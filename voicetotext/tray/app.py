@@ -1,0 +1,90 @@
+from typing import Callable
+
+import pystray
+from pystray import Menu, MenuItem
+
+from voicetotext.core.event_bus import EventBus
+from voicetotext.core.events import StateChangedEvent
+from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.hotkeys.listener import HotkeyListener
+from voicetotext.tray.icons import create_icon
+from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+
+
+_STATE_LABELS = {
+    AppState.IDLE: "Idle — ready",
+    AppState.RECORDING: "Recording...",
+    AppState.TRANSCRIBING: "Transcribing...",
+    AppState.ERROR: "Error",
+}
+
+
+class SystemTrayApp:
+
+    def __init__(
+        self,
+        use_case: RecordAndTranscribeUseCase,
+        state_machine: AppStateMachine,
+        event_bus: EventBus,
+        hotkey_listener: HotkeyListener,
+        on_open_settings: Callable[[], None] | None = None,
+    ):
+        self._use_case = use_case
+        self._state_machine = state_machine
+        self._event_bus = event_bus
+        self._hotkey_listener = hotkey_listener
+        self._on_open_settings = on_open_settings
+        self._icon: pystray.Icon | None = None
+
+        self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
+
+    def run(self) -> None:
+        menu_items = [
+            MenuItem(
+                lambda item: _STATE_LABELS.get(
+                    self._state_machine.state, "Unknown"
+                ),
+                action=None,
+                enabled=False,
+            ),
+            Menu.SEPARATOR,
+        ]
+
+        if self._on_open_settings:
+            menu_items.append(MenuItem("Settings...", self._on_settings_clicked))
+            menu_items.append(Menu.SEPARATOR)
+
+        menu_items.append(MenuItem("Quit", self._on_quit))
+
+        self._icon = pystray.Icon(
+            name="VoiceToText",
+            icon=create_icon(AppState.IDLE),
+            title="VoiceToText — Idle",
+            menu=Menu(*menu_items),
+        )
+        self._icon.run(setup=self._on_setup)
+
+    def set_hotkey_listener(self, listener: HotkeyListener) -> None:
+        self._hotkey_listener.stop()
+        self._hotkey_listener = listener
+        self._hotkey_listener.start()
+
+    def _on_setup(self, icon: pystray.Icon) -> None:
+        icon.visible = True
+        self._hotkey_listener.start()
+
+    def _on_settings_clicked(self, icon: pystray.Icon, item) -> None:
+        if self._on_open_settings:
+            self._on_open_settings()
+
+    def _on_quit(self, icon: pystray.Icon, item) -> None:
+        self._hotkey_listener.stop()
+        self._use_case.dispose()
+        icon.stop()
+
+    def _on_state_changed(self, event: StateChangedEvent) -> None:
+        if not self._icon:
+            return
+        new_state = AppState(event.new_state)
+        self._icon.icon = create_icon(new_state)
+        self._icon.title = f"VoiceToText — {_STATE_LABELS.get(new_state, 'Unknown')}"
