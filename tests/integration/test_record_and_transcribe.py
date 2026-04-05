@@ -67,11 +67,13 @@ class TestFullTogglePipeline:
 
         # First press: start recording
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         assert state_machine.state == AppState.RECORDING
         recorder.start_recording.assert_called_once()
 
         # Second press: stop recording + transcribe
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         # Verify full pipeline
@@ -124,10 +126,12 @@ class TestFullPushToTalkPipeline:
 
         # Key press: start recording
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         assert state_machine.state == AppState.RECORDING
 
         # Key release: stop + transcribe
         use_case.on_hotkey_deactivated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         output.output.assert_called_once_with("push to talk works")

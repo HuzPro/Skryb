@@ -1,3 +1,5 @@
+import os
+import threading
 from typing import Callable
 
 import pystray
@@ -75,12 +77,13 @@ class SystemTrayApp:
 
     def _on_settings_clicked(self, icon: pystray.Icon, item) -> None:
         if self._on_open_settings:
-            self._on_open_settings()
+            threading.Thread(target=self._on_open_settings, daemon=True).start()
 
     def _on_quit(self, icon: pystray.Icon, item) -> None:
         self._hotkey_listener.stop()
         self._use_case.dispose()
         icon.stop()
+        os._exit(0)
 
     def _on_state_changed(self, event: StateChangedEvent) -> None:
         if not self._icon:

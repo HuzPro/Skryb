@@ -28,7 +28,7 @@ class TestAutoPasteAdapterOutput:
 
         adapter.output("text")
 
-        mock_time.sleep.assert_called_once_with(0.05)
+        mock_time.sleep.assert_called_once_with(0.1)
 
 
 class TestAutoPasteAdapterIsATextOutputHandler:

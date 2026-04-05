@@ -24,7 +24,7 @@ def _resolve_device(configured_device: str) -> str:
             import ctranslate2
             supported = ctranslate2.get_supported_compute_types("cuda")
             print(f"  CUDA supported types: {supported}")
-            return "cuda" if "cuda" in supported else "cpu"
+            return "cuda"
         except Exception as e:
             print(f"  GPU not available ({e}), using CPU")
             return "cpu"
@@ -155,8 +155,22 @@ def apply_settings(
     if changes.get("model"):
         old_engine = use_case._engine
         new_engine = _build_engine(config, paths)
-        print(f"Hot-swapping to model '{config.get('transcription.model_size')}' ...")
-        new_engine.load_model()
+        model_name = config.get("transcription.model_size")
+        print(f"Hot-swapping to model '{model_name}' ...")
+        try:
+            new_engine.load_model()
+        except RuntimeError:
+            print("  GPU failed, falling back to CPU...")
+            new_engine = FasterWhisperAdapter(
+                model_size=model_name,
+                device="cpu",
+                compute_type="int8",
+                language=config.get("transcription.language"),
+                beam_size=config.get("transcription.beam_size", 5),
+                vad_filter=config.get("transcription.vad_filter", True),
+                download_root=str(paths.models_dir),
+            )
+            new_engine.load_model()
         old_engine.dispose()
         use_case.set_engine(new_engine)
         print("Model swapped.")

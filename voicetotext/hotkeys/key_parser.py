@@ -1,4 +1,23 @@
+from typing import Any
+
 from pynput.keyboard import Key, KeyCode
+
+_CHAR_TO_WIN_VK = {chr(i + ord("a")): 0x41 + i for i in range(26)}
+
+
+def canonicalize_key(key: Any) -> Any:
+    if isinstance(key, KeyCode):
+        vk = key.vk
+        if vk is None and key.char is not None:
+            vk = _CHAR_TO_WIN_VK.get(key.char.lower())
+            if vk is None:
+                code = ord(key.char)
+                if 1 <= code <= 26:
+                    vk = 0x41 + code - 1
+        if vk is not None:
+            return KeyCode.from_vk(vk)
+    return key
+
 
 _MODIFIER_MAP = {
     "ctrl": Key.ctrl_l,
@@ -34,7 +53,7 @@ def parse_hotkey_combo(combo_string: str) -> set:
         if part in _MODIFIER_MAP:
             keys.add(_MODIFIER_MAP[part])
         elif len(part) == 1:
-            keys.add(KeyCode.from_char(part))
+            keys.add(KeyCode.from_vk(_CHAR_TO_WIN_VK[part]))
         else:
             raise ValueError(f"Unknown key: {part}")
     return keys

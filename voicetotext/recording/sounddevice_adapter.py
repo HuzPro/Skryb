@@ -32,7 +32,7 @@ class SoundDeviceAdapter(AudioRecorder):
             self._stream.start()
             self._is_recording = True
 
-    def stop_recording(self) -> AudioSegment:
+    def stop_recording(self) -> AudioSegment | None:
         with self._lock:
             if not self._is_recording:
                 raise AudioRecorderError("not recording")
@@ -40,8 +40,11 @@ class SoundDeviceAdapter(AudioRecorder):
             self._stream.close()
             self._stream = None
             self._is_recording = False
-            audio_data = np.concatenate(self._chunks, axis=0).flatten()
+            chunks = self._chunks
             self._chunks = []
+        if not chunks:
+            return None
+        audio_data = np.concatenate(chunks, axis=0).flatten()
         return AudioSegment(data=audio_data, sample_rate=self._sample_rate)
 
     def is_recording(self) -> bool:

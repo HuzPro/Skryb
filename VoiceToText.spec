@@ -10,6 +10,8 @@ tmp_ret = collect_all('pystray')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('ctranslate2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('faster_whisper')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
@@ -21,35 +23,28 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'torchaudio', 'torchvision', 'onnxruntime', 'matplotlib', 'scipy', 'pandas', 'pytest', 'yt_dlp', 'numba', 'IPython', 'notebook', 'jupyter', 'transformers', 'accelerate', 'safetensors', 'optimum'],
+    excludes=['torch', 'torchaudio', 'torchvision', 'matplotlib', 'scipy', 'pandas', 'pytest', 'yt_dlp', 'numba', 'IPython', 'notebook', 'jupyter', 'transformers', 'accelerate', 'safetensors', 'optimum'],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='VoiceToText',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,
+    runtime_tmpdir=None,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='VoiceToText',
 )

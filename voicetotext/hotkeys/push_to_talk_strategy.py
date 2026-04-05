@@ -1,12 +1,13 @@
 from typing import Any, Callable
 
+from voicetotext.hotkeys.key_parser import canonicalize_key
 from voicetotext.hotkeys.strategy import HotkeyStrategy
 
 
 class PushToTalkStrategy(HotkeyStrategy):
 
     def __init__(self, keys: set):
-        self._target_keys = keys
+        self._target_keys = {canonicalize_key(k) for k in keys}
         self._pressed_keys: set = set()
         self._is_active = False
         self._on_activate: Callable[[], None] | None = None
@@ -17,6 +18,7 @@ class PushToTalkStrategy(HotkeyStrategy):
         self._on_deactivate = on_deactivate
 
     def on_key_press(self, key: Any) -> None:
+        key = canonicalize_key(key)
         if key not in self._target_keys:
             return
         self._pressed_keys.add(key)
@@ -26,6 +28,7 @@ class PushToTalkStrategy(HotkeyStrategy):
                 self._on_activate()
 
     def on_key_release(self, key: Any) -> None:
+        key = canonicalize_key(key)
         if key not in self._target_keys:
             return
         self._pressed_keys.discard(key)

@@ -75,6 +75,60 @@ class TestToggleStrategyIgnoresNonMatchingKeys:
         on_activate.assert_not_called()
 
 
+class TestToggleStrategyKeyNormalization:
+    def test_should_activate_when_key_reported_with_vk_instead_of_char(self):
+        strategy, on_activate, _ = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_vk(0x4D))
+
+        on_activate.assert_called_once()
+
+    def test_should_deactivate_when_vk_key_released(self):
+        strategy, _, on_deactivate = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_vk(0x4D))
+        strategy.on_key_release(KeyCode.from_vk(0x4D))
+        strategy.on_key_release(Key.alt_l)
+        strategy.on_key_release(Key.ctrl_l)
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_vk(0x4D))
+
+        on_deactivate.assert_called_once()
+
+    def test_should_activate_when_ctrl_modifies_char_to_control_character(self):
+        strategy, on_activate, _ = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        # Ctrl+M produces '\r' (carriage return) on Windows
+        strategy.on_key_press(KeyCode(char="\r"))
+
+        on_activate.assert_called_once()
+
+    def test_should_activate_when_key_has_both_char_and_vk(self):
+        strategy, on_activate, _ = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode(char="\r", vk=0x4D))
+
+        on_activate.assert_called_once()
+
+
 class TestToggleStrategySingleKey:
     def test_should_work_with_single_key_combo(self):
         strategy, on_activate, on_deactivate = _make_strategy(Key.f12)

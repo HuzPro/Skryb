@@ -7,11 +7,13 @@ import pytest
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
+    ErrorOccurredEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
+from voicetotext.core.exceptions import AudioRecorderError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
@@ -49,6 +51,7 @@ class TestActivateFromIdle:
         use_case, recorder, _, _, _, state_machine = _build_use_case()
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
 
         recorder.start_recording.assert_called_once()
         assert state_machine.state == AppState.RECORDING
@@ -59,6 +62,7 @@ class TestActivateFromIdle:
         event_bus.subscribe(RecordingStartedEvent, received.append)
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
 
         assert len(received) == 1
 
@@ -71,7 +75,9 @@ class TestActivateFromRecording:
         engine.transcribe.return_value = _make_result("hello")
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         recorder.stop_recording.assert_called_once()
@@ -83,7 +89,9 @@ class TestActivateFromRecording:
         engine.transcribe.return_value = _make_result("hello")
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         output.output.assert_called_once_with("hello")
@@ -94,7 +102,9 @@ class TestActivateFromRecording:
         engine.transcribe.return_value = _make_result("")
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         output.output.assert_not_called()
@@ -105,7 +115,9 @@ class TestActivateFromRecording:
         engine.transcribe.return_value = _make_result("hello")
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         assert state_machine.state == AppState.IDLE
@@ -118,7 +130,9 @@ class TestActivateFromRecording:
         event_bus.subscribe(RecordingStoppedEvent, received.append)
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
 
         assert len(received) == 1
 
@@ -130,7 +144,9 @@ class TestActivateFromRecording:
         event_bus.subscribe(TranscriptionCompletedEvent, received.append)
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         assert len(received) == 1
@@ -148,10 +164,13 @@ class TestActivateFromTranscribing:
         )[1]
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
 
         assert state_machine.state == AppState.TRANSCRIBING
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         assert state_machine.state == AppState.TRANSCRIBING
 
         blocker.set()
@@ -165,7 +184,9 @@ class TestDeactivateForPushToTalk:
         engine.transcribe.return_value = _make_result("hello")
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_deactivated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         recorder.stop_recording.assert_called_once()
@@ -177,6 +198,7 @@ class TestDeactivateForPushToTalk:
         use_case, recorder, _, _, _, state_machine = _build_use_case()
 
         use_case.on_hotkey_deactivated()
+        use_case._wait_for_action()
 
         recorder.stop_recording.assert_not_called()
         assert state_machine.state == AppState.IDLE
@@ -189,7 +211,9 @@ class TestTranscriptionError:
         engine.transcribe.side_effect = RuntimeError("model crashed")
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         assert state_machine.state == AppState.IDLE
@@ -202,7 +226,9 @@ class TestTranscriptionError:
         event_bus.subscribe(TranscriptionFailedEvent, received.append)
 
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         assert len(received) == 1
@@ -218,7 +244,9 @@ class TestHotSwapEngine:
 
         use_case.set_engine(new_engine)
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         new_engine.transcribe.assert_called_once()
@@ -227,6 +255,7 @@ class TestHotSwapEngine:
     def test_should_reject_engine_swap_when_not_idle(self):
         use_case, recorder, _, _, _, _ = _build_use_case()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
 
         with pytest.raises(RuntimeError, match="idle"):
             use_case.set_engine(MagicMock())
@@ -241,10 +270,147 @@ class TestHotSwapOutput:
 
         use_case.set_output(new_output)
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case.on_hotkey_activated()
+        use_case._wait_for_action()
         use_case._wait_for_transcription()
 
         new_output.output.assert_called_once_with("hello")
+
+
+class TestStartRecordingFailure:
+    def test_should_recover_to_idle_when_start_recording_fails(self):
+        use_case, recorder, _, _, _, state_machine = _build_use_case()
+        recorder.start_recording.side_effect = AudioRecorderError("mic unavailable")
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        assert state_machine.state == AppState.IDLE
+
+    def test_should_publish_error_event_when_start_recording_fails(self):
+        use_case, recorder, _, _, event_bus, _ = _build_use_case()
+        recorder.start_recording.side_effect = AudioRecorderError("mic unavailable")
+        received = []
+        event_bus.subscribe(ErrorOccurredEvent, received.append)
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        assert len(received) == 1
+        assert "mic unavailable" in received[0].error
+
+
+class TestStopRecordingFailure:
+    def test_should_recover_to_idle_when_stop_recording_fails(self):
+        use_case, recorder, _, _, _, state_machine = _build_use_case()
+        recorder.stop_recording.side_effect = AudioRecorderError("stream error")
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        assert state_machine.state == AppState.IDLE
+
+    def test_should_publish_error_event_when_stop_recording_fails(self):
+        use_case, recorder, _, _, event_bus, _ = _build_use_case()
+        recorder.stop_recording.side_effect = AudioRecorderError("stream error")
+        received = []
+        event_bus.subscribe(ErrorOccurredEvent, received.append)
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        assert len(received) == 1
+        assert "stream error" in received[0].error
+
+
+class TestShortRecording:
+    def test_should_skip_transcription_for_audio_shorter_than_minimum(self):
+        use_case, recorder, engine, output, _, state_machine = _build_use_case()
+        short_audio = AudioSegment(
+            data=np.zeros(800, dtype=np.float32),
+            sample_rate=16000,
+        )
+        recorder.stop_recording.return_value = short_audio
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        engine.transcribe.assert_not_called()
+        output.output.assert_not_called()
+        assert state_machine.state == AppState.IDLE
+
+
+class TestEmptyRecording:
+    def test_should_skip_transcription_when_recording_is_empty(self):
+        use_case, recorder, engine, output, _, state_machine = _build_use_case()
+        recorder.stop_recording.return_value = None
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        engine.transcribe.assert_not_called()
+        output.output.assert_not_called()
+        assert state_machine.state == AppState.IDLE
+
+    def test_should_publish_recording_stopped_event_even_when_empty(self):
+        use_case, recorder, _, _, event_bus, _ = _build_use_case()
+        recorder.stop_recording.return_value = None
+        received = []
+        event_bus.subscribe(RecordingStoppedEvent, received.append)
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        assert len(received) == 1
+
+
+class TestNonBlockingCallbacks:
+    def test_should_not_block_caller_on_activate(self):
+        use_case, recorder, _, _, _, _ = _build_use_case()
+        blocker = threading.Event()
+        recorder.start_recording.side_effect = lambda: blocker.wait(timeout=5)
+
+        start = time.monotonic()
+        use_case.on_hotkey_activated()
+        elapsed = time.monotonic() - start
+
+        blocker.set()
+        use_case._wait_for_action()
+        assert elapsed < 0.1
+
+    def test_should_not_block_caller_on_deactivate(self):
+        use_case, recorder, engine, _, _, _ = _build_use_case()
+
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+
+        blocker = threading.Event()
+        original_stop = recorder.stop_recording.return_value
+
+        def blocking_stop():
+            blocker.wait(timeout=5)
+            return _make_audio()
+
+        recorder.stop_recording.side_effect = blocking_stop
+
+        start = time.monotonic()
+        use_case.on_hotkey_deactivated()
+        elapsed = time.monotonic() - start
+
+        blocker.set()
+        use_case._wait_for_action()
+        assert elapsed < 0.1
 
 
 class TestDispose:

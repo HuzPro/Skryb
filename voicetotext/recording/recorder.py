@@ -10,7 +10,7 @@ class AudioRecorder(ABC):
         pass
 
     @abstractmethod
-    def stop_recording(self) -> AudioSegment:
+    def stop_recording(self) -> AudioSegment | None:
         pass
 
     @abstractmethod

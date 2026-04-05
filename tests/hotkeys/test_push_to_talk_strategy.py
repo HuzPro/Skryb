@@ -44,6 +44,42 @@ class TestPushToTalkActivation:
         assert on_deactivate.call_count == 3
 
 
+class TestPushToTalkKeyNormalization:
+    def test_should_activate_when_key_reported_with_vk_instead_of_char(self):
+        strategy, on_activate, _ = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_vk(0x4D))
+
+        on_activate.assert_called_once()
+
+    def test_should_deactivate_when_vk_key_released(self):
+        strategy, _, on_deactivate = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_vk(0x4D))
+        strategy.on_key_release(KeyCode.from_vk(0x4D))
+
+        on_deactivate.assert_called_once()
+
+    def test_should_activate_when_ctrl_modifies_char_to_control_character(self):
+        strategy, on_activate, _ = _make_strategy(
+            Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode(char="\r"))
+
+        on_activate.assert_called_once()
+
+
 class TestPushToTalkIgnoresNonMatchingKeys:
     def test_should_not_fire_for_partial_combo(self):
         strategy, on_activate, _ = _make_strategy(

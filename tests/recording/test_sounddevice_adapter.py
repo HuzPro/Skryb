@@ -89,6 +89,17 @@ class TestSoundDeviceAdapterStopRecording:
         assert result.sample_count == 1536
 
 
+class TestSoundDeviceAdapterEmptyRecording:
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_return_none_when_no_chunks_recorded(self, mock_sd):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        adapter.start_recording()
+
+        result = adapter.stop_recording()
+
+        assert result is None
+
+
 class TestSoundDeviceAdapterDispose:
     @patch("voicetotext.recording.sounddevice_adapter.sd")
     def test_should_stop_recording_on_dispose_if_active(self, mock_sd):
