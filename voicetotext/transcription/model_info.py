@@ -15,6 +15,7 @@ class ModelInfo:
         return f"{self.size_mb} MB"
 
 
+# TODO(deletion): Remove FASTER_WHISPER_MODELS — standardized on transformers engine.
 FASTER_WHISPER_MODELS: dict[str, ModelInfo] = {
     "tiny": ModelInfo(
         name="tiny", size_mb=75, description="Fastest, least accurate",
@@ -61,5 +62,4 @@ TRANSFORMERS_WHISPER_MODELS: dict[str, ModelInfo] = {
     ),
 }
 
-# Backwards compatibility alias
-AVAILABLE_MODELS = FASTER_WHISPER_MODELS
+AVAILABLE_MODELS = TRANSFORMERS_WHISPER_MODELS

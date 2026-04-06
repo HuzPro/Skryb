@@ -90,7 +90,7 @@ class TestTransformersWhisperAdapterTranscribe:
 
         assert isinstance(result, TranscriptionResult)
         assert result.text == "hello world"
-        assert result.duration_seconds > 0
+        assert result.duration_seconds > 0.0
 
     @patch.dict("sys.modules", _mock_transformers())
     def test_should_raise_when_model_not_loaded(self):

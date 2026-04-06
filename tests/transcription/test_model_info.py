@@ -64,5 +64,5 @@ class TestTransformersWhisperModels:
 
 
 class TestAvailableModelsAlias:
-    def test_available_models_should_be_faster_whisper_models(self):
-        assert AVAILABLE_MODELS is FASTER_WHISPER_MODELS
+    def test_available_models_should_be_transformers_whisper_models(self):
+        assert AVAILABLE_MODELS is TRANSFORMERS_WHISPER_MODELS

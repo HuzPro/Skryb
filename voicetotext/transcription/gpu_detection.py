@@ -1,34 +1,15 @@
+# TODO(deletion): CTranslate2/faster_whisper backend detection removed.
+# The transformers (PyTorch) engine is now the sole backend — it handles
+# NVIDIA CUDA, AMD ROCm, and CPU with one model format.
+
+
 def detect_available_backends() -> list[str]:
-    """Return available engine names in priority order.
+    """Return available engine names.
 
-    Priority:
-        1. faster_whisper – CTranslate2 with CUDA (fastest on NVIDIA)
-        2. transformers   – PyTorch GPU (works on AMD ROCm and NVIDIA)
-        3. cpu            – faster_whisper on CPU (always available)
+    Always returns ``["transformers"]`` — the PyTorch-based engine supports
+    NVIDIA (CUDA), AMD (ROCm), and CPU with a single model format.
     """
-    backends: list[str] = []
-
-    # CTranslate2 CUDA (NVIDIA) — fastest option
-    try:
-        import ctranslate2
-
-        ctranslate2.get_supported_compute_types("cuda")
-        backends.append("faster_whisper")
-    except Exception:
-        pass
-
-    # PyTorch GPU (ROCm or CUDA)
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            backends.append("transformers")
-    except Exception:
-        pass
-
-    # CPU always available
-    backends.append("cpu")
-    return backends
+    return ["transformers"]
 
 
 def get_device_info() -> str:

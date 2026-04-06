@@ -7,53 +7,10 @@ from voicetotext.transcription.gpu_detection import (
 
 
 class TestDetectAvailableBackends:
-    @patch.dict("sys.modules", {"ctranslate2": MagicMock(), "torch": MagicMock()})
-    def test_should_return_all_backends_when_both_available(self):
-        import ctranslate2
-        import torch
-
-        ctranslate2.get_supported_compute_types.return_value = {"float16"}
-        torch.cuda.is_available.return_value = True
-
+    def test_should_always_return_transformers(self):
         result = detect_available_backends()
 
-        assert result == ["faster_whisper", "transformers", "cpu"]
-
-    @patch.dict("sys.modules", {"ctranslate2": MagicMock(), "torch": MagicMock()})
-    def test_should_return_only_transformers_when_no_ctranslate2_cuda(self):
-        import ctranslate2
-        import torch
-
-        ctranslate2.get_supported_compute_types.side_effect = RuntimeError("no CUDA")
-        torch.cuda.is_available.return_value = True
-
-        result = detect_available_backends()
-
-        assert result == ["transformers", "cpu"]
-
-    @patch.dict("sys.modules", {"ctranslate2": MagicMock(), "torch": MagicMock()})
-    def test_should_return_only_faster_whisper_when_no_torch_gpu(self):
-        import ctranslate2
-        import torch
-
-        ctranslate2.get_supported_compute_types.return_value = {"float16"}
-        torch.cuda.is_available.return_value = False
-
-        result = detect_available_backends()
-
-        assert result == ["faster_whisper", "cpu"]
-
-    @patch.dict("sys.modules", {"ctranslate2": MagicMock(), "torch": MagicMock()})
-    def test_should_return_cpu_only_when_no_gpu(self):
-        import ctranslate2
-        import torch
-
-        ctranslate2.get_supported_compute_types.side_effect = RuntimeError("no CUDA")
-        torch.cuda.is_available.return_value = False
-
-        result = detect_available_backends()
-
-        assert result == ["cpu"]
+        assert result == ["transformers"]
 
 
 class TestGetDeviceInfo:

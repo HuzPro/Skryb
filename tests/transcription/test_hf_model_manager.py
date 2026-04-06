@@ -34,14 +34,14 @@ class TestHuggingFaceModelManagerIsInstalled:
         assert manager.is_installed("base") is False
 
     def test_should_return_true_when_model_directory_exists(self, tmp_path):
-        (tmp_path / "models--Systran--faster-whisper-base").mkdir()
-        (tmp_path / "models--Systran--faster-whisper-base" / "model.bin").touch()
+        (tmp_path / "models--openai--whisper-base").mkdir()
+        (tmp_path / "models--openai--whisper-base" / "model.bin").touch()
         manager = HuggingFaceModelManager(models_dir=tmp_path)
 
         assert manager.is_installed("base") is True
 
     def test_should_return_false_for_empty_model_directory(self, tmp_path):
-        (tmp_path / "models--Systran--faster-whisper-base").mkdir()
+        (tmp_path / "models--openai--whisper-base").mkdir()
         manager = HuggingFaceModelManager(models_dir=tmp_path)
 
         assert manager.is_installed("base") is False
@@ -54,7 +54,7 @@ class TestHuggingFaceModelManagerGetModelPath:
         assert manager.get_model_path("base") is None
 
     def test_should_return_path_when_installed(self, tmp_path):
-        model_dir = tmp_path / "models--Systran--faster-whisper-base"
+        model_dir = tmp_path / "models--openai--whisper-base"
         model_dir.mkdir()
         (model_dir / "model.bin").touch()
         manager = HuggingFaceModelManager(models_dir=tmp_path)
@@ -75,7 +75,7 @@ class TestHuggingFaceModelManagerDownload:
 
         mock_download.assert_called_once()
         call_kwargs = mock_download.call_args
-        assert call_kwargs[0][0] == "Systran/faster-whisper-base"
+        assert call_kwargs[0][0] == "openai/whisper-base"
 
     @patch("voicetotext.transcription.hf_model_manager.snapshot_download")
     def test_should_use_models_dir_as_cache(self, mock_download, tmp_path):
@@ -89,7 +89,7 @@ class TestHuggingFaceModelManagerDownload:
 
 class TestHuggingFaceModelManagerDelete:
     def test_should_remove_model_directory(self, tmp_path):
-        model_dir = tmp_path / "models--Systran--faster-whisper-base"
+        model_dir = tmp_path / "models--openai--whisper-base"
         model_dir.mkdir()
         (model_dir / "model.bin").touch()
         manager = HuggingFaceModelManager(models_dir=tmp_path)

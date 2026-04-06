@@ -41,6 +41,31 @@ def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscr
     return listener
 
 
+def _load_engine_with_fallback(engine_name, config, paths):
+    engine = create_engine(engine_name, config, paths)
+    try:
+        engine.load_model()
+        return engine
+    except RuntimeError as exc:
+        print(f"  Engine failed: {exc}")
+
+    if engine_name != "cpu":
+        print("  Retrying on CPU...")
+        try:
+            engine = create_engine(engine_name, config, paths, device_override="cpu")
+            engine.load_model()
+            return engine
+        except RuntimeError as exc:
+            print(f"  CPU fallback failed: {exc}")
+
+    effective = engine_name if engine_name != "cpu" else "faster_whisper"
+    alt = "transformers" if effective != "transformers" else "faster_whisper"
+    print(f"  Falling back to {alt} engine...")
+    engine = create_engine(alt, config, paths)
+    engine.load_model()
+    return engine
+
+
 def build_app(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -50,15 +75,9 @@ def build_app(
 
     engine_name = resolve_engine_name(config)
     print(f"  Engine: {engine_name}")
-    engine = create_engine(engine_name, config, paths)
     model_name = config.get("transcription.model_size")
     print(f"Loading Whisper model '{model_name}' ...")
-    try:
-        engine.load_model()
-    except RuntimeError:
-        print("  GPU failed, falling back to CPU...")
-        engine = create_engine("cpu", config, paths)
-        engine.load_model()
+    engine = _load_engine_with_fallback(engine_name, config, paths)
     print("Model loaded.")
 
     recorder = SoundDeviceAdapter(
@@ -121,15 +140,9 @@ def apply_settings(
     if changes.get("model") or changes.get("engine"):
         old_engine = use_case._engine
         engine_name = resolve_engine_name(config)
-        new_engine = create_engine(engine_name, config, paths)
         model_name = config.get("transcription.model_size")
         print(f"Hot-swapping to model '{model_name}' (engine: {engine_name}) ...")
-        try:
-            new_engine.load_model()
-        except RuntimeError:
-            print("  GPU failed, falling back to CPU...")
-            new_engine = create_engine("cpu", config, paths)
-            new_engine.load_model()
+        new_engine = _load_engine_with_fallback(engine_name, config, paths)
         old_engine.dispose()
         use_case.set_engine(new_engine)
         print("Model swapped.")

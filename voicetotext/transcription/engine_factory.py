@@ -11,6 +11,7 @@ def create_engine(
     engine_name: str,
     config: ConfigurationStore,
     paths: AppPaths,
+    device_override: str | None = None,
 ) -> TranscriptionEngine:
     """Build a :class:`TranscriptionEngine` for *engine_name*.
 
@@ -23,8 +24,11 @@ def create_engine(
 
     if engine_name == "cpu":
         engine_name = "faster_whisper"
-
-    device = _resolve_device(engine_name, config.get("transcription.device", "auto"))
+        device = "cpu"
+    elif device_override:
+        device = device_override
+    else:
+        device = _resolve_device(engine_name, config.get("transcription.device", "auto"))
 
     if engine_name == "transformers":
         from voicetotext.transcription.transformers_whisper_adapter import (
@@ -83,8 +87,7 @@ def create_model_manager(engine_name: str, models_dir: Path) -> ModelManager:
 # ------------------------------------------------------------------
 
 def _auto_select_engine() -> str:
-    backends = detect_available_backends()
-    return backends[0]
+    return "transformers"
 
 
 def _resolve_device(engine_name: str, configured_device: str) -> str:

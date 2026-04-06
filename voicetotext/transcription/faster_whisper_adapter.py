@@ -1,3 +1,6 @@
+# TODO(deletion): This adapter is marked for removal — the transformers engine
+# is now the sole backend. Kept for backward compatibility with explicit config.
+import os
 import time
 
 from faster_whisper import WhisperModel
@@ -33,7 +36,22 @@ class FasterWhisperAdapter(TranscriptionEngine):
         kwargs = {"device": self._device, "compute_type": self._compute_type}
         if self._download_root:
             kwargs["download_root"] = self._download_root
-        self._model = WhisperModel(self._model_size, **kwargs)
+
+        if self._device == "cpu":
+            self._model = self._load_with_cuda_hidden(**kwargs)
+        else:
+            self._model = WhisperModel(self._model_size, **kwargs)
+
+    def _load_with_cuda_hidden(self, **kwargs) -> WhisperModel:
+        original = os.environ.get("CUDA_VISIBLE_DEVICES")
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        try:
+            return WhisperModel(self._model_size, **kwargs)
+        finally:
+            if original is None:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = original
 
     def is_model_loaded(self) -> bool:
         return self._model is not None

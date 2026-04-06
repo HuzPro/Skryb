@@ -13,23 +13,8 @@ from voicetotext.transcription.engine_factory import (
 
 
 class TestAutoSelectEngine:
-    @patch("voicetotext.transcription.engine_factory.detect_available_backends")
-    def test_should_prefer_faster_whisper_when_available(self, mock_detect):
-        mock_detect.return_value = ["faster_whisper", "transformers", "cpu"]
-
-        assert _auto_select_engine() == "faster_whisper"
-
-    @patch("voicetotext.transcription.engine_factory.detect_available_backends")
-    def test_should_pick_transformers_when_no_ctranslate2(self, mock_detect):
-        mock_detect.return_value = ["transformers", "cpu"]
-
+    def test_should_always_return_transformers(self):
         assert _auto_select_engine() == "transformers"
-
-    @patch("voicetotext.transcription.engine_factory.detect_available_backends")
-    def test_should_fall_back_to_cpu(self, mock_detect):
-        mock_detect.return_value = ["cpu"]
-
-        assert _auto_select_engine() == "cpu"
 
 
 class TestResolveDevice:
@@ -135,6 +120,54 @@ class TestCreateEngine:
         engine = create_engine("cpu", _make_config(), paths)
 
         assert isinstance(engine, FasterWhisperAdapter)
+
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
+    @patch("voicetotext.transcription.engine_factory._resolve_device")
+    def test_cpu_should_bypass_resolve_device(self, mock_resolve):
+        paths = MagicMock()
+        paths.models_dir = Path("/tmp/models")
+
+        engine = create_engine("cpu", _make_config(), paths)
+
+        mock_resolve.assert_not_called()
+        assert engine._device == "cpu"
+
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
+    @patch("voicetotext.transcription.engine_factory._resolve_device")
+    def test_cpu_should_downgrade_float16_to_int8(self, mock_resolve):
+        paths = MagicMock()
+        paths.models_dir = Path("/tmp/models")
+        config = _make_config(**{"transcription.compute_type": "float16"})
+
+        engine = create_engine("cpu", config, paths)
+
+        assert engine._compute_type == "int8"
+
+    @patch("voicetotext.transcription.engine_factory._resolve_device", return_value="cuda")
+    def test_device_override_should_force_cpu_for_transformers(self, _dev):
+        from voicetotext.transcription.transformers_whisper_adapter import (
+            TransformersWhisperAdapter,
+        )
+
+        paths = MagicMock()
+        paths.models_dir = Path("/tmp/models")
+
+        engine = create_engine("transformers", _make_config(), paths, device_override="cpu")
+
+        assert isinstance(engine, TransformersWhisperAdapter)
+        assert engine._device == "cpu"
+        _dev.assert_not_called()
+
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
+    @patch("voicetotext.transcription.engine_factory._resolve_device", return_value="cuda")
+    def test_device_override_should_force_cpu_for_faster_whisper(self, _dev):
+        paths = MagicMock()
+        paths.models_dir = Path("/tmp/models")
+
+        engine = create_engine("faster_whisper", _make_config(), paths, device_override="cpu")
+
+        assert engine._device == "cpu"
+        _dev.assert_not_called()
 
 
 class TestCreateModelManager:

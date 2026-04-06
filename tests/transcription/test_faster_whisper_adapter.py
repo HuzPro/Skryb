@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -129,6 +130,64 @@ class TestFasterWhisperAdapterDispose:
         adapter = FasterWhisperAdapter(model_size="base")
 
         adapter.dispose()
+
+
+class TestFasterWhisperAdapterCudaSuppression:
+    @patch("voicetotext.transcription.faster_whisper_adapter.WhisperModel")
+    def test_should_hide_cuda_devices_when_loading_on_cpu(self, mock_whisper_cls):
+        captured_env = {}
+
+        def capture_env(*args, **kwargs):
+            captured_env["CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES")
+
+        mock_whisper_cls.side_effect = capture_env
+
+        adapter = FasterWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+
+        assert captured_env["CUDA_VISIBLE_DEVICES"] == ""
+
+    @patch("voicetotext.transcription.faster_whisper_adapter.WhisperModel")
+    def test_should_restore_cuda_visible_devices_after_cpu_load(self, mock_whisper_cls):
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        try:
+            adapter = FasterWhisperAdapter(model_size="base", device="cpu")
+            adapter.load_model()
+
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "0"
+        finally:
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+    @patch("voicetotext.transcription.faster_whisper_adapter.WhisperModel")
+    def test_should_restore_cuda_visible_devices_after_cpu_load_failure(self, mock_whisper_cls):
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+        mock_whisper_cls.side_effect = RuntimeError("boom")
+        try:
+            adapter = FasterWhisperAdapter(model_size="base", device="cpu")
+            with pytest.raises(RuntimeError):
+                adapter.load_model()
+
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "0,1"
+        finally:
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+
+    @patch("voicetotext.transcription.faster_whisper_adapter.WhisperModel")
+    def test_should_remove_env_var_if_unset_before_cpu_load(self, mock_whisper_cls):
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+
+        adapter = FasterWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+
+    @patch("voicetotext.transcription.faster_whisper_adapter.WhisperModel")
+    def test_should_not_touch_cuda_env_when_loading_on_gpu(self, mock_whisper_cls):
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+
+        adapter = FasterWhisperAdapter(model_size="base", device="cuda")
+        adapter.load_model()
+
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
 
 
 class TestFasterWhisperAdapterIsATranscriptionEngine:
