@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
         "mode": "auto_paste",
     },
     "transcription": {
+        "engine": "auto",
         "model_size": "base",
         "device": "auto",
         "compute_type": "float16",

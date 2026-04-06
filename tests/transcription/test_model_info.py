@@ -1,4 +1,9 @@
-from voicetotext.transcription.model_info import AVAILABLE_MODELS, ModelInfo
+from voicetotext.transcription.model_info import (
+    AVAILABLE_MODELS,
+    FASTER_WHISPER_MODELS,
+    TRANSFORMERS_WHISPER_MODELS,
+    ModelInfo,
+)
 
 
 class TestModelInfoEntity:
@@ -19,24 +24,45 @@ class TestModelInfoEntity:
 
         assert info.display_size == "1.5 GB"
 
-    def test_should_compute_huggingface_repo_id(self):
-        info = ModelInfo(name="base", size_mb=142, description="test")
+    def test_should_store_explicit_repo_id(self):
+        info = ModelInfo(
+            name="base", size_mb=142, description="test",
+            repo_id="Systran/faster-whisper-base",
+        )
 
         assert info.repo_id == "Systran/faster-whisper-base"
 
+    def test_repo_id_defaults_to_empty(self):
+        info = ModelInfo(name="base", size_mb=142, description="test")
 
-class TestAvailableModels:
+        assert info.repo_id == ""
+
+
+class TestFasterWhisperModels:
     def test_should_contain_all_standard_models(self):
         expected = {"tiny", "base", "small", "medium", "large-v3"}
 
-        assert set(AVAILABLE_MODELS.keys()) == expected
+        assert set(FASTER_WHISPER_MODELS.keys()) == expected
 
     def test_should_have_correct_base_model_size(self):
-        assert AVAILABLE_MODELS["base"].size_mb == 142
-
-    def test_should_have_correct_tiny_model_size(self):
-        assert AVAILABLE_MODELS["tiny"].size_mb == 75
+        assert FASTER_WHISPER_MODELS["base"].size_mb == 142
 
     def test_all_models_should_have_repo_ids(self):
-        for model in AVAILABLE_MODELS.values():
+        for model in FASTER_WHISPER_MODELS.values():
             assert model.repo_id.startswith("Systran/faster-whisper-")
+
+
+class TestTransformersWhisperModels:
+    def test_should_contain_all_standard_models(self):
+        expected = {"tiny", "base", "small", "medium", "large-v3"}
+
+        assert set(TRANSFORMERS_WHISPER_MODELS.keys()) == expected
+
+    def test_all_models_should_have_repo_ids(self):
+        for model in TRANSFORMERS_WHISPER_MODELS.values():
+            assert model.repo_id.startswith("openai/whisper-")
+
+
+class TestAvailableModelsAlias:
+    def test_available_models_should_be_faster_whisper_models(self):
+        assert AVAILABLE_MODELS is FASTER_WHISPER_MODELS

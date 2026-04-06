@@ -3,7 +3,6 @@ import traceback
 
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
-from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
 
 
 def main() -> None:
@@ -32,13 +31,19 @@ def _run() -> None:
 
 def _run_first_time_setup(config: JsonConfigAdapter, paths: AppPaths) -> None:
     from voicetotext.settings.window import SettingsWindow
+    from voicetotext.transcription.engine_factory import (
+        create_model_manager,
+        resolve_engine_name,
+    )
 
-    model_manager = HuggingFaceModelManager(paths.models_dir)
+    engine_name = resolve_engine_name(config)
+    model_manager = create_model_manager(engine_name, paths.models_dir)
 
     SettingsWindow(
         config=config,
         model_manager=model_manager,
         first_run=True,
+        models_dir=paths.models_dir,
     ).run()
 
     config.save()

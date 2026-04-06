@@ -3,8 +3,17 @@ import threading
 import customtkinter as ctk
 
 from voicetotext.core.config import ConfigurationStore
+from voicetotext.transcription.engine_factory import create_model_manager
 from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
+
+_ENGINE_LABELS = {
+    "auto": "Auto-detect",
+    "faster_whisper": "Faster Whisper (NVIDIA/CPU)",
+    "transformers": "Transformers (AMD ROCm/PyTorch)",
+}
+_ENGINE_VALUES = list(_ENGINE_LABELS.keys())
+_LABEL_TO_ENGINE = {v: k for k, v in _ENGINE_LABELS.items()}
 
 
 class TranscriptionTab:
@@ -14,10 +23,12 @@ class TranscriptionTab:
         parent: ctk.CTkFrame,
         config: ConfigurationStore,
         model_manager: ModelManager,
+        models_dir=None,
     ):
         self._parent = parent
         self._config = config
         self._model_manager = model_manager
+        self._models_dir = models_dir
         self._model_rows: dict[str, _ModelRow] = {}
         self._active_model_var = ctk.StringVar(
             value=config.get("transcription.model_size", "base")
@@ -33,6 +44,62 @@ class TranscriptionTab:
         self._models_frame = ctk.CTkScrollableFrame(parent, height=200)
         self._models_frame.pack(fill="x", padx=10, pady=(0, 10))
 
+        self._populate_model_rows()
+
+        settings_label = ctk.CTkLabel(
+            parent, text="Settings", font=ctk.CTkFont(size=14, weight="bold")
+        )
+        settings_label.pack(anchor="w", padx=10, pady=(5, 5))
+
+        settings_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        settings_frame.pack(fill="x", padx=10)
+
+        engine_label = ctk.CTkLabel(settings_frame, text="Engine:")
+        engine_label.grid(row=0, column=0, sticky="w", pady=3)
+
+        current_engine = self._config.get("transcription.engine", "auto")
+        self._engine_var = ctk.StringVar(value=_ENGINE_LABELS.get(current_engine, "Auto-detect"))
+        engine_menu = ctk.CTkOptionMenu(
+            settings_frame,
+            variable=self._engine_var,
+            values=list(_ENGINE_LABELS.values()),
+            width=250,
+            command=self._on_engine_changed,
+        )
+        engine_menu.grid(row=0, column=1, sticky="w", padx=(10, 0), pady=3)
+
+        lang_label = ctk.CTkLabel(settings_frame, text="Language:")
+        lang_label.grid(row=1, column=0, sticky="w", pady=3)
+
+        current_lang = self._config.get("transcription.language") or "auto"
+        self._language_var = ctk.StringVar(value=current_lang)
+        language_menu = ctk.CTkOptionMenu(
+            settings_frame,
+            variable=self._language_var,
+            values=["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh"],
+            width=150,
+        )
+        language_menu.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=3)
+
+        device_label = ctk.CTkLabel(settings_frame, text="Device:")
+        device_label.grid(row=2, column=0, sticky="w", pady=3)
+
+        self._device_var = ctk.StringVar(
+            value=self._config.get("transcription.device", "auto")
+        )
+        device_menu = ctk.CTkOptionMenu(
+            settings_frame,
+            variable=self._device_var,
+            values=["auto", "cuda", "cpu"],
+            width=150,
+        )
+        device_menu.grid(row=2, column=1, sticky="w", padx=(10, 0), pady=3)
+
+    def _populate_model_rows(self) -> None:
+        for widget in self._models_frame.winfo_children():
+            widget.destroy()
+        self._model_rows.clear()
+
         for model_info in self._model_manager.list_models():
             installed = self._model_manager.is_installed(model_info.name)
             row = _ModelRow(
@@ -45,40 +112,11 @@ class TranscriptionTab:
             )
             self._model_rows[model_info.name] = row
 
-        settings_label = ctk.CTkLabel(
-            parent, text="Settings", font=ctk.CTkFont(size=14, weight="bold")
-        )
-        settings_label.pack(anchor="w", padx=10, pady=(5, 5))
-
-        settings_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        settings_frame.pack(fill="x", padx=10)
-
-        lang_label = ctk.CTkLabel(settings_frame, text="Language:")
-        lang_label.grid(row=0, column=0, sticky="w", pady=3)
-
-        current_lang = self._config.get("transcription.language") or "auto"
-        self._language_var = ctk.StringVar(value=current_lang)
-        language_menu = ctk.CTkOptionMenu(
-            settings_frame,
-            variable=self._language_var,
-            values=["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh"],
-            width=150,
-        )
-        language_menu.grid(row=0, column=1, sticky="w", padx=(10, 0), pady=3)
-
-        device_label = ctk.CTkLabel(settings_frame, text="Device:")
-        device_label.grid(row=1, column=0, sticky="w", pady=3)
-
-        self._device_var = ctk.StringVar(
-            value=self._config.get("transcription.device", "auto")
-        )
-        device_menu = ctk.CTkOptionMenu(
-            settings_frame,
-            variable=self._device_var,
-            values=["auto", "cuda", "cpu"],
-            width=150,
-        )
-        device_menu.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=3)
+    def _on_engine_changed(self, label: str) -> None:
+        engine_key = _LABEL_TO_ENGINE.get(label, "auto")
+        if self._models_dir is not None:
+            self._model_manager = create_model_manager(engine_key, self._models_dir)
+            self._populate_model_rows()
 
     def _start_download(self, model_name: str) -> None:
         row = self._model_rows[model_name]
@@ -108,6 +146,8 @@ class TranscriptionTab:
         lang = self._language_var.get()
         self._config.set("transcription.language", None if lang == "auto" else lang)
         self._config.set("transcription.device", self._device_var.get())
+        engine_label = self._engine_var.get()
+        self._config.set("transcription.engine", _LABEL_TO_ENGINE.get(engine_label, "auto"))
 
 
 class _ModelRow:

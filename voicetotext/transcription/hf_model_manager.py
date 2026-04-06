@@ -20,18 +20,23 @@ def _make_progress_tqdm(callback: Callable[[float], None]):
 
 class HuggingFaceModelManager(ModelManager):
 
-    def __init__(self, models_dir: Path):
+    def __init__(
+        self,
+        models_dir: Path,
+        models: dict[str, ModelInfo] | None = None,
+    ):
         self._models_dir = models_dir
+        self._models = models or AVAILABLE_MODELS
 
     def list_models(self) -> list[ModelInfo]:
-        return list(AVAILABLE_MODELS.values())
+        return list(self._models.values())
 
     def is_installed(self, name: str) -> bool:
         model_dir = self._model_cache_dir(name)
         return model_dir.exists() and any(model_dir.iterdir())
 
     def download(self, name: str, on_progress: Callable[[float], None]) -> None:
-        info = AVAILABLE_MODELS[name]
+        info = self._models[name]
         snapshot_download(
             info.repo_id,
             cache_dir=str(self._models_dir),
@@ -51,6 +56,6 @@ class HuggingFaceModelManager(ModelManager):
         return None
 
     def _model_cache_dir(self, name: str) -> Path:
-        info = AVAILABLE_MODELS[name]
+        info = self._models[name]
         repo_dir_name = info.repo_id.replace("/", "--")
         return self._models_dir / f"models--{repo_dir_name}"
