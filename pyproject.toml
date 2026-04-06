@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gpu = [
+    "transformers>=4.36.0",
+    "torch>=2.2.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",

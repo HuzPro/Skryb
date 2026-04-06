@@ -19,11 +19,13 @@ class SettingsWindow:
         model_manager: ModelManager,
         first_run: bool = False,
         on_save: Callable[[dict], None] | None = None,
+        models_dir=None,
     ):
         self._config = config
         self._model_manager = model_manager
         self._first_run = first_run
         self._on_save = on_save
+        self._models_dir = models_dir
         self._window: ctk.CTk | None = None
         self._original_values: dict = {}
         self._warning_label: ctk.CTkLabel | None = None
@@ -65,7 +67,8 @@ class SettingsWindow:
         tab_output = tabview.add("Output")
 
         self._transcription_tab = TranscriptionTab(
-            tab_transcription, self._config, self._model_manager
+            tab_transcription, self._config, self._model_manager,
+            models_dir=self._models_dir,
         )
         self._hotkey_tab = HotkeyTab(tab_hotkeys, self._config)
         self._output_tab = OutputTab(tab_output, self._config)
@@ -98,6 +101,7 @@ class SettingsWindow:
         self._original_values = {
             "model_size": self._config.get("transcription.model_size"),
             "device": self._config.get("transcription.device"),
+            "engine": self._config.get("transcription.engine"),
             "hotkey_combination": self._config.get("hotkey.combination"),
             "hotkey_mode": self._config.get("hotkey.mode"),
             "output_mode": self._config.get("output.mode"),
@@ -110,6 +114,10 @@ class SettingsWindow:
                 != self._original_values["model_size"]
                 or self._config.get("transcription.device")
                 != self._original_values["device"]
+            ),
+            "engine": (
+                self._config.get("transcription.engine")
+                != self._original_values["engine"]
             ),
             "hotkey": (
                 self._config.get("hotkey.combination")
