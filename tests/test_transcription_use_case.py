@@ -294,6 +294,21 @@ class TestHotSwapEngine:
         new_engine.dispose.assert_not_called()
 
 
+class TestDisposeCurrentEngine:
+    def test_should_dispose_current_engine(self):
+        use_case, _, engine, _, _, _ = _build_use_case()
+
+        use_case.dispose_current_engine()
+
+        engine.dispose.assert_called_once()
+
+    def test_should_not_raise_when_called_twice(self):
+        use_case, _, engine, _, _, _ = _build_use_case()
+
+        use_case.dispose_current_engine()
+        use_case.dispose_current_engine()
+
+
 class TestHotSwapOutput:
     def test_should_swap_output_handler(self):
         use_case, recorder, engine, _, _, _ = _build_use_case()

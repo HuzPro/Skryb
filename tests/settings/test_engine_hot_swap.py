@@ -66,6 +66,26 @@ class TestEngineHotSwapCoordinatorStartSwap:
         assert collector.wait_until(lambda: len(collector.events) >= 1)
         use_case.set_engine.assert_called_once_with(new_engine)
 
+    def test_should_dispose_old_engine_before_loading_new_one(self):
+        bus = SimpleEventBus()
+        use_case = MagicMock()
+        call_order = []
+
+        use_case.dispose_current_engine.side_effect = (
+            lambda: call_order.append("dispose")
+        )
+
+        def loader():
+            call_order.append("load")
+            return MagicMock()
+
+        collector = _EventCollector(bus, EngineLoadCompletedEvent)
+        coord = EngineHotSwapCoordinator(use_case, bus, loader)
+        coord.start_swap("small")
+
+        assert collector.wait_until(lambda: len(collector.events) >= 1)
+        assert call_order == ["dispose", "load"]
+
     def test_should_publish_failed_event_when_set_engine_rejects_non_idle_state(self):
         bus = SimpleEventBus()
         use_case = MagicMock()

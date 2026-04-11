@@ -1,4 +1,3 @@
-import gc
 import logging
 import time
 
@@ -106,16 +105,26 @@ class TransformersWhisperAdapter(TranscriptionEngine):
 
         start = time.monotonic()
 
-        input_features = self._processor(
+        processed = self._processor(
             audio.data,
             sampling_rate=audio.sample_rate,
             return_tensors="pt",
-        ).input_features.to(self._device)
+            truncation=False,
+            padding="longest",
+            return_attention_mask=True,
+        )
+        input_features = processed.input_features.to(self._device)
+        attention_mask = processed.attention_mask.to(self._device)
 
         if self._device != "cpu" and self._model.dtype != input_features.dtype:
             input_features = input_features.half()
 
-        generate_kwargs: dict = {"num_beams": self._beam_size}
+        generate_kwargs: dict = {
+            "num_beams": self._beam_size,
+            "return_timestamps": True,
+            "attention_mask": attention_mask,
+            "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        }
         if self._language:
             generate_kwargs["language"] = self._language
             generate_kwargs["task"] = "transcribe"
@@ -158,7 +167,6 @@ class TransformersWhisperAdapter(TranscriptionEngine):
             self._model_size,
             vram_snapshot(),
         )
-        gc.collect()
         if self._device != "cpu":
             import torch
             torch.cuda.empty_cache()

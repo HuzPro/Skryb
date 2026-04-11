@@ -73,6 +73,10 @@ class RecordAndTranscribeUseCase:
         if not self._action_complete.wait(timeout=timeout):
             raise TimeoutError("_wait_for_action: action thread did not complete")
 
+    def dispose_current_engine(self) -> None:
+        if self._engine is not None:
+            self._engine.dispose()
+
     def set_engine(self, engine: TranscriptionEngine) -> None:
         if self._state_machine.state != AppState.IDLE:
             raise RuntimeError("Can only swap engine when idle")

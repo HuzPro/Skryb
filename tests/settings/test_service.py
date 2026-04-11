@@ -268,6 +268,28 @@ class TestTriggerEngineSwap:
             time.sleep(0.01)
         assert len(started) == 1
 
+    def test_should_ignore_swap_when_already_busy(self):
+        release = threading.Event()
+
+        def slow_loader():
+            release.wait(timeout=2)
+            return MagicMock()
+
+        service, _, _, bus, _ = _build_service()
+        # Replace the coordinator with one that uses a slow loader.
+        hot_swap = EngineHotSwapCoordinator(
+            use_case=MagicMock(),
+            event_bus=bus,
+            loader=slow_loader,
+        )
+        service._hot_swap = hot_swap
+
+        service.trigger_engine_swap()
+        time.sleep(0.05)
+        service.trigger_engine_swap()  # should not raise
+
+        release.set()
+
 
 class TestListenerFanout:
     def test_should_forward_download_progress_to_listeners(self):

@@ -40,6 +40,7 @@ class SystemTrayApp:
         self._on_open_settings = on_open_settings
         self._download_manager = download_manager
         self._icon: pystray.Icon | None = None
+        self._settings_lock = threading.Lock()
 
         self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
@@ -80,7 +81,15 @@ class SystemTrayApp:
 
     def _on_settings_clicked(self, icon: pystray.Icon, item) -> None:
         if self._on_open_settings:
-            threading.Thread(target=self._on_open_settings, daemon=True).start()
+            threading.Thread(target=self._open_settings_guarded, daemon=True).start()
+
+    def _open_settings_guarded(self) -> None:
+        if not self._settings_lock.acquire(blocking=False):
+            return
+        try:
+            self._on_open_settings()
+        finally:
+            self._settings_lock.release()
 
     def _on_quit(self, icon: pystray.Icon, item) -> None:
         self._hotkey_listener.stop()

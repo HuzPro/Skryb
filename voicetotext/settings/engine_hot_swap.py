@@ -109,6 +109,13 @@ class EngineHotSwapCoordinator:
             EngineLoadStartedEvent(model_name=model_name)
         )
         try:
+            self._use_case.dispose_current_engine()
+            _logger.info(
+                "[swap] old engine disposed | adapters=%d | %s",
+                count_live_adapters(),
+                vram_snapshot(),
+            )
+
             t0 = time.monotonic()
             new_engine = self._loader()
             _logger.info(
@@ -118,11 +125,9 @@ class EngineHotSwapCoordinator:
                 vram_snapshot(),
             )
 
-            t1 = time.monotonic()
             self._use_case.set_engine(new_engine)
             _logger.info(
-                "[swap] set_engine done in %.2fs | adapters=%d | %s",
-                time.monotonic() - t1,
+                "[swap] engine installed | adapters=%d | %s",
                 count_live_adapters(),
                 vram_snapshot(),
             )

@@ -81,6 +81,7 @@ class TestTransformersWhisperAdapterTranscribe:
 
         mock_features = MagicMock()
         mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
         mock_processor.return_value = mock_features
 
         mock_model.generate.return_value = MagicMock()
@@ -111,6 +112,7 @@ class TestTransformersWhisperAdapterTranscribe:
 
         mock_features = MagicMock()
         mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
         mock_processor.return_value = mock_features
         mock_model.generate.return_value = MagicMock()
         mock_processor.batch_decode.return_value = [""]
@@ -125,6 +127,118 @@ class TestTransformersWhisperAdapterTranscribe:
         assert call_kwargs["num_beams"] == 3
         assert call_kwargs["language"] == "en"
         assert call_kwargs["task"] == "transcribe"
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_call_processor_without_truncation(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_processor.call_args[1]
+        assert call_kwargs["truncation"] is False
+        assert call_kwargs["padding"] == "longest"
+        assert call_kwargs["return_attention_mask"] is True
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_attention_mask_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_attention_mask = MagicMock()
+        mock_features.attention_mask.to.return_value = mock_attention_mask
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["attention_mask"] is mock_attention_mask
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_return_timestamps_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["return_timestamps"] is True
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_move_attention_mask_to_device(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cuda")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        mock_features.attention_mask.to.assert_called_with("cuda")
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_temperature_fallback_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["temperature"] == (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
 
 class TestTransformersWhisperAdapterDispose:
@@ -147,16 +261,6 @@ class TestTransformersWhisperAdapterDispose:
         adapter.dispose()
 
         torch.cuda.empty_cache.assert_called_once()
-
-    @patch.dict("sys.modules", _mock_transformers())
-    @patch("gc.collect")
-    def test_should_call_gc_collect_on_dispose(self, mock_gc_collect):
-        adapter = TransformersWhisperAdapter(model_size="base", device="cuda")
-        adapter.load_model()
-
-        adapter.dispose()
-
-        mock_gc_collect.assert_called_once()
 
     @patch.dict("sys.modules", _mock_transformers())
     def test_should_skip_gpu_cache_release_on_cpu_dispose(self):

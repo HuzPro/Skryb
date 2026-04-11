@@ -167,6 +167,8 @@ class SettingsService:
     # ------------------------------------------------------------------
 
     def trigger_engine_swap(self) -> None:
+        if self._hot_swap.is_busy():
+            return
         self._hot_swap.start_swap(self.selected_model())
 
     def is_engine_swapping(self) -> bool:
