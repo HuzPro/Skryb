@@ -1,8 +1,3 @@
-# TODO(deletion): CTranslate2/faster_whisper backend detection removed.
-# The transformers (PyTorch) engine is now the sole backend — it handles
-# NVIDIA CUDA, AMD ROCm, and CPU with one model format.
-
-
 def detect_available_backends() -> list[str]:
     """Return available engine names.
 

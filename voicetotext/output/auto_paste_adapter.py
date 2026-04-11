@@ -1,9 +1,13 @@
+import logging
 import time
 
 import pyautogui
 import pyperclip
 
 from voicetotext.output.handler import TextOutputHandler
+
+
+_logger = logging.getLogger(__name__)
 
 
 class AutoPasteAdapter(TextOutputHandler):
@@ -14,4 +18,4 @@ class AutoPasteAdapter(TextOutputHandler):
         try:
             pyautogui.hotkey("ctrl", "v")
         except Exception as e:
-            print(f"  WARNING: Auto-paste failed ({e}), text is in clipboard.")
+            _logger.warning("Auto-paste failed (%s), text is in clipboard.", e)

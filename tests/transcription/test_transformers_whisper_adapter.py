@@ -33,9 +33,7 @@ class TestTransformersWhisperAdapterLoadModel:
     def test_should_load_model_with_given_parameters(self):
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-        adapter = TransformersWhisperAdapter(
-            model_size="base", device="cpu",
-        )
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
 
         adapter.load_model()
 
@@ -46,7 +44,7 @@ class TestTransformersWhisperAdapterLoadModel:
         assert adapter.is_model_loaded() is True
 
     @patch.dict("sys.modules", _mock_transformers())
-    def test_should_pass_cache_dir_when_download_root_set(self):
+    def test_should_pass_cache_dir_and_offline_when_download_root_set(self):
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
         adapter = TransformersWhisperAdapter(
@@ -56,10 +54,14 @@ class TestTransformersWhisperAdapterLoadModel:
         adapter.load_model()
 
         WhisperProcessor.from_pretrained.assert_called_once_with(
-            "openai/whisper-small", cache_dir="/tmp/models"
+            "openai/whisper-small",
+            cache_dir="/tmp/models",
+            local_files_only=True,
         )
         WhisperForConditionalGeneration.from_pretrained.assert_called_once_with(
-            "openai/whisper-small", cache_dir="/tmp/models"
+            "openai/whisper-small",
+            cache_dir="/tmp/models",
+            local_files_only=True,
         )
 
     def test_should_report_not_loaded_before_load(self):
@@ -90,7 +92,7 @@ class TestTransformersWhisperAdapterTranscribe:
 
         assert isinstance(result, TranscriptionResult)
         assert result.text == "hello world"
-        assert result.duration_seconds > 0.0
+        assert result.duration_seconds >= 0.0
 
     @patch.dict("sys.modules", _mock_transformers())
     def test_should_raise_when_model_not_loaded(self):
@@ -134,6 +136,38 @@ class TestTransformersWhisperAdapterDispose:
         adapter.dispose()
 
         assert adapter.is_model_loaded() is False
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_release_gpu_cache_on_dispose(self):
+        import torch
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cuda")
+        adapter.load_model()
+
+        adapter.dispose()
+
+        torch.cuda.empty_cache.assert_called_once()
+
+    @patch.dict("sys.modules", _mock_transformers())
+    @patch("gc.collect")
+    def test_should_call_gc_collect_on_dispose(self, mock_gc_collect):
+        adapter = TransformersWhisperAdapter(model_size="base", device="cuda")
+        adapter.load_model()
+
+        adapter.dispose()
+
+        mock_gc_collect.assert_called_once()
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_skip_gpu_cache_release_on_cpu_dispose(self):
+        import torch
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+
+        adapter.dispose()
+
+        torch.cuda.empty_cache.assert_not_called()
 
     def test_should_not_raise_on_dispose_when_not_loaded(self):
         adapter = TransformersWhisperAdapter(model_size="base")

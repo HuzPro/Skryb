@@ -1,20 +1,26 @@
 import customtkinter as ctk
 
-from voicetotext.core.config import ConfigurationStore
+from voicetotext.settings.service import SettingsService
+from voicetotext.settings.tk_cleanup import release_tk_variables
 
 
 class OutputTab:
+    """View for choosing how transcribed text is delivered to the focused window."""
 
-    def __init__(self, parent: ctk.CTkFrame, config: ConfigurationStore):
-        self._config = config
+    def __init__(self, parent: ctk.CTkFrame, service: SettingsService):
+        self._service = service
         self._build(parent)
 
-    def _build(self, parent: ctk.CTkFrame) -> None:
-        mode_label = ctk.CTkLabel(parent, text="Output Mode:")
-        mode_label.pack(anchor="w", padx=10, pady=(15, 2))
+    def dispose(self) -> None:
+        release_tk_variables(self._mode_var)
 
-        current_mode = self._config.get("output.mode", "auto_paste")
-        self._mode_var = ctk.StringVar(value=current_mode)
+    def _build(self, parent: ctk.CTkFrame) -> None:
+        draft = self._service.current_draft()
+
+        mode_label = ctk.CTkLabel(parent, text="Output Mode")
+        mode_label.pack(anchor="w", padx=16, pady=(18, 4))
+
+        self._mode_var = ctk.StringVar(value=draft.output_mode)
 
         paste_radio = ctk.CTkRadioButton(
             parent,
@@ -22,7 +28,7 @@ class OutputTab:
             variable=self._mode_var,
             value="auto_paste",
         )
-        paste_radio.pack(anchor="w", padx=20, pady=3)
+        paste_radio.pack(anchor="w", padx=24, pady=4)
 
         clipboard_radio = ctk.CTkRadioButton(
             parent,
@@ -30,7 +36,7 @@ class OutputTab:
             variable=self._mode_var,
             value="clipboard_only",
         )
-        clipboard_radio.pack(anchor="w", padx=20, pady=3)
+        clipboard_radio.pack(anchor="w", padx=24, pady=4)
 
-    def apply(self) -> None:
-        self._config.set("output.mode", self._mode_var.get())
+    def current_mode(self) -> str:
+        return self._mode_var.get()

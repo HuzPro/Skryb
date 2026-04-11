@@ -15,13 +15,10 @@ DEFAULT_CONFIG = {
         "mode": "auto_paste",
     },
     "transcription": {
-        "engine": "auto",
         "model_size": "base",
         "device": "auto",
-        "compute_type": "float16",
         "language": None,
         "beam_size": 5,
-        "vad_filter": True,
     },
     "audio": {
         "sample_rate": 16000,

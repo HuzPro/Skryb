@@ -8,6 +8,7 @@ from pystray import Menu, MenuItem
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import StateChangedEvent
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.tray.icons import create_icon
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
@@ -30,12 +31,14 @@ class SystemTrayApp:
         event_bus: EventBus,
         hotkey_listener: HotkeyListener,
         on_open_settings: Callable[[], None] | None = None,
+        download_manager: DownloadManager | None = None,
     ):
         self._use_case = use_case
         self._state_machine = state_machine
         self._event_bus = event_bus
         self._hotkey_listener = hotkey_listener
         self._on_open_settings = on_open_settings
+        self._download_manager = download_manager
         self._icon: pystray.Icon | None = None
 
         self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
@@ -82,6 +85,8 @@ class SystemTrayApp:
     def _on_quit(self, icon: pystray.Icon, item) -> None:
         self._hotkey_listener.stop()
         self._use_case.dispose()
+        if self._download_manager is not None:
+            self._download_manager.shutdown()
         icon.stop()
         os._exit(0)
 

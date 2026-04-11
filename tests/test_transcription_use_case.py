@@ -46,6 +46,19 @@ def _build_use_case():
     return use_case, recorder, engine, output, event_bus, state_machine
 
 
+@pytest.fixture()
+def _synchronous_threads(monkeypatch):
+    class _SyncThread:
+        def __init__(self, *, target=None, daemon=None):
+            self._target = target
+
+        def start(self):
+            if self._target:
+                self._target()
+
+    monkeypatch.setattr("threading.Thread", _SyncThread)
+
+
 class TestActivateFromIdle:
     def test_should_start_recording_on_activate_when_idle(self):
         use_case, recorder, _, _, _, state_machine = _build_use_case()
@@ -260,6 +273,26 @@ class TestHotSwapEngine:
         with pytest.raises(RuntimeError, match="idle"):
             use_case.set_engine(MagicMock())
 
+    def test_should_dispose_old_engine_when_swapped_out(self):
+        use_case, _, old_engine, _, _, _ = _build_use_case()
+        new_engine = MagicMock()
+
+        use_case.set_engine(new_engine)
+
+        old_engine.dispose.assert_called_once()
+
+    def test_should_not_dispose_new_engine_when_swap_rejected(self):
+        use_case, recorder, old_engine, _, _, _ = _build_use_case()
+        use_case.on_hotkey_activated()
+        use_case._wait_for_action()
+        new_engine = MagicMock()
+
+        with pytest.raises(RuntimeError):
+            use_case.set_engine(new_engine)
+
+        old_engine.dispose.assert_not_called()
+        new_engine.dispose.assert_not_called()
+
 
 class TestHotSwapOutput:
     def test_should_swap_output_handler(self):
@@ -276,6 +309,7 @@ class TestHotSwapOutput:
         use_case._wait_for_transcription()
 
         new_output.output.assert_called_once_with("hello")
+        use_case.dispose()
 
 
 class TestStartRecordingFailure:
@@ -288,6 +322,7 @@ class TestStartRecordingFailure:
 
         assert state_machine.state == AppState.IDLE
 
+    @pytest.mark.usefixtures("_synchronous_threads")
     def test_should_publish_error_event_when_start_recording_fails(self):
         use_case, recorder, _, _, event_bus, _ = _build_use_case()
         recorder.start_recording.side_effect = AudioRecorderError("mic unavailable")
@@ -295,7 +330,6 @@ class TestStartRecordingFailure:
         event_bus.subscribe(ErrorOccurredEvent, received.append)
 
         use_case.on_hotkey_activated()
-        use_case._wait_for_action()
 
         assert len(received) == 1
         assert "mic unavailable" in received[0].error

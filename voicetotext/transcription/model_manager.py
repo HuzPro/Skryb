@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable
 
+from voicetotext.downloads.download_manager import DownloadHandle
 from voicetotext.transcription.model_info import ModelInfo
 
 
@@ -16,7 +16,7 @@ class ModelManager(ABC):
         pass
 
     @abstractmethod
-    def download(self, name: str, on_progress: Callable[[float], None]) -> None:
+    def download(self, name: str) -> DownloadHandle:
         pass
 
     @abstractmethod

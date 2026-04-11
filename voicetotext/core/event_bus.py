@@ -35,17 +35,25 @@ class SimpleEventBus(EventBus):
         self._handlers: dict[Type[DomainEvent], list[Callable]] = defaultdict(list)
         self._lock = threading.Lock()
 
-    def subscribe(self, event_type, handler):
+    def subscribe(
+        self,
+        event_type: Type[DomainEvent],
+        handler: Callable[[DomainEvent], None],
+    ) -> None:
         with self._lock:
             self._handlers[event_type].append(handler)
 
-    def unsubscribe(self, event_type, handler):
+    def unsubscribe(
+        self,
+        event_type: Type[DomainEvent],
+        handler: Callable[[DomainEvent], None],
+    ) -> None:
         with self._lock:
             handlers = self._handlers.get(event_type, [])
             if handler in handlers:
                 handlers.remove(handler)
 
-    def publish(self, event):
+    def publish(self, event: DomainEvent) -> None:
         with self._lock:
             handlers = list(self._handlers.get(type(event), []))
         for handler in handlers:

@@ -13,7 +13,11 @@ class PushToTalkStrategy(HotkeyStrategy):
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
 
-    def set_callbacks(self, on_activate, on_deactivate):
+    def set_callbacks(
+        self,
+        on_activate: Callable[[], None],
+        on_deactivate: Callable[[], None],
+    ) -> None:
         self._on_activate = on_activate
         self._on_deactivate = on_deactivate
 

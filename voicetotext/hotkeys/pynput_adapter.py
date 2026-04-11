@@ -8,9 +8,11 @@ from voicetotext.hotkeys.strategy import HotkeyStrategy
 
 class PynputAdapter(HotkeyListener):
 
-    def __init__(self, strategy: HotkeyStrategy):
+    def __init__(self, strategy: HotkeyStrategy) -> None:
         self._strategy = strategy
         self._listener = None
+        self._on_activate: Callable[[], None] | None = None
+        self._on_deactivate: Callable[[], None] | None = None
 
     def start(self) -> None:
         self._listener = keyboard.Listener(
@@ -32,14 +34,12 @@ class PynputAdapter(HotkeyListener):
         self._on_deactivate = callback
         self._update_strategy_callbacks()
 
-    def _update_strategy_callbacks(self):
-        activate = getattr(self, "_on_activate", None)
-        deactivate = getattr(self, "_on_deactivate", None)
-        if activate and deactivate:
-            self._strategy.set_callbacks(activate, deactivate)
+    def _update_strategy_callbacks(self) -> None:
+        if self._on_activate is not None and self._on_deactivate is not None:
+            self._strategy.set_callbacks(self._on_activate, self._on_deactivate)
 
-    def _on_press(self, key):
+    def _on_press(self, key: keyboard.Key) -> None:
         self._strategy.on_key_press(key)
 
-    def _on_release(self, key):
+    def _on_release(self, key: keyboard.Key) -> None:
         self._strategy.on_key_release(key)

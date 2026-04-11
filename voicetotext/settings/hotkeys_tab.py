@@ -1,21 +1,28 @@
 import customtkinter as ctk
 
-from voicetotext.core.config import ConfigurationStore
+from voicetotext.settings.service import SettingsService
+from voicetotext.settings.tk_cleanup import release_tk_variables
 
 
 class HotkeyTab:
+    """View for configuring the global activation hotkey and its mode."""
 
-    def __init__(self, parent: ctk.CTkFrame, config: ConfigurationStore):
-        self._config = config
+    def __init__(self, parent: ctk.CTkFrame, service: SettingsService):
+        self._service = service
         self._build(parent)
 
-    def _build(self, parent: ctk.CTkFrame) -> None:
-        combo_label = ctk.CTkLabel(parent, text="Hotkey Combination:")
-        combo_label.pack(anchor="w", padx=10, pady=(15, 2))
+    def dispose(self) -> None:
+        release_tk_variables(self._mode_var)
 
-        self._combo_entry = ctk.CTkEntry(parent, width=300)
-        self._combo_entry.insert(0, self._config.get("hotkey.combination", "ctrl+alt+m"))
-        self._combo_entry.pack(anchor="w", padx=10, pady=(0, 10))
+    def _build(self, parent: ctk.CTkFrame) -> None:
+        draft = self._service.current_draft()
+
+        combo_label = ctk.CTkLabel(parent, text="Hotkey Combination")
+        combo_label.pack(anchor="w", padx=16, pady=(18, 4))
+
+        self._combo_entry = ctk.CTkEntry(parent, height=32)
+        self._combo_entry.insert(0, draft.hotkey_combination)
+        self._combo_entry.pack(fill="x", padx=16, pady=(0, 6))
 
         hint = ctk.CTkLabel(
             parent,
@@ -23,13 +30,12 @@ class HotkeyTab:
             font=ctk.CTkFont(size=11),
             text_color="gray",
         )
-        hint.pack(anchor="w", padx=10, pady=(0, 15))
+        hint.pack(anchor="w", padx=16, pady=(0, 18))
 
-        mode_label = ctk.CTkLabel(parent, text="Hotkey Mode:")
-        mode_label.pack(anchor="w", padx=10, pady=(5, 2))
+        mode_label = ctk.CTkLabel(parent, text="Activation Mode")
+        mode_label.pack(anchor="w", padx=16, pady=(4, 4))
 
-        current_mode = self._config.get("hotkey.mode", "toggle")
-        self._mode_var = ctk.StringVar(value=current_mode)
+        self._mode_var = ctk.StringVar(value=draft.hotkey_mode)
 
         toggle_radio = ctk.CTkRadioButton(
             parent,
@@ -37,7 +43,7 @@ class HotkeyTab:
             variable=self._mode_var,
             value="toggle",
         )
-        toggle_radio.pack(anchor="w", padx=20, pady=3)
+        toggle_radio.pack(anchor="w", padx=24, pady=4)
 
         ptt_radio = ctk.CTkRadioButton(
             parent,
@@ -45,8 +51,10 @@ class HotkeyTab:
             variable=self._mode_var,
             value="push_to_talk",
         )
-        ptt_radio.pack(anchor="w", padx=20, pady=3)
+        ptt_radio.pack(anchor="w", padx=24, pady=4)
 
-    def apply(self) -> None:
-        self._config.set("hotkey.combination", self._combo_entry.get().strip())
-        self._config.set("hotkey.mode", self._mode_var.get())
+    def current_combination(self) -> str:
+        return self._combo_entry.get().strip()
+
+    def current_mode(self) -> str:
+        return self._mode_var.get()

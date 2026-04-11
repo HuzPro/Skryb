@@ -37,3 +37,45 @@ class TranscriptionFailedEvent(DomainEvent):
 @dataclass(frozen=True)
 class ErrorOccurredEvent(DomainEvent):
     error: str = ""
+
+
+@dataclass(frozen=True)
+class DownloadProgressEvent(DomainEvent):
+    job_id: str = ""
+    bytes_done: int = 0
+    bytes_total: int = 0
+    speed_bps: float = 0.0
+    eta_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class DownloadStateChangedEvent(DomainEvent):
+    job_id: str = ""
+    state: str = ""
+
+
+@dataclass(frozen=True)
+class DownloadCompletedEvent(DomainEvent):
+    job_id: str = ""
+
+
+@dataclass(frozen=True)
+class DownloadFailedEvent(DomainEvent):
+    job_id: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class EngineLoadStartedEvent(DomainEvent):
+    model_name: str = ""
+
+
+@dataclass(frozen=True)
+class EngineLoadCompletedEvent(DomainEvent):
+    model_name: str = ""
+
+
+@dataclass(frozen=True)
+class EngineLoadFailedEvent(DomainEvent):
+    model_name: str = ""
+    error: str = ""

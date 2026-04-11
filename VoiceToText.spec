@@ -3,14 +3,14 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['ctranslate2', 'pystray._win32', 'faster_whisper']
+hiddenimports = ['pystray._win32']
 tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pystray')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('ctranslate2')
+tmp_ret = collect_all('transformers')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('faster_whisper')
+tmp_ret = collect_all('torch')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
@@ -23,7 +23,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'torchaudio', 'torchvision', 'matplotlib', 'scipy', 'pandas', 'pytest', 'yt_dlp', 'numba', 'IPython', 'notebook', 'jupyter', 'transformers', 'accelerate', 'safetensors', 'optimum'],
+    excludes=['matplotlib', 'scipy', 'pandas', 'pytest', 'yt_dlp', 'numba', 'IPython', 'notebook', 'jupyter'],
     noarchive=False,
     optimize=1,
 )

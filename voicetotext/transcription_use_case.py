@@ -1,3 +1,4 @@
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 
@@ -16,6 +17,7 @@ from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.transcription.engine import TranscriptionEngine
 
 
+_logger = logging.getLogger(__name__)
 _MIN_DURATION_SECONDS = 0.1
 
 
@@ -67,13 +69,16 @@ class RecordAndTranscribeUseCase:
         finally:
             self._action_complete.set()
 
-    def _wait_for_action(self) -> None:
-        self._action_complete.wait(timeout=5)
+    def _wait_for_action(self, timeout: float = 5) -> None:
+        if not self._action_complete.wait(timeout=timeout):
+            raise TimeoutError("_wait_for_action: action thread did not complete")
 
     def set_engine(self, engine: TranscriptionEngine) -> None:
         if self._state_machine.state != AppState.IDLE:
             raise RuntimeError("Can only swap engine when idle")
+        old_engine = self._engine
         self._engine = engine
+        old_engine.dispose()
 
     def set_output(self, output: TextOutputHandler) -> None:
         self._output = output
@@ -85,18 +90,18 @@ class RecordAndTranscribeUseCase:
         try:
             self._recorder.start_recording()
         except Exception as e:
-            print(f"  ERROR: Failed to start recording: {e}")
+            _logger.error("Failed to start recording: %s", e)
             self._event_bus.publish(ErrorOccurredEvent(error=str(e)))
             return
         self._state_machine.transition_to(AppState.RECORDING)
         self._event_bus.publish(RecordingStartedEvent())
-        print("Recording started.")
+        _logger.info("Recording started.")
 
     def _stop_and_transcribe(self) -> None:
         try:
             audio = self._recorder.stop_recording()
         except Exception as e:
-            print(f"  ERROR: Failed to stop recording: {e}")
+            _logger.error("Failed to stop recording: %s", e)
             self._state_machine.transition_to(AppState.ERROR)
             self._event_bus.publish(ErrorOccurredEvent(error=str(e)))
             self._state_machine.transition_to(AppState.IDLE)
@@ -104,23 +109,23 @@ class RecordAndTranscribeUseCase:
         self._state_machine.transition_to(AppState.TRANSCRIBING)
         self._event_bus.publish(RecordingStoppedEvent())
         if audio is None:
-            print("Recording stopped: no audio captured.")
+            _logger.info("Recording stopped: no audio captured.")
             self._state_machine.transition_to(AppState.IDLE)
             return
         if audio.duration_seconds < _MIN_DURATION_SECONDS:
-            print(f"Recording stopped: too short ({audio.duration_seconds:.2f}s).")
+            _logger.info("Recording stopped: too short (%.2fs).", audio.duration_seconds)
             self._state_machine.transition_to(AppState.IDLE)
             return
-        print(f"Recording stopped: {audio.duration_seconds:.1f}s of audio. Transcribing...")
+        _logger.info("Recording stopped: %.1fs of audio. Transcribing...", audio.duration_seconds)
         self._current_future = self._executor.submit(self._do_transcription, audio)
 
     def _do_transcription(self, audio: AudioSegment) -> None:
         try:
             result = self._engine.transcribe(audio)
             if result.is_empty:
-                print("Transcription: (empty — no speech detected)")
+                _logger.info("Transcription: (empty — no speech detected)")
             else:
-                print(f"Transcription: '{result.text}'")
+                _logger.info("Transcription: '%s'", result.text)
                 self._output.output(result.text)
             self._state_machine.transition_to(AppState.IDLE)
             self._event_bus.publish(
@@ -130,12 +135,14 @@ class RecordAndTranscribeUseCase:
                 )
             )
         except Exception as e:
-            print(f"  ERROR: Transcription failed: {e}")
+            _logger.error("Transcription failed: %s", e)
             self._state_machine.transition_to(AppState.ERROR)
             self._event_bus.publish(TranscriptionFailedEvent(error=str(e)))
             self._state_machine.transition_to(AppState.IDLE)
 
-    def _wait_for_transcription(self) -> None:
-        if self._current_future:
-            self._current_future.result(timeout=10)
-            self._current_future = None
+    def _wait_for_transcription(self, timeout: float = 10) -> None:
+        future = self._current_future
+        if future is None:
+            return
+        future.result(timeout=timeout)
+        self._current_future = None

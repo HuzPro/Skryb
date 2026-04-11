@@ -1,6 +1,4 @@
 from voicetotext.transcription.model_info import (
-    AVAILABLE_MODELS,
-    FASTER_WHISPER_MODELS,
     TRANSFORMERS_WHISPER_MODELS,
     ModelInfo,
 )
@@ -26,11 +24,11 @@ class TestModelInfoEntity:
 
     def test_should_store_explicit_repo_id(self):
         info = ModelInfo(
-            name="base", size_mb=142, description="test",
-            repo_id="Systran/faster-whisper-base",
+            name="base", size_mb=290, description="test",
+            repo_id="openai/whisper-base",
         )
 
-        assert info.repo_id == "Systran/faster-whisper-base"
+        assert info.repo_id == "openai/whisper-base"
 
     def test_repo_id_defaults_to_empty(self):
         info = ModelInfo(name="base", size_mb=142, description="test")
@@ -38,23 +36,9 @@ class TestModelInfoEntity:
         assert info.repo_id == ""
 
 
-class TestFasterWhisperModels:
-    def test_should_contain_all_standard_models(self):
-        expected = {"tiny", "base", "small", "medium", "large-v3"}
-
-        assert set(FASTER_WHISPER_MODELS.keys()) == expected
-
-    def test_should_have_correct_base_model_size(self):
-        assert FASTER_WHISPER_MODELS["base"].size_mb == 142
-
-    def test_all_models_should_have_repo_ids(self):
-        for model in FASTER_WHISPER_MODELS.values():
-            assert model.repo_id.startswith("Systran/faster-whisper-")
-
-
 class TestTransformersWhisperModels:
     def test_should_contain_all_standard_models(self):
-        expected = {"tiny", "base", "small", "medium", "large-v3"}
+        expected = {"tiny", "base", "small", "large-v3-turbo", "large-v3"}
 
         assert set(TRANSFORMERS_WHISPER_MODELS.keys()) == expected
 
@@ -63,6 +47,3 @@ class TestTransformersWhisperModels:
             assert model.repo_id.startswith("openai/whisper-")
 
 
-class TestAvailableModelsAlias:
-    def test_available_models_should_be_transformers_whisper_models(self):
-        assert AVAILABLE_MODELS is TRANSFORMERS_WHISPER_MODELS

@@ -46,7 +46,7 @@ _MODIFIER_MAP = {
 }
 
 
-def parse_hotkey_combo(combo_string: str) -> set:
+def parse_hotkey_combo(combo_string: str) -> set[Key | KeyCode]:
     keys = set()
     for part in combo_string.lower().split("+"):
         part = part.strip()

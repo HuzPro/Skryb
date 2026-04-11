@@ -1,9 +1,15 @@
+import gc
+import logging
 import time
 
+from voicetotext.transcription.engine_diagnostics import vram_snapshot
 from voicetotext.core.exceptions import TranscriptionError
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.result import TranscriptionResult
+
+
+_logger = logging.getLogger(__name__)
 
 
 class TransformersWhisperAdapter(TranscriptionEngine):
@@ -20,7 +26,7 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         language: str | None = None,
         beam_size: int = 5,
         download_root: str | None = None,
-    ):
+    ) -> None:
         self._model_size = model_size
         self._device = device
         self._language = language
@@ -32,20 +38,62 @@ class TransformersWhisperAdapter(TranscriptionEngine):
     def load_model(self) -> None:
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
+        _logger.info(
+            "[load_model %s device=%s] start | %s",
+            self._model_size,
+            self._device,
+            vram_snapshot(),
+        )
+
         repo_id = f"openai/whisper-{self._model_size}"
         kwargs = {}
         if self._download_root:
             kwargs["cache_dir"] = self._download_root
+            kwargs["local_files_only"] = True
 
+        t0 = time.monotonic()
         self._processor = WhisperProcessor.from_pretrained(repo_id, **kwargs)
+        _logger.info(
+            "[load_model %s] processor loaded in %.2fs",
+            self._model_size,
+            time.monotonic() - t0,
+        )
+
+        t1 = time.monotonic()
         self._model = WhisperForConditionalGeneration.from_pretrained(repo_id, **kwargs)
+        _logger.info(
+            "[load_model %s] model loaded in %.2fs | %s",
+            self._model_size,
+            time.monotonic() - t1,
+            vram_snapshot(),
+        )
 
         if self._device != "cpu":
             import torch
 
+            t2 = time.monotonic()
             self._model = self._model.to(self._device)
+            _logger.info(
+                "[load_model %s] model.to(%s) in %.2fs | %s",
+                self._model_size,
+                self._device,
+                time.monotonic() - t2,
+                vram_snapshot(),
+            )
+
             if torch.cuda.is_available():
+                t3 = time.monotonic()
                 self._model = self._model.half()
+                _logger.info(
+                    "[load_model %s] model.half() in %.2fs | %s",
+                    self._model_size,
+                    time.monotonic() - t3,
+                    vram_snapshot(),
+                )
+
+        _logger.info(
+            "[load_model %s] complete | %s", self._model_size, vram_snapshot()
+        )
 
     def is_model_loaded(self) -> bool:
         return self._model is not None and self._processor is not None
@@ -92,5 +140,30 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         )
 
     def dispose(self) -> None:
+        # Early-return on un-loaded adapters so tests that construct
+        # an adapter but never call ``load_model`` don't force a real
+        # ``import torch`` through ``vram_snapshot``.
+        if self._model is None and self._processor is None:
+            return
+        _logger.info(
+            "[dispose %s device=%s] start | %s",
+            self._model_size,
+            self._device,
+            vram_snapshot(),
+        )
         self._model = None
         self._processor = None
+        _logger.info(
+            "[dispose %s] refs nulled | %s",
+            self._model_size,
+            vram_snapshot(),
+        )
+        gc.collect()
+        if self._device != "cpu":
+            import torch
+            torch.cuda.empty_cache()
+        _logger.info(
+            "[dispose %s] cache released | %s",
+            self._model_size,
+            vram_snapshot(),
+        )
