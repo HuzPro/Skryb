@@ -124,6 +124,10 @@ class TransformersWhisperAdapter(TranscriptionEngine):
             "return_timestamps": True,
             "attention_mask": attention_mask,
             "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+            "compression_ratio_threshold": 1.35,
+            "logprob_threshold": -1.0,
+            "no_speech_threshold": 0.6,
+            "condition_on_prev_tokens": True,
         }
         if self._language:
             generate_kwargs["language"] = self._language

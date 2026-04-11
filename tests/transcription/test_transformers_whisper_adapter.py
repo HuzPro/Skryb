@@ -240,6 +240,94 @@ class TestTransformersWhisperAdapterTranscribe:
         call_kwargs = mock_model.generate.call_args[1]
         assert call_kwargs["temperature"] == (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_compression_ratio_threshold_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["compression_ratio_threshold"] == 1.35
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_logprob_threshold_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["logprob_threshold"] == -1.0
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_no_speech_threshold_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["no_speech_threshold"] == 0.6
+
+    @patch.dict("sys.modules", _mock_transformers())
+    def test_should_pass_condition_on_prev_tokens_to_generate(self):
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        mock_processor = WhisperProcessor.from_pretrained.return_value
+        mock_model = WhisperForConditionalGeneration.from_pretrained.return_value
+        mock_model.dtype = np.float32
+
+        mock_features = MagicMock()
+        mock_features.input_features.to.return_value = MagicMock()
+        mock_features.attention_mask.to.return_value = MagicMock()
+        mock_processor.return_value = mock_features
+        mock_model.generate.return_value = MagicMock()
+        mock_processor.batch_decode.return_value = [""]
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        adapter.transcribe(_make_audio())
+
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["condition_on_prev_tokens"] is True
+
 
 class TestTransformersWhisperAdapterDispose:
     @patch.dict("sys.modules", _mock_transformers())
