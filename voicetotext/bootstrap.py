@@ -184,7 +184,7 @@ def build_app(
         use_case=use_case,
     )
 
-    def open_settings():
+    def open_settings() -> None:
         SettingsWindow(
             service=settings_service,
             first_run=False,

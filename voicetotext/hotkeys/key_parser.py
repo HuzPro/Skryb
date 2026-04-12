@@ -1,11 +1,9 @@
-from typing import Any
-
 from pynput.keyboard import Key, KeyCode
 
 _CHAR_TO_WIN_VK = {chr(i + ord("a")): 0x41 + i for i in range(26)}
 
 
-def canonicalize_key(key: Any) -> Any:
+def canonicalize_key(key: Key | KeyCode) -> Key | KeyCode:
     if isinstance(key, KeyCode):
         vk = key.vk
         if vk is None and key.char is not None:

@@ -37,7 +37,7 @@ class RecordAndTranscribeUseCase:
         self._state_machine = state_machine
         self._event_bus = event_bus
         self._executor = ThreadPoolExecutor(max_workers=1)
-        self._current_future: Future | None = None
+        self._current_future: Future[None] | None = None
         self._action_lock = threading.Lock()
         self._action_complete = threading.Event()
         self._action_complete.set()

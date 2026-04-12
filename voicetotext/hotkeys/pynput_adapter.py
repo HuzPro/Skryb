@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 from pynput import keyboard
 
@@ -10,7 +10,7 @@ class PynputAdapter(HotkeyListener):
 
     def __init__(self, strategy: HotkeyStrategy) -> None:
         self._strategy = strategy
-        self._listener = None
+        self._listener: keyboard.Listener | None = None
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
 

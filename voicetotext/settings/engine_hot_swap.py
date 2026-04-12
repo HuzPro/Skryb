@@ -1,7 +1,8 @@
 import logging
 import threading
 import time
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 from voicetotext.transcription.engine_diagnostics import count_live_adapters, vram_snapshot
 from voicetotext.core.event_bus import EventBus

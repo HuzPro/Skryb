@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Protocol
 
 from voicetotext.transcription.engine_diagnostics import vram_snapshot
 from voicetotext.core.exceptions import TranscriptionError
@@ -9,6 +10,19 @@ from voicetotext.transcription.result import TranscriptionResult
 
 
 _logger = logging.getLogger(__name__)
+
+
+class _WhisperModel(Protocol):
+    dtype: object
+
+    def to(self, device: str) -> "_WhisperModel": ...
+    def half(self) -> "_WhisperModel": ...
+    def generate(self, input_features: object, **kwargs: object) -> object: ...
+
+
+class _WhisperProcessor(Protocol):
+    def __call__(self, audio: object, **kwargs: object) -> object: ...
+    def batch_decode(self, token_ids: object, skip_special_tokens: bool = ...) -> list[str]: ...
 
 
 class TransformersWhisperAdapter(TranscriptionEngine):
@@ -31,8 +45,8 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         self._language = language
         self._beam_size = beam_size
         self._download_root = download_root
-        self._model = None
-        self._processor = None
+        self._model: _WhisperModel | None = None
+        self._processor: _WhisperProcessor | None = None
 
     def load_model(self) -> None:
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
@@ -119,7 +133,7 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         if self._device != "cpu" and self._model.dtype != input_features.dtype:
             input_features = input_features.half()
 
-        generate_kwargs: dict = {
+        generate_kwargs: dict[str, object] = {
             "num_beams": self._beam_size,
             "return_timestamps": True,
             "attention_mask": attention_mask,

@@ -1,7 +1,7 @@
 import threading
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import Callable, Type
+from collections.abc import Callable
 
 from voicetotext.core.events import DomainEvent
 
@@ -11,7 +11,7 @@ class EventBus(ABC):
     @abstractmethod
     def subscribe(
         self,
-        event_type: Type[DomainEvent],
+        event_type: type[DomainEvent],
         handler: Callable[[DomainEvent], None],
     ) -> None:
         pass
@@ -19,7 +19,7 @@ class EventBus(ABC):
     @abstractmethod
     def unsubscribe(
         self,
-        event_type: Type[DomainEvent],
+        event_type: type[DomainEvent],
         handler: Callable[[DomainEvent], None],
     ) -> None:
         pass
@@ -31,13 +31,13 @@ class EventBus(ABC):
 
 class SimpleEventBus(EventBus):
 
-    def __init__(self):
-        self._handlers: dict[Type[DomainEvent], list[Callable]] = defaultdict(list)
+    def __init__(self) -> None:
+        self._handlers: dict[type[DomainEvent], list[Callable[[DomainEvent], None]]] = defaultdict(list)
         self._lock = threading.Lock()
 
     def subscribe(
         self,
-        event_type: Type[DomainEvent],
+        event_type: type[DomainEvent],
         handler: Callable[[DomainEvent], None],
     ) -> None:
         with self._lock:
@@ -45,7 +45,7 @@ class SimpleEventBus(EventBus):
 
     def unsubscribe(
         self,
-        event_type: Type[DomainEvent],
+        event_type: type[DomainEvent],
         handler: Callable[[DomainEvent], None],
     ) -> None:
         with self._lock:

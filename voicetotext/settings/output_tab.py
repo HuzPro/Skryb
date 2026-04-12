@@ -7,7 +7,7 @@ from voicetotext.settings.tk_cleanup import release_tk_variables
 class OutputTab:
     """View for choosing how transcribed text is delivered to the focused window."""
 
-    def __init__(self, parent: ctk.CTkFrame, service: SettingsService):
+    def __init__(self, parent: ctk.CTkFrame, service: SettingsService) -> None:
         self._service = service
         self._build(parent)
 

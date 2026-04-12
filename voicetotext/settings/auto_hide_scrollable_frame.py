@@ -5,6 +5,8 @@ disappears when the content fits inside the viewport and reappears when
 the content overflows — the standard Tk auto-hide scrollbar pattern.
 """
 
+import tkinter
+
 import customtkinter as ctk
 
 
@@ -17,12 +19,12 @@ class AutoHideScrollableFrame(ctk.CTkScrollableFrame):
     ``last >= 1``) and ``grid``'d again when content overflows.
     """
 
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: tkinter.Misc, **kwargs: object) -> None:
         super().__init__(master, **kwargs)
         if hasattr(self, "_parent_canvas") and hasattr(self, "_scrollbar"):
             self._parent_canvas.configure(yscrollcommand=self._autohide_set)
 
-    def _autohide_set(self, first, last) -> None:
+    def _autohide_set(self, first: str, last: str) -> None:
         if float(first) <= 0.0 and float(last) >= 1.0:
             self._scrollbar.grid_remove()
         else:

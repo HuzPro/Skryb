@@ -1,4 +1,5 @@
-from typing import Any, Iterable, Iterator, Protocol
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Protocol
 
 from voicetotext.downloads.chunked_file_downloader import HeadResult
 
@@ -7,9 +8,19 @@ _REQUEST_TIMEOUT_SECONDS = 60
 _STREAM_CHUNK_BYTES = 256 * 1024
 
 
+class _Response(Protocol):
+    status_code: int
+    headers: Mapping[str, str]
+    content: bytes
+
+    def raise_for_status(self) -> None: ...
+    def iter_content(self, chunk_size: int = ...) -> Iterator[bytes]: ...
+    def close(self) -> None: ...
+
+
 class _Session(Protocol):
-    def head(self, url: str, allow_redirects: bool, timeout: float): ...
-    def get(self, url: str, headers: dict, stream: bool, timeout: float): ...
+    def head(self, url: str, allow_redirects: bool, timeout: float) -> _Response: ...
+    def get(self, url: str, headers: dict[str, str], stream: bool, timeout: float) -> _Response: ...
 
 
 class RequestsHttpClient:
@@ -19,7 +30,7 @@ class RequestsHttpClient:
     this is what actually makes multi-chunk downloads fast against HF.
     """
 
-    def __init__(self, session: _Session):
+    def __init__(self, session: _Session) -> None:
         self._session = session
 
     def head(self, url: str) -> HeadResult:
@@ -27,7 +38,7 @@ class RequestsHttpClient:
             url, allow_redirects=True, timeout=_REQUEST_TIMEOUT_SECONDS
         )
         response.raise_for_status()
-        content_length = int(response.headers.get("Content-Length", 0))
+        content_length = int(response.headers.get("Content-Length", "0"))
         return HeadResult(
             content_length=content_length,
             etag=response.headers.get("ETag"),
@@ -59,7 +70,7 @@ class RequestsHttpClient:
 class _StreamingBody:
     """Closeable iterator adapter around a streaming ``requests`` response."""
 
-    def __init__(self, response: Any, chunk_bytes: int) -> None:
+    def __init__(self, response: _Response, chunk_bytes: int) -> None:
         self._response = response
         self._chunk_bytes = chunk_bytes
 

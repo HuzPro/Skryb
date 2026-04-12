@@ -1,10 +1,15 @@
 import sys
 import tkinter
-from typing import Callable
-
-import customtkinter as ctk
+from collections.abc import Callable
 from tkinter import messagebox
 
+import customtkinter as ctk
+
+from voicetotext.core.events import (
+    EngineLoadCompletedEvent,
+    EngineLoadFailedEvent,
+    EngineLoadStartedEvent,
+)
 from voicetotext.settings.hotkeys_tab import HotkeyTab
 from voicetotext.settings.output_tab import OutputTab
 from voicetotext.settings.service import EngineEventListener, SettingsService
@@ -182,7 +187,7 @@ class SettingsWindow(EngineEventListener):
     # EngineEventListener — called from background threads
     # ------------------------------------------------------------------
 
-    def on_engine_load_started(self, event) -> None:
+    def on_engine_load_started(self, event: EngineLoadStartedEvent) -> None:
         if self._window is not None:
             self._window.after(
                 0,
@@ -191,11 +196,11 @@ class SettingsWindow(EngineEventListener):
                 "#CCCCCC",
             )
 
-    def on_engine_load_completed(self, event) -> None:
+    def on_engine_load_completed(self, event: EngineLoadCompletedEvent) -> None:
         if self._window is not None:
             self._window.after(0, self._after_engine_loaded)
 
-    def on_engine_load_failed(self, event) -> None:
+    def on_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
         if self._window is not None:
             self._window.after(
                 0,

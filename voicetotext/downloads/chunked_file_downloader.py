@@ -2,7 +2,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Protocol
+from collections.abc import Callable, Iterable
+from typing import Protocol
 
 from voicetotext.downloads.chunk_plan import plan_chunks
 from voicetotext.downloads.sidecar import (

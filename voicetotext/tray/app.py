@@ -1,6 +1,6 @@
 import os
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 import pystray
 from pystray import Menu, MenuItem
@@ -79,7 +79,7 @@ class SystemTrayApp:
         icon.visible = True
         self._hotkey_listener.start()
 
-    def _on_settings_clicked(self, icon: pystray.Icon, item) -> None:
+    def _on_settings_clicked(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         if self._on_open_settings:
             threading.Thread(target=self._open_settings_guarded, daemon=True).start()
 
@@ -91,7 +91,7 @@ class SystemTrayApp:
         finally:
             self._settings_lock.release()
 
-    def _on_quit(self, icon: pystray.Icon, item) -> None:
+    def _on_quit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self._hotkey_listener.stop()
         self._use_case.dispose()
         if self._download_manager is not None:

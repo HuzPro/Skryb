@@ -1,4 +1,5 @@
 import fnmatch
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -24,8 +25,18 @@ class ResolvedFile:
     url: str
 
 
+class _RepoSibling(Protocol):
+    rfilename: str
+    size: int | None
+
+
+class _RepoInfo(Protocol):
+    sha: str
+    siblings: Iterable[_RepoSibling]
+
+
 class HfApiProtocol(Protocol):
-    def repo_info(self, repo_id: str, files_metadata: bool): ...
+    def repo_info(self, repo_id: str, files_metadata: bool) -> _RepoInfo: ...
 
 
 class HfRepoResolver:

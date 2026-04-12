@@ -53,7 +53,7 @@ class _ActiveJob:
     bytes_done: int = 0
     bytes_total: int = 0
     speed_samples: list[tuple[float, int]] = field(default_factory=list)
-    future: Future | None = None
+    future: Future[None] | None = None
 
 
 def _current_speed(active: _ActiveJob) -> float:

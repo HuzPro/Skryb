@@ -2,9 +2,8 @@ import copy
 import json
 import threading
 from pathlib import Path
-from typing import Any
 
-from voicetotext.core.config import ConfigurationStore
+from voicetotext.core.config import ConfigValue, ConfigurationStore
 
 DEFAULT_CONFIG = {
     "hotkey": {
@@ -26,7 +25,7 @@ DEFAULT_CONFIG = {
 }
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def _deep_merge(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
     result = copy.deepcopy(base)
     for key, value in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
@@ -40,7 +39,7 @@ class JsonConfigAdapter(ConfigurationStore):
 
     def __init__(self, path: Path):
         self._path = Path(path)
-        self._data: dict = {}
+        self._data: dict[str, object] = {}
         self._lock = threading.Lock()
 
     def load(self) -> None:
@@ -59,7 +58,7 @@ class JsonConfigAdapter(ConfigurationStore):
                 encoding="utf-8",
             )
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: ConfigValue = None) -> ConfigValue:
         with self._lock:
             parts = key.split(".")
             current = self._data
@@ -70,7 +69,7 @@ class JsonConfigAdapter(ConfigurationStore):
                     return default
             return current
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: ConfigValue) -> None:
         with self._lock:
             parts = key.split(".")
             current = self._data
@@ -80,6 +79,6 @@ class JsonConfigAdapter(ConfigurationStore):
                 current = current[part]
             current[parts[-1]] = value
 
-    def get_all(self) -> dict:
+    def get_all(self) -> dict[str, object]:
         with self._lock:
             return copy.deepcopy(self._data)

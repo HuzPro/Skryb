@@ -10,11 +10,11 @@ from voicetotext.recording.recorder import AudioRecorder
 
 class SoundDeviceAdapter(AudioRecorder):
 
-    def __init__(self, sample_rate: int = 16000):
+    def __init__(self, sample_rate: int = 16000) -> None:
         self._sample_rate = sample_rate
-        self._stream = None
+        self._stream: sd.InputStream | None = None
         self._chunks: list[np.ndarray] = []
-        self._is_recording = False
+        self._is_recording: bool = False
         self._lock = threading.Lock()
 
     def start_recording(self) -> None:
@@ -59,5 +59,11 @@ class SoundDeviceAdapter(AudioRecorder):
                 self._is_recording = False
                 self._chunks = []
 
-    def _audio_callback(self, indata, frames, time_info, status):
+    def _audio_callback(
+        self,
+        indata: np.ndarray,
+        frames: int,
+        time_info: object,
+        status: sd.CallbackFlags,
+    ) -> None:
         self._chunks.append(indata.copy())
