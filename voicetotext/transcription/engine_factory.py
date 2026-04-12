@@ -63,10 +63,6 @@ def create_model_manager(
     )
 
 
-# ------------------------------------------------------------------
-# Internal helpers
-# ------------------------------------------------------------------
-
 def _resolve_device(configured_device: str) -> str:
     if configured_device != "auto":
         return configured_device

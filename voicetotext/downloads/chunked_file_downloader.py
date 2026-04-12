@@ -1,6 +1,6 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable, Iterable
 from typing import Protocol
@@ -39,6 +39,21 @@ class HttpClient(Protocol):
     def head(self, url: str) -> HeadResult: ...
     def stream_range(self, url: str, start: int, end: int) -> Iterable[bytes]: ...
     def get_full(self, url: str) -> bytes: ...
+
+
+@dataclass
+class _SharedDownloadState:
+    """Thread-safe mutable container for sidecar progress across chunk workers."""
+
+    sidecar: Sidecar
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def update_chunk(self, index: int, bytes_done: int, meta_path: Path) -> None:
+        with self.lock:
+            self.sidecar = self.sidecar.with_chunk_progress(
+                index=index, bytes_done=bytes_done
+            )
+            self.sidecar.save(meta_path)
 
 
 class ChunkedFileDownloader:
@@ -174,50 +189,18 @@ class ChunkedFileDownloader:
         pause_event: threading.Event,
     ) -> Sidecar:
         self._ensure_part_file_sized(part_path=part_path, size=sidecar.content_length)
-
-        state_lock = threading.Lock()
-        current_sidecar = sidecar
-
-        def run_chunk(chunk: ChunkState) -> None:
-            if chunk.is_complete:
-                return
-            if cancel_event.is_set() or pause_event.is_set():
-                return
-
-            fetched_start = chunk.start + chunk.bytes_done
-            fetched_end = chunk.end
-            stream = self._http.stream_range(plan.url, fetched_start, fetched_end)
-
-            cursor = fetched_start
-            bytes_in_chunk = chunk.bytes_done
-            try:
-                with open(part_path, "r+b") as fd:
-                    for piece in stream:
-                        if not piece:
-                            continue
-                        if cancel_event.is_set():
-                            return
-                        fd.seek(cursor)
-                        fd.write(piece)
-                        cursor += len(piece)
-                        bytes_in_chunk += len(piece)
-                        nonlocal current_sidecar
-                        with state_lock:
-                            current_sidecar = current_sidecar.with_chunk_progress(
-                                index=chunk.index, bytes_done=bytes_in_chunk
-                            )
-                            current_sidecar.save(meta_path)
-                        on_progress(len(piece))
-                        if pause_event.is_set():
-                            return
-            finally:
-                close = getattr(stream, "close", None)
-                if callable(close):
-                    close()
+        shared = _SharedDownloadState(sidecar=sidecar)
 
         workers = min(len(sidecar.chunks), self._n_chunks)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(run_chunk, chunk) for chunk in sidecar.chunks]
+            futures = [
+                pool.submit(
+                    self._download_one_chunk,
+                    chunk, plan, part_path, meta_path,
+                    shared, on_progress, cancel_event, pause_event,
+                )
+                for chunk in sidecar.chunks
+            ]
             wait(futures, return_when=FIRST_EXCEPTION)
 
         for future in futures:
@@ -231,7 +214,46 @@ class ChunkedFileDownloader:
         if cancel_event.is_set():
             raise FileDownloadError("Cancelled")
 
-        return current_sidecar
+        return shared.sidecar
+
+    def _download_one_chunk(
+        self,
+        chunk: ChunkState,
+        plan: FileDownloadPlan,
+        part_path: Path,
+        meta_path: Path,
+        shared: _SharedDownloadState,
+        on_progress: Callable[[int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
+        if chunk.is_complete or cancel_event.is_set() or pause_event.is_set():
+            return
+
+        stream = self._http.stream_range(
+            plan.url, chunk.start + chunk.bytes_done, chunk.end
+        )
+        cursor = chunk.start + chunk.bytes_done
+        bytes_in_chunk = chunk.bytes_done
+        try:
+            with open(part_path, "r+b") as fd:
+                for piece in stream:
+                    if not piece:
+                        continue
+                    if cancel_event.is_set():
+                        return
+                    fd.seek(cursor)
+                    fd.write(piece)
+                    cursor += len(piece)
+                    bytes_in_chunk += len(piece)
+                    shared.update_chunk(chunk.index, bytes_in_chunk, meta_path)
+                    on_progress(len(piece))
+                    if pause_event.is_set():
+                        return
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
 
     @staticmethod
     def _ensure_part_file_sized(part_path: Path, size: int) -> None:

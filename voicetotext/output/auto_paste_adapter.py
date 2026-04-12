@@ -8,13 +8,14 @@ from voicetotext.output.handler import TextOutputHandler
 
 
 _logger = logging.getLogger(__name__)
+_CLIPBOARD_SETTLE_DELAY_SECONDS = 0.1
 
 
 class AutoPasteAdapter(TextOutputHandler):
 
     def output(self, text: str) -> None:
         pyperclip.copy(text)
-        time.sleep(0.1)
+        time.sleep(_CLIPBOARD_SETTLE_DELAY_SECONDS)
         try:
             pyautogui.hotkey("ctrl", "v")
         except Exception as e:

@@ -1,7 +1,8 @@
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 from voicetotext.downloads.chunked_file_downloader import FileDownloadPlan
 from voicetotext.downloads.hf_repo_resolver import ResolvedFile

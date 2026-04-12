@@ -14,7 +14,7 @@ class ToggleStrategy(HotkeyStrategy):
         self._is_active: bool = False
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
-        self._combo_fired: bool = False
+        self._combo_already_triggered: bool = False
 
     def set_callbacks(
         self,
@@ -29,8 +29,8 @@ class ToggleStrategy(HotkeyStrategy):
         if key not in self._target_keys:
             return
         self._pressed_keys.add(key)
-        if self._pressed_keys >= self._target_keys and not self._combo_fired:
-            self._combo_fired = True
+        if self._pressed_keys >= self._target_keys and not self._combo_already_triggered:
+            self._combo_already_triggered = True
             if self._is_active:
                 self._is_active = False
                 if self._on_deactivate:
@@ -44,4 +44,4 @@ class ToggleStrategy(HotkeyStrategy):
         key = canonicalize_key(key)
         self._pressed_keys.discard(key)
         if not self._pressed_keys >= self._target_keys:
-            self._combo_fired = False
+            self._combo_already_triggered = False

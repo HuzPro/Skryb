@@ -1,19 +1,19 @@
 from pynput.keyboard import Key, KeyCode
 
-_CHAR_TO_WIN_VK = {chr(i + ord("a")): 0x41 + i for i in range(26)}
+_CHAR_TO_VIRTUAL_KEY_CODE = {chr(i + ord("a")): 0x41 + i for i in range(26)}
 
 
 def canonicalize_key(key: Key | KeyCode) -> Key | KeyCode:
     if isinstance(key, KeyCode):
-        vk = key.vk
-        if vk is None and key.char is not None:
-            vk = _CHAR_TO_WIN_VK.get(key.char.lower())
-            if vk is None:
+        virtual_key = key.vk
+        if virtual_key is None and key.char is not None:
+            virtual_key = _CHAR_TO_VIRTUAL_KEY_CODE.get(key.char.lower())
+            if virtual_key is None:
                 code = ord(key.char)
                 if 1 <= code <= 26:
-                    vk = 0x41 + code - 1
-        if vk is not None:
-            return KeyCode.from_vk(vk)
+                    virtual_key = 0x41 + code - 1
+        if virtual_key is not None:
+            return KeyCode.from_vk(virtual_key)
     return key
 
 
@@ -51,7 +51,7 @@ def parse_hotkey_combo(combo_string: str) -> set[Key | KeyCode]:
         if part in _MODIFIER_MAP:
             keys.add(_MODIFIER_MAP[part])
         elif len(part) == 1:
-            keys.add(KeyCode.from_vk(_CHAR_TO_WIN_VK[part]))
+            keys.add(KeyCode.from_vk(_CHAR_TO_VIRTUAL_KEY_CODE[part]))
         else:
             raise ValueError(f"Unknown key: {part}")
     return keys

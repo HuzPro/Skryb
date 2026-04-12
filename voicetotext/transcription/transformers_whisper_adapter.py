@@ -11,6 +11,11 @@ from voicetotext.transcription.result import TranscriptionResult
 
 _logger = logging.getLogger(__name__)
 
+_TEMPERATURE_FALLBACK_SCHEDULE = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+_COMPRESSION_RATIO_THRESHOLD = 1.35
+_LOGPROB_THRESHOLD = -1.0
+_NO_SPEECH_THRESHOLD = 0.6
+
 
 class _WhisperModel(Protocol):
     dtype: object
@@ -81,31 +86,38 @@ class TransformersWhisperAdapter(TranscriptionEngine):
             vram_snapshot(),
         )
 
-        if self._device != "cpu":
-            import torch
-
-            t2 = time.monotonic()
-            self._model = self._model.to(self._device)
-            _logger.info(
-                "[load_model %s] model.to(%s) in %.2fs | %s",
-                self._model_size,
-                self._device,
-                time.monotonic() - t2,
-                vram_snapshot(),
-            )
-
-            if torch.cuda.is_available():
-                t3 = time.monotonic()
-                self._model = self._model.half()
-                _logger.info(
-                    "[load_model %s] model.half() in %.2fs | %s",
-                    self._model_size,
-                    time.monotonic() - t3,
-                    vram_snapshot(),
-                )
+        self._optimize_for_device()
 
         _logger.info(
             "[load_model %s] complete | %s", self._model_size, vram_snapshot()
+        )
+
+    def _optimize_for_device(self) -> None:
+        if self._device == "cpu":
+            return
+
+        import torch
+
+        t0 = time.monotonic()
+        self._model = self._model.to(self._device)
+        _logger.info(
+            "[load_model %s] model.to(%s) in %.2fs | %s",
+            self._model_size,
+            self._device,
+            time.monotonic() - t0,
+            vram_snapshot(),
+        )
+
+        if not torch.cuda.is_available():
+            return
+
+        t1 = time.monotonic()
+        self._model = self._model.half()
+        _logger.info(
+            "[load_model %s] model.half() in %.2fs | %s",
+            self._model_size,
+            time.monotonic() - t1,
+            vram_snapshot(),
         )
 
     def is_model_loaded(self) -> bool:
@@ -118,7 +130,27 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         import torch
 
         start = time.monotonic()
+        input_features, attention_mask = self._preprocess_audio(audio)
+        generate_kwargs = self._build_generate_kwargs(attention_mask)
 
+        with torch.no_grad():
+            predicted_ids = self._model.generate(
+                input_features, **generate_kwargs
+            )
+
+        text = self._processor.batch_decode(
+            predicted_ids, skip_special_tokens=True
+        )[0].strip()
+
+        language = self._language or "en"
+        return TranscriptionResult(
+            text=text,
+            language=language,
+            language_probability=0.0,
+            duration_seconds=time.monotonic() - start,
+        )
+
+    def _preprocess_audio(self, audio: AudioSegment) -> tuple[object, object]:
         processed = self._processor(
             audio.data,
             sampling_rate=audio.sample_rate,
@@ -133,38 +165,23 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         if self._device != "cpu" and self._model.dtype != input_features.dtype:
             input_features = input_features.half()
 
-        generate_kwargs: dict[str, object] = {
+        return input_features, attention_mask
+
+    def _build_generate_kwargs(self, attention_mask: object) -> dict[str, object]:
+        kwargs: dict[str, object] = {
             "num_beams": self._beam_size,
             "return_timestamps": True,
             "attention_mask": attention_mask,
-            "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-            "compression_ratio_threshold": 1.35,
-            "logprob_threshold": -1.0,
-            "no_speech_threshold": 0.6,
+            "temperature": _TEMPERATURE_FALLBACK_SCHEDULE,
+            "compression_ratio_threshold": _COMPRESSION_RATIO_THRESHOLD,
+            "logprob_threshold": _LOGPROB_THRESHOLD,
+            "no_speech_threshold": _NO_SPEECH_THRESHOLD,
             "condition_on_prev_tokens": True,
         }
         if self._language:
-            generate_kwargs["language"] = self._language
-            generate_kwargs["task"] = "transcribe"
-
-        with torch.no_grad():
-            predicted_ids = self._model.generate(
-                input_features, **generate_kwargs
-            )
-
-        text = self._processor.batch_decode(
-            predicted_ids, skip_special_tokens=True
-        )[0].strip()
-
-        duration = time.monotonic() - start
-
-        language = self._language or "en"
-        return TranscriptionResult(
-            text=text,
-            language=language,
-            language_probability=0.0,
-            duration_seconds=duration,
-        )
+            kwargs["language"] = self._language
+            kwargs["task"] = "transcribe"
+        return kwargs
 
     def dispose(self) -> None:
         # Early-return on un-loaded adapters so tests that construct

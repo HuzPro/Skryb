@@ -17,6 +17,11 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_tab import TranscriptionTab
 
 
+_DEFAULT_WINDOW_SIZE = "580x720"
+_MIN_WINDOW_SIZE = (540, 520)
+_MAX_WINDOW_SIZE = (900, 1100)
+
+
 class SettingsWindow(EngineEventListener):
     """Top-level settings window. Composes the three tabs and the save flow.
 
@@ -59,9 +64,9 @@ class SettingsWindow(EngineEventListener):
         self._window = ctk.CTk()
         title = "VoiceToText Setup" if self._first_run else "VoiceToText Settings"
         self._window.title(title)
-        self._window.geometry("580x720")
-        self._window.minsize(540, 520)
-        self._window.maxsize(900, 1100)
+        self._window.geometry(_DEFAULT_WINDOW_SIZE)
+        self._window.minsize(*_MIN_WINDOW_SIZE)
+        self._window.maxsize(*_MAX_WINDOW_SIZE)
         self._window.resizable(True, True)
 
         if self._first_run:

@@ -1,5 +1,5 @@
 from tkinter import Event
-from typing import Callable
+from collections.abc import Callable
 
 import customtkinter as ctk
 

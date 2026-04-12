@@ -58,6 +58,7 @@ class RecordAndTranscribeUseCase:
                     self._start_recording()
                 elif state == AppState.RECORDING:
                     self._stop_and_transcribe()
+                # TRANSCRIBING: intentionally ignored — no action while engine is busy
         finally:
             self._action_complete.set()
 
