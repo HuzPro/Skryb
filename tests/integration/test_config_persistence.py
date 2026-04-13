@@ -1,5 +1,6 @@
 import json
 
+from voicetotext.bootstrap import migrate_output_mode
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 
 
@@ -42,4 +43,25 @@ class TestConfigRoundTrip:
         assert config.get("hotkey.mode") == "toggle"
         # New defaults filled in
         assert config.get("transcription.model_size") == "base"
-        assert config.get("output.mode") == "auto_paste"
+        assert config.get("output.mode") == "direct_paste"
+
+
+class TestOutputModeMigration:
+    def test_should_migrate_auto_paste_to_paste_and_clipboard(self, tmp_path):
+        path = tmp_path / "config.json"
+        old_config = {"output": {"mode": "auto_paste"}}
+        path.write_text(json.dumps(old_config))
+
+        config = JsonConfigAdapter(path)
+        config.load()
+        migrate_output_mode(config)
+
+        assert config.get("output.mode") == "paste_and_clipboard"
+
+    def test_should_preserve_direct_paste_through_migration(self, tmp_path):
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+        migrate_output_mode(config)
+
+        assert config.get("output.mode") == "direct_paste"

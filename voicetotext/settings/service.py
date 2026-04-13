@@ -145,7 +145,7 @@ class SettingsService:
             device=self._config.get("transcription.device", "auto"),
             hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
             hotkey_mode=self._config.get("hotkey.mode", "toggle"),
-            output_mode=self._config.get("output.mode", "auto_paste"),
+            output_mode=self._config.get("output.mode", "direct_paste"),
         )
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:

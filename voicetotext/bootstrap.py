@@ -13,9 +13,11 @@ from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.pynput_adapter import PynputAdapter
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
-from voicetotext.output.auto_paste_adapter import AutoPasteAdapter
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
+from voicetotext.output.direct_paste_adapter import DirectPasteAdapter
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import (
@@ -38,12 +40,26 @@ from voicetotext.tray.app import SystemTrayApp
 
 _logger = logging.getLogger(__name__)
 
+_OUTPUT_MODE_RENAMES = {"auto_paste": "paste_and_clipboard"}
+
+
+def migrate_output_mode(config: JsonConfigAdapter) -> None:
+    current = config.get("output.mode")
+    replacement = _OUTPUT_MODE_RENAMES.get(current)
+    if replacement is None:
+        return
+    _logger.info("Migrating output mode '%s' -> '%s'.", current, replacement)
+    config.set("output.mode", replacement)
+    config.save()
 
 
 def _build_output(config: JsonConfigAdapter) -> TextOutputHandler:
-    if config.get("output.mode") == "clipboard_only":
+    mode = config.get("output.mode")
+    if mode == "clipboard_only":
         return ClipboardAdapter()
-    return AutoPasteAdapter()
+    if mode == "paste_and_clipboard":
+        return PasteAndClipboardAdapter()
+    return DirectPasteAdapter(Win32ClipboardPreserver())
 
 
 def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscribeUseCase) -> HotkeyListener:
@@ -145,6 +161,7 @@ def build_app(
 
     from voicetotext.transcription.model_info import migrate_removed_models
     migrate_removed_models(config)
+    migrate_output_mode(config)
 
     if event_bus is None:
         event_bus = SimpleEventBus()

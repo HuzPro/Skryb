@@ -36,7 +36,7 @@ def _build_service(
         "transcription.device": "auto",
         "hotkey.combination": "ctrl+alt+m",
         "hotkey.mode": "toggle",
-        "output.mode": "auto_paste",
+        "output.mode": "direct_paste",
     }
     config_data.update(config_overrides or {})
 
@@ -228,7 +228,7 @@ class TestApplyDraft:
             device="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
-            output_mode="auto_paste",
+            output_mode="direct_paste",
         )
 
         service.apply_draft(draft)
@@ -244,7 +244,7 @@ class TestApplyDraft:
             device="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
-            output_mode="auto_paste",
+            output_mode="direct_paste",
         )
 
         changes = service.apply_draft(draft)
@@ -375,7 +375,7 @@ class TestIsEngineSwapping:
             "transcription.device": "auto",
             "hotkey.combination": "ctrl+alt+m",
             "hotkey.mode": "toggle",
-            "output.mode": "auto_paste",
+            "output.mode": "direct_paste",
         })
         manager = FakeModelManager(installed={"base": True})
         bus = SimpleEventBus()

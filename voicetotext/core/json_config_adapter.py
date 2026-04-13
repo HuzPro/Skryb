@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
         "combination": "ctrl+alt+m",
     },
     "output": {
-        "mode": "auto_paste",
+        "mode": "direct_paste",
     },
     "transcription": {
         "model_size": "base",

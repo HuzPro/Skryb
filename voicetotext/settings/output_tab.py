@@ -22,17 +22,25 @@ class OutputTab:
 
         self._mode_var = ctk.StringVar(value=draft.output_mode)
 
-        paste_radio = ctk.CTkRadioButton(
+        direct_paste_radio = ctk.CTkRadioButton(
             parent,
-            text="Auto-paste (copy to clipboard and simulate Ctrl+V)",
+            text="Paste only (does not modify your clipboard)",
             variable=self._mode_var,
-            value="auto_paste",
+            value="direct_paste",
         )
-        paste_radio.pack(anchor="w", padx=24, pady=4)
+        direct_paste_radio.pack(anchor="w", padx=24, pady=4)
+
+        paste_and_clipboard_radio = ctk.CTkRadioButton(
+            parent,
+            text="Paste and copy to clipboard",
+            variable=self._mode_var,
+            value="paste_and_clipboard",
+        )
+        paste_and_clipboard_radio.pack(anchor="w", padx=24, pady=4)
 
         clipboard_radio = ctk.CTkRadioButton(
             parent,
-            text="Clipboard only (copy to clipboard, no paste)",
+            text="Clipboard only (no paste)",
             variable=self._mode_var,
             value="clipboard_only",
         )

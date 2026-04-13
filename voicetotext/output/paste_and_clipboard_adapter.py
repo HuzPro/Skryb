@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 _CLIPBOARD_SETTLE_DELAY_SECONDS = 0.1
 
 
-class AutoPasteAdapter(TextOutputHandler):
+class PasteAndClipboardAdapter(TextOutputHandler):
 
     def output(self, text: str) -> None:
         pyperclip.copy(text)

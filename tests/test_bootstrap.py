@@ -2,7 +2,14 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from voicetotext.bootstrap import _load_engine_with_fallback
+from voicetotext.bootstrap import (
+    _build_output,
+    _load_engine_with_fallback,
+    migrate_output_mode,
+)
+from voicetotext.output.clipboard_adapter import ClipboardAdapter
+from voicetotext.output.direct_paste_adapter import DirectPasteAdapter
+from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.transcription.model_info import migrate_removed_models
 
 
@@ -99,3 +106,85 @@ class TestMigrateRemovedModels:
         migrate_removed_models(config)
 
         config.set.assert_not_called()
+
+
+class TestMigrateOutputMode:
+    def test_should_rewrite_auto_paste_to_paste_and_clipboard(self):
+        config = MagicMock()
+        config.get.return_value = "auto_paste"
+
+        migrate_output_mode(config)
+
+        config.set.assert_called_once_with("output.mode", "paste_and_clipboard")
+        config.save.assert_called_once()
+
+    def test_should_leave_direct_paste_unchanged(self):
+        config = MagicMock()
+        config.get.return_value = "direct_paste"
+
+        migrate_output_mode(config)
+
+        config.set.assert_not_called()
+        config.save.assert_not_called()
+
+    def test_should_leave_clipboard_only_unchanged(self):
+        config = MagicMock()
+        config.get.return_value = "clipboard_only"
+
+        migrate_output_mode(config)
+
+        config.set.assert_not_called()
+        config.save.assert_not_called()
+
+    def test_should_leave_paste_and_clipboard_unchanged(self):
+        config = MagicMock()
+        config.get.return_value = "paste_and_clipboard"
+
+        migrate_output_mode(config)
+
+        config.set.assert_not_called()
+        config.save.assert_not_called()
+
+
+class TestBuildOutput:
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    def test_should_return_direct_paste_adapter_with_preserver_injected(
+        self, mock_preserver_cls
+    ):
+        config = MagicMock()
+        config.get.return_value = "direct_paste"
+
+        result = _build_output(config)
+
+        assert isinstance(result, DirectPasteAdapter)
+        mock_preserver_cls.assert_called_once()
+        assert result._preserver is mock_preserver_cls.return_value
+
+    def test_should_return_paste_and_clipboard_adapter_for_paste_and_clipboard_mode(
+        self,
+    ):
+        config = MagicMock()
+        config.get.return_value = "paste_and_clipboard"
+
+        result = _build_output(config)
+
+        assert isinstance(result, PasteAndClipboardAdapter)
+
+    def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
+        config = MagicMock()
+        config.get.return_value = "clipboard_only"
+
+        result = _build_output(config)
+
+        assert isinstance(result, ClipboardAdapter)
+
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    def test_should_default_to_direct_paste_for_unknown_mode(
+        self, mock_preserver_cls
+    ):
+        config = MagicMock()
+        config.get.return_value = "something_unexpected"
+
+        result = _build_output(config)
+
+        assert isinstance(result, DirectPasteAdapter)
