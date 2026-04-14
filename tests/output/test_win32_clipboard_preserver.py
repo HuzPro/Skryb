@@ -46,6 +46,7 @@ class _FakeWin32Clipboard:
     ) -> None:
         self.contents: dict[int, bytes] = dict(initial or {})
         self.open_clipboard_should_succeed: bool = True
+        self.fail_global_lock_calls: int = 0
         self._handles: dict[int, bytes] = {}
         self._next_handle: int = 1
 
@@ -89,6 +90,9 @@ class _FakeWin32Clipboard:
         return len(self._handles[handle])
 
     def GlobalLock(self, handle):  # noqa: N802
+        if self.fail_global_lock_calls > 0:
+            self.fail_global_lock_calls -= 1
+            return 0
         return handle
 
     def GlobalUnlock(self, handle) -> int:  # noqa: N802
@@ -255,6 +259,20 @@ class TestRestoreEdgeCases:
         preserver.restore()
 
         assert "Could not open clipboard" in log_capture.text
+
+    def test_should_skip_format_when_global_lock_fails_during_allocation(
+        self, fake_clipboard: _FakeWin32Clipboard, log_capture
+    ):
+        fake_clipboard.contents = {1: b"saved data"}
+        preserver = Win32ClipboardPreserver()
+        preserver.save()
+
+        fake_clipboard.contents = {}
+        fake_clipboard.fail_global_lock_calls = 1
+        preserver.restore()
+
+        assert fake_clipboard.contents == {}
+        assert "GlobalLock" in log_capture.text
 
 
 class TestInterfaceConformance:

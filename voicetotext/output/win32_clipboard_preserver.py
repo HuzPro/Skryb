@@ -86,9 +86,12 @@ def _read_format_bytes(fmt: int) -> bytes | None:
         _kernel32.GlobalUnlock(handle)
 
 
-def _allocate_and_copy(data: bytes) -> int:
+def _allocate_and_copy(data: bytes) -> int | None:
     alloc = _kernel32.GlobalAlloc(_GMEM_MOVEABLE, len(data))
     ptr = _kernel32.GlobalLock(alloc)
+    if not ptr:
+        _logger.warning("GlobalLock returned NULL during allocation, skipping.")
+        return None
     try:
         _memmove(ptr, data, len(data))
     finally:
@@ -121,7 +124,10 @@ class Win32ClipboardPreserver(ClipboardPreserver):
         try:
             _user32.EmptyClipboard()
             for fmt, data in self._snapshot:
-                _user32.SetClipboardData(fmt, _allocate_and_copy(data))
+                handle = _allocate_and_copy(data)
+                if handle is None:
+                    continue
+                _user32.SetClipboardData(fmt, handle)
         finally:
             _user32.CloseClipboard()
         self._snapshot.clear()
