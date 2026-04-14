@@ -12,6 +12,7 @@ from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
+from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.model_info import migrate_removed_models
@@ -155,10 +156,7 @@ class TestBuildOutput:
     def test_should_return_decorator_wrapping_paste_and_clipboard_with_preserver(
         self, mock_preserver_cls
     ):
-        config = MagicMock()
-        config.get.return_value = "direct_paste"
-
-        result = _build_output(config)
+        result = _build_output(OutputMode.DIRECT_PASTE)
 
         assert isinstance(result, ClipboardPreservingDecorator)
         assert isinstance(result._inner, PasteAndClipboardAdapter)
@@ -168,32 +166,14 @@ class TestBuildOutput:
     def test_should_return_paste_and_clipboard_adapter_for_paste_and_clipboard_mode(
         self,
     ):
-        config = MagicMock()
-        config.get.return_value = "paste_and_clipboard"
-
-        result = _build_output(config)
+        result = _build_output(OutputMode.PASTE_AND_CLIPBOARD)
 
         assert isinstance(result, PasteAndClipboardAdapter)
 
     def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
-        config = MagicMock()
-        config.get.return_value = "clipboard_only"
-
-        result = _build_output(config)
+        result = _build_output(OutputMode.CLIPBOARD_ONLY)
 
         assert isinstance(result, ClipboardAdapter)
-
-    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
-    def test_should_default_to_clipboard_preserving_decorator_for_unknown_mode(
-        self, mock_preserver_cls
-    ):
-        config = MagicMock()
-        config.get.return_value = "something_unexpected"
-
-        result = _build_output(config)
-
-        assert isinstance(result, ClipboardPreservingDecorator)
-        assert isinstance(result._inner, PasteAndClipboardAdapter)
 
 
 class TestApplySettings:
@@ -218,13 +198,14 @@ class TestApplySettings:
     @patch("voicetotext.bootstrap._build_output")
     def test_should_rebuild_output_when_output_changed(self, mock_build_output):
         config = MagicMock()
+        config.get.return_value = "clipboard_only"
         use_case = MagicMock()
         app = MagicMock()
         changes = self._make_changes(output_changed=True)
 
         apply_settings(changes, config, use_case, app)
 
-        mock_build_output.assert_called_once_with(config)
+        mock_build_output.assert_called_once_with(OutputMode.CLIPBOARD_ONLY)
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
     @patch("voicetotext.bootstrap._build_output")

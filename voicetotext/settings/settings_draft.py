@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from voicetotext.output.output_mode import OutputMode
+
 
 @dataclass(frozen=True)
 class SettingsDraft:
@@ -16,7 +18,7 @@ class SettingsDraft:
     device: str
     hotkey_combination: str
     hotkey_mode: str
-    output_mode: str
+    output_mode: OutputMode
 
 
 @dataclass(frozen=True)

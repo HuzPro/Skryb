@@ -13,6 +13,7 @@ from voicetotext.core.events import (
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
 )
+from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
@@ -186,7 +187,7 @@ class TestCurrentDraft:
         assert draft.device == "cuda"
         assert draft.hotkey_combination == "f12"
         assert draft.hotkey_mode == "push_to_talk"
-        assert draft.output_mode == "clipboard_only"
+        assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
 
     def test_should_surface_auto_language_when_config_is_none(self):
         service, *_ = _build_service(
@@ -207,7 +208,7 @@ class TestApplyDraft:
             device="cuda",
             hotkey_combination="f12",
             hotkey_mode="push_to_talk",
-            output_mode="clipboard_only",
+            output_mode=OutputMode.CLIPBOARD_ONLY,
         )
 
         service.apply_draft(draft)
@@ -228,7 +229,7 @@ class TestApplyDraft:
             device="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
-            output_mode="direct_paste",
+            output_mode=OutputMode.DIRECT_PASTE,
         )
 
         service.apply_draft(draft)
@@ -244,7 +245,7 @@ class TestApplyDraft:
             device="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
-            output_mode="direct_paste",
+            output_mode=OutputMode.DIRECT_PASTE,
         )
 
         changes = service.apply_draft(draft)

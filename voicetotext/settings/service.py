@@ -11,6 +11,7 @@ from voicetotext.core.events import (
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
 )
+from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwap
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
@@ -145,7 +146,7 @@ class SettingsService:
             device=self._config.get("transcription.device", "auto"),
             hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
             hotkey_mode=self._config.get("hotkey.mode", "toggle"),
-            output_mode=self._config.get("output.mode", "direct_paste"),
+            output_mode=OutputMode.migrate(self._config.get("output.mode")),
         )
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
@@ -158,7 +159,7 @@ class SettingsService:
         self._config.set("transcription.device", draft.device)
         self._config.set("hotkey.combination", draft.hotkey_combination)
         self._config.set("hotkey.mode", draft.hotkey_mode)
-        self._config.set("output.mode", draft.output_mode)
+        self._config.set("output.mode", draft.output_mode.value)
         self._config.save()
         return ChangeSet.between(original, draft)
 

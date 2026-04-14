@@ -1,5 +1,6 @@
 import pytest
 
+from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 
 
@@ -10,7 +11,7 @@ def _make_draft(**overrides) -> SettingsDraft:
         device="auto",
         hotkey_combination="ctrl+alt+m",
         hotkey_mode="toggle",
-        output_mode="direct_paste",
+        output_mode=OutputMode.DIRECT_PASTE,
     )
     base.update(overrides)
     return SettingsDraft(**base)
@@ -25,7 +26,7 @@ class TestSettingsDraftConstruction:
         assert draft.device == "auto"
         assert draft.hotkey_combination == "ctrl+alt+m"
         assert draft.hotkey_mode == "toggle"
-        assert draft.output_mode == "direct_paste"
+        assert draft.output_mode is OutputMode.DIRECT_PASTE
 
     def test_should_be_immutable(self):
         draft = _make_draft()
@@ -81,8 +82,8 @@ class TestChangeSetFromDrafts:
         assert changes.hotkey_changed is True
 
     def test_should_flag_output_change_when_mode_differs(self):
-        original = _make_draft(output_mode="direct_paste")
-        updated = _make_draft(output_mode="clipboard_only")
+        original = _make_draft(output_mode=OutputMode.DIRECT_PASTE)
+        updated = _make_draft(output_mode=OutputMode.CLIPBOARD_ONLY)
 
         changes = ChangeSet.between(original, updated)
 

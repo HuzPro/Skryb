@@ -1,6 +1,7 @@
 import logging
 import sys
 import threading
+from collections.abc import Callable
 
 from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
 from voicetotext.core.debug_logger import setup_debug_logger
@@ -19,6 +20,7 @@ from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
@@ -44,31 +46,39 @@ from voicetotext.tray.app import SystemTrayApp
 
 _logger = logging.getLogger(__name__)
 
-_OUTPUT_MODE_RENAMES = {"auto_paste": "paste_and_clipboard"}
-
 
 def migrate_output_mode(config: JsonConfigAdapter) -> None:
+    """Rewrite a legacy or unknown ``output.mode`` config value in place.
+
+    Delegates to :meth:`OutputMode.migrate` for the string-to-enum
+    mapping and only touches the config when the canonical form
+    differs from what was stored.
+    """
     current = config.get("output.mode")
-    replacement = _OUTPUT_MODE_RENAMES.get(current)
-    if replacement is None:
+    canonical = OutputMode.migrate(current).value
+    if canonical == current:
         return
-    _logger.info("Migrating output mode '%s' -> '%s'.", current, replacement)
-    config.set("output.mode", replacement)
+    _logger.info("Migrating output mode '%s' -> '%s'.", current, canonical)
+    config.set("output.mode", canonical)
     config.save()
 
 
-def _build_output(config: JsonConfigAdapter) -> TextOutputHandler:
-    mode = config.get("output.mode")
-    if mode == "clipboard_only":
-        return ClipboardAdapter()
+def _build_output(mode: OutputMode) -> TextOutputHandler:
     sleeper = TimeSleeper()
-    if mode == "paste_and_clipboard":
-        return PasteAndClipboardAdapter(sleeper=sleeper)
-    return ClipboardPreservingDecorator(
-        inner=PasteAndClipboardAdapter(sleeper=sleeper),
-        preserver=Win32ClipboardPreserver(),
-        sleeper=sleeper,
-    )
+    builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
+        OutputMode.CLIPBOARD_ONLY: ClipboardAdapter,
+        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(sleeper=sleeper),
+        OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
+            inner=PasteAndClipboardAdapter(sleeper=sleeper),
+            preserver=Win32ClipboardPreserver(),
+            sleeper=sleeper,
+        ),
+    }
+    return builders[mode]()
+
+
+def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
+    return OutputMode.migrate(config.get("output.mode"))
 
 
 def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscribeUseCase) -> HotkeyListener:
@@ -190,7 +200,7 @@ def build_app(
         sample_rate=config.get("audio.sample_rate", 16000),
     )
 
-    output = _build_output(config)
+    output = _build_output(_resolve_output_mode(config))
 
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -253,7 +263,7 @@ def apply_settings(
     UI; this callback only handles the lightweight dispatches.
     """
     if changes.output_changed:
-        use_case.set_output(_build_output(config))
+        use_case.set_output(_build_output(_resolve_output_mode(config)))
 
     if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(config, use_case)
