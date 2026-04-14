@@ -14,7 +14,9 @@ from voicetotext.hotkeys.pynput_adapter import PynputAdapter
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
-from voicetotext.output.direct_paste_adapter import DirectPasteAdapter
+from voicetotext.output.clipboard_preserving_decorator import (
+    ClipboardPreservingDecorator,
+)
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
@@ -59,7 +61,10 @@ def _build_output(config: JsonConfigAdapter) -> TextOutputHandler:
         return ClipboardAdapter()
     if mode == "paste_and_clipboard":
         return PasteAndClipboardAdapter()
-    return DirectPasteAdapter(Win32ClipboardPreserver())
+    return ClipboardPreservingDecorator(
+        inner=PasteAndClipboardAdapter(),
+        preserver=Win32ClipboardPreserver(),
+    )
 
 
 def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscribeUseCase) -> HotkeyListener:

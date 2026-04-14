@@ -5,11 +5,15 @@ import pytest
 from voicetotext.bootstrap import (
     _build_output,
     _load_engine_with_fallback,
+    apply_settings,
     migrate_output_mode,
 )
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
-from voicetotext.output.direct_paste_adapter import DirectPasteAdapter
+from voicetotext.output.clipboard_preserving_decorator import (
+    ClipboardPreservingDecorator,
+)
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.model_info import migrate_removed_models
 
 
@@ -148,7 +152,7 @@ class TestMigrateOutputMode:
 
 class TestBuildOutput:
     @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
-    def test_should_return_direct_paste_adapter_with_preserver_injected(
+    def test_should_return_decorator_wrapping_paste_and_clipboard_with_preserver(
         self, mock_preserver_cls
     ):
         config = MagicMock()
@@ -156,7 +160,8 @@ class TestBuildOutput:
 
         result = _build_output(config)
 
-        assert isinstance(result, DirectPasteAdapter)
+        assert isinstance(result, ClipboardPreservingDecorator)
+        assert isinstance(result._inner, PasteAndClipboardAdapter)
         mock_preserver_cls.assert_called_once()
         assert result._preserver is mock_preserver_cls.return_value
 
@@ -179,7 +184,7 @@ class TestBuildOutput:
         assert isinstance(result, ClipboardAdapter)
 
     @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
-    def test_should_default_to_direct_paste_for_unknown_mode(
+    def test_should_default_to_clipboard_preserving_decorator_for_unknown_mode(
         self, mock_preserver_cls
     ):
         config = MagicMock()
@@ -187,4 +192,96 @@ class TestBuildOutput:
 
         result = _build_output(config)
 
-        assert isinstance(result, DirectPasteAdapter)
+        assert isinstance(result, ClipboardPreservingDecorator)
+        assert isinstance(result._inner, PasteAndClipboardAdapter)
+
+
+class TestApplySettings:
+    """Characterize the hot-reload dispatch: apply_settings routes each
+    ChangeSet flag to the correct adapter swap so runtime changes take
+    effect without an app restart.
+    """
+
+    def _make_changes(
+        self,
+        *,
+        engine_reload_required: bool = False,
+        hotkey_changed: bool = False,
+        output_changed: bool = False,
+    ) -> ChangeSet:
+        return ChangeSet(
+            engine_reload_required=engine_reload_required,
+            hotkey_changed=hotkey_changed,
+            output_changed=output_changed,
+        )
+
+    @patch("voicetotext.bootstrap._build_output")
+    def test_should_rebuild_output_when_output_changed(self, mock_build_output):
+        config = MagicMock()
+        use_case = MagicMock()
+        app = MagicMock()
+        changes = self._make_changes(output_changed=True)
+
+        apply_settings(changes, config, use_case, app)
+
+        mock_build_output.assert_called_once_with(config)
+        use_case.set_output.assert_called_once_with(mock_build_output.return_value)
+
+    @patch("voicetotext.bootstrap._build_output")
+    def test_should_not_rebuild_output_when_output_unchanged(self, mock_build_output):
+        config = MagicMock()
+        use_case = MagicMock()
+        app = MagicMock()
+        changes = self._make_changes(output_changed=False)
+
+        apply_settings(changes, config, use_case, app)
+
+        mock_build_output.assert_not_called()
+        use_case.set_output.assert_not_called()
+
+    @patch("voicetotext.bootstrap._build_hotkey_listener")
+    def test_should_rebuild_hotkey_listener_when_hotkey_changed(
+        self, mock_build_listener
+    ):
+        config = MagicMock()
+        use_case = MagicMock()
+        app = MagicMock()
+        changes = self._make_changes(hotkey_changed=True)
+
+        apply_settings(changes, config, use_case, app)
+
+        mock_build_listener.assert_called_once_with(config, use_case)
+        app.set_hotkey_listener.assert_called_once_with(
+            mock_build_listener.return_value
+        )
+
+    @patch("voicetotext.bootstrap._build_hotkey_listener")
+    def test_should_not_rebuild_hotkey_listener_when_hotkey_unchanged(
+        self, mock_build_listener
+    ):
+        config = MagicMock()
+        use_case = MagicMock()
+        app = MagicMock()
+        changes = self._make_changes(hotkey_changed=False)
+
+        apply_settings(changes, config, use_case, app)
+
+        mock_build_listener.assert_not_called()
+        app.set_hotkey_listener.assert_not_called()
+
+    @patch("voicetotext.bootstrap._build_hotkey_listener")
+    @patch("voicetotext.bootstrap._build_output")
+    def test_should_handle_multiple_changes_in_a_single_call(
+        self, mock_build_output, mock_build_listener
+    ):
+        config = MagicMock()
+        use_case = MagicMock()
+        app = MagicMock()
+        changes = self._make_changes(hotkey_changed=True, output_changed=True)
+
+        apply_settings(changes, config, use_case, app)
+
+        use_case.set_output.assert_called_once_with(mock_build_output.return_value)
+        app.set_hotkey_listener.assert_called_once_with(
+            mock_build_listener.return_value
+        )

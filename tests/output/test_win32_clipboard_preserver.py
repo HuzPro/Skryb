@@ -22,17 +22,6 @@ def log_capture(caplog):
     logger.removeHandler(caplog.handler)
 
 
-def _make_preserver(
-    user32: MagicMock | None = None,
-    kernel32: MagicMock | None = None,
-) -> Win32ClipboardPreserver:
-    with (
-        patch(f"{_MODULE}._user32", user32 or MagicMock()),
-        patch(f"{_MODULE}._kernel32", kernel32 or MagicMock()),
-    ):
-        return Win32ClipboardPreserver()
-
-
 class TestWin32ClipboardPreserverSave:
     @patch(f"{_MODULE}._kernel32")
     @patch(f"{_MODULE}._user32")
@@ -326,3 +315,83 @@ class TestWin32ClipboardPreserverIsAClipboardPreserver:
         preserver = Win32ClipboardPreserver()
 
         assert isinstance(preserver, ClipboardPreserver)
+
+
+class TestWin32ClipboardPreserverCtypesSignatures:
+    """Guard against the 64-bit handle truncation bug.
+
+    Without explicit argtypes/restype on ctypes functions, HANDLE
+    return values (8-byte pointers on 64-bit Python) get silently
+    truncated to c_int (4 bytes), which cascades into OverflowError
+    during save(). These tests assert the shared windll function
+    objects carry the expected signatures after the module is imported.
+    They must NOT patch _user32/_kernel32.
+    """
+
+    @pytest.mark.parametrize(
+        "func_name, expected_restype",
+        [
+            ("OpenClipboard", ctypes.wintypes.BOOL),
+            ("CloseClipboard", ctypes.wintypes.BOOL),
+            ("EmptyClipboard", ctypes.wintypes.BOOL),
+            ("EnumClipboardFormats", ctypes.wintypes.UINT),
+            ("GetClipboardData", ctypes.wintypes.HANDLE),
+            ("SetClipboardData", ctypes.wintypes.HANDLE),
+        ],
+    )
+    def test_user32_function_has_correct_restype(
+        self, func_name, expected_restype
+    ):
+        from voicetotext.output.win32_clipboard_preserver import _user32
+
+        assert getattr(_user32, func_name).restype is expected_restype
+
+    @pytest.mark.parametrize(
+        "func_name, expected_argtypes",
+        [
+            ("OpenClipboard", [ctypes.wintypes.HWND]),
+            ("EnumClipboardFormats", [ctypes.wintypes.UINT]),
+            ("GetClipboardData", [ctypes.wintypes.UINT]),
+        ],
+    )
+    def test_user32_function_has_correct_argtypes(
+        self, func_name, expected_argtypes
+    ):
+        from voicetotext.output.win32_clipboard_preserver import _user32
+
+        assert getattr(_user32, func_name).argtypes == expected_argtypes
+
+    @pytest.mark.parametrize(
+        "func_name, expected_restype",
+        [
+            ("GlobalSize", ctypes.c_size_t),
+            ("GlobalLock", ctypes.c_void_p),
+            ("GlobalUnlock", ctypes.wintypes.BOOL),
+            ("GlobalAlloc", ctypes.wintypes.HGLOBAL),
+        ],
+    )
+    def test_kernel32_function_has_correct_restype(
+        self, func_name, expected_restype
+    ):
+        from voicetotext.output.win32_clipboard_preserver import _kernel32
+
+        assert getattr(_kernel32, func_name).restype is expected_restype
+
+    @pytest.mark.parametrize(
+        "func_name, expected_argtypes",
+        [
+            ("GlobalSize", [ctypes.wintypes.HGLOBAL]),
+            ("GlobalLock", [ctypes.wintypes.HGLOBAL]),
+        ],
+    )
+    def test_kernel32_function_has_correct_argtypes(
+        self, func_name, expected_argtypes
+    ):
+        from voicetotext.output.win32_clipboard_preserver import _kernel32
+
+        assert getattr(_kernel32, func_name).argtypes == expected_argtypes
+
+    def test_kernel32_global_alloc_accepts_size_t_for_byte_count(self):
+        from voicetotext.output.win32_clipboard_preserver import _kernel32
+
+        assert _kernel32.GlobalAlloc.argtypes[1] is ctypes.c_size_t
