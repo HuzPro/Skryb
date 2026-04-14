@@ -1,9 +1,7 @@
 import os
 import threading
 from collections.abc import Callable
-
-import pystray
-from pystray import Menu, MenuItem
+from typing import Protocol
 
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import StateChangedEvent
@@ -20,6 +18,15 @@ _STATE_LABELS = {
     AppState.TRANSCRIBING: "Transcribing...",
     AppState.ERROR: "Error",
 }
+
+
+class TrayIcon(Protocol):
+    visible: bool
+    icon: object
+    title: str
+
+    def run(self, setup: Callable[..., None]) -> None: ...
+    def stop(self) -> None: ...
 
 
 class SystemTrayApp:
@@ -39,12 +46,15 @@ class SystemTrayApp:
         self._hotkey_listener = hotkey_listener
         self._on_open_settings = on_open_settings
         self._download_manager = download_manager
-        self._icon: pystray.Icon | None = None
+        self._icon: TrayIcon | None = None
         self._settings_lock = threading.Lock()
 
         self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
     def run(self) -> None:
+        import pystray
+        from pystray import Menu, MenuItem
+
         menu_items = [
             MenuItem(
                 lambda item: _STATE_LABELS.get(
@@ -75,11 +85,11 @@ class SystemTrayApp:
         self._hotkey_listener = listener
         self._hotkey_listener.start()
 
-    def _on_setup(self, icon: pystray.Icon) -> None:
+    def _on_setup(self, icon: TrayIcon) -> None:
         icon.visible = True
         self._hotkey_listener.start()
 
-    def _on_settings_clicked(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+    def _on_settings_clicked(self, icon: TrayIcon, item: object) -> None:
         if self._on_open_settings:
             threading.Thread(target=self._open_settings_guarded, daemon=True).start()
 
@@ -91,7 +101,7 @@ class SystemTrayApp:
         finally:
             self._settings_lock.release()
 
-    def _on_quit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+    def _on_quit(self, icon: TrayIcon, item: object) -> None:
         self._hotkey_listener.stop()
         self._use_case.dispose()
         if self._download_manager is not None:
