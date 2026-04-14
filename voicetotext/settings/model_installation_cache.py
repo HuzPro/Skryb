@@ -18,7 +18,7 @@ class ModelInstallationCache:
     common cases of downloads finishing while the settings window is open.
     """
 
-    def __init__(self, model_manager: ModelManager, event_bus: EventBus):
+    def __init__(self, model_manager: ModelManager, event_bus: EventBus) -> None:
         self._model_manager = model_manager
         self._event_bus = event_bus
         self._cache: dict[str, bool] = {}

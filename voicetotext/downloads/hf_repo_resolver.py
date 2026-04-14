@@ -44,7 +44,7 @@ class HfRepoResolver:
     (commit_sha, list-of-files-with-urls) tuples without touching tqdm.
     """
 
-    def __init__(self, api: HfApiProtocol):
+    def __init__(self, api: HfApiProtocol) -> None:
         self._api = api
 
     def resolve(self, repo_id: str) -> tuple[str, list[ResolvedFile]]:

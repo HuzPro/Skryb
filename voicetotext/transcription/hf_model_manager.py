@@ -25,7 +25,7 @@ class HuggingFaceModelManager(ModelManager):
         resolver: HfRepoResolver,
         file_downloader: ChunkedFileDownloader,
         models: dict[str, ModelInfo] | None = None,
-    ):
+    ) -> None:
         self._models_dir = models_dir
         self._download_manager = download_manager
         self._resolver = resolver

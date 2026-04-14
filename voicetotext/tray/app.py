@@ -32,7 +32,7 @@ class SystemTrayApp:
         hotkey_listener: HotkeyListener,
         on_open_settings: Callable[[], None] | None = None,
         download_manager: DownloadManager | None = None,
-    ):
+    ) -> None:
         self._use_case = use_case
         self._state_machine = state_machine
         self._event_bus = event_bus

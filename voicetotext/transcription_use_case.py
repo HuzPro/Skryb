@@ -10,6 +10,7 @@ from voicetotext.core.events import (
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
+from voicetotext.core.exceptions import EngineSwapError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.recording.audio_segment import AudioSegment
@@ -31,7 +32,7 @@ class RecordAndTranscribeUseCase:
         state_machine: AppStateMachine,
         event_bus: EventBus,
         action_dispatcher: ActionDispatcher,
-    ):
+    ) -> None:
         self._recorder = recorder
         self._engine = engine
         self._output = output
@@ -66,7 +67,7 @@ class RecordAndTranscribeUseCase:
 
     def set_engine(self, engine: TranscriptionEngine) -> None:
         if self._state_machine.state != AppState.IDLE:
-            raise RuntimeError("Can only swap engine when idle")
+            raise EngineSwapError("Can only swap engine when idle")
         old_engine = self._engine
         self._engine = engine
         old_engine.dispose()

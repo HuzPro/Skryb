@@ -35,7 +35,7 @@ class SettingsWindow(EngineEventListener):
         service: SettingsService,
         first_run: bool = False,
         on_save: Callable[[ChangeSet], None] | None = None,
-    ):
+    ) -> None:
         self._service = service
         self._first_run = first_run
         self._on_save = on_save

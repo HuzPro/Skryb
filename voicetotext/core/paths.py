@@ -4,7 +4,7 @@ from pathlib import Path
 
 class AppPaths:
 
-    def __init__(self, base: Path | None = None):
+    def __init__(self, base: Path | None = None) -> None:
         if base is None:
             base = Path(os.environ["APPDATA"]) / "VoiceToText"
         self.base = base

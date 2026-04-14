@@ -13,7 +13,7 @@ from voicetotext.core.events import (
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
-from voicetotext.core.exceptions import AudioRecorderError
+from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
@@ -214,7 +214,7 @@ class TestHotSwapEngine:
         use_case, _, _, _, _, _ = _build_use_case()
         use_case.on_hotkey_activated()
 
-        with pytest.raises(RuntimeError, match="idle"):
+        with pytest.raises(EngineSwapError, match="idle"):
             use_case.set_engine(MagicMock())
 
     def test_should_dispose_old_engine_when_swapped_out(self):
@@ -230,7 +230,7 @@ class TestHotSwapEngine:
         use_case.on_hotkey_activated()
         new_engine = MagicMock()
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(EngineSwapError):
             use_case.set_engine(new_engine)
 
         old_engine.dispose.assert_not_called()

@@ -11,7 +11,7 @@ class DownloadCoordinator:
     (e.g. first-run → normal mode) without losing in-flight downloads.
     """
 
-    def __init__(self, model_manager: ModelManager):
+    def __init__(self, model_manager: ModelManager) -> None:
         self._model_manager = model_manager
         self._handles: dict[str, DownloadHandle] = {}
 

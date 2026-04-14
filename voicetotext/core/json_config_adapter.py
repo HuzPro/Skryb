@@ -37,7 +37,7 @@ def _deep_merge(base: dict[str, object], override: dict[str, object]) -> dict[st
 
 class JsonConfigAdapter(ConfigurationStore):
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._data: dict[str, object] = {}
         self._lock = threading.Lock()

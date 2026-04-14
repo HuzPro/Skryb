@@ -204,7 +204,7 @@ def build_app(
 
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
-    use_case = RecordAndTranscribeUseCase(
+    record_and_transcribe_use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
         engine=engine,
         output=output,
@@ -213,7 +213,7 @@ def build_app(
         action_dispatcher=action_dispatcher,
     )
 
-    listener = _build_hotkey_listener(config, use_case)
+    listener = _build_hotkey_listener(config, record_and_transcribe_use_case)
 
     model_manager = create_model_manager(paths.models_dir, download_manager)
 
@@ -222,7 +222,7 @@ def build_app(
         paths=paths,
         event_bus=event_bus,
         model_manager=model_manager,
-        use_case=use_case,
+        use_case=record_and_transcribe_use_case,
         action_dispatcher=action_dispatcher,
     )
 
@@ -230,11 +230,11 @@ def build_app(
         SettingsWindow(
             service=settings_service,
             first_run=False,
-            on_save=lambda changes: apply_settings(changes, config, use_case, app),
+            on_save=lambda changes: apply_settings(changes, config, record_and_transcribe_use_case, app),
         ).run()
 
     app = SystemTrayApp(
-        use_case=use_case,
+        use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,
         hotkey_listener=listener,

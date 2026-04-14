@@ -9,6 +9,7 @@ from voicetotext.core.events import (
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
 )
+from voicetotext.core.exceptions import EngineSwapError
 from voicetotext.settings.engine_hot_swap import (
     EngineHotSwapCoordinator,
     NullEngineHotSwap,
@@ -122,7 +123,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         )
         coord.start_swap("small")
 
-        with pytest.raises(RuntimeError, match="already in progress"):
+        with pytest.raises(EngineSwapError, match="already in progress"):
             coord.start_swap("small")
 
     def test_should_allow_new_swap_after_previous_finishes(self):
@@ -148,7 +149,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
     def test_null_hot_swap_raises_when_start_called(self):
         null = NullEngineHotSwap()
 
-        with pytest.raises(RuntimeError, match="first-run"):
+        with pytest.raises(EngineSwapError, match="first-run"):
             null.start_swap("base")
 
     def test_is_busy_reflects_swap_lifecycle(self):

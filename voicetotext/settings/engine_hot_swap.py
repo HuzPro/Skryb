@@ -12,6 +12,7 @@ from voicetotext.core.events import (
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
 )
+from voicetotext.core.exceptions import EngineSwapError
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
@@ -49,7 +50,7 @@ class NullEngineHotSwap:
         return False
 
     def start_swap(self, model_name: str) -> None:
-        raise RuntimeError(
+        raise EngineSwapError(
             "engine hot-swap is unavailable during first-run setup"
         )
 
@@ -76,7 +77,7 @@ class EngineHotSwapCoordinator:
         event_bus: EventBus,
         loader: EngineLoader,
         action_dispatcher: ActionDispatcher,
-    ):
+    ) -> None:
         self._use_case = use_case
         self._event_bus = event_bus
         self._loader = loader
@@ -91,7 +92,7 @@ class EngineHotSwapCoordinator:
     def start_swap(self, model_name: str) -> None:
         with self._lock:
             if self._busy:
-                raise RuntimeError("engine swap already in progress")
+                raise EngineSwapError("engine swap already in progress")
             self._busy = True
         self._dispatcher.dispatch(lambda: self._run_swap(model_name))
 

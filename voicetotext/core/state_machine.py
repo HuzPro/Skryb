@@ -22,7 +22,7 @@ _VALID_TRANSITIONS: dict[AppState, set[AppState]] = {
 
 class AppStateMachine:
 
-    def __init__(self, event_bus: EventBus):
+    def __init__(self, event_bus: EventBus) -> None:
         self._state = AppState.IDLE
         self._event_bus = event_bus
         self._lock = threading.Lock()
