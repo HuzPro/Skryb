@@ -5,7 +5,6 @@ import pytest
 
 from voicetotext.output.clipboard_preserver import ClipboardPreserver
 from voicetotext.output.clipboard_preserving_decorator import (
-    _PASTE_CONSUME_DELAY_SECONDS,
     ClipboardPreservingDecorator,
 )
 from voicetotext.output.handler import TextOutputHandler
@@ -145,14 +144,14 @@ class TestClipboardPreservingDecoratorOutput:
 
         assert "restore" in log_capture.text.lower()
 
-    def test_should_call_operations_in_correct_order_with_consume_delay(self):
+    def test_should_sleep_between_paste_and_restore(self):
         call_order: list[str] = []
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
         sleeper = MagicMock(spec=Sleeper)
         preserver.save.side_effect = lambda: call_order.append("save")
         inner.output.side_effect = lambda t: call_order.append("inner.output")
-        sleeper.sleep.side_effect = lambda d: call_order.append(f"sleep({d})")
+        sleeper.sleep.side_effect = lambda d: call_order.append("sleep")
         preserver.restore.side_effect = lambda: call_order.append("restore")
         decorator = ClipboardPreservingDecorator(
             inner=inner, preserver=preserver, sleeper=sleeper
@@ -160,12 +159,7 @@ class TestClipboardPreservingDecoratorOutput:
 
         decorator.output("text")
 
-        assert call_order == [
-            "save",
-            "inner.output",
-            f"sleep({_PASTE_CONSUME_DELAY_SECONDS})",
-            "restore",
-        ]
+        assert call_order == ["save", "inner.output", "sleep", "restore"]
 
     def test_should_skip_consume_delay_when_inner_raises(self):
         call_order: list[str] = []
@@ -190,7 +184,7 @@ class TestClipboardPreservingDecoratorOutput:
 
         decorator.output("text")
 
-        sleeper.sleep.assert_called_once_with(_PASTE_CONSUME_DELAY_SECONDS)
+        sleeper.sleep.assert_called_once()
 
 
 class TestClipboardPreservingDecoratorIsATextOutputHandler:

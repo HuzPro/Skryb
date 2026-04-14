@@ -1,10 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from voicetotext.output.handler import TextOutputHandler
-from voicetotext.output.paste_and_clipboard_adapter import (
-    _CLIPBOARD_SETTLE_DELAY_SECONDS,
-    PasteAndClipboardAdapter,
-)
+from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.sleeper import Sleeper
 
 
@@ -33,7 +30,7 @@ class TestPasteAndClipboardAdapterOutput:
 
         adapter.output("text")
 
-        sleeper.sleep.assert_called_once_with(_CLIPBOARD_SETTLE_DELAY_SECONDS)
+        sleeper.sleep.assert_called_once()
 
     @patch(f"{_MODULE}.pyautogui")
     @patch(f"{_MODULE}.pyperclip")

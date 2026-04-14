@@ -2,10 +2,15 @@ import logging
 
 import pytest
 
-from voicetotext.core.debug_logger import setup_debug_logger
+from voicetotext.core.debug_logger import (
+    VoiceToTextConsoleHandler,
+    VoiceToTextFileHandler,
+    setup_debug_logger,
+)
 
 
 _APP_LOGGER_NAME = "voicetotext"
+_OwnedHandler = (VoiceToTextFileHandler, VoiceToTextConsoleHandler)
 
 
 @pytest.fixture(autouse=True)
@@ -19,27 +24,17 @@ def _release_debug_handlers():
     yield
     logger = logging.getLogger(_APP_LOGGER_NAME)
     for handler in list(logger.handlers):
-        if getattr(handler, "_voicetotext_debug", False):
+        if isinstance(handler, _OwnedHandler):
             logger.removeHandler(handler)
             handler.close()
 
 
-def _debug_handlers(logger: logging.Logger) -> list[logging.Handler]:
-    return [
-        h for h in logger.handlers if getattr(h, "_voicetotext_debug", False)
-    ]
+def _file_handlers(logger: logging.Logger) -> list[VoiceToTextFileHandler]:
+    return [h for h in logger.handlers if isinstance(h, VoiceToTextFileHandler)]
 
 
-def _file_handlers(logger: logging.Logger) -> list[logging.FileHandler]:
-    return [h for h in _debug_handlers(logger) if isinstance(h, logging.FileHandler)]
-
-
-def _console_handlers(logger: logging.Logger) -> list[logging.StreamHandler]:
-    return [
-        h
-        for h in _debug_handlers(logger)
-        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
-    ]
+def _console_handlers(logger: logging.Logger) -> list[VoiceToTextConsoleHandler]:
+    return [h for h in logger.handlers if isinstance(h, VoiceToTextConsoleHandler)]
 
 
 class TestSetupDebugLoggerFileHandler:
