@@ -1,9 +1,8 @@
-import threading
-import time
 from unittest.mock import MagicMock
 
 import pytest
 
+from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -49,6 +48,7 @@ def _build_service(
         use_case=MagicMock(),
         event_bus=bus,
         loader=lambda: MagicMock(),
+        action_dispatcher=InlineActionDispatcher(),
     )
     service = SettingsService(
         config=config,
@@ -256,39 +256,29 @@ class TestApplyDraft:
 
 class TestTriggerEngineSwap:
     def test_should_start_swap_on_coordinator(self):
-        service, _, _, bus, hot_swap = _build_service()
+        service, _, _, bus, _ = _build_service()
         started = []
         bus.subscribe(EngineLoadStartedEvent, started.append)
 
         service.trigger_engine_swap()
 
-        # The coordinator runs on a thread — give it a moment.
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline and not started:
-            time.sleep(0.01)
         assert len(started) == 1
 
     def test_should_ignore_swap_when_already_busy(self):
-        release = threading.Event()
-
-        def slow_loader():
-            release.wait(timeout=2)
-            return MagicMock()
-
         service, _, _, bus, _ = _build_service()
-        # Replace the coordinator with one that uses a slow loader.
+        dispatcher = DeferredActionDispatcher()
         hot_swap = EngineHotSwapCoordinator(
             use_case=MagicMock(),
             event_bus=bus,
-            loader=slow_loader,
+            loader=lambda: MagicMock(),
+            action_dispatcher=dispatcher,
         )
         service._hot_swap = hot_swap
 
         service.trigger_engine_swap()
-        time.sleep(0.05)
         service.trigger_engine_swap()  # should not raise
 
-        release.set()
+        dispatcher.drain_all()
 
 
 class TestListenerFanout:
@@ -364,12 +354,6 @@ class TestListenerFanout:
 
 class TestIsEngineSwapping:
     def test_should_reflect_hot_swap_coordinator_busy_state(self):
-        release = threading.Event()
-
-        def slow_loader():
-            release.wait(timeout=2)
-            return MagicMock()
-
         config = FakeConfig({
             "transcription.model_size": "base",
             "transcription.device": "auto",
@@ -381,13 +365,13 @@ class TestIsEngineSwapping:
         bus = SimpleEventBus()
         cache = ModelInstallationCache(manager, bus)
         downloads = DownloadCoordinator(manager)
+        dispatcher = DeferredActionDispatcher()
         hot_swap = EngineHotSwapCoordinator(
             use_case=MagicMock(),
             event_bus=bus,
-            loader=slow_loader,
+            loader=lambda: MagicMock(),
+            action_dispatcher=dispatcher,
         )
-        completed = []
-        bus.subscribe(EngineLoadCompletedEvent, completed.append)
         service = SettingsService(
             config=config,
             model_manager=manager,
@@ -401,9 +385,5 @@ class TestIsEngineSwapping:
         service.trigger_engine_swap()
         assert service.is_engine_swapping() is True
 
-        release.set()
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline and not completed:
-            time.sleep(0.01)
-        time.sleep(0.05)
+        dispatcher.drain_all()
         assert service.is_engine_swapping() is False

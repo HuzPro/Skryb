@@ -1,6 +1,20 @@
+"""Tests for :class:`Win32ClipboardPreserver`.
+
+The test strategy is behavioural: we stand up a fake Win32 clipboard
+(an in-memory ``dict[int, bytes]`` mapping format id → data) and
+verify save/restore round-trips.  We do *not* assert on exact ctypes
+call orders — that's implementation detail.
+
+One dedicated section guards the ctypes signature declarations.
+Those are a real integration concern: on 64-bit Python, missing
+``restype`` annotations silently truncate HANDLE values to 4 bytes,
+which crashes ``save()`` non-obviously at runtime.
+"""
+
 import ctypes
+import ctypes.wintypes as _wt
 import logging
-from unittest.mock import MagicMock, call, patch
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,383 +23,317 @@ from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 
 
 _MODULE = "voicetotext.output.win32_clipboard_preserver"
-_LOGGER_NAME = _MODULE
+
+
+# ---------------------------------------------------------------------------
+# Fake Win32 clipboard
+# ---------------------------------------------------------------------------
+
+
+class _FakeWin32Clipboard:
+    """In-memory stand-in for the Windows clipboard.
+
+    Mimics the public behaviour of the subset of ``user32`` and
+    ``kernel32`` that :class:`Win32ClipboardPreserver` uses.  Data is
+    stored as ``format_id -> bytes``.  ``GlobalLock`` returns the
+    handle itself as the "pointer" — since the fake's
+    ``string_at``/``memmove`` replacements look up the handle
+    directly, there is no real pointer arithmetic to model.
+    """
+
+    def __init__(
+        self, initial: dict[int, bytes] | None = None,
+    ) -> None:
+        self.contents: dict[int, bytes] = dict(initial or {})
+        self.open_clipboard_should_succeed: bool = True
+        self._handles: dict[int, bytes] = {}
+        self._next_handle: int = 1
+
+    # --- fake user32 -------------------------------------------------
+
+    def OpenClipboard(self, hwnd) -> int:  # noqa: N802 (Win32 name)
+        return 1 if self.open_clipboard_should_succeed else 0
+
+    def CloseClipboard(self) -> int:  # noqa: N802
+        return 1
+
+    def EmptyClipboard(self) -> int:  # noqa: N802
+        self.contents.clear()
+        return 1
+
+    def EnumClipboardFormats(self, prev: int) -> int:  # noqa: N802
+        formats = sorted(self.contents.keys())
+        if prev == 0:
+            return formats[0] if formats else 0
+        try:
+            idx = formats.index(prev) + 1
+        except ValueError:
+            return 0
+        return formats[idx] if idx < len(formats) else 0
+
+    def GetClipboardData(self, fmt: int):  # noqa: N802
+        if fmt not in self.contents:
+            return None
+        handle = self._next_handle
+        self._next_handle += 1
+        self._handles[handle] = self.contents[fmt]
+        return handle
+
+    def SetClipboardData(self, fmt: int, handle):  # noqa: N802
+        self.contents[fmt] = self._handles[handle]
+        return handle
+
+    # --- fake kernel32 -----------------------------------------------
+
+    def GlobalSize(self, handle) -> int:  # noqa: N802
+        return len(self._handles[handle])
+
+    def GlobalLock(self, handle):  # noqa: N802
+        return handle
+
+    def GlobalUnlock(self, handle) -> int:  # noqa: N802
+        return 1
+
+    def GlobalAlloc(self, flags: int, size: int):  # noqa: N802
+        handle = self._next_handle
+        self._next_handle += 1
+        self._handles[handle] = b"\x00" * size
+        return handle
+
+    # --- fake ctypes helpers -----------------------------------------
+
+    def string_at(self, ptr, size: int) -> bytes:
+        return self._handles[ptr][:size]
+
+    def memmove(self, dest, src, size: int) -> None:
+        self._handles[dest] = bytes(src)[:size]
 
 
 @pytest.fixture()
-def log_capture(caplog):
-    """Attach caplog handler to the module logger (propagate=False in this project)."""
-    logger = logging.getLogger(_LOGGER_NAME)
+def fake_clipboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> _FakeWin32Clipboard:
+    fake = _FakeWin32Clipboard()
+    fake_user32 = SimpleNamespace(
+        OpenClipboard=fake.OpenClipboard,
+        CloseClipboard=fake.CloseClipboard,
+        EmptyClipboard=fake.EmptyClipboard,
+        EnumClipboardFormats=fake.EnumClipboardFormats,
+        GetClipboardData=fake.GetClipboardData,
+        SetClipboardData=fake.SetClipboardData,
+    )
+    fake_kernel32 = SimpleNamespace(
+        GlobalSize=fake.GlobalSize,
+        GlobalLock=fake.GlobalLock,
+        GlobalUnlock=fake.GlobalUnlock,
+        GlobalAlloc=fake.GlobalAlloc,
+    )
+    monkeypatch.setattr(f"{_MODULE}._user32", fake_user32)
+    monkeypatch.setattr(f"{_MODULE}._kernel32", fake_kernel32)
+    monkeypatch.setattr(f"{_MODULE}._string_at", fake.string_at)
+    monkeypatch.setattr(f"{_MODULE}._memmove", fake.memmove)
+    return fake
+
+
+@pytest.fixture()
+def log_capture(caplog: pytest.LogCaptureFixture):
+    logger = logging.getLogger(_MODULE)
     logger.addHandler(caplog.handler)
     caplog.handler.setLevel(logging.DEBUG)
     yield caplog
     logger.removeHandler(caplog.handler)
 
 
-class TestWin32ClipboardPreserverSave:
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_open_and_close_clipboard(self, mock_user32, mock_kernel32):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.return_value = 0
-        preserver = Win32ClipboardPreserver()
+# ---------------------------------------------------------------------------
+# Behavioural tests — save/restore round-trip
+# ---------------------------------------------------------------------------
 
-        preserver.save()
 
-        mock_user32.OpenClipboard.assert_called_once_with(None)
-        mock_user32.CloseClipboard.assert_called_once()
-
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_enumerate_all_clipboard_formats(
-        self, mock_user32, mock_kernel32
+class TestSaveAndRestoreRoundTrip:
+    def test_should_restore_single_format_clipboard(
+        self, fake_clipboard: _FakeWin32Clipboard
     ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 13, 0]
-        mock_user32.GetClipboardData.return_value = None
+        fake_clipboard.contents = {1: b"hello world"}
         preserver = Win32ClipboardPreserver()
 
         preserver.save()
+        fake_clipboard.contents = {1: b"transcription text"}
+        preserver.restore()
 
-        assert mock_user32.EnumClipboardFormats.call_args_list == [
-            call(0),
-            call(1),
-            call(13),
-        ]
+        assert fake_clipboard.contents == {1: b"hello world"}
 
-    @patch(f"{_MODULE}._string_at", return_value=b"hello")
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_read_data_for_each_format(
-        self, mock_user32, mock_kernel32, mock_string_at
+    def test_should_restore_multi_format_clipboard(
+        self, fake_clipboard: _FakeWin32Clipboard
     ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 0]
-
-        handle = ctypes.c_void_p(12345)
-        mock_user32.GetClipboardData.return_value = handle
-        mock_kernel32.GlobalSize.return_value = 5
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(99999)
+        fake_clipboard.contents = {
+            1: b"plain text",
+            13: b"unicode text encoded",
+            49161: b"<html>rich</html>",
+        }
         preserver = Win32ClipboardPreserver()
 
         preserver.save()
+        fake_clipboard.contents = {1: b"garbage"}
+        preserver.restore()
 
-        mock_user32.GetClipboardData.assert_called_once_with(1)
-        mock_kernel32.GlobalLock.assert_called_once_with(handle)
-        mock_kernel32.GlobalSize.assert_called_once_with(handle)
-        mock_kernel32.GlobalUnlock.assert_called_once_with(handle)
+        assert fake_clipboard.contents == {
+            1: b"plain text",
+            13: b"unicode text encoded",
+            49161: b"<html>rich</html>",
+        }
 
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_handle_empty_clipboard(self, mock_user32, mock_kernel32):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.return_value = 0
-        preserver = Win32ClipboardPreserver()
-
-        preserver.save()
-
-        mock_user32.GetClipboardData.assert_not_called()
-
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_close_clipboard_even_on_error(
-        self, mock_user32, mock_kernel32
+    def test_second_save_overwrites_first(
+        self, fake_clipboard: _FakeWin32Clipboard
     ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = OSError("boom")
         preserver = Win32ClipboardPreserver()
 
-        try:
-            preserver.save()
-        except OSError:
-            pass
+        fake_clipboard.contents = {1: b"first"}
+        preserver.save()
+        fake_clipboard.contents = {42: b"second"}
+        preserver.save()
 
-        mock_user32.CloseClipboard.assert_called_once()
+        fake_clipboard.contents = {99: b"cleared"}
+        preserver.restore()
 
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
+        assert fake_clipboard.contents == {42: b"second"}
+
+
+class TestSaveEdgeCases:
+    def test_should_handle_empty_clipboard(
+        self, fake_clipboard: _FakeWin32Clipboard
+    ):
+        fake_clipboard.contents = {}
+        preserver = Win32ClipboardPreserver()
+
+        preserver.save()
+
+        # A subsequent restore is a no-op and must not crash.
+        preserver.restore()
+
     def test_should_log_warning_when_open_clipboard_fails(
-        self, mock_user32, mock_kernel32, log_capture
+        self, fake_clipboard: _FakeWin32Clipboard, log_capture
     ):
-        mock_user32.OpenClipboard.return_value = False
+        fake_clipboard.open_clipboard_should_succeed = False
         preserver = Win32ClipboardPreserver()
 
         preserver.save()
 
         assert "Could not open clipboard" in log_capture.text
-        mock_user32.CloseClipboard.assert_not_called()
 
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_skip_format_when_get_clipboard_data_returns_null(
-        self, mock_user32, mock_kernel32
+
+class TestRestoreEdgeCases:
+    def test_should_be_a_noop_when_save_was_never_called(
+        self, fake_clipboard: _FakeWin32Clipboard
     ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 0]
-        mock_user32.GetClipboardData.return_value = None
+        fake_clipboard.contents = {1: b"untouched"}
         preserver = Win32ClipboardPreserver()
-
-        preserver.save()
-
-        mock_kernel32.GlobalLock.assert_not_called()
-
-
-    @patch(f"{_MODULE}._string_at", return_value=b"data")
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_skip_format_when_global_lock_returns_null(
-        self, mock_user32, mock_kernel32, mock_string_at
-    ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 0]
-        mock_user32.GetClipboardData.return_value = ctypes.c_void_p(100)
-        mock_kernel32.GlobalSize.return_value = 4
-        mock_kernel32.GlobalLock.return_value = None
-        preserver = Win32ClipboardPreserver()
-
-        preserver.save()
-
-        mock_string_at.assert_not_called()
-
-    @patch(f"{_MODULE}._memmove")
-    @patch(f"{_MODULE}._string_at")
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_overwrite_snapshot_on_second_save(
-        self, mock_user32, mock_kernel32, mock_string_at, mock_memmove
-    ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(200)
-
-        # First save: one format
-        mock_user32.EnumClipboardFormats.side_effect = [1, 0]
-        mock_user32.GetClipboardData.return_value = ctypes.c_void_p(100)
-        mock_kernel32.GlobalSize.return_value = 5
-        mock_string_at.return_value = b"first"
-        preserver = Win32ClipboardPreserver()
-        preserver.save()
-
-        # Second save: different format
-        mock_user32.EnumClipboardFormats.side_effect = [42, 0]
-        mock_string_at.return_value = b"second"
-        preserver.save()
-
-        # Restore should only contain the second save's data
-        mock_user32.reset_mock()
-        mock_kernel32.reset_mock()
-        mock_user32.OpenClipboard.return_value = True
-        alloc_handle = MagicMock()
-        mock_kernel32.GlobalAlloc.return_value = alloc_handle
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(600)
 
         preserver.restore()
 
-        assert mock_user32.SetClipboardData.call_count == 1
-        mock_user32.SetClipboardData.assert_called_once_with(42, alloc_handle)
+        assert fake_clipboard.contents == {1: b"untouched"}
 
-
-class TestWin32ClipboardPreserverRestore:
-    @patch(f"{_MODULE}._memmove")
-    @patch(f"{_MODULE}._string_at")
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_restore_exact_format_ids_and_data_bytes(
-        self, mock_user32, mock_kernel32, mock_string_at, mock_memmove
+    def test_should_be_a_noop_when_last_save_was_empty(
+        self, fake_clipboard: _FakeWin32Clipboard
     ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 13, 0]
-
-        handle = ctypes.c_void_p(100)
-        mock_user32.GetClipboardData.return_value = handle
-        mock_kernel32.GlobalSize.side_effect = [5, 5]
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(200)
-        mock_string_at.side_effect = [b"alpha", b"bravo"]
-
+        fake_clipboard.contents = {}
         preserver = Win32ClipboardPreserver()
         preserver.save()
 
-        mock_user32.reset_mock()
-        mock_kernel32.reset_mock()
-        mock_memmove.reset_mock()
-        mock_user32.OpenClipboard.return_value = True
-        alloc_handle = ctypes.c_void_p(500)
-        mock_kernel32.GlobalAlloc.return_value = alloc_handle
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(600)
-
+        fake_clipboard.contents = {1: b"new"}
         preserver.restore()
 
-        assert mock_kernel32.GlobalAlloc.call_args_list == [
-            call(0x0002, 5),
-            call(0x0002, 5),
-        ]
-        assert mock_memmove.call_args_list[0][0][1] == b"alpha"
-        assert mock_memmove.call_args_list[1][0][1] == b"bravo"
-        assert mock_user32.SetClipboardData.call_args_list == [
-            call(1, alloc_handle),
-            call(13, alloc_handle),
-        ]
+        assert fake_clipboard.contents == {1: b"new"}
 
-    @patch(f"{_MODULE}._memmove")
-    @patch(f"{_MODULE}._string_at", return_value=b"data")
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_close_clipboard_even_when_restore_fails(
-        self, mock_user32, mock_kernel32, mock_string_at, mock_memmove
-    ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 0]
-        handle = ctypes.c_void_p(100)
-        mock_user32.GetClipboardData.return_value = handle
-        mock_kernel32.GlobalSize.return_value = 4
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(200)
-
-        preserver = Win32ClipboardPreserver()
-        preserver.save()
-
-        mock_user32.reset_mock()
-        mock_kernel32.reset_mock()
-        mock_user32.OpenClipboard.return_value = True
-        mock_kernel32.GlobalAlloc.side_effect = OSError("alloc failed")
-
-        try:
-            preserver.restore()
-        except OSError:
-            pass
-
-        mock_user32.CloseClipboard.assert_called_once()
-
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_noop_when_nothing_was_saved(
-        self, mock_user32, mock_kernel32
-    ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.return_value = 0
-        preserver = Win32ClipboardPreserver()
-        preserver.save()
-
-        mock_user32.reset_mock()
-
-        preserver.restore()
-
-        mock_user32.OpenClipboard.assert_not_called()
-
-    @patch(f"{_MODULE}._string_at", return_value=b"data")
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
     def test_should_log_warning_when_open_clipboard_fails_on_restore(
-        self, mock_user32, mock_kernel32, mock_string_at, log_capture
+        self, fake_clipboard: _FakeWin32Clipboard, log_capture
     ):
-        mock_user32.OpenClipboard.return_value = True
-        mock_user32.EnumClipboardFormats.side_effect = [1, 0]
-        handle = ctypes.c_void_p(100)
-        mock_user32.GetClipboardData.return_value = handle
-        mock_kernel32.GlobalSize.return_value = 4
-        mock_kernel32.GlobalLock.return_value = ctypes.c_void_p(200)
-
+        fake_clipboard.contents = {1: b"saved"}
         preserver = Win32ClipboardPreserver()
         preserver.save()
 
-        mock_user32.reset_mock()
-        mock_user32.OpenClipboard.return_value = False
-
+        fake_clipboard.open_clipboard_should_succeed = False
         preserver.restore()
 
         assert "Could not open clipboard" in log_capture.text
 
 
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
-    def test_should_noop_when_restore_called_without_save(
-        self, mock_user32, mock_kernel32
-    ):
-        preserver = Win32ClipboardPreserver()
-
-        preserver.restore()
-
-        mock_user32.OpenClipboard.assert_not_called()
-
-
-class TestWin32ClipboardPreserverIsAClipboardPreserver:
-    @patch(f"{_MODULE}._kernel32")
-    @patch(f"{_MODULE}._user32")
+class TestInterfaceConformance:
     def test_should_implement_clipboard_preserver_interface(
-        self, mock_user32, mock_kernel32
+        self, fake_clipboard: _FakeWin32Clipboard
     ):
         preserver = Win32ClipboardPreserver()
 
         assert isinstance(preserver, ClipboardPreserver)
 
 
+# ---------------------------------------------------------------------------
+# ctypes signature guards
+# ---------------------------------------------------------------------------
+#
+# These tests protect against the 64-bit handle truncation bug.  They
+# must NOT patch ``_user32``/``_kernel32`` because they read the real
+# ctypes function objects to verify their argtypes/restype.
+
+
 class TestWin32ClipboardPreserverCtypesSignatures:
-    """Guard against the 64-bit handle truncation bug.
-
-    Without explicit argtypes/restype on ctypes functions, HANDLE
-    return values (8-byte pointers on 64-bit Python) get silently
-    truncated to c_int (4 bytes), which cascades into OverflowError
-    during save(). These tests assert the shared windll function
-    objects carry the expected signatures after the module is imported.
-    They must NOT patch _user32/_kernel32.
-    """
-
     @pytest.mark.parametrize(
-        "func_name, expected_restype",
+        ("func_name", "expected_restype"),
         [
-            ("OpenClipboard", ctypes.wintypes.BOOL),
-            ("CloseClipboard", ctypes.wintypes.BOOL),
-            ("EmptyClipboard", ctypes.wintypes.BOOL),
-            ("EnumClipboardFormats", ctypes.wintypes.UINT),
-            ("GetClipboardData", ctypes.wintypes.HANDLE),
-            ("SetClipboardData", ctypes.wintypes.HANDLE),
+            ("OpenClipboard", _wt.BOOL),
+            ("CloseClipboard", _wt.BOOL),
+            ("EmptyClipboard", _wt.BOOL),
+            ("EnumClipboardFormats", _wt.UINT),
+            ("GetClipboardData", _wt.HANDLE),
+            ("SetClipboardData", _wt.HANDLE),
         ],
     )
     def test_user32_function_has_correct_restype(
-        self, func_name, expected_restype
+        self, func_name: str, expected_restype
     ):
         from voicetotext.output.win32_clipboard_preserver import _user32
 
         assert getattr(_user32, func_name).restype is expected_restype
 
     @pytest.mark.parametrize(
-        "func_name, expected_argtypes",
+        ("func_name", "expected_argtypes"),
         [
-            ("OpenClipboard", [ctypes.wintypes.HWND]),
-            ("EnumClipboardFormats", [ctypes.wintypes.UINT]),
-            ("GetClipboardData", [ctypes.wintypes.UINT]),
+            ("OpenClipboard", [_wt.HWND]),
+            ("EnumClipboardFormats", [_wt.UINT]),
+            ("GetClipboardData", [_wt.UINT]),
         ],
     )
     def test_user32_function_has_correct_argtypes(
-        self, func_name, expected_argtypes
+        self, func_name: str, expected_argtypes
     ):
         from voicetotext.output.win32_clipboard_preserver import _user32
 
         assert getattr(_user32, func_name).argtypes == expected_argtypes
 
     @pytest.mark.parametrize(
-        "func_name, expected_restype",
+        ("func_name", "expected_restype"),
         [
             ("GlobalSize", ctypes.c_size_t),
             ("GlobalLock", ctypes.c_void_p),
-            ("GlobalUnlock", ctypes.wintypes.BOOL),
-            ("GlobalAlloc", ctypes.wintypes.HGLOBAL),
+            ("GlobalUnlock", _wt.BOOL),
+            ("GlobalAlloc", _wt.HGLOBAL),
         ],
     )
     def test_kernel32_function_has_correct_restype(
-        self, func_name, expected_restype
+        self, func_name: str, expected_restype
     ):
         from voicetotext.output.win32_clipboard_preserver import _kernel32
 
         assert getattr(_kernel32, func_name).restype is expected_restype
 
     @pytest.mark.parametrize(
-        "func_name, expected_argtypes",
+        ("func_name", "expected_argtypes"),
         [
-            ("GlobalSize", [ctypes.wintypes.HGLOBAL]),
-            ("GlobalLock", [ctypes.wintypes.HGLOBAL]),
+            ("GlobalSize", [_wt.HGLOBAL]),
+            ("GlobalLock", [_wt.HGLOBAL]),
         ],
     )
     def test_kernel32_function_has_correct_argtypes(
-        self, func_name, expected_argtypes
+        self, func_name: str, expected_argtypes
     ):
         from voicetotext.output.win32_clipboard_preserver import _kernel32
 

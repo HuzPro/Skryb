@@ -1,4 +1,12 @@
-from unittest.mock import MagicMock, patch
+"""Tests for :class:`SoundDeviceAdapter`.
+
+The adapter is driven through its public port — ``start_recording``,
+``stop_recording``, ``is_recording``, ``dispose`` — and chunks are
+fed via the same callback that ``sd.InputStream`` would invoke in
+production.  No private-attribute poking.
+"""
+
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -7,6 +15,15 @@ from voicetotext.core.exceptions import AudioRecorderError
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
+
+
+def _feed(mock_sd, *chunks: np.ndarray) -> None:
+    """Fire the callback that the adapter registered with ``sd.InputStream``
+    with each of the given chunks — the same path ``sounddevice`` uses
+    in production when audio data arrives from the device."""
+    callback = mock_sd.InputStream.call_args.kwargs["callback"]
+    for chunk in chunks:
+        callback(chunk, len(chunk), None, None)
 
 
 class TestSoundDeviceAdapterStartRecording:
@@ -20,7 +37,7 @@ class TestSoundDeviceAdapterStartRecording:
         mock_sd.InputStream.return_value.start.assert_called_once()
 
     @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_set_recording_flag(self, mock_sd):
+    def test_should_report_is_recording_after_start(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
 
         adapter.start_recording()
@@ -38,10 +55,10 @@ class TestSoundDeviceAdapterStartRecording:
 
 class TestSoundDeviceAdapterStopRecording:
     @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_return_audio_segment_on_stop(self, mock_sd):
+    def test_should_return_audio_segment_when_audio_was_captured(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
-        adapter._chunks = [np.zeros((1024, 1), dtype=np.float32)]
+        _feed(mock_sd, np.zeros((1024, 1), dtype=np.float32))
 
         result = adapter.stop_recording()
 
@@ -49,10 +66,9 @@ class TestSoundDeviceAdapterStopRecording:
         assert result.sample_rate == 16000
 
     @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_stop_stream_on_stop(self, mock_sd):
+    def test_should_stop_and_close_stream_on_stop(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
-        adapter._chunks = [np.zeros((1024, 1), dtype=np.float32)]
 
         adapter.stop_recording()
 
@@ -60,14 +76,49 @@ class TestSoundDeviceAdapterStopRecording:
         mock_sd.InputStream.return_value.close.assert_called_once()
 
     @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_clear_recording_flag_on_stop(self, mock_sd):
+    def test_should_report_not_recording_after_stop(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
-        adapter._chunks = [np.zeros((1024, 1), dtype=np.float32)]
 
         adapter.stop_recording()
 
         assert adapter.is_recording() is False
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_assemble_captured_chunks_into_a_single_segment(
+        self, mock_sd
+    ):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        adapter.start_recording()
+        _feed(
+            mock_sd,
+            np.ones((1024, 1), dtype=np.float32),
+            np.ones((512, 1), dtype=np.float32) * 0.5,
+        )
+
+        result = adapter.stop_recording()
+
+        assert result is not None
+        assert result.sample_count == 1536
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_preserve_captured_samples_in_result(self, mock_sd):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        adapter.start_recording()
+        chunk_a = np.full((4, 1), 0.25, dtype=np.float32)
+        chunk_b = np.full((4, 1), 0.75, dtype=np.float32)
+        _feed(mock_sd, chunk_a, chunk_b)
+
+        result = adapter.stop_recording()
+
+        assert result is not None
+        np.testing.assert_array_equal(
+            result.data,
+            np.array(
+                [0.25, 0.25, 0.25, 0.25, 0.75, 0.75, 0.75, 0.75],
+                dtype=np.float32,
+            ),
+        )
 
     @patch("voicetotext.recording.sounddevice_adapter.sd")
     def test_should_raise_when_not_recording(self, mock_sd):
@@ -76,22 +127,10 @@ class TestSoundDeviceAdapterStopRecording:
         with pytest.raises(AudioRecorderError, match="not recording"):
             adapter.stop_recording()
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_concatenate_audio_chunks(self, mock_sd):
-        adapter = SoundDeviceAdapter(sample_rate=16000)
-        adapter.start_recording()
-        chunk1 = np.ones((1024, 1), dtype=np.float32)
-        chunk2 = np.ones((512, 1), dtype=np.float32) * 0.5
-        adapter._chunks = [chunk1, chunk2]
-
-        result = adapter.stop_recording()
-
-        assert result.sample_count == 1536
-
 
 class TestSoundDeviceAdapterEmptyRecording:
     @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_return_none_when_no_chunks_recorded(self, mock_sd):
+    def test_should_return_none_when_no_chunks_were_captured(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
 
@@ -105,7 +144,6 @@ class TestSoundDeviceAdapterDispose:
     def test_should_stop_recording_on_dispose_if_active(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
-        adapter._chunks = [np.zeros((1024, 1), dtype=np.float32)]
 
         adapter.dispose()
 

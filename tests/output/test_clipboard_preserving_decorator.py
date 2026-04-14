@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -9,6 +9,7 @@ from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.sleeper import Sleeper
 
 
 _MODULE = "voicetotext.output.clipboard_preserving_decorator"
@@ -25,17 +26,20 @@ def log_capture(caplog):
 
 
 def _build_decorator() -> tuple[
-    ClipboardPreservingDecorator, MagicMock, MagicMock
+    ClipboardPreservingDecorator, MagicMock, MagicMock, MagicMock
 ]:
     inner = MagicMock(spec=TextOutputHandler)
     preserver = MagicMock(spec=ClipboardPreserver)
-    decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
-    return decorator, inner, preserver
+    sleeper = MagicMock(spec=Sleeper)
+    decorator = ClipboardPreservingDecorator(
+        inner=inner, preserver=preserver, sleeper=sleeper
+    )
+    return decorator, inner, preserver, sleeper
 
 
 class TestClipboardPreservingDecoratorOutput:
     def test_should_delegate_to_inner_with_text(self):
-        decorator, inner, _ = _build_decorator()
+        decorator, inner, _, _ = _build_decorator()
 
         decorator.output("hello world")
 
@@ -45,9 +49,12 @@ class TestClipboardPreservingDecoratorOutput:
         parent = MagicMock()
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
+        sleeper = MagicMock(spec=Sleeper)
         parent.attach_mock(inner, "inner")
         parent.attach_mock(preserver, "preserver")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
@@ -59,9 +66,12 @@ class TestClipboardPreservingDecoratorOutput:
         parent = MagicMock()
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
+        sleeper = MagicMock(spec=Sleeper)
         parent.attach_mock(inner, "inner")
         parent.attach_mock(preserver, "preserver")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
@@ -70,7 +80,7 @@ class TestClipboardPreservingDecoratorOutput:
         assert output_index < restore_index
 
     def test_should_restore_even_when_inner_raises(self):
-        decorator, inner, preserver = _build_decorator()
+        decorator, inner, preserver, _ = _build_decorator()
         inner.output.side_effect = RuntimeError("paste failed")
 
         with pytest.raises(RuntimeError):
@@ -82,7 +92,10 @@ class TestClipboardPreservingDecoratorOutput:
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
         preserver.save.side_effect = OSError("clipboard locked")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        sleeper = MagicMock(spec=Sleeper)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
@@ -93,7 +106,10 @@ class TestClipboardPreservingDecoratorOutput:
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
         preserver.save.side_effect = OSError("clipboard locked")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        sleeper = MagicMock(spec=Sleeper)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
@@ -103,7 +119,10 @@ class TestClipboardPreservingDecoratorOutput:
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
         preserver.save.side_effect = OSError("clipboard locked")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        sleeper = MagicMock(spec=Sleeper)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
@@ -117,24 +136,27 @@ class TestClipboardPreservingDecoratorOutput:
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
         preserver.restore.side_effect = OSError("restore failed")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        sleeper = MagicMock(spec=Sleeper)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
         assert "restore" in log_capture.text.lower()
 
-    @patch(f"{_MODULE}.time")
-    def test_should_call_operations_in_correct_order_with_consume_delay(
-        self, mock_time
-    ):
+    def test_should_call_operations_in_correct_order_with_consume_delay(self):
         call_order: list[str] = []
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
+        sleeper = MagicMock(spec=Sleeper)
         preserver.save.side_effect = lambda: call_order.append("save")
         inner.output.side_effect = lambda t: call_order.append("inner.output")
-        mock_time.sleep.side_effect = lambda d: call_order.append(f"sleep({d})")
+        sleeper.sleep.side_effect = lambda d: call_order.append(f"sleep({d})")
         preserver.restore.side_effect = lambda: call_order.append("restore")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         decorator.output("text")
 
@@ -145,27 +167,39 @@ class TestClipboardPreservingDecoratorOutput:
             "restore",
         ]
 
-    @patch(f"{_MODULE}.time")
-    def test_should_skip_consume_delay_when_inner_raises(self, mock_time):
+    def test_should_skip_consume_delay_when_inner_raises(self):
         call_order: list[str] = []
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
+        sleeper = MagicMock(spec=Sleeper)
         preserver.save.side_effect = lambda: call_order.append("save")
         inner.output.side_effect = RuntimeError("boom")
-        mock_time.sleep.side_effect = lambda d: call_order.append("sleep")
+        sleeper.sleep.side_effect = lambda d: call_order.append("sleep")
         preserver.restore.side_effect = lambda: call_order.append("restore")
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         with pytest.raises(RuntimeError):
             decorator.output("text")
 
         assert call_order == ["save", "restore"]
 
+    def test_should_delegate_sleep_to_injected_sleeper(self):
+        decorator, _, _, sleeper = _build_decorator()
+
+        decorator.output("text")
+
+        sleeper.sleep.assert_called_once_with(_PASTE_CONSUME_DELAY_SECONDS)
+
 
 class TestClipboardPreservingDecoratorIsATextOutputHandler:
     def test_should_implement_text_output_handler_interface(self):
         inner = MagicMock(spec=TextOutputHandler)
         preserver = MagicMock(spec=ClipboardPreserver)
-        decorator = ClipboardPreservingDecorator(inner=inner, preserver=preserver)
+        sleeper = MagicMock(spec=Sleeper)
+        decorator = ClipboardPreservingDecorator(
+            inner=inner, preserver=preserver, sleeper=sleeper
+        )
 
         assert isinstance(decorator, TextOutputHandler)

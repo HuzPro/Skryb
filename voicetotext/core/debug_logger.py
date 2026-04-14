@@ -44,10 +44,14 @@ def setup_debug_logger(log_path: Path, *, console: bool = False) -> None:
 
     # Idempotency: drop any handler we previously attached so repeated
     # calls (e.g. tests, first-run → main-run transitions) do not stack
-    # identical handlers and multiply writes.
+    # identical handlers and multiply writes.  Close each dropped handler
+    # so its underlying file descriptor is released immediately — leaving
+    # it open would leak handles on first-run → main-run transitions and
+    # prevents the log file from being rotated on Windows.
     for existing in list(logger.handlers):
         if getattr(existing, "_voicetotext_debug", False):
             logger.removeHandler(existing)
+            existing.close()
 
     file_handler = logging.FileHandler(str(log_path), mode="w", encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)

@@ -1,9 +1,27 @@
 import logging
 
+import pytest
+
 from voicetotext.core.debug_logger import setup_debug_logger
 
 
 _APP_LOGGER_NAME = "voicetotext"
+
+
+@pytest.fixture(autouse=True)
+def _release_debug_handlers():
+    """Close and detach any debug handlers attached by a test.
+
+    Without this, FileHandler instances pointing at ``tmp_path`` leak
+    into later tests (which pytest flags as
+    ``PytestUnraisableExceptionWarning``) and pollute test isolation.
+    """
+    yield
+    logger = logging.getLogger(_APP_LOGGER_NAME)
+    for handler in list(logger.handlers):
+        if getattr(handler, "_voicetotext_debug", False):
+            logger.removeHandler(handler)
+            handler.close()
 
 
 def _debug_handlers(logger: logging.Logger) -> list[logging.Handler]:

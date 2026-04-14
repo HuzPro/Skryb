@@ -1,8 +1,8 @@
 import logging
-import time
 
 from voicetotext.output.clipboard_preserver import ClipboardPreserver
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.sleeper import Sleeper
 
 
 _logger = logging.getLogger(__name__)
@@ -21,9 +21,11 @@ class ClipboardPreservingDecorator(TextOutputHandler):
         self,
         inner: TextOutputHandler,
         preserver: ClipboardPreserver,
+        sleeper: Sleeper,
     ) -> None:
         self._inner = inner
         self._preserver = preserver
+        self._sleeper = sleeper
 
     def output(self, text: str) -> None:
         if not self._try_save():
@@ -35,7 +37,7 @@ class ClipboardPreservingDecorator(TextOutputHandler):
             return
         try:
             self._inner.output(text)
-            time.sleep(_PASTE_CONSUME_DELAY_SECONDS)
+            self._sleeper.sleep(_PASTE_CONSUME_DELAY_SECONDS)
         finally:
             self._try_restore()
 

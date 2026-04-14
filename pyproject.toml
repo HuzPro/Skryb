@@ -35,6 +35,20 @@ voicetotext = "voicetotext.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "unit: fast hermetic tests, no I/O",
+    "acceptance: full-use-case scenarios via fakes",
+    "integration: touch real filesystem or real third-party libs",
+    "slow: tests that take longer than 100ms",
+]
+filterwarnings = [
+    "error",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -2,6 +2,7 @@ import logging
 import sys
 import threading
 
+from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
 from voicetotext.core.debug_logger import setup_debug_logger
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
@@ -19,6 +20,7 @@ from voicetotext.output.clipboard_preserving_decorator import (
 )
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.settings.download_coordinator import DownloadCoordinator
@@ -59,11 +61,13 @@ def _build_output(config: JsonConfigAdapter) -> TextOutputHandler:
     mode = config.get("output.mode")
     if mode == "clipboard_only":
         return ClipboardAdapter()
+    sleeper = TimeSleeper()
     if mode == "paste_and_clipboard":
-        return PasteAndClipboardAdapter()
+        return PasteAndClipboardAdapter(sleeper=sleeper)
     return ClipboardPreservingDecorator(
-        inner=PasteAndClipboardAdapter(),
+        inner=PasteAndClipboardAdapter(sleeper=sleeper),
         preserver=Win32ClipboardPreserver(),
+        sleeper=sleeper,
     )
 
 
@@ -105,6 +109,7 @@ def _build_settings_service(
     event_bus: SimpleEventBus,
     model_manager: ModelManager,
     use_case: RecordAndTranscribeUseCase,
+    action_dispatcher: ActionDispatcher,
 ) -> SettingsService:
     install_cache = ModelInstallationCache(model_manager, event_bus)
     downloads = DownloadCoordinator(model_manager)
@@ -112,6 +117,7 @@ def _build_settings_service(
         use_case=use_case,
         event_bus=event_bus,
         loader=lambda: _load_engine_with_fallback(config, paths),
+        action_dispatcher=action_dispatcher,
     )
     service = SettingsService(
         config=config,
@@ -186,12 +192,15 @@ def build_app(
 
     output = _build_output(config)
 
+    action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
+
     use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
         engine=engine,
         output=output,
         state_machine=state_machine,
         event_bus=event_bus,
+        action_dispatcher=action_dispatcher,
     )
 
     listener = _build_hotkey_listener(config, use_case)
@@ -204,6 +213,7 @@ def build_app(
         event_bus=event_bus,
         model_manager=model_manager,
         use_case=use_case,
+        action_dispatcher=action_dispatcher,
     )
 
     def open_settings() -> None:

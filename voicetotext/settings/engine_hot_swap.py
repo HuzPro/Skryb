@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable
 from typing import Protocol
 
+from voicetotext.core.action_dispatcher import ActionDispatcher
 from voicetotext.transcription.engine_diagnostics import count_live_adapters, vram_snapshot
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
@@ -74,11 +75,12 @@ class EngineHotSwapCoordinator:
         use_case: RecordAndTranscribeUseCase,
         event_bus: EventBus,
         loader: EngineLoader,
+        action_dispatcher: ActionDispatcher,
     ):
         self._use_case = use_case
         self._event_bus = event_bus
         self._loader = loader
-        self._thread: threading.Thread | None = None
+        self._dispatcher = action_dispatcher
         self._lock = threading.Lock()
         self._busy = False
 
@@ -91,13 +93,7 @@ class EngineHotSwapCoordinator:
             if self._busy:
                 raise RuntimeError("engine swap already in progress")
             self._busy = True
-            self._thread = threading.Thread(
-                target=self._run_swap,
-                args=(model_name,),
-                daemon=True,
-                name=f"engine-swap-{model_name}",
-            )
-            self._thread.start()
+        self._dispatcher.dispatch(lambda: self._run_swap(model_name))
 
     def _run_swap(self, model_name: str) -> None:
         _logger.info(

@@ -1,9 +1,8 @@
-import threading
-import time
 from unittest.mock import MagicMock
 
 import pytest
 
+from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     EngineLoadCompletedEvent,
@@ -16,60 +15,48 @@ from voicetotext.settings.engine_hot_swap import (
 )
 
 
-class _EventCollector:
-    """Records published events of a given type."""
-
-    def __init__(self, bus: SimpleEventBus, *event_types):
-        self.events: list = []
-        self._bus = bus
-        for et in event_types:
-            bus.subscribe(et, self._on_event)
-
-    def _on_event(self, event) -> None:
-        self.events.append(event)
-
-    def wait_until(self, predicate, timeout: float = 2.0) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if predicate():
-                return True
-            time.sleep(0.01)
-        return False
+def _collect(bus: SimpleEventBus, *event_types) -> list:
+    events: list = []
+    for et in event_types:
+        bus.subscribe(et, events.append)
+    return events
 
 
 class TestEngineHotSwapCoordinatorStartSwap:
     def test_should_publish_load_started_event(self):
         bus = SimpleEventBus()
-        use_case = MagicMock()
-        collector = _EventCollector(bus, EngineLoadStartedEvent)
-        loader = MagicMock(return_value=MagicMock())
+        started = _collect(bus, EngineLoadStartedEvent)
 
-        coord = EngineHotSwapCoordinator(use_case, bus, loader)
+        coord = EngineHotSwapCoordinator(
+            use_case=MagicMock(),
+            event_bus=bus,
+            loader=lambda: MagicMock(),
+            action_dispatcher=InlineActionDispatcher(),
+        )
         coord.start_swap("small")
 
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
-        assert collector.events[0].model_name == "small"
+        assert len(started) == 1
+        assert started[0].model_name == "small"
 
     def test_should_replace_engine_on_use_case_when_loader_succeeds(self):
         bus = SimpleEventBus()
         use_case = MagicMock()
         new_engine = MagicMock()
-        collector = _EventCollector(bus, EngineLoadCompletedEvent)
 
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
             event_bus=bus,
             loader=lambda: new_engine,
+            action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("small")
 
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
         use_case.set_engine.assert_called_once_with(new_engine)
 
     def test_should_dispose_old_engine_before_loading_new_one(self):
         bus = SimpleEventBus()
         use_case = MagicMock()
-        call_order = []
+        call_order: list[str] = []
 
         use_case.dispose_current_engine.side_effect = (
             lambda: call_order.append("dispose")
@@ -79,32 +66,36 @@ class TestEngineHotSwapCoordinatorStartSwap:
             call_order.append("load")
             return MagicMock()
 
-        collector = _EventCollector(bus, EngineLoadCompletedEvent)
-        coord = EngineHotSwapCoordinator(use_case, bus, loader)
+        coord = EngineHotSwapCoordinator(
+            use_case=use_case,
+            event_bus=bus,
+            loader=loader,
+            action_dispatcher=InlineActionDispatcher(),
+        )
         coord.start_swap("small")
 
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
         assert call_order == ["dispose", "load"]
 
     def test_should_publish_failed_event_when_set_engine_rejects_non_idle_state(self):
         bus = SimpleEventBus()
+        failed = _collect(bus, EngineLoadFailedEvent)
         use_case = MagicMock()
         use_case.set_engine.side_effect = RuntimeError("Can only swap engine when idle")
-        collector = _EventCollector(bus, EngineLoadFailedEvent)
 
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
             event_bus=bus,
             loader=lambda: MagicMock(),
+            action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("small")
 
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
-        assert "idle" in collector.events[0].error.lower()
+        assert len(failed) == 1
+        assert "idle" in failed[0].error.lower()
 
     def test_should_publish_failed_event_on_loader_exception(self):
         bus = SimpleEventBus()
-        collector = _EventCollector(bus, EngineLoadFailedEvent)
+        failed = _collect(bus, EngineLoadFailedEvent)
 
         def broken_loader():
             raise RuntimeError("cuda oom")
@@ -113,50 +104,41 @@ class TestEngineHotSwapCoordinatorStartSwap:
             use_case=MagicMock(),
             event_bus=bus,
             loader=broken_loader,
+            action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("large-v3")
 
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
-        assert collector.events[0].model_name == "large-v3"
-        assert "cuda oom" in collector.events[0].error
+        assert len(failed) == 1
+        assert failed[0].model_name == "large-v3"
+        assert "cuda oom" in failed[0].error
 
     def test_should_raise_when_swap_already_in_progress(self):
-        release = threading.Event()
-
-        def slow_loader():
-            release.wait(timeout=2)
-            return MagicMock()
-
-        bus = SimpleEventBus()
+        dispatcher = DeferredActionDispatcher()
         coord = EngineHotSwapCoordinator(
             use_case=MagicMock(),
-            event_bus=bus,
-            loader=slow_loader,
+            event_bus=SimpleEventBus(),
+            loader=lambda: MagicMock(),
+            action_dispatcher=dispatcher,
         )
         coord.start_swap("small")
 
-        try:
-            with pytest.raises(RuntimeError):
-                coord.start_swap("small")
-        finally:
-            release.set()
+        with pytest.raises(RuntimeError, match="already in progress"):
+            coord.start_swap("small")
 
     def test_should_allow_new_swap_after_previous_finishes(self):
         bus = SimpleEventBus()
-        collector = _EventCollector(
-            bus, EngineLoadCompletedEvent, EngineLoadFailedEvent
-        )
+        completed = _collect(bus, EngineLoadCompletedEvent)
         coord = EngineHotSwapCoordinator(
             use_case=MagicMock(),
             event_bus=bus,
             loader=lambda: MagicMock(),
+            action_dispatcher=InlineActionDispatcher(),
         )
 
         coord.start_swap("tiny")
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
-
         coord.start_swap("small")
-        assert collector.wait_until(lambda: len(collector.events) >= 2)
+
+        assert len(completed) == 2
 
     def test_null_hot_swap_reports_not_busy(self):
         null = NullEngineHotSwap()
@@ -170,26 +152,17 @@ class TestEngineHotSwapCoordinatorStartSwap:
             null.start_swap("base")
 
     def test_is_busy_reflects_swap_lifecycle(self):
-        release = threading.Event()
-
-        def slow_loader():
-            release.wait(timeout=2)
-            return MagicMock()
-
-        bus = SimpleEventBus()
-        collector = _EventCollector(bus, EngineLoadCompletedEvent)
+        dispatcher = DeferredActionDispatcher()
         coord = EngineHotSwapCoordinator(
             use_case=MagicMock(),
-            event_bus=bus,
-            loader=slow_loader,
+            event_bus=SimpleEventBus(),
+            loader=lambda: MagicMock(),
+            action_dispatcher=dispatcher,
         )
 
         assert coord.is_busy() is False
         coord.start_swap("small")
         assert coord.is_busy() is True
 
-        release.set()
-        assert collector.wait_until(lambda: len(collector.events) >= 1)
-        # Let the worker thread fully exit.
-        time.sleep(0.05)
+        dispatcher.drain_all()
         assert coord.is_busy() is False
