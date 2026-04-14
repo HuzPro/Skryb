@@ -1,11 +1,10 @@
 import logging
 import threading
 import time
+from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Protocol
 
 from voicetotext.core.action_dispatcher import ActionDispatcher
-from voicetotext.transcription.engine_diagnostics import count_live_adapters, vram_snapshot
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     EngineLoadCompletedEvent,
@@ -14,6 +13,10 @@ from voicetotext.core.events import (
 )
 from voicetotext.core.exceptions import EngineSwapError
 from voicetotext.transcription.engine import TranscriptionEngine
+from voicetotext.transcription.engine_diagnostics import (
+    count_live_adapters,
+    vram_snapshot,
+)
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 
@@ -23,23 +26,25 @@ _logger = logging.getLogger(__name__)
 EngineLoader = Callable[[], TranscriptionEngine]
 
 
-class EngineHotSwap(Protocol):
-    """Structural interface for an engine hot-swap strategy.
+class EngineHotSwap(ABC):
+    """Port for an engine hot-swap strategy.
 
-    Two implementations exist:
-    :class:`EngineHotSwapCoordinator` (normal runtime) and
-    :class:`NullEngineHotSwap` (first-run setup, where no engine is
-    loaded yet and swapping is meaningless).
+    Two implementations exist: :class:`EngineHotSwapCoordinator` for
+    normal runtime and :class:`NullEngineHotSwap` for first-run setup,
+    where no engine is loaded yet and swapping is meaningless.
     """
 
+    @abstractmethod
     def start_swap(self, model_name: str) -> None: ...
+
+    @abstractmethod
     def is_busy(self) -> bool: ...
 
 
-class NullEngineHotSwap:
+class NullEngineHotSwap(EngineHotSwap):
     """Null Object (GoF) for first-run setup.
 
-    During first-run the app has no engine to swap — the first engine
+    During first-run the app has no engine to swap; the first engine
     load happens in :func:`voicetotext.bootstrap.build_app` after the
     setup window closes. This null object lets the facade still receive
     a valid collaborator without introducing ``None`` into its API.
@@ -55,19 +60,19 @@ class NullEngineHotSwap:
         )
 
 
-class EngineHotSwapCoordinator:
+class EngineHotSwapCoordinator(EngineHotSwap):
     """Runs a new engine load on a background thread and swaps it in.
 
-    The existing synchronous hot-swap in bootstrap freezes the caller
-    thread (tray or settings window daemon) for 5–30 seconds with no
+    The existing synchronous hot-swap in bootstrap froze the caller
+    thread (tray or settings window daemon) for 5 to 30 seconds with no
     feedback. This coordinator offloads the load and publishes
-    :class:`EngineLoadStartedEvent`,
-    :class:`EngineLoadCompletedEvent`, or :class:`EngineLoadFailedEvent`
-    so the UI can render a loading state.
+    :class:`EngineLoadStartedEvent`, :class:`EngineLoadCompletedEvent`,
+    or :class:`EngineLoadFailedEvent` so the UI can render a loading
+    state.
 
     Only one swap may run at a time. Starting a second swap while the
-    first is still in-flight raises :class:`RuntimeError` — callers that
-    expose this via UI should disable the relevant control while
+    first is still in-flight raises :class:`EngineSwapError`; callers
+    that expose this via UI should disable the relevant control while
     :meth:`is_busy` is true.
     """
 
@@ -97,57 +102,55 @@ class EngineHotSwapCoordinator:
         self._dispatcher.dispatch(lambda: self._run_swap(model_name))
 
     def _run_swap(self, model_name: str) -> None:
-        _logger.info(
-            "[swap] start target=%s | adapters=%d | %s",
-            model_name,
-            count_live_adapters(),
-            vram_snapshot(),
-        )
-        self._event_bus.publish(
-            EngineLoadStartedEvent(model_name=model_name)
-        )
+        self._announce_swap_started(model_name)
+        failure = self._try_swap(model_name)
+        self._release_busy_flag()
+        self._publish_swap_outcome(model_name, failure)
+
+    def _try_swap(self, model_name: str) -> Exception | None:
         try:
-            self._use_case.dispose_current_engine()
-            _logger.info(
-                "[swap] old engine disposed | adapters=%d | %s",
-                count_live_adapters(),
-                vram_snapshot(),
-            )
-
-            t0 = time.monotonic()
-            new_engine = self._loader()
-            _logger.info(
-                "[swap] loader done in %.2fs | adapters=%d | %s",
-                time.monotonic() - t0,
-                count_live_adapters(),
-                vram_snapshot(),
-            )
-
-            self._use_case.set_engine(new_engine)
-            _logger.info(
-                "[swap] engine installed | adapters=%d | %s",
-                count_live_adapters(),
-                vram_snapshot(),
-            )
+            self._perform_swap()
+            return None
         except Exception as exc:
             _logger.exception("[swap] failed for '%s'", model_name)
-            with self._lock:
-                self._busy = False
+            return exc
+
+    def _perform_swap(self) -> None:
+        self._use_case.dispose_current_engine()
+        self._log_phase("old engine disposed")
+
+        started_at = time.monotonic()
+        new_engine = self._loader()
+        self._log_phase(f"loader done in {time.monotonic() - started_at:.2f}s")
+
+        self._use_case.set_engine(new_engine)
+        self._log_phase("engine installed")
+
+    def _announce_swap_started(self, model_name: str) -> None:
+        self._log_phase(f"start target={model_name}")
+        self._event_bus.publish(EngineLoadStartedEvent(model_name=model_name))
+
+    def _publish_swap_outcome(
+        self, model_name: str, failure: Exception | None
+    ) -> None:
+        if failure is None:
+            self._log_phase(f"complete '{model_name}' is live")
             self._event_bus.publish(
-                EngineLoadFailedEvent(
-                    model_name=model_name, error=str(exc)
-                )
+                EngineLoadCompletedEvent(model_name=model_name)
             )
             return
-
-        _logger.info(
-            "[swap] complete '%s' is live | adapters=%d | %s",
-            model_name,
-            count_live_adapters(),
-            vram_snapshot(),
+        self._event_bus.publish(
+            EngineLoadFailedEvent(model_name=model_name, error=str(failure))
         )
+
+    def _release_busy_flag(self) -> None:
         with self._lock:
             self._busy = False
-        self._event_bus.publish(
-            EngineLoadCompletedEvent(model_name=model_name)
+
+    def _log_phase(self, message: str) -> None:
+        _logger.info(
+            "[swap] %s | adapters=%d | %s",
+            message,
+            count_live_adapters(),
+            vram_snapshot(),
         )
