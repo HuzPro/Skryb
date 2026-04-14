@@ -397,7 +397,9 @@ class TestDispatchesThroughActionDispatcher:
 
 
 class TestDispose:
-    def test_should_not_raise_on_dispose(self):
-        use_case, _, _, _, _, _ = _build_use_case()
+    def test_should_dispose_current_engine(self):
+        use_case, _, engine, _, _, _ = _build_use_case()
 
         use_case.dispose()
+
+        engine.dispose.assert_called_once()
