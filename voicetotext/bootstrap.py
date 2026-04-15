@@ -63,6 +63,27 @@ def migrate_output_mode(config: JsonConfigAdapter) -> None:
     config.save()
 
 
+def migrate_language(config: JsonConfigAdapter) -> None:
+    """Rewrite a legacy ``transcription.language`` of ``None`` or ``"auto"`` to ``"en"``.
+
+    Older configs used ``None`` (or the sentinel ``"auto"``) to request
+    Whisper's auto-detect path.  That path fails on audio shorter than
+    30 seconds because of how transformers 5.x routes short-form vs.
+    long-form generation — and short recordings are the whole use case
+    of this app.  Pinning the language to a specific value (default
+    ``"en"``) sidesteps the bug and is more reliable anyway, since
+    language detection on sub-30-second utterances is unreliable by
+    construction.  This one-shot migration protects existing users
+    whose configs still hold the legacy value.
+    """
+    current = config.get("transcription.language")
+    if current not in (None, "auto"):
+        return
+    _logger.info("Migrating transcription language %r -> 'en'.", current)
+    config.set("transcription.language", "en")
+    config.save()
+
+
 def _build_output(mode: OutputMode) -> TextOutputHandler:
     sleeper = TimeSleeper()
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
@@ -183,6 +204,7 @@ def build_app(
     from voicetotext.transcription.model_info import migrate_removed_models
     migrate_removed_models(config)
     migrate_output_mode(config)
+    migrate_language(config)
 
     if event_bus is None:
         event_bus = SimpleEventBus()

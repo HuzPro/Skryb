@@ -6,6 +6,7 @@ from voicetotext.bootstrap import (
     _build_output,
     _load_engine_with_fallback,
     apply_settings,
+    migrate_language,
     migrate_output_mode,
 )
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
@@ -146,6 +147,44 @@ class TestMigrateOutputMode:
         config.get.return_value = "paste_and_clipboard"
 
         migrate_output_mode(config)
+
+        config.set.assert_not_called()
+        config.save.assert_not_called()
+
+
+class TestMigrateLanguage:
+    def test_should_rewrite_none_language_to_en(self):
+        config = MagicMock()
+        config.get.return_value = None
+
+        migrate_language(config)
+
+        config.set.assert_called_once_with("transcription.language", "en")
+        config.save.assert_called_once()
+
+    def test_should_rewrite_legacy_auto_language_to_en(self):
+        config = MagicMock()
+        config.get.return_value = "auto"
+
+        migrate_language(config)
+
+        config.set.assert_called_once_with("transcription.language", "en")
+        config.save.assert_called_once()
+
+    def test_should_leave_english_unchanged(self):
+        config = MagicMock()
+        config.get.return_value = "en"
+
+        migrate_language(config)
+
+        config.set.assert_not_called()
+        config.save.assert_not_called()
+
+    def test_should_leave_other_language_unchanged(self):
+        config = MagicMock()
+        config.get.return_value = "fr"
+
+        migrate_language(config)
 
         config.set.assert_not_called()
         config.save.assert_not_called()

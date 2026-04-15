@@ -54,6 +54,7 @@ def _setup_transcribe_mocks(decoded_text: str = "") -> tuple:
 class TestTransformersWhisperAdapterLoadModel:
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_load_model_and_processor_from_hf_repo(self):
+        import torch
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
         adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
@@ -64,12 +65,13 @@ class TestTransformersWhisperAdapterLoadModel:
             "openai/whisper-base"
         )
         WhisperForConditionalGeneration.from_pretrained.assert_called_once_with(
-            "openai/whisper-base"
+            "openai/whisper-base", dtype=torch.float32
         )
         assert adapter.is_model_loaded() is True
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_load_from_local_cache_when_download_root_set(self):
+        import torch
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
         adapter = TransformersWhisperAdapter(
@@ -87,7 +89,36 @@ class TestTransformersWhisperAdapterLoadModel:
             "openai/whisper-small",
             cache_dir="/tmp/models",
             local_files_only=True,
+            dtype=torch.float32,
         )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_force_fp32_dtype_when_loading_on_cpu(self):
+        """Transformers 5.x honors ``torch_dtype`` from config.json by default,
+        so large-v3-turbo (config: float16) lands on CPU as fp16 and cannot
+        run Linear/Conv layers. The adapter must force fp32 on CPU."""
+        import torch
+        from transformers import WhisperForConditionalGeneration
+
+        adapter = TransformersWhisperAdapter(model_size="large-v3-turbo", device="cpu")
+
+        adapter.load_model()
+
+        call_kwargs = WhisperForConditionalGeneration.from_pretrained.call_args[1]
+        assert call_kwargs.get("dtype") is torch.float32
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_not_force_dtype_when_loading_on_cuda(self):
+        """CUDA path relies on ``_optimize_for_device`` to cast to fp16 and
+        must leave the HF default dtype selection alone."""
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        adapter = TransformersWhisperAdapter(model_size="large-v3-turbo", device="cuda")
+
+        adapter.load_model()
+
+        call_kwargs = WhisperForConditionalGeneration.from_pretrained.call_args[1]
+        assert "dtype" not in call_kwargs
 
     def test_should_report_not_loaded_before_load(self):
         adapter = TransformersWhisperAdapter(model_size="base")

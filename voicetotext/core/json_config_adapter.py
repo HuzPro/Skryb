@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
     "transcription": {
         "model_size": "base",
         "device": "auto",
-        "language": None,
+        "language": "en",
         "beam_size": 5,
     },
     "audio": {

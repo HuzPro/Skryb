@@ -54,18 +54,16 @@ class TestEngineHotSwapCoordinatorStartSwap:
 
         use_case.set_engine.assert_called_once_with(new_engine)
 
-    def test_should_dispose_old_engine_before_loading_new_one(self):
+    def test_should_load_new_engine_before_installing_it(self):
         bus = SimpleEventBus()
         use_case = MagicMock()
         call_order: list[str] = []
 
-        use_case.dispose_current_engine.side_effect = (
-            lambda: call_order.append("dispose")
-        )
-
         def loader():
             call_order.append("load")
             return MagicMock()
+
+        use_case.set_engine.side_effect = lambda _e: call_order.append("install")
 
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
@@ -75,13 +73,58 @@ class TestEngineHotSwapCoordinatorStartSwap:
         )
         coord.start_swap("small")
 
-        assert call_order == ["dispose", "load"]
+        assert call_order == ["load", "install"]
+
+    def test_should_not_call_dispose_current_engine_during_swap(self):
+        use_case = MagicMock()
+
+        coord = EngineHotSwapCoordinator(
+            use_case=use_case,
+            event_bus=SimpleEventBus(),
+            loader=lambda: MagicMock(),
+            action_dispatcher=InlineActionDispatcher(),
+        )
+        coord.start_swap("small")
+
+        use_case.dispose_current_engine.assert_not_called()
+
+    def test_should_not_dispose_new_engine_on_happy_path(self):
+        new_engine = MagicMock()
+
+        coord = EngineHotSwapCoordinator(
+            use_case=MagicMock(),
+            event_bus=SimpleEventBus(),
+            loader=lambda: new_engine,
+            action_dispatcher=InlineActionDispatcher(),
+        )
+        coord.start_swap("small")
+
+        new_engine.dispose.assert_not_called()
+
+    def test_should_dispose_new_engine_when_set_engine_rejects(self):
+        new_engine = MagicMock()
+        use_case = MagicMock()
+        use_case.set_engine.side_effect = EngineSwapError(
+            "Can only swap engine when idle"
+        )
+
+        coord = EngineHotSwapCoordinator(
+            use_case=use_case,
+            event_bus=SimpleEventBus(),
+            loader=lambda: new_engine,
+            action_dispatcher=InlineActionDispatcher(),
+        )
+        coord.start_swap("small")
+
+        new_engine.dispose.assert_called_once_with()
 
     def test_should_publish_failed_event_when_set_engine_rejects_non_idle_state(self):
         bus = SimpleEventBus()
         failed = _collect(bus, EngineLoadFailedEvent)
         use_case = MagicMock()
-        use_case.set_engine.side_effect = RuntimeError("Can only swap engine when idle")
+        use_case.set_engine.side_effect = EngineSwapError(
+            "Can only swap engine when idle"
+        )
 
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
@@ -93,6 +136,23 @@ class TestEngineHotSwapCoordinatorStartSwap:
 
         assert len(failed) == 1
         assert "idle" in failed[0].error.lower()
+
+    def test_should_not_touch_use_case_engine_when_loader_fails(self):
+        use_case = MagicMock()
+
+        def broken_loader():
+            raise RuntimeError("cuda oom")
+
+        coord = EngineHotSwapCoordinator(
+            use_case=use_case,
+            event_bus=SimpleEventBus(),
+            loader=broken_loader,
+            action_dispatcher=InlineActionDispatcher(),
+        )
+        coord.start_swap("large-v3")
+
+        use_case.dispose_current_engine.assert_not_called()
+        use_case.set_engine.assert_not_called()
 
     def test_should_publish_failed_event_on_loader_exception(self):
         bus = SimpleEventBus()

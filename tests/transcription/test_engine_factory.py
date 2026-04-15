@@ -32,7 +32,7 @@ def _make_config(**overrides):
     defaults = {
         "transcription.model_size": "base",
         "transcription.device": "auto",
-        "transcription.language": None,
+        "transcription.language": "en",
         "transcription.beam_size": 5,
     }
     defaults.update(overrides)

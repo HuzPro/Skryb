@@ -49,9 +49,6 @@ class EngineEventListener(ABC):
     def on_engine_load_failed(self, event: EngineLoadFailedEvent) -> None: ...
 
 
-_AUTO_LANGUAGE = "auto"
-
-
 class SettingsService:
     """Facade (GoF) the settings UI talks to instead of domain objects.
 
@@ -139,10 +136,9 @@ class SettingsService:
     # ------------------------------------------------------------------
 
     def current_draft(self) -> SettingsDraft:
-        language = self._config.get("transcription.language")
         return SettingsDraft(
             model_size=self._config.get("transcription.model_size", "base"),
-            language=language if language else _AUTO_LANGUAGE,
+            language=self._config.get("transcription.language", "en"),
             device=self._config.get("transcription.device", "auto"),
             hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
             hotkey_mode=self._config.get("hotkey.mode", "toggle"),
@@ -152,10 +148,7 @@ class SettingsService:
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
         original = self.current_draft()
         self._config.set("transcription.model_size", draft.model_size)
-        self._config.set(
-            "transcription.language",
-            None if draft.language == _AUTO_LANGUAGE else draft.language,
-        )
+        self._config.set("transcription.language", draft.language)
         self._config.set("transcription.device", draft.device)
         self._config.set("hotkey.combination", draft.hotkey_combination)
         self._config.set("hotkey.mode", draft.hotkey_mode)

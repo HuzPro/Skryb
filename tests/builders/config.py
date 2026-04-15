@@ -4,7 +4,7 @@ from voicetotext.core.config import ConfigValue
 
 _DEFAULTS: dict[str, ConfigValue] = {
     "transcription.model_size": "base",
-    "transcription.language": None,
+    "transcription.language": "en",
     "transcription.device": "auto",
     "hotkey.combination": "ctrl+alt+m",
     "hotkey.mode": "toggle",

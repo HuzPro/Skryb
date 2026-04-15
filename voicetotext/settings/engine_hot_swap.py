@@ -116,14 +116,21 @@ class EngineHotSwapCoordinator(EngineHotSwap):
             return exc
 
     def _perform_swap(self) -> None:
-        self._use_case.dispose_current_engine()
-        self._log_phase("old engine disposed")
+        new_engine = self._load_new_engine()
+        self._install_or_discard(new_engine)
 
+    def _load_new_engine(self) -> TranscriptionEngine:
         started_at = time.monotonic()
         new_engine = self._loader()
         self._log_phase(f"loader done in {time.monotonic() - started_at:.2f}s")
+        return new_engine
 
-        self._use_case.set_engine(new_engine)
+    def _install_or_discard(self, new_engine: TranscriptionEngine) -> None:
+        try:
+            self._use_case.set_engine(new_engine)
+        except EngineSwapError:
+            new_engine.dispose()
+            raise
         self._log_phase("engine installed")
 
     def _announce_swap_started(self, model_name: str) -> None:

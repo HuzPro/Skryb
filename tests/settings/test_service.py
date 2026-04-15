@@ -32,7 +32,7 @@ def _build_service(
 ):
     config_data = {
         "transcription.model_size": "base",
-        "transcription.language": None,
+        "transcription.language": "en",
         "transcription.device": "auto",
         "hotkey.combination": "ctrl+alt+m",
         "hotkey.mode": "toggle",
@@ -189,14 +189,14 @@ class TestCurrentDraft:
         assert draft.hotkey_mode == "push_to_talk"
         assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
 
-    def test_should_surface_auto_language_when_config_is_none(self):
+    def test_should_pass_language_through_without_translation(self):
         service, *_ = _build_service(
-            config_overrides={"transcription.language": None}
+            config_overrides={"transcription.language": "fr"}
         )
 
         draft = service.current_draft()
 
-        assert draft.language == "auto"
+        assert draft.language == "fr"
 
 
 class TestApplyDraft:
@@ -221,11 +221,11 @@ class TestApplyDraft:
         assert config.get("output.mode") == "clipboard_only"
         assert config.save_count == 1
 
-    def test_should_store_none_for_auto_language(self):
+    def test_should_persist_language_exactly_as_given(self):
         service, config, *_ = _build_service()
         draft = SettingsDraft(
             model_size="base",
-            language="auto",
+            language="de",
             device="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
@@ -234,14 +234,14 @@ class TestApplyDraft:
 
         service.apply_draft(draft)
 
-        assert config.get("transcription.language") is None
+        assert config.get("transcription.language") == "de"
 
     def test_should_return_changeset_reflecting_only_changed_fields(self):
         service, *_ = _build_service()
 
         draft = SettingsDraft(
             model_size="small",  # changed from "base"
-            language="auto",
+            language="en",
             device="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",

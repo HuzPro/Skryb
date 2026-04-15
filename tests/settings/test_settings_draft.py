@@ -7,7 +7,7 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 def _make_draft(**overrides) -> SettingsDraft:
     base = dict(
         model_size="base",
-        language="auto",
+        language="en",
         device="auto",
         hotkey_combination="ctrl+alt+m",
         hotkey_mode="toggle",
@@ -22,7 +22,7 @@ class TestSettingsDraftConstruction:
         draft = _make_draft()
 
         assert draft.model_size == "base"
-        assert draft.language == "auto"
+        assert draft.language == "en"
         assert draft.device == "auto"
         assert draft.hotkey_combination == "ctrl+alt+m"
         assert draft.hotkey_mode == "toggle"

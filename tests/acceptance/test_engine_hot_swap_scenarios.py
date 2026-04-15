@@ -64,3 +64,26 @@ class TestEngineHotSwap:
         voice_to_text_app.trigger_engine_swap("base")
 
         assert old_engine.dispose_called is True
+
+    def test_old_engine_stays_live_when_swap_rejected_mid_recording(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        old_engine = voice_to_text_app.current_engine
+        old_engine.will_return(
+            a_transcription_result().with_text("from old engine").build()
+        )
+        voice_to_text_app.press_hotkey()  # state = RECORDING
+        new_engine = FakeTranscriptionEngine()
+        new_engine.will_return(
+            a_transcription_result().with_text("from new engine").build()
+        )
+        voice_to_text_app.next_engine_will_be(new_engine)
+
+        voice_to_text_app.trigger_engine_swap("large-v3")
+
+        assert new_engine.dispose_called is True
+        assert old_engine.dispose_called is False
+
+        voice_to_text_app.release_hotkey()
+
+        assert voice_to_text_app.typed_text == "from old engine"

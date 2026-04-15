@@ -2,19 +2,21 @@ import logging
 import time
 from typing import Protocol
 
-from voicetotext.transcription.engine_diagnostics import vram_snapshot
 from voicetotext.core.exceptions import TranscriptionError
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
+from voicetotext.transcription.engine_diagnostics import vram_snapshot
 from voicetotext.transcription.result import TranscriptionResult
 
 
 _logger = logging.getLogger(__name__)
 
-_TEMPERATURE_FALLBACK_SCHEDULE = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
-_COMPRESSION_RATIO_THRESHOLD = 1.35
-_LOGPROB_THRESHOLD = -1.0
-_NO_SPEECH_THRESHOLD = 0.6
+_WHISPER_DECODING_DEFAULTS: dict[str, object] = {
+    "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+    "compression_ratio_threshold": 1.35,
+    "logprob_threshold": -1.0,
+    "no_speech_threshold": 0.6,
+}
 
 
 class _WhisperModel(Protocol):
@@ -41,7 +43,7 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         self,
         model_size: str = "base",
         device: str = "cpu",
-        language: str | None = None,
+        language: str = "en",
         beam_size: int = 5,
         download_root: str | None = None,
     ) -> None:
@@ -56,69 +58,54 @@ class TransformersWhisperAdapter(TranscriptionEngine):
     def load_model(self) -> None:
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-        _logger.info(
-            "[load_model %s device=%s] start | %s",
-            self._model_size,
-            self._device,
-            vram_snapshot(),
-        )
+        self._log_phase("load_model", f"start device={self._device}")
 
         repo_id = f"openai/whisper-{self._model_size}"
-        kwargs = {}
+        shared_kwargs: dict[str, object] = {}
         if self._download_root:
-            kwargs["cache_dir"] = self._download_root
-            kwargs["local_files_only"] = True
+            shared_kwargs["cache_dir"] = self._download_root
+            shared_kwargs["local_files_only"] = True
 
-        t0 = time.monotonic()
-        self._processor = WhisperProcessor.from_pretrained(repo_id, **kwargs)
-        _logger.info(
-            "[load_model %s] processor loaded in %.2fs",
-            self._model_size,
-            time.monotonic() - t0,
-        )
+        started_at = time.monotonic()
+        self._processor = WhisperProcessor.from_pretrained(repo_id, **shared_kwargs)
+        self._log_timed_phase("load_model", "processor loaded", started_at)
 
-        t1 = time.monotonic()
-        self._model = WhisperForConditionalGeneration.from_pretrained(repo_id, **kwargs)
-        _logger.info(
-            "[load_model %s] model loaded in %.2fs | %s",
-            self._model_size,
-            time.monotonic() - t1,
-            vram_snapshot(),
+        started_at = time.monotonic()
+        self._model = WhisperForConditionalGeneration.from_pretrained(
+            repo_id, **self._model_load_kwargs(shared_kwargs)
         )
+        self._log_timed_phase("load_model", "model loaded", started_at)
 
         self._optimize_for_device()
 
-        _logger.info(
-            "[load_model %s] complete | %s", self._model_size, vram_snapshot()
-        )
+        self._log_phase("load_model", "complete")
+
+    def _model_load_kwargs(self, base: dict[str, object]) -> dict[str, object]:
+        # HF 5.x honors config.json ``torch_dtype`` (fp16 for large-v3-turbo),
+        # which breaks CPU Linear/Conv layers — force fp32 on CPU.
+        if self._device != "cpu":
+            return base
+        import torch
+        return {**base, "dtype": torch.float32}
 
     def _optimize_for_device(self) -> None:
         if self._device == "cpu":
             return
+        self._move_model_to_device()
+        self._cast_to_half_precision_if_cuda_available()
 
-        import torch
-
-        t0 = time.monotonic()
+    def _move_model_to_device(self) -> None:
+        started_at = time.monotonic()
         self._model = self._model.to(self._device)
-        _logger.info(
-            "[load_model %s] model.to(%s) in %.2fs | %s",
-            self._model_size,
-            self._device,
-            time.monotonic() - t0,
-            vram_snapshot(),
-        )
+        self._log_timed_phase("load_model", f"model.to({self._device})", started_at)
 
+    def _cast_to_half_precision_if_cuda_available(self) -> None:
+        import torch
         if not torch.cuda.is_available():
             return
-
-        t1 = time.monotonic()
+        started_at = time.monotonic()
         self._model = self._model.half()
-        _logger.info(
-            "[load_model %s] model.half() in %.2fs | %s",
-            self._model_size,
-            time.monotonic() - t1,
-            vram_snapshot(),
-        )
+        self._log_timed_phase("load_model", "model.half()", started_at)
 
     def is_model_loaded(self) -> bool:
         return self._model is not None and self._processor is not None
@@ -142,10 +129,9 @@ class TransformersWhisperAdapter(TranscriptionEngine):
             predicted_ids, skip_special_tokens=True
         )[0].strip()
 
-        language = self._language or "en"
         return TranscriptionResult(
             text=text,
-            language=language,
+            language=self._language,
             language_probability=0.0,
             duration_seconds=time.monotonic() - start,
         )
@@ -168,45 +154,41 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         return input_features, attention_mask
 
     def _build_generate_kwargs(self, attention_mask: object) -> dict[str, object]:
-        kwargs: dict[str, object] = {
+        return {
             "num_beams": self._beam_size,
             "return_timestamps": True,
             "attention_mask": attention_mask,
-            "temperature": _TEMPERATURE_FALLBACK_SCHEDULE,
-            "compression_ratio_threshold": _COMPRESSION_RATIO_THRESHOLD,
-            "logprob_threshold": _LOGPROB_THRESHOLD,
-            "no_speech_threshold": _NO_SPEECH_THRESHOLD,
             "condition_on_prev_tokens": True,
+            "language": self._language,
+            "task": "transcribe",
+            **_WHISPER_DECODING_DEFAULTS,
         }
-        if self._language:
-            kwargs["language"] = self._language
-            kwargs["task"] = "transcribe"
-        return kwargs
 
     def dispose(self) -> None:
-        # Early-return on un-loaded adapters so tests that construct
-        # an adapter but never call ``load_model`` don't force a real
-        # ``import torch`` through ``vram_snapshot``.
+        # Skip vram_snapshot on un-loaded adapters so tests that never
+        # call load_model don't force a real torch import.
         if self._model is None and self._processor is None:
             return
-        _logger.info(
-            "[dispose %s device=%s] start | %s",
-            self._model_size,
-            self._device,
-            vram_snapshot(),
-        )
+        self._log_phase("dispose", f"start device={self._device}")
         self._model = None
         self._processor = None
-        _logger.info(
-            "[dispose %s] refs nulled | %s",
-            self._model_size,
-            vram_snapshot(),
-        )
+        self._log_phase("dispose", "refs nulled")
         if self._device != "cpu":
             import torch
             torch.cuda.empty_cache()
+        self._log_phase("dispose", "cache released")
+
+    def _log_phase(self, operation: str, message: str) -> None:
         _logger.info(
-            "[dispose %s] cache released | %s",
-            self._model_size,
-            vram_snapshot(),
+            "[%s %s] %s | %s",
+            operation, self._model_size, message, vram_snapshot(),
+        )
+
+    def _log_timed_phase(
+        self, operation: str, message: str, started_at: float,
+    ) -> None:
+        elapsed = time.monotonic() - started_at
+        _logger.info(
+            "[%s %s] %s in %.2fs | %s",
+            operation, self._model_size, message, elapsed, vram_snapshot(),
         )
