@@ -31,9 +31,11 @@ from voicetotext.settings.engine_hot_swap import (
     NullEngineHotSwap,
 )
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
+from voicetotext.settings.qt_download_bridge import QtDownloadBridge
+from voicetotext.settings.qt_engine_bridge import QtEngineBridge
+from voicetotext.settings.qt_window import QtSettingsWindow
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
-from voicetotext.settings.window import SettingsWindow
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
     create_engine,
@@ -42,6 +44,7 @@ from voicetotext.transcription.engine_factory import (
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
+from voicetotext.tray.qt_tray_adapter import build_qt_tray_adapter
 
 
 _logger = logging.getLogger(__name__)
@@ -134,6 +137,9 @@ def _load_engine_with_fallback(
     return engine
 
 
+_ENGINE_LOAD_TIMEOUT_SECONDS = 120.0
+
+
 def _build_settings_service(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -141,6 +147,7 @@ def _build_settings_service(
     model_manager: ModelManager,
     use_case: RecordAndTranscribeUseCase,
     action_dispatcher: ActionDispatcher,
+    state_machine: AppStateMachine,
 ) -> SettingsService:
     install_cache = ModelInstallationCache(model_manager, event_bus)
     downloads = DownloadCoordinator(model_manager)
@@ -149,6 +156,7 @@ def _build_settings_service(
         event_bus=event_bus,
         loader=lambda: _load_engine_with_fallback(config, paths),
         action_dispatcher=action_dispatcher,
+        timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
     )
     service = SettingsService(
         config=config,
@@ -157,6 +165,7 @@ def _build_settings_service(
         install_cache=install_cache,
         downloads=downloads,
         hot_swap=hot_swap,
+        state_machine=state_machine,
     )
     # Populate the cache on a background thread so the first settings
     # open doesn't pay the filesystem-scan cost.
@@ -190,6 +199,7 @@ def build_first_run_settings_service(
         install_cache=install_cache,
         downloads=downloads,
         hot_swap=hot_swap,
+        state_machine=AppStateMachine(event_bus),
     )
 
 
@@ -246,20 +256,36 @@ def build_app(
         model_manager=model_manager,
         use_case=record_and_transcribe_use_case,
         action_dispatcher=action_dispatcher,
+        state_machine=state_machine,
     )
 
+    settings_window_ref: dict[str, QtSettingsWindow | None] = {"current": None}
+
     def open_settings() -> None:
-        SettingsWindow(
+        existing = settings_window_ref["current"]
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        window = QtSettingsWindow(
             service=settings_service,
             first_run=False,
-            on_save=lambda changes: apply_settings(changes, config, record_and_transcribe_use_case, app),
-        ).run()
+            on_save=lambda changes: apply_settings(
+                changes, config, record_and_transcribe_use_case, app
+            ),
+        )
+        window.destroyed.connect(
+            lambda *_: settings_window_ref.__setitem__("current", None)
+        )
+        settings_window_ref["current"] = window
+        window.show()
 
     app = SystemTrayApp(
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,
         hotkey_listener=listener,
+        tray_factory=build_qt_tray_adapter,
         on_open_settings=open_settings,
         download_manager=download_manager,
     )

@@ -1,13 +1,12 @@
-import threading
-import time
 from unittest.mock import MagicMock
 
 from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.state_machine import AppStateMachine
+from voicetotext.core.events import StateChangedEvent
+from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.tray.app import SystemTrayApp
 
 
-def _build_app(on_open_settings=None):
+def _build_app(on_open_settings=None, tray_factory=None):
     use_case = MagicMock()
     event_bus = SimpleEventBus()
     state_machine = AppStateMachine(event_bus=event_bus)
@@ -17,45 +16,68 @@ def _build_app(on_open_settings=None):
         state_machine=state_machine,
         event_bus=event_bus,
         hotkey_listener=listener,
+        tray_factory=tray_factory or (lambda **kwargs: MagicMock()),
         on_open_settings=on_open_settings,
     )
 
 
-class TestSettingsWindowSingleInstance:
-    def test_should_ignore_second_click_while_settings_is_open(self):
+class TestSettingsClick:
+    def test_should_call_open_settings_when_click_handled(self):
         call_count = 0
-        barrier = threading.Event()
 
-        def slow_open():
+        def on_open() -> None:
             nonlocal call_count
             call_count += 1
-            barrier.wait(timeout=5)
 
-        app = _build_app(on_open_settings=slow_open)
-        icon = MagicMock()
+        app = _build_app(on_open_settings=on_open)
 
-        app._on_settings_clicked(icon, None)
-        time.sleep(0.05)
-        app._on_settings_clicked(icon, None)
-        time.sleep(0.05)
+        app._handle_settings_clicked()
 
         assert call_count == 1
 
-        barrier.set()
+    def test_should_noop_when_no_settings_callback_registered(self):
+        app = _build_app(on_open_settings=None)
 
-    def test_should_allow_reopening_after_settings_closes(self):
-        call_count = 0
+        # No callback wired: click must not raise.
+        app._handle_settings_clicked()
 
-        def fast_open():
-            nonlocal call_count
-            call_count += 1
 
-        app = _build_app(on_open_settings=fast_open)
+class TestTrayIconFactoryInvocation:
+    def test_should_invoke_factory_with_callbacks_on_run(self):
+        captured: dict = {}
+
+        def factory(**kwargs):
+            captured.update(kwargs)
+            icon = MagicMock()
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(on_open_settings=lambda: None, tray_factory=factory)
+
+        app.run()
+
+        assert callable(captured["get_state_label"])
+        assert callable(captured["on_settings_clicked"])
+        assert callable(captured["on_quit_clicked"])
+        assert captured["initial_state"] == AppState.IDLE
+
+
+class TestStateChangeForwarding:
+    def test_should_call_update_state_on_icon_when_state_changes(self):
         icon = MagicMock()
 
-        app._on_settings_clicked(icon, None)
-        time.sleep(0.05)
-        app._on_settings_clicked(icon, None)
-        time.sleep(0.05)
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
 
-        assert call_count == 2
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._handle_state_changed(
+            StateChangedEvent(
+                old_state=AppState.IDLE.value,
+                new_state=AppState.RECORDING.value,
+            )
+        )
+
+        icon.update_state.assert_called_with(AppState.RECORDING, "Recording...")

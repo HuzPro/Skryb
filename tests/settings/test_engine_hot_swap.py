@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -211,6 +212,53 @@ class TestEngineHotSwapCoordinatorStartSwap:
 
         with pytest.raises(EngineSwapError, match="first-run"):
             null.start_swap("base")
+
+    def test_should_publish_failed_event_when_loader_exceeds_timeout(self):
+        bus = SimpleEventBus()
+        failed = _collect(bus, EngineLoadFailedEvent)
+        let_loader_return = threading.Event()
+
+        def hanging_loader():
+            let_loader_return.wait(timeout=5.0)
+            return MagicMock()
+
+        coord = EngineHotSwapCoordinator(
+            use_case=MagicMock(),
+            event_bus=bus,
+            loader=hanging_loader,
+            action_dispatcher=InlineActionDispatcher(),
+            timeout_seconds=0.05,
+        )
+        try:
+            coord.start_swap("large-v3")
+        finally:
+            let_loader_return.set()
+
+        assert len(failed) == 1
+        assert failed[0].model_name == "large-v3"
+        assert "timed out" in failed[0].error.lower()
+
+    def test_should_not_install_engine_when_loader_times_out(self):
+        use_case = MagicMock()
+        let_loader_return = threading.Event()
+
+        def hanging_loader():
+            let_loader_return.wait(timeout=5.0)
+            return MagicMock()
+
+        coord = EngineHotSwapCoordinator(
+            use_case=use_case,
+            event_bus=SimpleEventBus(),
+            loader=hanging_loader,
+            action_dispatcher=InlineActionDispatcher(),
+            timeout_seconds=0.05,
+        )
+        try:
+            coord.start_swap("large-v3")
+        finally:
+            let_loader_return.set()
+
+        use_case.set_engine.assert_not_called()
 
     def test_is_busy_reflects_swap_lifecycle(self):
         dispatcher = DeferredActionDispatcher()

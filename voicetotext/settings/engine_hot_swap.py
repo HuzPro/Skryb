@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import threading
 import time
@@ -82,11 +83,13 @@ class EngineHotSwapCoordinator(EngineHotSwap):
         event_bus: EventBus,
         loader: EngineLoader,
         action_dispatcher: ActionDispatcher,
+        timeout_seconds: float | None = None,
     ) -> None:
         self._use_case = use_case
         self._event_bus = event_bus
         self._loader = loader
         self._dispatcher = action_dispatcher
+        self._timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
         self._busy = False
 
@@ -121,9 +124,29 @@ class EngineHotSwapCoordinator(EngineHotSwap):
 
     def _load_new_engine(self) -> TranscriptionEngine:
         started_at = time.monotonic()
-        new_engine = self._loader()
+        new_engine = self._invoke_loader()
         self._log_phase(f"loader done in {time.monotonic() - started_at:.2f}s")
         return new_engine
+
+    def _invoke_loader(self) -> TranscriptionEngine:
+        if self._timeout_seconds is None:
+            return self._loader()
+        return self._invoke_loader_with_timeout()
+
+    def _invoke_loader_with_timeout(self) -> TranscriptionEngine:
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="engine-load"
+        )
+        try:
+            future = executor.submit(self._loader)
+            try:
+                return future.result(timeout=self._timeout_seconds)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(
+                    f"engine load timed out after {self._timeout_seconds:.0f}s"
+                ) from None
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _install_or_discard(self, new_engine: TranscriptionEngine) -> None:
         try:

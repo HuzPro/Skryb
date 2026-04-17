@@ -39,6 +39,7 @@ class ChangeSet:
         engine_reload_required = (
             original.model_size != updated.model_size
             or original.device != updated.device
+            or original.language != updated.language
         )
         hotkey_changed = (
             original.hotkey_combination != updated.hotkey_combination
