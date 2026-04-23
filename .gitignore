@@ -18,3 +18,8 @@ config.json
 models/
 .claude
 CLAUDE.md
+
+# Test audio fixtures (large binaries, not needed in git)
+tests/fixtures/audio/*.mp3
+tests/fixtures/audio/*.wav
+tests/fixtures/audio/*.flac

@@ -27,6 +27,8 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-qt>=4.2.0",
     "pyinstaller>=6.0.0",
+    "soundfile>=0.12.0",
+    "scipy>=1.10.0",
 ]
 
 [project.scripts]
@@ -47,6 +49,7 @@ markers = [
 ]
 filterwarnings = [
     "error",
+    "ignore:.*attention on Current AMD GPU is still experimental.*:UserWarning",
 ]
 
 [tool.setuptools.packages.find]

@@ -9,6 +9,8 @@ into the components it composes — everything they need is exposed
 as a first-class DSL step.
 """
 
+from pathlib import Path
+
 from voicetotext.core.events import (
     DomainEvent,
     EngineLoadCompletedEvent,
@@ -19,6 +21,7 @@ from voicetotext.output.clipboard_preserving_decorator import (
 )
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
+from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 from tests.builders import a_transcription_result, an_audio_segment
@@ -96,6 +99,11 @@ class VoiceToTextApp:
     def microphone_captures(self, audio: AudioSegment) -> None:
         self._recorder.will_return(audio)
 
+    def microphone_captures_from_file(self, path: Path) -> None:
+        from tests.helpers.audio_file_loader import load_audio_file
+
+        self._recorder.will_return(load_audio_file(path))
+
     def microphone_captures_silence_of(self, seconds: float) -> None:
         self._recorder.will_return(
             an_audio_segment().silent().with_duration(seconds=seconds).build()
@@ -124,6 +132,33 @@ class VoiceToTextApp:
 
     def next_engine_will_be(self, engine: FakeTranscriptionEngine) -> None:
         self._next_engine = engine
+
+    def uses_real_engine(self, model: str = "base") -> None:
+        """Swap the default ``FakeTranscriptionEngine`` for a real
+        :class:`TransformersWhisperAdapter` loaded on the CUDA/ROCm GPU.
+
+        Tests that call this must also call
+        :func:`tests.helpers.gpu.require_cuda` so they skip cleanly on
+        machines without a GPU.  Call before any ``press_hotkey`` —
+        the use case reads ``engine`` at transcribe time via
+        :meth:`set_engine`.  The replaced engine is disposed; the new
+        one is disposed at :meth:`dispose`.
+        """
+        from voicetotext.core.paths import AppPaths
+        from voicetotext.transcription.transformers_whisper_adapter import (
+            TransformersWhisperAdapter,
+        )
+
+        self._engine.dispose()
+        real_engine = TransformersWhisperAdapter(
+            model_size=model,
+            device="cuda",
+            language="en",
+            download_root=str(AppPaths().models_dir),
+        )
+        real_engine.load_model()
+        self._use_case.set_engine(real_engine)
+        self._engine = real_engine
 
     # ------------------------------------------------------------------
     # When — the user's actions
@@ -180,6 +215,18 @@ class VoiceToTextApp:
     @property
     def engine_transcribe_calls(self) -> int:
         return len(self._engine.transcribe_calls)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def dispose(self) -> None:
+        """Release any resources the app is holding.
+
+        Safe to call even when the engine is a pure fake; the adapter
+        contract guarantees ``dispose`` is idempotent.
+        """
+        self._engine.dispose()
 
     # ------------------------------------------------------------------
     # Internal wiring

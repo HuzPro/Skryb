@@ -6,6 +6,9 @@ need a specific pre-programmed state should configure the fake inside
 the test body so the setup is visible.
 """
 
+import os
+import sys
+
 import pytest
 
 from tests.fakes import (
@@ -76,3 +79,27 @@ def fake_preserver() -> FakeClipboardPreserver:
 @pytest.fixture()
 def fake_hotkey_listener() -> FakeHotkeyListener:
     return FakeHotkeyListener()
+
+
+_captured_exit_status = 0
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    global _captured_exit_status
+    _captured_exit_status = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Bypass a sentencepiece destructor crash on Windows + Python 3.12.
+
+    Whisper's tokenizer pulls in ``_sentencepiece.cp312-win_amd64.pyd``
+    whose destructor segfaults during ``Py_FinalizeEx``. This hook
+    fires after the terminal summary is printed, so we flush and exit
+    immediately rather than let the broken finalizer run.
+    """
+    if sys.platform != "win32":
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_captured_exit_status)
