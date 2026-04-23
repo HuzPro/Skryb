@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -109,3 +110,38 @@ class TestBuildQtTrayAdapterFactory:
         )
 
         assert adapter.current_title() == "VoiceToText — Idle — ready"
+
+
+class TestQtTrayAdapterThreadSafety:
+    """``update_state`` must marshal Qt mutations onto the main thread.
+
+    ``QSystemTrayIcon`` has strict thread affinity — mutating it from a
+    worker thread silently aborts the Qt event loop on Windows. The
+    state machine publishes ``StateChangedEvent`` synchronously from
+    the transcription worker thread, so the adapter is the boundary
+    that must queue the update.
+    """
+
+    def test_should_run_qt_mutations_on_main_thread_when_called_from_worker(
+        self, qtbot, adapter, tray_backend
+    ):
+        tray_backend.reset_mock()
+        main_thread = threading.current_thread()
+        invoked_on: list[threading.Thread] = []
+        tray_backend.setToolTip.side_effect = (
+            lambda *_a, **_kw: invoked_on.append(threading.current_thread())
+        )
+
+        def worker() -> None:
+            adapter.update_state(AppState.RECORDING, "Recording...")
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        qtbot.wait(50)
+
+        assert invoked_on, "setToolTip was never called"
+        assert all(th is main_thread for th in invoked_on), (
+            f"Qt mutation ran off the main thread: {invoked_on}"
+        )
+        tray_backend.setToolTip.assert_called_with("VoiceToText — Recording...")

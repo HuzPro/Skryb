@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -22,7 +23,7 @@ def _run_event_loop() -> None:
         app.exec()
 
 
-class QtTrayAdapter:
+class QtTrayAdapter(QObject):
     """``QSystemTrayIcon``-backed :class:`voicetotext.tray.app.TrayIcon`.
 
     Satisfies the ``TrayIcon`` Protocol (``visible``, ``update_state``,
@@ -35,6 +36,14 @@ class QtTrayAdapter:
     hook on ``aboutToShow``.
     """
 
+    # Thread-marshaling seam. ``update_state`` may be called from any
+    # thread (state transitions are published synchronously by the
+    # transcription worker), but ``QSystemTrayIcon`` mutations must run
+    # on the main thread. Emitting this signal lets ``Qt.AutoConnection``
+    # queue the slot onto the adapter's owner thread — which is the main
+    # thread because the factory is invoked during bootstrap.
+    _state_update_requested = Signal(object, str)
+
     def __init__(
         self,
         *,
@@ -45,6 +54,7 @@ class QtTrayAdapter:
         on_quit_clicked: Callable[[], None],
         tray_backend: object | None = None,
     ) -> None:
+        super().__init__()
         self._icon = create_qicon(initial_state)
         self._title = _TITLE_PREFIX + initial_label
         self._visible = False
@@ -58,6 +68,8 @@ class QtTrayAdapter:
 
         self._menu = self._build_menu()
         self._tray.setContextMenu(self._menu)
+
+        self._state_update_requested.connect(self._apply_state_update)
 
     def _build_menu(self) -> QMenu:
         menu = QMenu()
@@ -103,6 +115,9 @@ class QtTrayAdapter:
             self._tray.hide()
 
     def update_state(self, state: AppState, label: str) -> None:
+        self._state_update_requested.emit(state, label)
+
+    def _apply_state_update(self, state: AppState, label: str) -> None:
         self._icon = create_qicon(state)
         self._title = _TITLE_PREFIX + label
         self._tray.setIcon(self._icon)
