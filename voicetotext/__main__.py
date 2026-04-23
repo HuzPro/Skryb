@@ -38,8 +38,18 @@ def main() -> None:
 
 
 def _run() -> None:
+    import sys as _sys
+
+    from PySide6.QtWidgets import QApplication
+
     paths = AppPaths()
     paths.ensure_dirs()
+
+    # Single QApplication for the whole process. The tray must outlive
+    # any transient window (settings/first-run), so disable Qt's default
+    # "quit when last window closes" behaviour.
+    qapp = QApplication.instance() or QApplication(_sys.argv)
+    qapp.setQuitOnLastWindowClosed(False)
 
     config = JsonConfigAdapter(paths.config_path)
     config.load()
@@ -52,6 +62,11 @@ def _run() -> None:
 
     if paths.is_first_run() or not _configured_model_installed(config, model_manager):
         _run_first_time_setup(config, model_manager, event_bus)
+
+    if not _configured_model_installed(config, model_manager):
+        # User closed first-run without installing a model — nothing
+        # to load, so bail cleanly before build_app tries the engine.
+        return
 
     from voicetotext.bootstrap import build_app
 
@@ -73,27 +88,38 @@ def _run_first_time_setup(
     model_manager: ModelManager,
     event_bus: SimpleEventBus,
 ) -> None:
+    from PySide6.QtCore import QEventLoop
+
     from voicetotext.bootstrap import build_first_run_settings_service
-    from voicetotext.settings.window import SettingsWindow
+    from voicetotext.settings.qt_window import QtSettingsWindow
 
     service = build_first_run_settings_service(
         config=config,
         event_bus=event_bus,
         model_manager=model_manager,
     )
-    SettingsWindow(service=service, first_run=True).run()
+
+    # Block until the first-run window closes — whether via Save (which
+    # calls close()) or the OS close button. QEventLoop keeps the main
+    # event pump running without calling QApplication.exec(), which the
+    # tray uses later.
+    loop = QEventLoop()
+    window = QtSettingsWindow(service=service, first_run=True)
+    window.destroyed.connect(loop.quit)
+    window.show()
+    loop.exec()
 
     config.save()
 
 
 def _show_error(message: str) -> None:
     try:
-        from tkinter import messagebox
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("VoiceToText Error", message)
-        root.destroy()
+        import sys as _sys
+
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication(_sys.argv)
+        QMessageBox.critical(None, "VoiceToText Error", message)
     except Exception:
         pass
 

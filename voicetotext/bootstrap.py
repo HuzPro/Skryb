@@ -31,9 +31,11 @@ from voicetotext.settings.engine_hot_swap import (
     NullEngineHotSwap,
 )
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
+from voicetotext.settings.qt_download_bridge import QtDownloadBridge
+from voicetotext.settings.qt_engine_bridge import QtEngineBridge
+from voicetotext.settings.qt_window import QtSettingsWindow
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
-from voicetotext.settings.window import SettingsWindow
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
     create_engine,
@@ -42,6 +44,7 @@ from voicetotext.transcription.engine_factory import (
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
+from voicetotext.tray.qt_tray_adapter import build_qt_tray_adapter
 
 
 _logger = logging.getLogger(__name__)
@@ -82,6 +85,26 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     _logger.info("Migrating transcription language %r -> 'en'.", current)
     config.set("transcription.language", "en")
     config.save()
+
+
+def _make_destroyed_handler(
+    window_ref: dict[str, QtSettingsWindow | None],
+    window: QtSettingsWindow,
+) -> Callable[..., None]:
+    """Build a ``destroyed``-signal handler guarded by window identity.
+
+    Qt emits ``destroyed`` from any Python-GC path, including stale refs
+    whose replacement is already live in ``current``. Unconditionally
+    nulling ``current`` would orphan that replacement. Identity-check
+    the destroyed window first — the default-arg ``w=window`` capture
+    pins the Python wrapper so ``is`` still works after C++ destruction.
+    """
+
+    def _on_destroyed(*_args: object, w: QtSettingsWindow = window) -> None:
+        if window_ref.get("current") is w:
+            window_ref["current"] = None
+
+    return _on_destroyed
 
 
 def _build_output(mode: OutputMode) -> TextOutputHandler:
@@ -134,6 +157,9 @@ def _load_engine_with_fallback(
     return engine
 
 
+_ENGINE_LOAD_TIMEOUT_SECONDS = 120.0
+
+
 def _build_settings_service(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -141,6 +167,7 @@ def _build_settings_service(
     model_manager: ModelManager,
     use_case: RecordAndTranscribeUseCase,
     action_dispatcher: ActionDispatcher,
+    state_machine: AppStateMachine,
 ) -> SettingsService:
     install_cache = ModelInstallationCache(model_manager, event_bus)
     downloads = DownloadCoordinator(model_manager)
@@ -149,6 +176,7 @@ def _build_settings_service(
         event_bus=event_bus,
         loader=lambda: _load_engine_with_fallback(config, paths),
         action_dispatcher=action_dispatcher,
+        timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
     )
     service = SettingsService(
         config=config,
@@ -157,6 +185,7 @@ def _build_settings_service(
         install_cache=install_cache,
         downloads=downloads,
         hot_swap=hot_swap,
+        state_machine=state_machine,
     )
     # Populate the cache on a background thread so the first settings
     # open doesn't pay the filesystem-scan cost.
@@ -190,6 +219,7 @@ def build_first_run_settings_service(
         install_cache=install_cache,
         downloads=downloads,
         hot_swap=hot_swap,
+        state_machine=AppStateMachine(event_bus),
     )
 
 
@@ -246,20 +276,41 @@ def build_app(
         model_manager=model_manager,
         use_case=record_and_transcribe_use_case,
         action_dispatcher=action_dispatcher,
+        state_machine=state_machine,
     )
 
+    settings_window_ref: dict[str, QtSettingsWindow | None] = {"current": None}
+
     def open_settings() -> None:
-        SettingsWindow(
+        existing = settings_window_ref["current"]
+        if existing is not None:
+            if existing.isVisible():
+                existing.raise_()
+                existing.activateWindow()
+                return
+            # Hidden-but-alive window: null current up front so the
+            # guarded destroyed handler becomes a no-op, then close to
+            # fire closeEvent (unsubscribing bridges) + deleteLater
+            # (via WA_DeleteOnClose on QtSettingsWindow).
+            settings_window_ref["current"] = None
+            existing.close()
+        window = QtSettingsWindow(
             service=settings_service,
             first_run=False,
-            on_save=lambda changes: apply_settings(changes, config, record_and_transcribe_use_case, app),
-        ).run()
+            on_save=lambda changes: apply_settings(
+                changes, config, record_and_transcribe_use_case, app
+            ),
+        )
+        window.destroyed.connect(_make_destroyed_handler(settings_window_ref, window))
+        settings_window_ref["current"] = window
+        window.show()
 
     app = SystemTrayApp(
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,
         hotkey_listener=listener,
+        tray_factory=build_qt_tray_adapter,
         on_open_settings=open_settings,
         download_manager=download_manager,
     )

@@ -12,7 +12,9 @@ from voicetotext.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
+    StateChangedEvent,
 )
+from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
@@ -21,6 +23,7 @@ from voicetotext.settings.service import (
     DownloadEventListener,
     EngineEventListener,
     SettingsService,
+    StateChangeListener,
 )
 from voicetotext.settings.settings_draft import SettingsDraft
 from tests.settings.fakes import FakeConfig, FakeModelManager
@@ -29,6 +32,7 @@ from tests.settings.fakes import FakeConfig, FakeModelManager
 def _build_service(
     installed: dict[str, bool] | None = None,
     config_overrides: dict | None = None,
+    state_machine: AppStateMachine | None = None,
 ):
     config_data = {
         "transcription.model_size": "base",
@@ -51,6 +55,8 @@ def _build_service(
         loader=lambda: MagicMock(),
         action_dispatcher=InlineActionDispatcher(),
     )
+    if state_machine is None:
+        state_machine = AppStateMachine(bus)
     service = SettingsService(
         config=config,
         model_manager=manager,
@@ -58,6 +64,7 @@ def _build_service(
         install_cache=cache,
         downloads=downloads,
         hot_swap=hot_swap,
+        state_machine=state_machine,
     )
     return service, config, manager, bus, hot_swap
 
@@ -380,6 +387,7 @@ class TestIsEngineSwapping:
             install_cache=cache,
             downloads=downloads,
             hot_swap=hot_swap,
+            state_machine=AppStateMachine(bus),
         )
 
         assert service.is_engine_swapping() is False
@@ -388,3 +396,71 @@ class TestIsEngineSwapping:
 
         dispatcher.drain_all()
         assert service.is_engine_swapping() is False
+
+
+class TestCanApplyNow:
+    def test_should_return_true_when_state_is_idle(self):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus)
+
+        service, *_ = _build_service(state_machine=state_machine)
+
+        assert service.can_apply_now() is True
+
+    def test_should_return_false_when_state_is_recording(self):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus)
+        state_machine.transition_to(AppState.RECORDING)
+
+        service, *_ = _build_service(state_machine=state_machine)
+
+        assert service.can_apply_now() is False
+
+    def test_should_return_false_when_state_is_transcribing(self):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus)
+        state_machine.transition_to(AppState.RECORDING)
+        state_machine.transition_to(AppState.TRANSCRIBING)
+
+        service, *_ = _build_service(state_machine=state_machine)
+
+        assert service.can_apply_now() is False
+
+    def test_should_return_true_when_state_is_error(self):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus)
+        state_machine.transition_to(AppState.ERROR)
+
+        service, *_ = _build_service(state_machine=state_machine)
+
+        assert service.can_apply_now() is True
+
+
+class _StateListener(StateChangeListener):
+    def __init__(self) -> None:
+        self.events: list = []
+
+    def on_state_changed(self, event):
+        self.events.append(event)
+
+
+class TestStateChangeSubscription:
+    def test_should_forward_state_change_events_to_listener(self):
+        service, _, _, bus, _ = _build_service()
+        listener = _StateListener()
+
+        service.subscribe_state_changes(listener)
+        bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
+
+        assert len(listener.events) == 1
+        assert listener.events[0].new_state == "recording"
+
+    def test_should_stop_forwarding_after_unsubscribe(self):
+        service, _, _, bus, _ = _build_service()
+        listener = _StateListener()
+        service.subscribe_state_changes(listener)
+        service.unsubscribe_state_changes(listener)
+
+        bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
+
+        assert listener.events == []

@@ -10,7 +10,9 @@ from voicetotext.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
+    StateChangedEvent,
 )
+from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwap
@@ -49,6 +51,13 @@ class EngineEventListener(ABC):
     def on_engine_load_failed(self, event: EngineLoadFailedEvent) -> None: ...
 
 
+class StateChangeListener(ABC):
+    """Callback interface for app state transitions (IDLE/RECORDING/...)."""
+
+    @abstractmethod
+    def on_state_changed(self, event: StateChangedEvent) -> None: ...
+
+
 class SettingsService:
     """Facade (GoF) the settings UI talks to instead of domain objects.
 
@@ -72,6 +81,7 @@ class SettingsService:
         install_cache: ModelInstallationCache,
         downloads: DownloadCoordinator,
         hot_swap: EngineHotSwap,
+        state_machine: AppStateMachine,
     ) -> None:
         self._config = config
         self._model_manager = model_manager
@@ -79,8 +89,10 @@ class SettingsService:
         self._install_cache = install_cache
         self._downloads = downloads
         self._hot_swap = hot_swap
+        self._state_machine = state_machine
         self._download_listeners: list[DownloadEventListener] = []
         self._engine_listeners: list[EngineEventListener] = []
+        self._state_listeners: list[StateChangeListener] = []
 
         self._event_bus.subscribe(DownloadProgressEvent, self._fanout_progress)
         self._event_bus.subscribe(DownloadStateChangedEvent, self._fanout_state)
@@ -89,6 +101,7 @@ class SettingsService:
         self._event_bus.subscribe(EngineLoadStartedEvent, self._fanout_load_started)
         self._event_bus.subscribe(EngineLoadCompletedEvent, self._fanout_load_completed)
         self._event_bus.subscribe(EngineLoadFailedEvent, self._fanout_load_failed)
+        self._event_bus.subscribe(StateChangedEvent, self._fanout_state_change)
 
     # ------------------------------------------------------------------
     # Model queries
@@ -169,6 +182,22 @@ class SettingsService:
         return self._hot_swap.is_busy()
 
     # ------------------------------------------------------------------
+    # App-state guard
+    # ------------------------------------------------------------------
+
+    def can_apply_now(self) -> bool:
+        """Return ``True`` iff it is safe to apply settings right now.
+
+        Applying settings during :attr:`AppState.RECORDING` or
+        :attr:`AppState.TRANSCRIBING` would either steal audio from an
+        in-flight capture or be rejected by the engine hot-swap (which
+        requires :attr:`AppState.IDLE`). Save-button UX consults this
+        before issuing commands.
+        """
+        state = self._state_machine.state
+        return state not in (AppState.RECORDING, AppState.TRANSCRIBING)
+
+    # ------------------------------------------------------------------
     # Listener fan-out
     # ------------------------------------------------------------------
 
@@ -185,6 +214,13 @@ class SettingsService:
     def unsubscribe_engine(self, listener: EngineEventListener) -> None:
         if listener in self._engine_listeners:
             self._engine_listeners.remove(listener)
+
+    def subscribe_state_changes(self, listener: StateChangeListener) -> None:
+        self._state_listeners.append(listener)
+
+    def unsubscribe_state_changes(self, listener: StateChangeListener) -> None:
+        if listener in self._state_listeners:
+            self._state_listeners.remove(listener)
 
     def _fanout_progress(self, event: DownloadProgressEvent) -> None:
         for listener in list(self._download_listeners):
@@ -213,3 +249,7 @@ class SettingsService:
     def _fanout_load_failed(self, event: EngineLoadFailedEvent) -> None:
         for listener in list(self._engine_listeners):
             listener.on_engine_load_failed(event)
+
+    def _fanout_state_change(self, event: StateChangedEvent) -> None:
+        for listener in list(self._state_listeners):
+            listener.on_state_changed(event)

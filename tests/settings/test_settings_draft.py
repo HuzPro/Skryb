@@ -64,6 +64,16 @@ class TestChangeSetFromDrafts:
 
         assert changes.engine_reload_required is True
 
+    def test_should_flag_engine_reload_required_when_language_differs(self):
+        original = _make_draft(language="en")
+        updated = _make_draft(language="fr")
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.engine_reload_required is True
+        assert changes.hotkey_changed is False
+        assert changes.output_changed is False
+
     def test_should_flag_hotkey_change_when_combination_differs(self):
         original = _make_draft(hotkey_combination="ctrl+alt+m")
         updated = _make_draft(hotkey_combination="f12")
