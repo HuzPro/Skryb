@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,8 @@ from voicetotext.core.events import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.model_view import ModelView
+from voicetotext.settings.qt_engine_bridge import QtEngineBridge
+from voicetotext.settings.qt_state_bridge import QtStateBridge
 from voicetotext.settings.qt_window import QtSettingsWindow
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 
@@ -73,12 +76,14 @@ class TestQtSettingsWindowInitial:
     def test_should_expose_save_button(self, window):
         assert window.save_button() is not None
 
-    def test_should_subscribe_engine_and_state_listeners(self, service):
-        # Construction alone should subscribe.
-        QtSettingsWindow(service)
+    def test_should_subscribe_bridges_for_engine_and_state(self, qtbot, service):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
 
-        assert service.subscribe_engine.called
-        assert service.subscribe_state_changes.called
+        (engine_listener,), _ = service.subscribe_engine.call_args
+        (state_listener,), _ = service.subscribe_state_changes.call_args
+        assert isinstance(engine_listener, QtEngineBridge)
+        assert isinstance(state_listener, QtStateBridge)
 
 
 class TestQtSettingsWindowCollectDraft:
@@ -185,6 +190,46 @@ class TestQtSettingsWindowSave:
         assert window.save_button().isEnabled() is True
         assert "boom" in window.status_label().text()
 
+    def test_should_marshal_engine_completed_from_worker_thread_to_gui(
+        self, qtbot, service
+    ):
+        # Regression: before the Qt-bridge wiring, the hot-swap worker
+        # thread called into QtSettingsWindow.on_engine_load_completed
+        # directly, violating Qt thread affinity and freezing the window
+        # (including the call to ``self.close()`` from _finalize_save).
+        # With QtEngineBridge as a QObject child of the window, emitting
+        # the signal from a worker thread resolves via Qt.AutoConnection
+        # to a queued invocation on the GUI thread.
+        service.apply_draft.return_value = ChangeSet(
+            engine_reload_required=True,
+            hotkey_changed=False,
+            output_changed=False,
+        )
+        received: list[ChangeSet] = []
+        window = QtSettingsWindow(service, on_save=received.append)
+        qtbot.addWidget(window)
+        qtbot.mouseClick(window.save_button(), Qt.LeftButton)
+        assert window.save_button().isEnabled() is False
+
+        event = EngineLoadCompletedEvent(model_name="base")
+        with qtbot.waitSignal(
+            window._engine_bridge.load_completed, timeout=1000
+        ):
+            threading.Thread(
+                target=lambda: window._engine_bridge.on_engine_load_completed(
+                    event
+                ),
+                daemon=True,
+            ).start()
+
+        assert received == [
+            ChangeSet(
+                engine_reload_required=True,
+                hotkey_changed=False,
+                output_changed=False,
+            )
+        ]
+
 
 class TestQtSettingsWindowStateMachineGuard:
     def test_should_disable_save_when_cannot_apply_now(self, qtbot, service):
@@ -210,3 +255,23 @@ class TestQtSettingsWindowFirstRun:
 
         assert received == []
         assert "model" in window.status_label().text().lower()
+
+
+class TestQtSettingsWindowLifecycle:
+    def test_should_destroy_window_on_close(self, qtbot, service):
+        # Regression: QMainWindow by default only hides on close(), leaving
+        # the window alive in memory and its bridges subscribed to the
+        # service. When the holding dict later gets reassigned, Python GC
+        # destroys the window without firing closeEvent — bridges stay in
+        # the service listener list and raise
+        # ``RuntimeError: Signal source has been deleted`` on the next
+        # fanout. WA_DeleteOnClose turns close() into close-then-
+        # deleteLater so the destructor runs *after* closeEvent.
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        with qtbot.waitSignal(window.destroyed, timeout=1000):
+            window.close()
+
+        assert service.unsubscribe_engine.called
+        assert service.unsubscribe_state_changes.called

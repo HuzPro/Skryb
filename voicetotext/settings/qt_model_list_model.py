@@ -69,6 +69,12 @@ class QtModelListModel(QAbstractListModel):
     def selected_model_name(self) -> str:
         return self._selected
 
+    def index_for_name(self, name: str) -> QModelIndex:
+        for row, view in enumerate(self._views):
+            if view.name == name:
+                return self.index(row)
+        return QModelIndex()
+
     def set_selected(self, name: str) -> None:
         if name == self._selected:
             return

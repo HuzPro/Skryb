@@ -87,6 +87,26 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     config.save()
 
 
+def _make_destroyed_handler(
+    window_ref: dict[str, QtSettingsWindow | None],
+    window: QtSettingsWindow,
+) -> Callable[..., None]:
+    """Build a ``destroyed``-signal handler guarded by window identity.
+
+    Qt emits ``destroyed`` from any Python-GC path, including stale refs
+    whose replacement is already live in ``current``. Unconditionally
+    nulling ``current`` would orphan that replacement. Identity-check
+    the destroyed window first — the default-arg ``w=window`` capture
+    pins the Python wrapper so ``is`` still works after C++ destruction.
+    """
+
+    def _on_destroyed(*_args: object, w: QtSettingsWindow = window) -> None:
+        if window_ref.get("current") is w:
+            window_ref["current"] = None
+
+    return _on_destroyed
+
+
 def _build_output(mode: OutputMode) -> TextOutputHandler:
     sleeper = TimeSleeper()
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
@@ -263,10 +283,17 @@ def build_app(
 
     def open_settings() -> None:
         existing = settings_window_ref["current"]
-        if existing is not None and existing.isVisible():
-            existing.raise_()
-            existing.activateWindow()
-            return
+        if existing is not None:
+            if existing.isVisible():
+                existing.raise_()
+                existing.activateWindow()
+                return
+            # Hidden-but-alive window: null current up front so the
+            # guarded destroyed handler becomes a no-op, then close to
+            # fire closeEvent (unsubscribing bridges) + deleteLater
+            # (via WA_DeleteOnClose on QtSettingsWindow).
+            settings_window_ref["current"] = None
+            existing.close()
         window = QtSettingsWindow(
             service=settings_service,
             first_run=False,
@@ -274,9 +301,7 @@ def build_app(
                 changes, config, record_and_transcribe_use_case, app
             ),
         )
-        window.destroyed.connect(
-            lambda *_: settings_window_ref.__setitem__("current", None)
-        )
+        window.destroyed.connect(_make_destroyed_handler(settings_window_ref, window))
         settings_window_ref["current"] = window
         window.show()
 

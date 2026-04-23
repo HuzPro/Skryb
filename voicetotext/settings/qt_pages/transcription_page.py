@@ -75,12 +75,18 @@ class TranscriptionPage(QWidget):
 
     def _select_initial_model(self, name: str) -> None:
         self._list_model.set_selected(name)
+        self._sync_view_selection(name)
 
     def _on_model_clicked(self, index: QModelIndex) -> None:
         view = self._list_model.data(index, QtModelListModel.MODEL_ROLE)
         if view is None or not view.installed:
             return
         self._list_model.set_selected(view.name)
+
+    def _sync_view_selection(self, name: str) -> None:
+        index = self._list_model.index_for_name(name)
+        if index.isValid():
+            self._list_view.setCurrentIndex(index)
 
     # ------------------------------------------------------------------
     # Public getters/setters (consumed by the main window)
@@ -97,6 +103,7 @@ class TranscriptionPage(QWidget):
 
     def set_model(self, name: str) -> None:
         self._list_model.set_selected(name)
+        self._sync_view_selection(name)
 
     def current_language(self) -> str:
         return self._language_combo.currentText()

@@ -5,6 +5,7 @@ import pytest
 from voicetotext.bootstrap import (
     _build_output,
     _load_engine_with_fallback,
+    _make_destroyed_handler,
     apply_settings,
     migrate_language,
     migrate_output_mode,
@@ -305,3 +306,48 @@ class TestApplySettings:
         app.set_hotkey_listener.assert_called_once_with(
             mock_build_listener.return_value
         )
+
+
+class TestMakeDestroyedHandler:
+    """Characterize the guard on the ``destroyed`` signal handler used by
+    ``open_settings`` — nulling ``current`` must only happen when the
+    destroyed window is the one *still* registered. Otherwise a just-
+    destroyed previous window would orphan the newly-opened one.
+    """
+
+    def test_should_clear_current_when_registered_window_is_destroyed(self):
+        window = object()
+        ref: dict[str, object | None] = {"current": window}
+
+        handler = _make_destroyed_handler(ref, window)
+        handler()
+
+        assert ref["current"] is None
+
+    def test_should_not_clear_current_when_another_window_is_registered(self):
+        old_window = object()
+        new_window = object()
+        ref: dict[str, object | None] = {"current": new_window}
+
+        handler = _make_destroyed_handler(ref, old_window)
+        handler()
+
+        assert ref["current"] is new_window
+
+    def test_should_not_raise_when_current_is_already_none(self):
+        window = object()
+        ref: dict[str, object | None] = {"current": None}
+
+        handler = _make_destroyed_handler(ref, window)
+        handler()
+
+        assert ref["current"] is None
+
+    def test_should_accept_qt_signal_arguments(self):
+        window = object()
+        ref: dict[str, object | None] = {"current": window}
+
+        handler = _make_destroyed_handler(ref, window)
+        handler(window)  # Qt's destroyed emits the QObject
+
+        assert ref["current"] is None

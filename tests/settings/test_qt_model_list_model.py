@@ -154,6 +154,23 @@ class TestQtModelListModelDownloadState:
         assert list_model.data(base_idx, QtModelListModel.DOWNLOAD_ROLE) is None
 
 
+class TestQtModelListModelIndexLookup:
+    def test_should_return_valid_index_for_known_model(self, model_fixture):
+        list_model, _, views = model_fixture
+
+        idx = list_model.index_for_name("base")
+
+        assert idx.isValid()
+        assert idx.row() == 1
+
+    def test_should_return_invalid_index_for_unknown_model(self, model_fixture):
+        list_model, *_ = model_fixture
+
+        idx = list_model.index_for_name("unknown")
+
+        assert idx.isValid() is False
+
+
 class TestQtModelListModelRefresh:
     def test_should_re_read_service_and_update_install_state_for_row(
         self, model_fixture

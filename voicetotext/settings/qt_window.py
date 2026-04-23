@@ -18,14 +18,12 @@ from voicetotext.core.events import (
     EngineLoadStartedEvent,
     StateChangedEvent,
 )
+from voicetotext.settings.qt_engine_bridge import QtEngineBridge
 from voicetotext.settings.qt_pages.hotkeys_page import HotkeysPage
 from voicetotext.settings.qt_pages.output_page import OutputPage
 from voicetotext.settings.qt_pages.transcription_page import TranscriptionPage
-from voicetotext.settings.service import (
-    EngineEventListener,
-    SettingsService,
-    StateChangeListener,
-)
+from voicetotext.settings.qt_state_bridge import QtStateBridge
+from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 
 
@@ -40,11 +38,14 @@ class QtSettingsWindow(QMainWindow):
     domain types directly, so the view layer stays decoupled from
     transcription, downloads, and config internals.
 
-    Engine and state-machine events arrive on listener callbacks. They
-    may be invoked from any thread when fired via the real event bus;
-    in the Qt app they are re-emitted through :class:`QtEngineBridge`
-    which marshals to the GUI thread before calling back here. Tests
-    invoke the callbacks directly on the GUI thread.
+    Engine and state-machine events arrive on the event bus from any
+    thread (the hot-swap worker for engine events, the recording/
+    transcription worker for state transitions). They are re-emitted
+    through :class:`QtEngineBridge` and :class:`QtStateBridge` — both
+    are ``QObject`` children of this window with GUI-thread affinity,
+    so ``Qt.AutoConnection`` automatically queues the slot invocation
+    onto the GUI event loop. Tests may invoke the slots directly on
+    the GUI thread to bypass the bridge.
     """
 
     def __init__(
@@ -55,13 +56,24 @@ class QtSettingsWindow(QMainWindow):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Ensure ``close()`` triggers ``deleteLater`` *after* ``closeEvent``
+        # runs — without this, QMainWindow only hides on close(), leaving
+        # the window alive in memory and its bridges subscribed to the
+        # service. A later Python-GC reaping would destroy the window
+        # without firing closeEvent, leaking subscriptions and crashing
+        # the next fanout with "Signal source has been deleted".
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._service = service
         self._first_run = first_run
         self._on_save = on_save
         self._pending_changes: ChangeSet | None = None
 
-        self._engine_listener = _EngineListenerProxy(self)
-        self._state_listener = _StateListenerProxy(self)
+        self._engine_bridge = QtEngineBridge(parent=self)
+        self._state_bridge = QtStateBridge(parent=self)
+        self._engine_bridge.load_started.connect(self.on_engine_load_started)
+        self._engine_bridge.load_completed.connect(self.on_engine_load_completed)
+        self._engine_bridge.load_failed.connect(self.on_engine_load_failed)
+        self._state_bridge.state_changed.connect(self.on_state_changed)
 
         self.setWindowTitle(
             "VoiceToText Setup" if first_run else "VoiceToText Settings"
@@ -69,8 +81,8 @@ class QtSettingsWindow(QMainWindow):
         self.resize(720, 600)
 
         self._build_ui()
-        self._service.subscribe_engine(self._engine_listener)
-        self._service.subscribe_state_changes(self._state_listener)
+        self._service.subscribe_engine(self._engine_bridge)
+        self._service.subscribe_state_changes(self._state_bridge)
         self._refresh_save_enabled()
 
     # ------------------------------------------------------------------
@@ -203,8 +215,8 @@ class QtSettingsWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
-    # Engine listener callbacks — invoked on the GUI thread via
-    # QtEngineBridge's queued signals.
+    # Engine slots — invoked on the GUI thread via QtEngineBridge's
+    # queued signals (AutoConnection queues across threads).
     # ------------------------------------------------------------------
 
     def on_engine_load_started(self, event: EngineLoadStartedEvent) -> None:
@@ -236,8 +248,13 @@ class QtSettingsWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
-        self._service.unsubscribe_engine(self._engine_listener)
-        self._service.unsubscribe_state_changes(self._state_listener)
+        # Unsubscribe from the service before calling ``super().closeEvent``
+        # so no fanout call can reach the bridges after we're closing.
+        # Any in-flight emit that slipped through queues to the bridges'
+        # connected slots — Qt drops queued invocations to destroyed
+        # QObjects, so this is safe.
+        self._service.unsubscribe_engine(self._engine_bridge)
+        self._service.unsubscribe_state_changes(self._state_bridge)
         super().closeEvent(event)
 
     # ------------------------------------------------------------------
@@ -258,35 +275,3 @@ class QtSettingsWindow(QMainWindow):
 
     def status_label(self) -> QLabel:
         return self._status_label
-
-
-class _EngineListenerProxy(EngineEventListener):
-    """Forwards engine-load events to the owning window.
-
-    A thin indirection keeps :class:`QtSettingsWindow` from having to
-    inherit :class:`EngineEventListener` directly (which would drag the
-    ABC metaclass into Qt's ``QObject`` hierarchy and conflict with
-    shiboken's metaclass).
-    """
-
-    def __init__(self, window: QtSettingsWindow) -> None:
-        self._window = window
-
-    def on_engine_load_started(self, event: EngineLoadStartedEvent) -> None:
-        self._window.on_engine_load_started(event)
-
-    def on_engine_load_completed(self, event: EngineLoadCompletedEvent) -> None:
-        self._window.on_engine_load_completed(event)
-
-    def on_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
-        self._window.on_engine_load_failed(event)
-
-
-class _StateListenerProxy(StateChangeListener):
-    """Forwards state-machine transitions to the owning window."""
-
-    def __init__(self, window: QtSettingsWindow) -> None:
-        self._window = window
-
-    def on_state_changed(self, event: StateChangedEvent) -> None:
-        self._window.on_state_changed(event)
