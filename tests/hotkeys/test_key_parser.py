@@ -1,7 +1,7 @@
 """Tests for ``parse_hotkey_combo`` and ``canonicalize_key``.
 
 Parsing is pure — no OS or pynput runtime state — so tests drive it
-through the public function and assert on the resulting key set.
+through the public function and assert on the resulting key tuple.
 """
 
 import pytest
@@ -11,39 +11,47 @@ from voicetotext.hotkeys.key_parser import canonicalize_key, parse_hotkey_combo
 
 
 class TestParseHotkeyCombo:
+    def test_should_return_tuple(self):
+        keys = parse_hotkey_combo("ctrl+alt+m")
+
+        assert isinstance(keys, tuple)
+
     def test_should_parse_single_modifier(self):
         keys = parse_hotkey_combo("ctrl")
 
-        assert keys == {Key.ctrl_l}
+        assert keys == (Key.ctrl_l,)
 
     def test_should_parse_single_letter_key(self):
         keys = parse_hotkey_combo("a")
 
         assert len(keys) == 1
-        only_key = next(iter(keys))
-        assert isinstance(only_key, KeyCode)
-        assert only_key.vk == 0x41  # "A"
+        assert isinstance(keys[0], KeyCode)
+        assert keys[0].vk == 0x41
 
     def test_should_parse_single_function_key(self):
         keys = parse_hotkey_combo("f1")
 
-        assert keys == {Key.f1}
+        assert keys == (Key.f1,)
+
+    def test_should_preserve_declared_key_order(self):
+        keys = parse_hotkey_combo("alt+ctrl+m")
+
+        assert keys[0] == Key.alt_l
+        assert keys[1] == Key.ctrl_l
+        assert isinstance(keys[2], KeyCode) and keys[2].vk == 0x4D
 
     def test_should_parse_ctrl_alt_letter_combo(self):
         keys = parse_hotkey_combo("ctrl+alt+m")
 
-        assert Key.ctrl_l in keys
-        assert Key.alt_l in keys
-        m_key = KeyCode.from_vk(0x4D)  # "M"
-        assert any(
-            isinstance(k, KeyCode) and k.vk == m_key.vk for k in keys
-        )
+        assert keys[0] == Key.ctrl_l
+        assert keys[1] == Key.alt_l
+        assert isinstance(keys[2], KeyCode) and keys[2].vk == 0x4D
 
-    def test_should_accept_modifiers_in_any_order(self):
+    def test_should_distinguish_different_orderings(self):
         a = parse_hotkey_combo("ctrl+alt+m")
         b = parse_hotkey_combo("alt+m+ctrl")
 
-        assert a == b
+        assert a != b
 
     def test_should_be_case_insensitive(self):
         lower = parse_hotkey_combo("ctrl+alt+m")
@@ -54,15 +62,15 @@ class TestParseHotkeyCombo:
     def test_should_ignore_surrounding_whitespace_around_parts(self):
         keys = parse_hotkey_combo("ctrl + alt + m")
 
-        assert Key.ctrl_l in keys
-        assert Key.alt_l in keys
+        assert keys[0] == Key.ctrl_l
+        assert keys[1] == Key.alt_l
 
     def test_should_parse_ctrl_shift_alt_combo(self):
         keys = parse_hotkey_combo("ctrl+shift+alt+x")
 
-        assert Key.ctrl_l in keys
-        assert Key.shift_l in keys
-        assert Key.alt_l in keys
+        assert keys[0] == Key.ctrl_l
+        assert keys[1] == Key.shift_l
+        assert keys[2] == Key.alt_l
 
     def test_should_raise_for_unknown_multi_letter_name(self):
         with pytest.raises(ValueError, match="Unknown key"):
@@ -72,8 +80,8 @@ class TestParseHotkeyCombo:
         left = parse_hotkey_combo("ctrl_l")
         right = parse_hotkey_combo("ctrl_r")
 
-        assert left == {Key.ctrl_l}
-        assert right == {Key.ctrl_r}
+        assert left == (Key.ctrl_l,)
+        assert right == (Key.ctrl_r,)
 
 
 class TestCanonicalizeKey:

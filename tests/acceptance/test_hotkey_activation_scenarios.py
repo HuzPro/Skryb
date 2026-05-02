@@ -1,8 +1,12 @@
 """Hotkey activation modes — toggle vs push-to-talk — and their
 interaction with in-flight transcription."""
 
+from pynput.keyboard import Key, KeyCode
+
 from tests.acceptance.app_fixture import VoiceToTextApp
 from voicetotext.core.state_machine import AppState
+from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
+from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 
 
 class TestPushToTalk:
@@ -53,3 +57,52 @@ class TestToggle:
         voice_to_text_app.press_hotkey()
 
         assert voice_to_text_app.all_typed_text == ["first", "second"]
+
+
+class TestExactSequenceMatching:
+    def test_toggle_activates_when_keys_pressed_in_exact_order(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        voice_to_text_app.user_speaks("exact order")
+        strategy = ToggleStrategy(keys=(Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")))
+        strategy.set_callbacks(
+            voice_to_text_app.press_hotkey, voice_to_text_app.press_hotkey
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_char("m"))
+
+        assert voice_to_text_app.state == AppState.RECORDING
+
+    def test_toggle_does_not_activate_when_extra_key_interleaved(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        strategy = ToggleStrategy(keys=(Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")))
+        strategy.set_callbacks(
+            voice_to_text_app.press_hotkey, voice_to_text_app.press_hotkey
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(KeyCode.from_char("w"))
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(KeyCode.from_char("m"))
+
+        assert voice_to_text_app.state == AppState.IDLE
+
+    def test_push_to_talk_activates_and_deactivates_with_exact_sequence(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        voice_to_text_app.user_speaks("held sequence")
+        strategy = PushToTalkStrategy(keys=(Key.ctrl_l, KeyCode.from_char("m")))
+        strategy.set_callbacks(
+            voice_to_text_app.press_hotkey, voice_to_text_app.release_hotkey
+        )
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(KeyCode.from_char("m"))
+        assert voice_to_text_app.state == AppState.RECORDING
+
+        strategy.on_key_release(KeyCode.from_char("m"))
+        assert voice_to_text_app.typed_text == "held sequence"
+        assert voice_to_text_app.state == AppState.IDLE

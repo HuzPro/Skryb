@@ -44,14 +44,14 @@ _MODIFIER_MAP = {
 }
 
 
-def parse_hotkey_combo(combo_string: str) -> set[Key | KeyCode]:
-    keys = set()
+def parse_hotkey_combo(combo_string: str) -> tuple[Key | KeyCode, ...]:
+    keys: list[Key | KeyCode] = []
     for part in combo_string.lower().split("+"):
         part = part.strip()
         if part in _MODIFIER_MAP:
-            keys.add(_MODIFIER_MAP[part])
+            keys.append(_MODIFIER_MAP[part])
         elif len(part) == 1:
-            keys.add(KeyCode.from_vk(_CHAR_TO_VIRTUAL_KEY_CODE[part]))
+            keys.append(KeyCode.from_vk(_CHAR_TO_VIRTUAL_KEY_CODE[part]))
         else:
             raise ValueError(f"Unknown key: {part}")
-    return keys
+    return tuple(keys)

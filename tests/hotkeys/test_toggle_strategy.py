@@ -6,7 +6,7 @@ from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 
 
 def _make_strategy(*keys):
-    strategy = ToggleStrategy(keys=set(keys))
+    strategy = ToggleStrategy(keys=keys)
     on_activate = MagicMock()
     on_deactivate = MagicMock()
     strategy.set_callbacks(on_activate, on_deactivate)
@@ -25,13 +25,11 @@ class TestToggleStrategyActivation:
     def test_should_fire_deactivate_on_second_combo_press(self):
         strategy, _, on_deactivate = _make_strategy(Key.ctrl_l, KeyCode.from_char("m"))
 
-        # First combo press (activate)
         strategy.on_key_press(Key.ctrl_l)
         strategy.on_key_press(KeyCode.from_char("m"))
         strategy.on_key_release(KeyCode.from_char("m"))
         strategy.on_key_release(Key.ctrl_l)
 
-        # Second combo press (deactivate)
         strategy.on_key_press(Key.ctrl_l)
         strategy.on_key_press(KeyCode.from_char("m"))
 
@@ -42,7 +40,7 @@ class TestToggleStrategyActivation:
             Key.ctrl_l, KeyCode.from_char("m")
         )
 
-        for i in range(4):
+        for _ in range(4):
             strategy.on_key_press(Key.ctrl_l)
             strategy.on_key_press(KeyCode.from_char("m"))
             strategy.on_key_release(KeyCode.from_char("m"))
@@ -50,6 +48,55 @@ class TestToggleStrategyActivation:
 
         assert on_activate.call_count == 2
         assert on_deactivate.call_count == 2
+
+
+class TestToggleStrategyExactSequence:
+    def test_should_not_activate_when_keys_pressed_in_wrong_order(self):
+        strategy, on_activate, _ = _make_strategy(Key.ctrl_l, KeyCode.from_char("m"))
+
+        strategy.on_key_press(KeyCode.from_char("m"))
+        strategy.on_key_press(Key.ctrl_l)
+
+        on_activate.assert_not_called()
+
+    def test_should_not_activate_when_extra_key_interleaved(self):
+        strategy, on_activate, _ = _make_strategy(Key.ctrl_l, KeyCode.from_char("m"))
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(KeyCode.from_char("x"))
+        strategy.on_key_press(KeyCode.from_char("m"))
+
+        on_activate.assert_not_called()
+
+    def test_should_activate_five_key_sequence_in_exact_order(self):
+        k1 = KeyCode.from_char("1")
+        k2 = KeyCode.from_char("2")
+        k3 = KeyCode.from_char("3")
+        k4 = KeyCode.from_char("4")
+        k5 = KeyCode.from_char("5")
+        strategy, on_activate, _ = _make_strategy(Key.alt_l, k1, k2, k3, k4, k5)
+
+        strategy.on_key_press(Key.alt_l)
+        strategy.on_key_press(k1)
+        strategy.on_key_press(k2)
+        strategy.on_key_press(k3)
+        strategy.on_key_press(k4)
+        strategy.on_key_press(k5)
+
+        on_activate.assert_called_once()
+
+    def test_should_allow_retry_after_interleaved_key_resets_sequence(self):
+        strategy, on_activate, _ = _make_strategy(Key.ctrl_l, KeyCode.from_char("m"))
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(KeyCode.from_char("x"))
+        strategy.on_key_release(KeyCode.from_char("x"))
+        strategy.on_key_release(Key.ctrl_l)
+
+        strategy.on_key_press(Key.ctrl_l)
+        strategy.on_key_press(KeyCode.from_char("m"))
+
+        on_activate.assert_called_once()
 
 
 class TestToggleStrategyIgnoresNonMatchingKeys:
@@ -112,7 +159,6 @@ class TestToggleStrategyKeyNormalization:
 
         strategy.on_key_press(Key.ctrl_l)
         strategy.on_key_press(Key.alt_l)
-        # Ctrl+M produces '\r' (carriage return) on Windows
         strategy.on_key_press(KeyCode(char="\r"))
 
         on_activate.assert_called_once()

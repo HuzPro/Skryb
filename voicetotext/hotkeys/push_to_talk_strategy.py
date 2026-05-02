@@ -8,9 +8,10 @@ from voicetotext.hotkeys.strategy import HotkeyStrategy
 
 class PushToTalkStrategy(HotkeyStrategy):
 
-    def __init__(self, keys: set[Key | KeyCode]) -> None:
-        self._target_keys = {canonicalize_key(k) for k in keys}
-        self._pressed_keys: set[Key | KeyCode] = set()
+    def __init__(self, keys: tuple[Key | KeyCode, ...]) -> None:
+        self._target_sequence = tuple(canonicalize_key(k) for k in keys)
+        self._seq_index: int = 0
+        self._held_keys: set[Key | KeyCode] = set()
         self._is_active: bool = False
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
@@ -25,20 +26,27 @@ class PushToTalkStrategy(HotkeyStrategy):
 
     def on_key_press(self, key: Key | KeyCode) -> None:
         key = canonicalize_key(key)
-        if key not in self._target_keys:
+        if self._is_active:
             return
-        self._pressed_keys.add(key)
-        if self._pressed_keys >= self._target_keys and not self._is_active:
-            self._is_active = True
-            if self._on_activate:
-                self._on_activate()
+        if (
+            self._seq_index < len(self._target_sequence)
+            and key == self._target_sequence[self._seq_index]
+        ):
+            self._seq_index += 1
+            self._held_keys.add(key)
+            if self._seq_index == len(self._target_sequence):
+                self._is_active = True
+                if self._on_activate:
+                    self._on_activate()
+        else:
+            self._seq_index = 0
+            self._held_keys.clear()
 
     def on_key_release(self, key: Key | KeyCode) -> None:
         key = canonicalize_key(key)
-        if key not in self._target_keys:
-            return
-        self._pressed_keys.discard(key)
-        if self._is_active and not self._pressed_keys >= self._target_keys:
+        self._held_keys.discard(key)
+        if self._is_active:
             self._is_active = False
+            self._seq_index = 0
             if self._on_deactivate:
                 self._on_deactivate()
