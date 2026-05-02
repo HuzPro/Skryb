@@ -40,10 +40,16 @@ from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
-    create_engine,
-    create_model_manager,
+    build_composite_model_manager,
+    build_engine_registry,
+    create_engine_for_active_model,
+    resolve_engine_id,
 )
+from voicetotext.transcription.engine_registry import EngineRegistry
+from voicetotext.transcription.engine_types import EngineId, HardwareProfile
+from voicetotext.transcription.model_info import WHISPER_MODELS
 from voicetotext.transcription.model_manager import ModelManager
+from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
 from voicetotext.tray.qt_tray_adapter import build_qt_tray_adapter
@@ -145,19 +151,63 @@ def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscr
 
 
 def _load_engine_with_fallback(
-    config: JsonConfigAdapter, paths: AppPaths,
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
 ) -> TranscriptionEngine:
-    engine = create_engine(config, paths)
+    """Try the active engine on its preferred device, falling back to CPU.
+
+    Never silently switches engines on failure — the user picked the
+    engine explicitly (or via ``transcription.engine="auto"`` at config
+    time), and a runtime swap to a different engine would download
+    different model files. CPU-fallback within the same engine is the
+    only automatic step.
+    """
     try:
-        engine.load_model()
-        return engine
+        return _load_engine(config, paths, registry, hardware)
     except (RuntimeError, OSError) as exc:
         _logger.warning("load_engine: primary device failed: %s", exc)
 
     _logger.info("load_engine: retrying on CPU")
-    engine = create_engine(config, paths, device_override="cpu")
+    return _load_engine_on_cpu(config, paths, registry, hardware)
+
+
+def _load_engine(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
+) -> TranscriptionEngine:
+    engine = create_engine_for_active_model(config, paths, registry, hardware)
     engine.load_model()
     return engine
+
+
+def _load_engine_on_cpu(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
+) -> TranscriptionEngine:
+    engine = create_engine_for_active_model(
+        config, paths, registry, hardware, device_override="cpu",
+    )
+    engine.load_model()
+    return engine
+
+
+def _make_active_engine_provider(
+    config: JsonConfigAdapter,
+    hardware: HardwareProfile,
+    registry: EngineRegistry,
+) -> Callable[[], EngineId]:
+    """Return a callable the composite ModelManager can poll on each op."""
+    def provider() -> EngineId:
+        model_name = config.get("transcription.model_size", "base")
+        model_info = WHISPER_MODELS[model_name]
+        return resolve_engine_id(config, model_info, hardware, registry)
+    return provider
 
 
 _ENGINE_LOAD_TIMEOUT_SECONDS = 120.0
@@ -171,13 +221,15 @@ def _build_settings_service(
     use_case: RecordAndTranscribeUseCase,
     action_dispatcher: ActionDispatcher,
     state_machine: AppStateMachine,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
 ) -> SettingsService:
     install_cache = ModelInstallationCache(model_manager, event_bus)
     downloads = DownloadCoordinator(model_manager)
     hot_swap = EngineHotSwapCoordinator(
         use_case=use_case,
         event_bus=event_bus,
-        loader=lambda: _load_engine_with_fallback(config, paths),
+        loader=lambda: _load_engine_with_fallback(config, paths, registry, hardware),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
     )
@@ -189,6 +241,8 @@ def _build_settings_service(
         downloads=downloads,
         hot_swap=hot_swap,
         state_machine=state_machine,
+        registry=registry,
+        hardware=hardware,
     )
     # Populate the cache on a background thread so the first settings
     # open doesn't pay the filesystem-scan cost.
@@ -234,8 +288,12 @@ def build_app(
 ) -> SystemTrayApp:
     setup_debug_logger(paths.base / "debug.log", console=sys.stderr.isatty())
 
-    from voicetotext.transcription.model_info import migrate_removed_models
+    from voicetotext.transcription.model_info import (
+        migrate_engine_field,
+        migrate_removed_models,
+    )
     migrate_removed_models(config)
+    migrate_engine_field(config)
     migrate_output_mode(config)
     migrate_language(config)
 
@@ -246,9 +304,16 @@ def build_app(
 
     state_machine = AppStateMachine(event_bus)
 
+    hardware = TorchHardwareDetector().detect()
+    _logger.info(
+        "Detected hardware: %s (%s, gfx=%s)",
+        hardware.kind, hardware.device_name, hardware.gfx_arch,
+    )
+    registry = build_engine_registry()
+
     model_name = config.get("transcription.model_size")
     _logger.info("Loading Whisper model '%s' ...", model_name)
-    engine = _load_engine_with_fallback(config, paths)
+    engine = _load_engine_with_fallback(config, paths, registry, hardware)
     _logger.info("Model loaded.")
 
     recorder = SoundDeviceAdapter(
@@ -270,7 +335,10 @@ def build_app(
 
     listener = _build_hotkey_listener(config, record_and_transcribe_use_case)
 
-    model_manager = create_model_manager(paths.models_dir, download_manager)
+    active_engine_provider = _make_active_engine_provider(config, hardware, registry)
+    model_manager = build_composite_model_manager(
+        paths.models_dir, download_manager, active_engine_provider,
+    )
 
     settings_service = _build_settings_service(
         config=config,
@@ -280,6 +348,8 @@ def build_app(
         use_case=record_and_transcribe_use_case,
         action_dispatcher=action_dispatcher,
         state_machine=state_machine,
+        registry=registry,
+        hardware=hardware,
     )
 
     settings_window_ref: dict[str, QtSettingsWindow | None] = {"current": None}

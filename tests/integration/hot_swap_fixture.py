@@ -253,11 +253,15 @@ class HotSwapIntegrationApp:
         self._blocking_loader = None
         import gc
         gc.collect()
+        # Catch OSError too — on Windows, re-importing torch during
+        # shutdown can fail with WinError 1455 ("paging file too small")
+        # if the host is low on swap, which would otherwise mask the
+        # test's own exit code with a harness traceback.
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        except ImportError:
+        except (ImportError, OSError):
             pass
 
     # ------------------------------------------------------------------

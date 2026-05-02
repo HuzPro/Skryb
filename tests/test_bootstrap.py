@@ -20,20 +20,24 @@ from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.model_info import migrate_removed_models
 
 
+_HARDWARE = MagicMock()
+_REGISTRY = MagicMock()
+
+
 class TestLoadEngineWithFallback:
-    @patch("voicetotext.bootstrap.create_engine")
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_return_engine_when_first_attempt_succeeds(self, mock_create):
         engine = MagicMock()
         mock_create.return_value = engine
-        config = MagicMock()
-        paths = MagicMock()
 
-        result = _load_engine_with_fallback(config, paths)
+        result = _load_engine_with_fallback(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+        )
 
         assert result is engine
         engine.load_model.assert_called_once()
 
-    @patch("voicetotext.bootstrap.create_engine")
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_retry_on_cpu_when_default_load_fails(self, mock_create):
         gpu_engine = MagicMock()
         gpu_engine.load_model.side_effect = RuntimeError("CUDA fail")
@@ -42,39 +46,62 @@ class TestLoadEngineWithFallback:
         config = MagicMock()
         paths = MagicMock()
 
-        result = _load_engine_with_fallback(config, paths)
+        result = _load_engine_with_fallback(config, paths, _REGISTRY, _HARDWARE)
 
         assert result is cpu_engine
-        assert mock_create.call_args_list == [
-            call(config, paths),
-            call(config, paths, device_override="cpu"),
-        ]
+        first_call, second_call = mock_create.call_args_list
+        assert first_call.kwargs.get("device_override") is None
+        assert second_call.kwargs == {"device_override": "cpu"}
 
-    @patch("voicetotext.bootstrap.create_engine")
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_catch_os_error_from_missing_model_files(self, mock_create):
         broken_engine = MagicMock()
         broken_engine.load_model.side_effect = OSError("Can't load feature extractor")
         cpu_engine = MagicMock()
         mock_create.side_effect = [broken_engine, cpu_engine]
-        config = MagicMock()
-        paths = MagicMock()
 
-        result = _load_engine_with_fallback(config, paths)
+        result = _load_engine_with_fallback(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+        )
 
         assert result is cpu_engine
 
-    @patch("voicetotext.bootstrap.create_engine")
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_propagate_error_when_cpu_fallback_also_fails(self, mock_create):
         gpu_engine = MagicMock()
         gpu_engine.load_model.side_effect = RuntimeError("fail")
         cpu_engine = MagicMock()
         cpu_engine.load_model.side_effect = RuntimeError("fail")
         mock_create.side_effect = [gpu_engine, cpu_engine]
+
+        with pytest.raises(RuntimeError):
+            _load_engine_with_fallback(
+                MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            )
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_never_silently_switch_engines_on_fallback(self, mock_create):
+        """CPU fallback must reuse the same engine_id, only changing device.
+
+        Cross-engine fallback would download different model files and
+        re-introduce the surprise-re-download bug `feedback_single_engine`
+        was created to prevent.
+        """
+        gpu_engine = MagicMock()
+        gpu_engine.load_model.side_effect = RuntimeError("fail")
+        cpu_engine = MagicMock()
+        mock_create.side_effect = [gpu_engine, cpu_engine]
         config = MagicMock()
         paths = MagicMock()
 
-        with pytest.raises(RuntimeError):
-            _load_engine_with_fallback(config, paths)
+        _load_engine_with_fallback(config, paths, _REGISTRY, _HARDWARE)
+
+        # Both calls go through the SAME factory function, which routes
+        # to the SAME engine_id from config — only device_override differs.
+        first_call, second_call = mock_create.call_args_list
+        assert first_call.args == (config, paths, _REGISTRY, _HARDWARE)
+        assert second_call.args == (config, paths, _REGISTRY, _HARDWARE)
+        assert second_call.kwargs == {"device_override": "cpu"}
 
 
 class TestMigrateRemovedModels:

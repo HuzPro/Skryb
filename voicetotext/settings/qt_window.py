@@ -174,6 +174,7 @@ class QtSettingsWindow(QMainWindow):
             model_size=self._transcription_page.current_model(),
             language=self._transcription_page.current_language(),
             device=self._transcription_page.current_device(),
+            engine=self._transcription_page.current_engine(),
             hotkey_combination=self._hotkeys_page.current_combination(),
             hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),

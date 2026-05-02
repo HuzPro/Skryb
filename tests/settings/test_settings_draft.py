@@ -9,6 +9,7 @@ def _make_draft(**overrides) -> SettingsDraft:
         model_size="base",
         language="en",
         device="auto",
+        engine="auto",
         hotkey_combination="ctrl+alt+m",
         hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE,
@@ -18,12 +19,13 @@ def _make_draft(**overrides) -> SettingsDraft:
 
 
 class TestSettingsDraftConstruction:
-    def test_should_hold_all_six_fields(self):
+    def test_should_hold_all_seven_fields(self):
         draft = _make_draft()
 
         assert draft.model_size == "base"
         assert draft.language == "en"
         assert draft.device == "auto"
+        assert draft.engine == "auto"
         assert draft.hotkey_combination == "ctrl+alt+m"
         assert draft.hotkey_mode == "toggle"
         assert draft.output_mode is OutputMode.DIRECT_PASTE
@@ -67,6 +69,16 @@ class TestChangeSetFromDrafts:
     def test_should_flag_engine_reload_required_when_language_differs(self):
         original = _make_draft(language="en")
         updated = _make_draft(language="fr")
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.engine_reload_required is True
+        assert changes.hotkey_changed is False
+        assert changes.output_changed is False
+
+    def test_should_flag_engine_reload_required_when_engine_differs(self):
+        original = _make_draft(engine="auto")
+        updated = _make_draft(engine="faster_whisper")
 
         changes = ChangeSet.between(original, updated)
 

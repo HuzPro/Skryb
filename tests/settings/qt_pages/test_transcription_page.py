@@ -16,13 +16,17 @@ def _view(name: str, installed: bool = False) -> ModelView:
     )
 
 
-def _draft(model: str = "base", language: str = "en", device: str = "auto") -> SettingsDraft:
+def _draft(
+    model: str = "base", language: str = "en", device: str = "auto",
+    engine: str = "auto",
+) -> SettingsDraft:
     from voicetotext.output.output_mode import OutputMode
 
     return SettingsDraft(
         model_size=model,
         language=language,
         device=device,
+        engine=engine,
         hotkey_combination="ctrl+alt+m",
         hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE,
@@ -39,6 +43,8 @@ def service():
     ]
     svc.selected_model.return_value = "base"
     svc.current_draft.return_value = _draft()
+    svc.available_devices.return_value = ["auto", "cuda", "cpu"]
+    svc.engine_candidates_for.return_value = ()
     return svc
 
 
@@ -77,6 +83,49 @@ class TestTranscriptionPageDevice:
         page.set_device("cuda")
 
         assert page.current_device() == "cuda"
+
+    def test_should_populate_devices_from_service(self, qtbot, service):
+        service.available_devices.return_value = ["auto", "cpu"]
+        page = TranscriptionPage(service)
+        qtbot.addWidget(page)
+
+        assert page._device_combo.count() == 2
+        items = [page._device_combo.itemText(i) for i in range(2)]
+        assert items == ["auto", "cpu"]
+
+
+class TestTranscriptionPageEngine:
+    def test_should_default_to_auto_when_no_candidates(self, page):
+        assert page.current_engine() == "auto"
+
+    def test_should_offer_each_candidate_engine(self, qtbot, service):
+        from voicetotext.transcription.engine_types import EngineCandidate
+
+        service.engine_candidates_for.return_value = (
+            EngineCandidate(
+                engine_id="faster_whisper", display_name="faster-whisper",
+                score=100, is_recommended=True, reason="for ROCm",
+            ),
+            EngineCandidate(
+                engine_id="transformers", display_name="Transformers",
+                score=50, is_recommended=False, reason="",
+            ),
+        )
+        page = TranscriptionPage(service)
+        qtbot.addWidget(page)
+
+        engine_ids = [
+            page._engine_combo.itemData(i)
+            for i in range(page._engine_combo.count())
+        ]
+        assert "auto" in engine_ids
+        assert "faster_whisper" in engine_ids
+        assert "transformers" in engine_ids
+
+    def test_should_reflect_set_engine(self, page):
+        page.set_engine("auto")
+
+        assert page.current_engine() == "auto"
 
 
 class TestTranscriptionPageDownloadActions:

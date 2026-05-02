@@ -5,7 +5,7 @@ from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
 from voicetotext.downloads.download_manager import DownloadHandle, DownloadManager
 from voicetotext.downloads.hf_repo_resolver import HfRepoResolver
 from voicetotext.downloads.model_download_job import ModelDownloadJob
-from voicetotext.transcription.model_info import TRANSFORMERS_WHISPER_MODELS, ModelInfo
+from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -30,7 +30,7 @@ class HuggingFaceModelManager(ModelManager):
         self._download_manager = download_manager
         self._resolver = resolver
         self._file_downloader = file_downloader
-        self._models = models or TRANSFORMERS_WHISPER_MODELS
+        self._models = models or WHISPER_MODELS
 
     # ------------------------------------------------------------------
     # Listing / inspection

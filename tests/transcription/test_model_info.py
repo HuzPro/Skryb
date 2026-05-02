@@ -1,6 +1,8 @@
+from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
-    TRANSFORMERS_WHISPER_MODELS,
+    WHISPER_MODELS,
     ModelInfo,
+    migrate_engine_field,
 )
 
 
@@ -35,15 +37,98 @@ class TestModelInfoEntity:
 
         assert info.repo_id == ""
 
+    def test_compatible_engines_defaults_to_transformers_only(self):
+        info = ModelInfo(name="base", size_mb=142, description="test")
 
-class TestTransformersWhisperModels:
+        assert info.compatible_engines == ("transformers",)
+
+    def test_should_store_explicit_compatible_engines(self):
+        info = ModelInfo(
+            name="base", size_mb=142, description="test",
+            compatible_engines=("transformers", "faster_whisper"),
+        )
+
+        assert info.compatible_engines == ("transformers", "faster_whisper")
+
+    def test_engine_priorities_default_to_empty_mapping(self):
+        info = ModelInfo(name="base", size_mb=142, description="test")
+
+        assert dict(info.engine_priorities) == {}
+
+    def test_should_store_explicit_engine_priorities(self):
+        info = ModelInfo(
+            name="base", size_mb=142, description="test",
+            engine_priorities={"faster_whisper": 100, "transformers": 50},
+        )
+
+        assert info.engine_priorities["faster_whisper"] == 100
+        assert info.engine_priorities["transformers"] == 50
+
+    def test_ct2_repo_id_defaults_to_empty(self):
+        info = ModelInfo(name="base", size_mb=142, description="test")
+
+        assert info.ct2_repo_id == ""
+
+    def test_should_store_explicit_ct2_repo_id(self):
+        info = ModelInfo(
+            name="base", size_mb=142, description="test",
+            ct2_repo_id="Systran/faster-whisper-base",
+        )
+
+        assert info.ct2_repo_id == "Systran/faster-whisper-base"
+
+
+class TestWhisperModels:
     def test_should_contain_all_standard_models(self):
         expected = {"tiny", "base", "small", "large-v3-turbo", "large-v3"}
 
-        assert set(TRANSFORMERS_WHISPER_MODELS.keys()) == expected
+        assert set(WHISPER_MODELS.keys()) == expected
 
-    def test_all_models_should_have_repo_ids(self):
-        for model in TRANSFORMERS_WHISPER_MODELS.values():
+    def test_all_models_should_have_openai_repo_ids(self):
+        for model in WHISPER_MODELS.values():
             assert model.repo_id.startswith("openai/whisper-")
+
+    def test_all_models_should_have_systran_ct2_repo_ids(self):
+        for model in WHISPER_MODELS.values():
+            assert model.ct2_repo_id.startswith("Systran/faster-whisper-")
+
+    def test_all_models_should_be_compatible_with_both_engines(self):
+        for model in WHISPER_MODELS.values():
+            assert "transformers" in model.compatible_engines
+            assert "faster_whisper" in model.compatible_engines
+
+    def test_faster_whisper_should_outrank_transformers_for_every_model(self):
+        for model in WHISPER_MODELS.values():
+            assert model.engine_priorities["faster_whisper"] > model.engine_priorities["transformers"]
+
+
+class TestMigrateEngineField:
+    def test_should_set_engine_to_auto_when_missing(self, tmp_path):
+        config = JsonConfigAdapter(tmp_path / "config.json")
+        config.load()
+
+        migrate_engine_field(config)
+
+        assert config.get("transcription.engine") == "auto"
+
+    def test_should_leave_engine_unchanged_when_explicitly_set(self, tmp_path):
+        config = JsonConfigAdapter(tmp_path / "config.json")
+        config.load()
+        config.set("transcription.engine", "faster_whisper")
+
+        migrate_engine_field(config)
+
+        assert config.get("transcription.engine") == "faster_whisper"
+
+    def test_should_persist_migration_to_disk(self, tmp_path):
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_engine_field(config)
+
+        reloaded = JsonConfigAdapter(path)
+        reloaded.load()
+        assert reloaded.get("transcription.engine") == "auto"
 
 

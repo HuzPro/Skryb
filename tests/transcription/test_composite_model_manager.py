@@ -1,0 +1,134 @@
+from pathlib import Path
+from unittest.mock import MagicMock
+
+from voicetotext.transcription.composite_model_manager import CompositeModelManager
+from voicetotext.transcription.model_info import ModelInfo
+from voicetotext.transcription.model_manager import ModelManager
+
+
+def _info(name: str, repo_id: str = "openai/whisper-base") -> ModelInfo:
+    return ModelInfo(
+        name=name, size_mb=290, description="test", repo_id=repo_id,
+    )
+
+
+class _FakeManager(ModelManager):
+
+    def __init__(
+        self,
+        models: list[ModelInfo] | None = None,
+        installed: dict[str, bool] | None = None,
+        path: Path | None = None,
+    ) -> None:
+        self._models = models or []
+        self._installed = installed or {}
+        self._path = path
+        self.download_calls: list[str] = []
+        self.delete_calls: list[str] = []
+
+    def list_models(self) -> list[ModelInfo]:
+        return list(self._models)
+
+    def is_installed(self, name: str) -> bool:
+        return self._installed.get(name, False)
+
+    def download(self, name: str):  # type: ignore[override]
+        self.download_calls.append(name)
+        return MagicMock()
+
+    def delete(self, name: str) -> None:
+        self.delete_calls.append(name)
+
+    def get_model_path(self, name: str) -> Path | None:
+        return self._path if self._installed.get(name, False) else None
+
+
+def _make_composite(
+    *,
+    transformers: _FakeManager | None = None,
+    faster_whisper: _FakeManager | None = None,
+    active: str = "transformers",
+) -> CompositeModelManager:
+    return CompositeModelManager(
+        by_engine={
+            "transformers": transformers or _FakeManager(),
+            "faster_whisper": faster_whisper or _FakeManager(),
+        },
+        active_engine_provider=lambda: active,  # type: ignore[arg-type]
+    )
+
+
+class TestCompositeModelManagerListing:
+    def test_should_aggregate_models_from_all_children_deduped(self):
+        info = _info("base")
+        composite = _make_composite(
+            transformers=_FakeManager(models=[info]),
+            faster_whisper=_FakeManager(models=[info]),
+        )
+
+        models = composite.list_models()
+
+        assert len(models) == 1
+        assert models[0].name == "base"
+
+
+class TestCompositeModelManagerInstallation:
+    def test_should_report_installed_when_any_child_has_model(self):
+        composite = _make_composite(
+            transformers=_FakeManager(installed={"base": False}),
+            faster_whisper=_FakeManager(installed={"base": True}),
+        )
+
+        assert composite.is_installed("base") is True
+
+    def test_should_report_not_installed_when_no_child_has_model(self):
+        composite = _make_composite(
+            transformers=_FakeManager(installed={"base": False}),
+            faster_whisper=_FakeManager(installed={"base": False}),
+        )
+
+        assert composite.is_installed("base") is False
+
+
+class TestCompositeModelManagerRouting:
+    def test_should_route_download_to_active_engine_child(self):
+        transformers = _FakeManager()
+        faster_whisper = _FakeManager()
+        composite = _make_composite(
+            transformers=transformers,
+            faster_whisper=faster_whisper,
+            active="faster_whisper",
+        )
+
+        composite.download("base")
+
+        assert faster_whisper.download_calls == ["base"]
+        assert transformers.download_calls == []
+
+    def test_should_route_delete_to_active_engine_child(self):
+        transformers = _FakeManager()
+        faster_whisper = _FakeManager()
+        composite = _make_composite(
+            transformers=transformers,
+            faster_whisper=faster_whisper,
+            active="transformers",
+        )
+
+        composite.delete("base")
+
+        assert transformers.delete_calls == ["base"]
+        assert faster_whisper.delete_calls == []
+
+    def test_should_return_get_model_path_from_active_engine_child(self, tmp_path):
+        active_path = tmp_path / "models--openai--whisper-base"
+        composite = _make_composite(
+            transformers=_FakeManager(installed={"base": True}, path=active_path),
+            active="transformers",
+        )
+
+        assert composite.get_model_path("base") == active_path
+
+    def test_should_implement_model_manager_interface(self):
+        composite = _make_composite()
+
+        assert isinstance(composite, ModelManager)

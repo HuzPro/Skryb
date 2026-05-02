@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from voicetotext.downloads.hf_repo_resolver import ResolvedFile
 from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
-from voicetotext.transcription.model_info import TRANSFORMERS_WHISPER_MODELS
+from voicetotext.transcription.model_info import WHISPER_MODELS
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -29,7 +29,7 @@ class TestHuggingFaceModelManagerListModels:
 
         models = manager.list_models()
 
-        assert len(models) == len(TRANSFORMERS_WHISPER_MODELS)
+        assert len(models) == len(WHISPER_MODELS)
 
     def test_should_include_model_names(self, tmp_path):
         manager = _make_manager(tmp_path)
@@ -168,22 +168,22 @@ class TestHuggingFaceModelManagerIsAModelManager:
         assert isinstance(manager, ModelManager)
 
 
-class TestTransformersWhisperModelLineup:
+class TestWhisperModelLineup:
     def test_lineup_contains_large_v3_turbo(self):
-        from voicetotext.transcription.model_info import TRANSFORMERS_WHISPER_MODELS
+        from voicetotext.transcription.model_info import WHISPER_MODELS
 
-        assert "large-v3-turbo" in TRANSFORMERS_WHISPER_MODELS
-        info = TRANSFORMERS_WHISPER_MODELS["large-v3-turbo"]
+        assert "large-v3-turbo" in WHISPER_MODELS
+        info = WHISPER_MODELS["large-v3-turbo"]
         assert info.repo_id == "openai/whisper-large-v3-turbo"
         assert info.size_mb == 1620
 
     def test_lineup_does_not_contain_medium(self):
-        from voicetotext.transcription.model_info import TRANSFORMERS_WHISPER_MODELS
+        from voicetotext.transcription.model_info import WHISPER_MODELS
 
-        assert "medium" not in TRANSFORMERS_WHISPER_MODELS
+        assert "medium" not in WHISPER_MODELS
 
     def test_lineup_uses_only_official_openai_repos(self):
-        from voicetotext.transcription.model_info import TRANSFORMERS_WHISPER_MODELS
+        from voicetotext.transcription.model_info import WHISPER_MODELS
 
-        for info in TRANSFORMERS_WHISPER_MODELS.values():
+        for info in WHISPER_MODELS.values():
             assert info.repo_id.startswith("openai/whisper-")

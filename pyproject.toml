@@ -35,16 +35,22 @@ voicetotext = "voicetotext.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `slow` is deselected by default — it covers tests that load real
+# multi-GB Whisper models or spawn subprocesses that import torch, which
+# can exhaust the Windows pagefile and balloon the OS swap file. Opt in
+# explicitly with `pytest -m slow` when you actually want those.
 addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
+    "-m",
+    "not slow",
 ]
 markers = [
     "unit: fast hermetic tests, no I/O",
     "acceptance: full-use-case scenarios via fakes",
     "integration: touch real filesystem or real third-party libs",
-    "slow: tests that take longer than 100ms",
+    "slow: tests that take longer than 100ms (deselected by default; opt in via `-m slow`)",
 ]
 filterwarnings = [
     "error",

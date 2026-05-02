@@ -19,6 +19,10 @@ from voicetotext.settings.engine_hot_swap import EngineHotSwap
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
+from voicetotext.transcription.engine_registry import EngineRegistry
+from voicetotext.transcription.engine_selector import rank_engines
+from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
+from voicetotext.transcription.model_info import WHISPER_MODELS
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -82,6 +86,8 @@ class SettingsService:
         downloads: DownloadCoordinator,
         hot_swap: EngineHotSwap,
         state_machine: AppStateMachine,
+        registry: EngineRegistry | None = None,
+        hardware: HardwareProfile | None = None,
     ) -> None:
         self._config = config
         self._model_manager = model_manager
@@ -90,6 +96,8 @@ class SettingsService:
         self._downloads = downloads
         self._hot_swap = hot_swap
         self._state_machine = state_machine
+        self._registry = registry
+        self._hardware = hardware
         self._download_listeners: list[DownloadEventListener] = []
         self._engine_listeners: list[EngineEventListener] = []
         self._state_listeners: list[StateChangeListener] = []
@@ -153,6 +161,7 @@ class SettingsService:
             model_size=self._config.get("transcription.model_size", "base"),
             language=self._config.get("transcription.language", "en"),
             device=self._config.get("transcription.device", "auto"),
+            engine=self._config.get("transcription.engine", "auto"),
             hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
             hotkey_mode=self._config.get("hotkey.mode", "toggle"),
             output_mode=OutputMode.migrate(self._config.get("output.mode")),
@@ -163,11 +172,43 @@ class SettingsService:
         self._config.set("transcription.model_size", draft.model_size)
         self._config.set("transcription.language", draft.language)
         self._config.set("transcription.device", draft.device)
+        self._config.set("transcription.engine", draft.engine)
         self._config.set("hotkey.combination", draft.hotkey_combination)
         self._config.set("hotkey.mode", draft.hotkey_mode)
         self._config.set("output.mode", draft.output_mode.value)
         self._config.save()
         return ChangeSet.between(original, draft)
+
+    # ------------------------------------------------------------------
+    # Engine + device queries (hardware-aware)
+    # ------------------------------------------------------------------
+
+    def engine_candidates_for(
+        self, model_name: str,
+    ) -> tuple[EngineCandidate, ...]:
+        """Return engines that can drive *model_name* on this hardware.
+
+        Empty when registry/hardware aren't wired (first-run path).
+        Otherwise a ranked tuple — the first entry has
+        ``is_recommended=True`` and the reason string says why.
+        """
+        if self._registry is None or self._hardware is None:
+            return ()
+        info = WHISPER_MODELS.get(model_name)
+        if info is None:
+            return ()
+        return rank_engines(info, self._hardware, self._registry.all_descriptors())
+
+    def available_devices(self) -> list[str]:
+        """Return device choices applicable to the detected hardware.
+
+        Always includes ``auto`` and ``cpu``; adds ``cuda`` only when a
+        GPU was detected, so a CPU-only box doesn't show a non-functional
+        option.
+        """
+        if self._hardware is None or self._hardware.kind == "cpu":
+            return ["auto", "cpu"]
+        return ["auto", "cuda", "cpu"]
 
     # ------------------------------------------------------------------
     # Engine hot-swap

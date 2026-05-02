@@ -13,7 +13,7 @@ import pytest
 
 from voicetotext.core.paths import AppPaths
 from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
-from voicetotext.transcription.model_info import TRANSFORMERS_WHISPER_MODELS
+from voicetotext.transcription.model_info import WHISPER_MODELS
 
 
 def models_dir() -> Path | None:
@@ -28,7 +28,7 @@ def installed_model_names() -> list[str]:
     if directory is None or not directory.exists():
         return []
     installed: list[str] = []
-    for name, info in TRANSFORMERS_WHISPER_MODELS.items():
+    for name, info in WHISPER_MODELS.items():
         repo_dir = directory / f"models--{info.repo_id.replace('/', '--')}"
         snapshots = repo_dir / "snapshots"
         if not snapshots.exists():

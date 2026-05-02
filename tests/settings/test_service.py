@@ -33,6 +33,8 @@ def _build_service(
     installed: dict[str, bool] | None = None,
     config_overrides: dict | None = None,
     state_machine: AppStateMachine | None = None,
+    registry=None,
+    hardware=None,
 ):
     config_data = {
         "transcription.model_size": "base",
@@ -65,8 +67,78 @@ def _build_service(
         downloads=downloads,
         hot_swap=hot_swap,
         state_machine=state_machine,
+        registry=registry,
+        hardware=hardware,
     )
     return service, config, manager, bus, hot_swap
+
+
+class TestEngineCandidatesFor:
+    def test_should_return_empty_tuple_when_registry_not_wired(self):
+        service, *_ = _build_service()
+
+        assert service.engine_candidates_for("base") == ()
+
+    def test_should_return_ranked_candidates_when_registry_wired(self):
+        from voicetotext.transcription.engine_factory import build_engine_registry
+        from voicetotext.transcription.engine_types import HardwareProfile
+
+        registry = build_engine_registry()
+        hardware = HardwareProfile(
+            kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
+        )
+        service, *_ = _build_service(registry=registry, hardware=hardware)
+
+        candidates = service.engine_candidates_for("base")
+
+        assert len(candidates) == 2
+        assert candidates[0].is_recommended is True
+        assert candidates[0].engine_id == "faster_whisper"
+
+    def test_should_return_empty_when_model_unknown(self):
+        from voicetotext.transcription.engine_factory import build_engine_registry
+        from voicetotext.transcription.engine_types import HardwareProfile
+
+        registry = build_engine_registry()
+        hardware = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
+        service, *_ = _build_service(registry=registry, hardware=hardware)
+
+        assert service.engine_candidates_for("nonexistent-model") == ()
+
+
+class TestAvailableDevices:
+    def test_should_return_cpu_only_when_hardware_not_wired(self):
+        service, *_ = _build_service()
+
+        assert service.available_devices() == ["auto", "cpu"]
+
+    def test_should_omit_cuda_for_cpu_only_hardware(self):
+        from voicetotext.transcription.engine_types import HardwareProfile
+
+        cpu_only = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
+        service, *_ = _build_service(hardware=cpu_only)
+
+        assert service.available_devices() == ["auto", "cpu"]
+
+    def test_should_include_cuda_for_amd_rocm_hardware(self):
+        from voicetotext.transcription.engine_types import HardwareProfile
+
+        rocm = HardwareProfile(
+            kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
+        )
+        service, *_ = _build_service(hardware=rocm)
+
+        assert service.available_devices() == ["auto", "cuda", "cpu"]
+
+    def test_should_include_cuda_for_nvidia_hardware(self):
+        from voicetotext.transcription.engine_types import HardwareProfile
+
+        cuda = HardwareProfile(
+            kind="nvidia_cuda", device_name="NVIDIA RTX 4090", gfx_arch=None,
+        )
+        service, *_ = _build_service(hardware=cuda)
+
+        assert service.available_devices() == ["auto", "cuda", "cpu"]
 
 
 class _RecordingListener(DownloadEventListener, EngineEventListener):
@@ -213,6 +285,7 @@ class TestApplyDraft:
             model_size="small",
             language="en",
             device="cuda",
+            engine="auto",
             hotkey_combination="f12",
             hotkey_mode="push_to_talk",
             output_mode=OutputMode.CLIPBOARD_ONLY,
@@ -234,6 +307,7 @@ class TestApplyDraft:
             model_size="base",
             language="de",
             device="auto",
+            engine="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
@@ -250,6 +324,7 @@ class TestApplyDraft:
             model_size="small",  # changed from "base"
             language="en",
             device="auto",
+            engine="auto",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,

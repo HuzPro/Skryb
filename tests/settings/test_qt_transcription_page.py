@@ -22,6 +22,7 @@ def _draft(model_size: str = "base") -> SettingsDraft:
         model_size=model_size,
         language="en",
         device="cuda",
+        engine="auto",
         hotkey_combination="ctrl+alt+m",
         hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE,

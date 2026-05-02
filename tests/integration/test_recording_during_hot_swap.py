@@ -18,6 +18,13 @@ C++ state into interpreter finalization and segfaults on Windows at
 shutdown.  Isolating the scenario in a child process that calls
 ``os._exit`` after printing its result keeps the parent pytest
 process clean.
+
+The whole test is gated behind ``VOICETOTEXT_RUN_REAL_MODEL_TESTS`` —
+without that env var the test skips before ever spawning the
+subprocess. On Windows, ``torch`` opens shared-memory regions backed
+by the OS pagefile during import, and the auto-expanding pagefile
+can fill the disk if the subprocess is spawned while resources are
+already low. Opt in only when you have headroom.
 """
 
 import json
@@ -39,9 +46,20 @@ _EXIT_MODEL_UNAVAILABLE = 2
 _EXIT_INVARIANT_VIOLATED = 3
 _EXIT_HARNESS_ERROR = 4
 
+_REAL_MODEL_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
+
 
 @pytest.mark.integration
 @pytest.mark.slow
+@pytest.mark.skipif(
+    not os.environ.get(_REAL_MODEL_OPT_IN),
+    reason=(
+        "Real-model integration test gated behind "
+        f"{_REAL_MODEL_OPT_IN}=1 — opting in spawns a subprocess that "
+        "imports torch and can balloon the Windows pagefile to fill "
+        "the disk."
+    ),
+)
 class TestRecordingDuringHotSwap:
     def test_old_engine_keeps_transcribing_when_recording_races_with_swap(
         self,

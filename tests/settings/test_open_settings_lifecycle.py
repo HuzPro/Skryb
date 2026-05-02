@@ -30,6 +30,7 @@ def _draft() -> SettingsDraft:
         model_size="base",
         language="en",
         device="auto",
+        engine="auto",
         hotkey_combination="ctrl+alt+m",
         hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE,
@@ -56,6 +57,8 @@ class _TrackingService:
             )
         )
         self.trigger_engine_swap = MagicMock()
+        self.available_devices = MagicMock(return_value=["auto", "cuda", "cpu"])
+        self.engine_candidates_for = MagicMock(return_value=())
 
     def subscribe_engine(self, listener: object) -> None:
         self._engine_listeners.append(listener)

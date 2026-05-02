@@ -15,16 +15,20 @@ from voicetotext.settings.service import SettingsService
 _SUPPORTED_LANGUAGES = [
     "en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh",
 ]
-_SUPPORTED_DEVICES = ["auto", "cuda", "cpu"]
 
 
 class TranscriptionPage(QWidget):
-    """Page for picking the active Whisper model, language, and device.
+    """Page for picking the active Whisper model, language, device, and engine.
 
     Uses a :class:`QListView` + :class:`QtModelListModel` so the model
     catalog renders as native item views (deferred to a delegate in the
     main window). Exposes imperative setters/getters so the enclosing
     window can build a :class:`SettingsDraft` on Save.
+
+    The Engine combo is hardware-aware: it asks the service for engine
+    candidates compatible with the *currently selected* model on the
+    detected hardware, and re-populates whenever the model changes.
+    The recommended engine is preselected with a reason label.
     """
 
     def __init__(
@@ -62,9 +66,17 @@ class TranscriptionPage(QWidget):
         form.addRow("Language:", self._language_combo)
 
         self._device_combo = QComboBox()
-        self._device_combo.addItems(_SUPPORTED_DEVICES)
+        self._device_combo.addItems(self._service.available_devices())
         self._device_combo.setCurrentText(draft.device)
         form.addRow("Device:", self._device_combo)
+
+        self._engine_combo = QComboBox()
+        self._engine_combo.setObjectName("engine-combo")
+        self._engine_reason_label = QLabel("")
+        self._engine_reason_label.setObjectName("engine-reason")
+        form.addRow("Engine:", self._engine_combo)
+        form.addRow("", self._engine_reason_label)
+        self._populate_engine_combo(draft.model_size, current_engine=draft.engine)
 
         layout.addLayout(form)
 
@@ -82,11 +94,34 @@ class TranscriptionPage(QWidget):
         if view is None or not view.installed:
             return
         self._list_model.set_selected(view.name)
+        self._populate_engine_combo(view.name)
 
     def _sync_view_selection(self, name: str) -> None:
         index = self._list_model.index_for_name(name)
         if index.isValid():
             self._list_view.setCurrentIndex(index)
+
+    def _populate_engine_combo(
+        self, model_name: str, current_engine: str = "auto",
+    ) -> None:
+        candidates = tuple(self._service.engine_candidates_for(model_name) or ())
+        self._engine_combo.clear()
+        self._engine_combo.addItem("auto", userData="auto")
+        for candidate in candidates:
+            label = candidate.display_name
+            if candidate.is_recommended:
+                label += "  (recommended)"
+            self._engine_combo.addItem(label, userData=candidate.engine_id)
+        self._select_engine_combo_value(current_engine)
+        reason = candidates[0].reason if candidates else ""
+        self._engine_reason_label.setText(str(reason))
+
+    def _select_engine_combo_value(self, engine_id: str) -> None:
+        for idx in range(self._engine_combo.count()):
+            if self._engine_combo.itemData(idx) == engine_id:
+                self._engine_combo.setCurrentIndex(idx)
+                return
+        self._engine_combo.setCurrentIndex(0)
 
     # ------------------------------------------------------------------
     # Public getters/setters (consumed by the main window)
@@ -116,6 +151,13 @@ class TranscriptionPage(QWidget):
 
     def set_device(self, device: str) -> None:
         self._device_combo.setCurrentText(device)
+
+    def current_engine(self) -> str:
+        data = self._engine_combo.currentData()
+        return str(data) if data is not None else "auto"
+
+    def set_engine(self, engine: str) -> None:
+        self._select_engine_combo_value(engine)
 
     # ------------------------------------------------------------------
     # Download/delete commands (proxy to the service, tolerate errors

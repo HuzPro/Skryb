@@ -31,6 +31,7 @@ def _draft(**overrides) -> SettingsDraft:
         "model_size": "base",
         "language": "en",
         "device": "auto",
+        "engine": "auto",
         "hotkey_combination": "ctrl+alt+m",
         "hotkey_mode": "toggle",
         "output_mode": OutputMode.DIRECT_PASTE,

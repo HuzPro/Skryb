@@ -7,9 +7,14 @@ acceptance suite, and swaps in real components only where it matters
 pipeline — state machine, event bus, hotkey wiring, clipboard
 preservation, output decorator — stays the same as in production.
 
-The test skips cleanly when either the audio fixture or the ``base``
-model is missing from the local HuggingFace cache.
+Skipped by default: gated behind ``VOICETOTEXT_RUN_REAL_MODEL_TESTS``
+because importing torch and loading Whisper weights on Windows can
+auto-expand the OS pagefile to fill the disk. Also skips when the
+audio fixture or the ``base`` model is missing from the local
+HuggingFace cache.
 """
+
+import os
 
 import pytest
 
@@ -23,7 +28,18 @@ from tests.helpers.model_cache import require_installed_model
 
 pytestmark = [pytest.mark.acceptance, pytest.mark.slow]
 
+_REAL_MODEL_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
 
+
+@pytest.mark.skipif(
+    not os.environ.get(_REAL_MODEL_OPT_IN),
+    reason=(
+        "Real-engine acceptance test gated behind "
+        f"{_REAL_MODEL_OPT_IN}=1 — opting in imports torch and loads "
+        "Whisper weights, which can balloon the Windows pagefile to "
+        "fill the disk."
+    ),
+)
 class TestRealEngineTranscribesRealAudio:
     def test_should_transcribe_recorded_audio_and_type_text_when_user_toggles_hotkey(
         self, voice_to_text_app: VoiceToTextApp

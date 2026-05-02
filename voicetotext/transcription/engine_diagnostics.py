@@ -2,7 +2,7 @@
 
 Provides VRAM and adapter-instance snapshots for the model hot-swap
 path. These live in the transcription layer (not core) because they
-depend on torch and TransformersWhisperAdapter.
+depend on torch and the engine ABC.
 """
 
 import gc
@@ -33,17 +33,18 @@ def vram_snapshot() -> str:
 
 
 def count_live_adapters() -> int:
-    """Count live TransformersWhisperAdapter instances on the heap.
+    """Count live :class:`TranscriptionEngine` instances on the heap.
 
-    Returns ``-1`` on any failure and never raises into the caller.
+    Used by the hot-swap coordinator to verify the previous adapter was
+    actually released after a swap. Returns ``-1`` on any failure and
+    never raises into the caller. Counts every ``TranscriptionEngine``
+    subclass — adding a new engine does not require updating this fn.
     """
     try:
-        from voicetotext.transcription.transformers_whisper_adapter import (
-            TransformersWhisperAdapter,
-        )
+        from voicetotext.transcription.engine import TranscriptionEngine
 
         return sum(
-            1 for obj in gc.get_objects() if isinstance(obj, TransformersWhisperAdapter)
+            1 for obj in gc.get_objects() if isinstance(obj, TranscriptionEngine)
         )
     except Exception:  # pragma: no cover — diagnostic only
         return -1
