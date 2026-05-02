@@ -15,6 +15,9 @@ from voicetotext.settings.qt_model_list_model import DownloadProgressSnapshot
 
 _DOWNLOADING_STATES = frozenset({"queued", "downloading", "paused"})
 
+_ACTION_BUTTON_HEIGHT: int = 28
+_ACTION_BUTTON_MIN_WIDTH: int = 84
+
 
 class ModelRowWidget(QWidget):
     """Per-row widget for the transcription page's model list.
@@ -68,6 +71,8 @@ class ModelRowWidget(QWidget):
         self._action_button = QPushButton("")
         self._action_button.setObjectName("model-action")
         self._action_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._action_button.setFixedHeight(_ACTION_BUTTON_HEIGHT)
+        self._action_button.setMinimumWidth(_ACTION_BUTTON_MIN_WIDTH)
         self._action_button.clicked.connect(self._on_action_clicked)
         header.addWidget(self._action_button)
 
