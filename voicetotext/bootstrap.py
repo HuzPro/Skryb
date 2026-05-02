@@ -33,6 +33,7 @@ from voicetotext.settings.engine_hot_swap import (
 )
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.qt_download_bridge import QtDownloadBridge
+from voicetotext.settings.pynput_capture_bridge import PynputCaptureBridge
 from voicetotext.settings.qt_engine_bridge import QtEngineBridge
 from voicetotext.settings.qt_window import QtSettingsWindow
 from voicetotext.settings.service import SettingsService
@@ -296,12 +297,17 @@ def build_app(
             # (via WA_DeleteOnClose on QtSettingsWindow).
             settings_window_ref["current"] = None
             existing.close()
+        capture_bridge = PynputCaptureBridge()
         window = QtSettingsWindow(
             service=settings_service,
             first_run=False,
             on_save=lambda changes: apply_settings(
                 changes, config, record_and_transcribe_use_case, app
             ),
+            on_capture_state_changed=lambda recording: (
+                app.pause_listener() if recording else app.resume_listener()
+            ),
+            capture_bridge=capture_bridge,
         )
         window.destroyed.connect(_make_destroyed_handler(settings_window_ref, window))
         settings_window_ref["current"] = window

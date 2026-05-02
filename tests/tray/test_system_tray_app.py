@@ -87,6 +87,36 @@ class TestStateChangeForwarding:
         icon.update_state.assert_called_with(AppState.RECORDING, "Recording...")
 
 
+class TestPauseResumeListener:
+    def test_should_call_pause_on_listener_when_pause_listener_called(self):
+        listener = MagicMock()
+        app = SystemTrayApp(
+            use_case=MagicMock(),
+            state_machine=AppStateMachine(event_bus=SimpleEventBus()),
+            event_bus=SimpleEventBus(),
+            hotkey_listener=listener,
+            tray_factory=lambda **kwargs: MagicMock(),
+        )
+
+        app.pause_listener()
+
+        listener.pause.assert_called_once()
+
+    def test_should_call_resume_on_listener_when_resume_listener_called(self):
+        listener = MagicMock()
+        app = SystemTrayApp(
+            use_case=MagicMock(),
+            state_machine=AppStateMachine(event_bus=SimpleEventBus()),
+            event_bus=SimpleEventBus(),
+            hotkey_listener=listener,
+            tray_factory=lambda **kwargs: MagicMock(),
+        )
+
+        app.resume_listener()
+
+        listener.resume.assert_called_once()
+
+
 class TestErrorNotification:
     def test_should_notify_on_error_occurred_event(self):
         icon = MagicMock()

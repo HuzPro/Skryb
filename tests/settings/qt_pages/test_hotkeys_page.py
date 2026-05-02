@@ -47,3 +47,50 @@ class TestHotkeysPageCapture:
         page.hotkey_capture().combination_changed.emit("ctrl+f12")
 
         assert page.current_combination() == "ctrl+f12"
+
+
+class TestHotkeysPageRecordingState:
+    def test_should_emit_recording_state_changed_true_when_capture_starts(
+        self, page
+    ):
+        events: list[bool] = []
+        page.recording_state_changed.connect(events.append)
+
+        page.hotkey_capture().start_recording()
+
+        assert events == [True]
+
+    def test_should_emit_recording_state_changed_false_when_capture_stops(
+        self, page
+    ):
+        events: list[bool] = []
+        page.recording_state_changed.connect(events.append)
+        page.hotkey_capture().start_recording()
+
+        page.hotkey_capture().stop_recording()
+
+        assert events == [True, False]
+
+
+class TestHotkeysPageBridgeForwarding:
+    def test_should_pass_capture_bridge_to_capture_widget(self, qtbot):
+        from PySide6.QtCore import QObject, Signal
+
+        class FakeBridge(QObject):
+            key_pressed = Signal(str)
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        bridge = FakeBridge()
+        page = HotkeysPage(capture_bridge=bridge)
+        qtbot.addWidget(page)
+
+        page.hotkey_capture().start_recording()
+        bridge.key_pressed.emit("f12")
+        page.hotkey_capture().stop_recording()
+
+        assert page.current_combination() == "f12"

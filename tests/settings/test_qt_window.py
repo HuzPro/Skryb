@@ -257,6 +257,44 @@ class TestQtSettingsWindowFirstRun:
         assert "model" in window.status_label().text().lower()
 
 
+class TestQtSettingsWindowCaptureCallback:
+    def test_should_invoke_on_capture_state_changed_when_recording_starts(
+        self, qtbot, service
+    ):
+        events: list[bool] = []
+        window = QtSettingsWindow(
+            service, on_capture_state_changed=events.append
+        )
+        qtbot.addWidget(window)
+
+        window.hotkeys_page().hotkey_capture().start_recording()
+
+        assert events == [True]
+
+    def test_should_invoke_on_capture_state_changed_when_recording_stops(
+        self, qtbot, service
+    ):
+        events: list[bool] = []
+        window = QtSettingsWindow(
+            service, on_capture_state_changed=events.append
+        )
+        qtbot.addWidget(window)
+
+        window.hotkeys_page().hotkey_capture().start_recording()
+        window.hotkeys_page().hotkey_capture().stop_recording()
+
+        assert events == [True, False]
+
+    def test_should_be_safe_when_no_capture_callback_registered(
+        self, qtbot, service
+    ):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        window.hotkeys_page().hotkey_capture().start_recording()
+        window.hotkeys_page().hotkey_capture().stop_recording()
+
+
 class TestQtSettingsWindowLifecycle:
     def test_should_destroy_window_on_close(self, qtbot, service):
         # Regression: QMainWindow by default only hides on close(), leaving

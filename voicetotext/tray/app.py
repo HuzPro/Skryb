@@ -91,6 +91,12 @@ class SystemTrayApp:
         self._hotkey_listener = listener
         self._hotkey_listener.start()
 
+    def pause_listener(self) -> None:
+        self._hotkey_listener.pause()
+
+    def resume_listener(self) -> None:
+        self._hotkey_listener.resume()
+
     def _on_setup(self, icon: TrayIcon) -> None:
         icon.visible = True
         self._hotkey_listener.start()

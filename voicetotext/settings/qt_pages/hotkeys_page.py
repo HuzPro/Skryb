@@ -1,3 +1,4 @@
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QLabel,
@@ -6,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from voicetotext.settings.qt_hotkey_capture import QtHotkeyCapture
+from voicetotext.settings.qt_hotkey_capture import CaptureBridge, QtHotkeyCapture
 
 
 _TOGGLE_MODE = "toggle"
@@ -22,11 +23,18 @@ class HotkeysPage(QWidget):
     main window uses to build a :class:`SettingsDraft`.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    recording_state_changed = Signal(bool)
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        capture_bridge: CaptureBridge | None = None,
+    ) -> None:
         super().__init__(parent)
         self._combination: str = ""
         self._mode: str = _TOGGLE_MODE
         self._mode_buttons: dict[str, QRadioButton] = {}
+        self._capture_bridge = capture_bridge
         self._build()
 
     def _build(self) -> None:
@@ -35,11 +43,15 @@ class HotkeysPage(QWidget):
         layout.setSpacing(8)
 
         layout.addWidget(self._make_heading("Hotkey Combination"))
-        self._capture = QtHotkeyCapture()
+        self._capture = QtHotkeyCapture(capture_bridge=self._capture_bridge)
         self._capture.combination_changed.connect(self._on_combination_changed)
+        self._capture.recording_started.connect(self._on_recording_started)
+        self._capture.recording_stopped.connect(self._on_recording_stopped)
         layout.addWidget(self._capture)
 
-        hint = QLabel("Click Record, then press your combination.")
+        hint = QLabel(
+            "Type a combination, or click Record and press your keys, then click Stop."
+        )
         hint.setObjectName("page-hint")
         layout.addWidget(hint)
 
@@ -81,6 +93,12 @@ class HotkeysPage(QWidget):
 
     def _on_combination_changed(self, combo: str) -> None:
         self._combination = combo
+
+    def _on_recording_started(self) -> None:
+        self.recording_state_changed.emit(True)
+
+    def _on_recording_stopped(self) -> None:
+        self.recording_state_changed.emit(False)
 
     def hotkey_capture(self) -> QtHotkeyCapture:
         return self._capture

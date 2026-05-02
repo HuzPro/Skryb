@@ -67,3 +67,46 @@ class TestPynputAdapterIsAHotkeyListener:
         adapter = PynputAdapter(MagicMock())
 
         assert isinstance(adapter, HotkeyListener)
+
+
+class TestPynputAdapterPause:
+    @patch("voicetotext.hotkeys.pynput_adapter.keyboard")
+    def test_should_ignore_key_press_when_paused(self, mock_kb):
+        strategy = MagicMock()
+        adapter = PynputAdapter(strategy)
+        adapter.start()
+        listener_kwargs = mock_kb.Listener.call_args[1]
+        on_press = listener_kwargs["on_press"]
+
+        adapter.pause()
+        on_press(MagicMock())
+
+        strategy.on_key_press.assert_not_called()
+
+    @patch("voicetotext.hotkeys.pynput_adapter.keyboard")
+    def test_should_ignore_key_release_when_paused(self, mock_kb):
+        strategy = MagicMock()
+        adapter = PynputAdapter(strategy)
+        adapter.start()
+        listener_kwargs = mock_kb.Listener.call_args[1]
+        on_release = listener_kwargs["on_release"]
+
+        adapter.pause()
+        on_release(MagicMock())
+
+        strategy.on_key_release.assert_not_called()
+
+    @patch("voicetotext.hotkeys.pynput_adapter.keyboard")
+    def test_should_resume_processing_after_resume(self, mock_kb):
+        strategy = MagicMock()
+        adapter = PynputAdapter(strategy)
+        adapter.start()
+        listener_kwargs = mock_kb.Listener.call_args[1]
+        on_press = listener_kwargs["on_press"]
+
+        adapter.pause()
+        adapter.resume()
+        fake_key = MagicMock()
+        on_press(fake_key)
+
+        strategy.on_key_press.assert_called_once_with(fake_key)

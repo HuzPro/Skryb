@@ -19,6 +19,7 @@ from voicetotext.core.events import (
     StateChangedEvent,
 )
 from voicetotext.settings.qt_engine_bridge import QtEngineBridge
+from voicetotext.settings.qt_hotkey_capture import CaptureBridge
 from voicetotext.settings.qt_pages.hotkeys_page import HotkeysPage
 from voicetotext.settings.qt_pages.output_page import OutputPage
 from voicetotext.settings.qt_pages.transcription_page import TranscriptionPage
@@ -53,6 +54,8 @@ class QtSettingsWindow(QMainWindow):
         service: SettingsService,
         first_run: bool = False,
         on_save: Callable[[ChangeSet], None] | None = None,
+        on_capture_state_changed: Callable[[bool], None] | None = None,
+        capture_bridge: CaptureBridge | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -66,6 +69,8 @@ class QtSettingsWindow(QMainWindow):
         self._service = service
         self._first_run = first_run
         self._on_save = on_save
+        self._on_capture_state_changed = on_capture_state_changed
+        self._capture_bridge = capture_bridge
         self._pending_changes: ChangeSet | None = None
 
         self._engine_bridge = QtEngineBridge(parent=self)
@@ -106,7 +111,10 @@ class QtSettingsWindow(QMainWindow):
 
         self._pages = QStackedWidget()
         self._transcription_page = TranscriptionPage(self._service)
-        self._hotkeys_page = HotkeysPage()
+        self._hotkeys_page = HotkeysPage(capture_bridge=self._capture_bridge)
+        self._hotkeys_page.recording_state_changed.connect(
+            self._on_recording_state_changed
+        )
         self._output_page = OutputPage()
         self._pages.addWidget(self._transcription_page)
         self._pages.addWidget(self._hotkeys_page)
@@ -242,6 +250,10 @@ class QtSettingsWindow(QMainWindow):
 
     def on_state_changed(self, event: StateChangedEvent) -> None:
         self._refresh_save_enabled()
+
+    def _on_recording_state_changed(self, recording: bool) -> None:
+        if self._on_capture_state_changed is not None:
+            self._on_capture_state_changed(recording)
 
     # ------------------------------------------------------------------
     # Close/teardown

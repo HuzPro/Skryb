@@ -13,6 +13,7 @@ class PynputAdapter(HotkeyListener):
         self._listener: keyboard.Listener | None = None
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
+        self._paused: bool = False
 
     def start(self) -> None:
         self._listener = keyboard.Listener(
@@ -38,8 +39,18 @@ class PynputAdapter(HotkeyListener):
         if self._on_activate is not None and self._on_deactivate is not None:
             self._strategy.set_callbacks(self._on_activate, self._on_deactivate)
 
+    def pause(self) -> None:
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+
     def _on_press(self, key: keyboard.Key) -> None:
+        if self._paused:
+            return
         self._strategy.on_key_press(key)
 
     def _on_release(self, key: keyboard.Key) -> None:
+        if self._paused:
+            return
         self._strategy.on_key_release(key)

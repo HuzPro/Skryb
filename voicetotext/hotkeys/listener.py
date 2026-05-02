@@ -19,3 +19,11 @@ class HotkeyListener(ABC):
     @abstractmethod
     def set_on_deactivate(self, callback: Callable[[], None]) -> None:
         pass
+
+    @abstractmethod
+    def pause(self) -> None:
+        pass
+
+    @abstractmethod
+    def resume(self) -> None:
+        pass
