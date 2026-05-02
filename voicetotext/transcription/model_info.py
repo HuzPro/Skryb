@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from voicetotext.core.config import ConfigurationStore
+from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.transcription.engine_types import EngineId
 
 
@@ -74,6 +75,44 @@ WHISPER_MODELS: dict[str, ModelInfo] = {
         engine_priorities=_WHISPER_ENGINE_PRIORITIES,
     ),
 }
+
+
+_PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"nano_parakeet": 100},
+)
+
+
+PARAKEET_MODELS: dict[str, ModelInfo] = {
+    "parakeet-tdt-0.6b-v2": ModelInfo(
+        name="parakeet-tdt-0.6b-v2",
+        size_mb=2500,
+        description="Best accuracy, built-in punctuation (English)",
+        repo_id="nvidia/parakeet-tdt-0.6b-v2",
+        compatible_engines=("nano_parakeet",),
+        engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
+    ),
+    "parakeet-tdt-0.6b-v3": ModelInfo(
+        name="parakeet-tdt-0.6b-v3",
+        size_mb=2510,
+        description="Best accuracy, built-in punctuation (25 languages)",
+        repo_id="nvidia/parakeet-tdt-0.6b-v3",
+        compatible_engines=("nano_parakeet",),
+        engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
+    ),
+}
+
+
+ALL_MODELS: dict[str, ModelInfo] = {**WHISPER_MODELS, **PARAKEET_MODELS}
+
+
+def get_model_info(name: str) -> ModelInfo:
+    info = ALL_MODELS.get(name)
+    if info is None:
+        raise ConfigurationError(
+            f"Unknown model '{name}'. "
+            f"Available: {', '.join(sorted(ALL_MODELS))}"
+        )
+    return info
 
 
 _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {

@@ -14,7 +14,13 @@ from voicetotext.transcription.engine_factory import (
 )
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.faster_whisper_adapter import FasterWhisperAdapter
-from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
+from voicetotext.transcription.model_info import (
+    ALL_MODELS,
+    PARAKEET_MODELS,
+    WHISPER_MODELS,
+    ModelInfo,
+)
+from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
 from voicetotext.transcription.transformers_whisper_adapter import (
     TransformersWhisperAdapter,
 )
@@ -64,6 +70,13 @@ class TestBuildEngineRegistry:
 
         ids = {d.engine_id for d in registry.all_descriptors()}
         assert "faster_whisper" in ids
+
+
+    def test_should_register_nano_parakeet_descriptor(self):
+        registry = build_engine_registry()
+
+        ids = {d.engine_id for d in registry.all_descriptors()}
+        assert "nano_parakeet" in ids
 
 
 class TestResolveEngineId:
@@ -225,15 +238,63 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, TransformersWhisperAdapter)
 
+    def test_should_build_nano_parakeet_adapter_for_parakeet_model(
+        self, tmp_path,
+    ):
+        config = _config(
+            model_size="parakeet-tdt-0.6b-v2",
+            engine="nano_parakeet",
+            device="cpu",
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert isinstance(engine, NanoParakeetAdapter)
+
+    def test_should_route_nvidia_repo_id_to_nano_parakeet_adapter(
+        self, tmp_path,
+    ):
+        config = _config(
+            model_size="parakeet-tdt-0.6b-v3",
+            engine="nano_parakeet",
+            device="cpu",
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert engine._repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+
+    def test_should_auto_select_nano_parakeet_for_parakeet_model(
+        self, tmp_path,
+    ):
+        config = _config(
+            model_size="parakeet-tdt-0.6b-v2",
+            engine="auto",
+            device="cpu",
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert isinstance(engine, NanoParakeetAdapter)
+
 
 class TestCreateModelManager:
-    def test_should_return_model_manager_listing_all_whisper_models(self, tmp_path):
+    def test_should_return_model_manager_listing_all_models(self, tmp_path):
         download_manager = MagicMock()
 
         manager = create_model_manager(tmp_path, download_manager)
 
         names = {m.name for m in manager.list_models()}
-        assert names == set(WHISPER_MODELS.keys())
+        assert names == set(ALL_MODELS.keys())
 
     def test_should_report_model_not_installed_on_empty_directory(self, tmp_path):
         download_manager = MagicMock()
@@ -244,7 +305,7 @@ class TestCreateModelManager:
 
 
 class TestBuildCompositeModelManager:
-    def test_should_return_model_manager_with_whisper_models(self, tmp_path):
+    def test_should_return_model_manager_with_all_models(self, tmp_path):
         download_manager = MagicMock()
 
         manager = build_composite_model_manager(
@@ -253,4 +314,4 @@ class TestBuildCompositeModelManager:
         )
 
         names = {m.name for m in manager.list_models()}
-        assert names == set(WHISPER_MODELS.keys())
+        assert names == set(ALL_MODELS.keys())

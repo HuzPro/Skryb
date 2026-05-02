@@ -40,6 +40,8 @@ class HuggingFaceModelManager(ModelManager):
         return list(self._models.values())
 
     def is_installed(self, name: str) -> bool:
+        if name not in self._models:
+            return False
         snapshots_dir = self._model_cache_dir(name) / "snapshots"
         if not snapshots_dir.exists():
             return False

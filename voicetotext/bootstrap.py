@@ -47,7 +47,7 @@ from voicetotext.transcription.engine_factory import (
 )
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
-from voicetotext.transcription.model_info import WHISPER_MODELS
+from voicetotext.transcription.model_info import get_model_info
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
@@ -205,7 +205,7 @@ def _make_active_engine_provider(
     """Return a callable the composite ModelManager can poll on each op."""
     def provider() -> EngineId:
         model_name = config.get("transcription.model_size", "base")
-        model_info = WHISPER_MODELS[model_name]
+        model_info = get_model_info(model_name)
         return resolve_engine_id(config, model_info, hardware, registry)
     return provider
 

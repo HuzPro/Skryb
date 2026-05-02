@@ -16,7 +16,13 @@ from voicetotext.transcription.engine_types import (
     EngineId,
     HardwareProfile,
 )
-from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
+from voicetotext.transcription.model_info import (
+    ALL_MODELS,
+    PARAKEET_MODELS,
+    WHISPER_MODELS,
+    ModelInfo,
+    get_model_info,
+)
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -34,14 +40,26 @@ _FASTER_WHISPER_DESCRIPTOR = EngineDescriptor(
     base_priority=80,
 )
 
+_NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
+    engine_id="nano_parakeet",
+    display_name="nano-parakeet (PyTorch)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=90,
+)
+
 
 def build_engine_registry() -> EngineRegistry:
     """Wire the engine adapters this build ships with."""
     return EngineRegistry(
-        descriptors=[_TRANSFORMERS_DESCRIPTOR, _FASTER_WHISPER_DESCRIPTOR],
+        descriptors=[
+            _TRANSFORMERS_DESCRIPTOR,
+            _FASTER_WHISPER_DESCRIPTOR,
+            _NANO_PARAKEET_DESCRIPTOR,
+        ],
         builders={
             "transformers": _build_transformers_engine,
             "faster_whisper": _build_faster_whisper_engine,
+            "nano_parakeet": _build_nano_parakeet_engine,
         },
     )
 
@@ -71,6 +89,18 @@ def _build_faster_whisper_engine(spec: EngineSpec) -> TranscriptionEngine:
         device=spec.device,
         language=spec.language,
         beam_size=spec.beam_size,
+        model_dir=spec.model_dir,
+    )
+
+
+def _build_nano_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.nano_parakeet_adapter import (
+        NanoParakeetAdapter,
+    )
+
+    return NanoParakeetAdapter(
+        repo_id=spec.repo_id,
+        device=spec.device,
         model_dir=spec.model_dir,
     )
 
@@ -117,7 +147,10 @@ def engines_with_model_on_disk(
 def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
     pairs: list[tuple[EngineId, str]] = []
     if model_info.repo_id:
-        pairs.append(("transformers", model_info.repo_id))
+        if "transformers" in model_info.compatible_engines:
+            pairs.append(("transformers", model_info.repo_id))
+        if "nano_parakeet" in model_info.compatible_engines:
+            pairs.append(("nano_parakeet", model_info.repo_id))
     if model_info.ct2_repo_id:
         pairs.append(("faster_whisper", model_info.ct2_repo_id))
     return pairs
@@ -132,7 +165,7 @@ def create_engine_for_active_model(
     device_override: str | None = None,
 ) -> TranscriptionEngine:
     model_name = config.get("transcription.model_size", "base")
-    model_info = WHISPER_MODELS[model_name]
+    model_info = get_model_info(model_name)
     installed = engines_with_model_on_disk(model_info, paths.models_dir)
     engine_id = resolve_engine_id(
         config, model_info, hardware, registry,
@@ -152,7 +185,7 @@ def create_engine_for_active_model(
 def _repo_id_for(model_info: ModelInfo, engine_id: EngineId) -> str:
     if engine_id == "faster_whisper":
         return model_info.ct2_repo_id
-    return model_info.repo_id
+    return model_info.repo_id  # transformers and nano_parakeet both use repo_id
 
 
 def _resolve_device(
@@ -208,6 +241,9 @@ def build_composite_model_manager(
         name: info for name, info in WHISPER_MODELS.items() if info.repo_id
     }
     faster_whisper_models = _ct2_models()
+    parakeet_models = {
+        name: info for name, info in PARAKEET_MODELS.items() if info.repo_id
+    }
 
     transformers_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -223,11 +259,19 @@ def build_composite_model_manager(
         file_downloader=file_downloader,
         models=faster_whisper_models,
     )
+    nano_parakeet_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=parakeet_models,
+    )
 
     return CompositeModelManager(
         by_engine={
             "transformers": transformers_manager,
             "faster_whisper": faster_whisper_manager,
+            "nano_parakeet": nano_parakeet_manager,
         },
         active_engine_provider=active_engine_provider,
     )

@@ -22,7 +22,7 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_selector import rank_engines
 from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
-from voicetotext.transcription.model_info import WHISPER_MODELS
+from voicetotext.transcription.model_info import ALL_MODELS
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -194,7 +194,7 @@ class SettingsService:
         """
         if self._registry is None or self._hardware is None:
             return ()
-        info = WHISPER_MODELS.get(model_name)
+        info = ALL_MODELS.get(model_name)
         if info is None:
             return ()
         return rank_engines(info, self._hardware, self._registry.all_descriptors())

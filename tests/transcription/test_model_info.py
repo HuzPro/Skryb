@@ -1,7 +1,13 @@
+import pytest
+
+from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
+    ALL_MODELS,
+    PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
+    get_model_info,
     migrate_engine_field,
 )
 
@@ -100,6 +106,56 @@ class TestWhisperModels:
     def test_faster_whisper_should_outrank_transformers_for_every_model(self):
         for model in WHISPER_MODELS.values():
             assert model.engine_priorities["faster_whisper"] > model.engine_priorities["transformers"]
+
+
+class TestParakeetModels:
+    def test_should_contain_tdt_v2_and_v3(self):
+        expected = {"parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"}
+
+        assert set(PARAKEET_MODELS.keys()) == expected
+
+    def test_all_models_should_have_nvidia_repo_ids(self):
+        for model in PARAKEET_MODELS.values():
+            assert model.repo_id.startswith("nvidia/parakeet-tdt-")
+
+    def test_all_models_should_be_compatible_with_nano_parakeet_only(self):
+        for model in PARAKEET_MODELS.values():
+            assert model.compatible_engines == ("nano_parakeet",)
+
+    def test_all_models_should_have_no_ct2_repo_id(self):
+        for model in PARAKEET_MODELS.values():
+            assert model.ct2_repo_id == ""
+
+
+class TestAllModels:
+    def test_should_contain_all_whisper_and_parakeet_models(self):
+        expected = set(WHISPER_MODELS.keys()) | set(PARAKEET_MODELS.keys())
+
+        assert set(ALL_MODELS.keys()) == expected
+
+    def test_whisper_entries_should_match_whisper_models(self):
+        for name, info in WHISPER_MODELS.items():
+            assert ALL_MODELS[name] is info
+
+    def test_parakeet_entries_should_match_parakeet_models(self):
+        for name, info in PARAKEET_MODELS.items():
+            assert ALL_MODELS[name] is info
+
+
+class TestGetModelInfo:
+    def test_should_return_whisper_model_by_name(self):
+        info = get_model_info("base")
+
+        assert info.name == "base"
+
+    def test_should_return_parakeet_model_by_name(self):
+        info = get_model_info("parakeet-tdt-0.6b-v2")
+
+        assert info.name == "parakeet-tdt-0.6b-v2"
+
+    def test_should_raise_configuration_error_for_unknown_model(self):
+        with pytest.raises(ConfigurationError, match="unknown-model"):
+            get_model_info("unknown-model")
 
 
 class TestMigrateEngineField:
