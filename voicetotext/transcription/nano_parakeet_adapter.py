@@ -36,17 +36,53 @@ class NanoParakeetAdapter(TranscriptionEngine):
         self._model: _ParakeetModel | None = None
 
     def load_model(self) -> None:
-        from nano_parakeet import from_pretrained
+        import nano_parakeet
+        import torch
 
         self._log_phase("load_model", f"start device={self._device}")
         started_at = time.monotonic()
 
-        self._model = from_pretrained(
+        self._patch_hf_hub_download(nano_parakeet)
+        # Force float32: nano_parakeet auto-selects bfloat16 on bf16-
+        # capable GPUs (RDNA4 included), and ROCm's bf16 kernels are
+        # less battle-tested than fp32. The slight memory/perf cost is
+        # worth the stability.
+        self._model = nano_parakeet.from_pretrained(
             model_name=self._repo_id,
             device=self._device,
+            dtype=torch.float32,
         )
 
         self._log_timed_phase("load_model", "complete", started_at)
+
+    def _patch_hf_hub_download(self, nano_parakeet_module: object) -> None:
+        """Force nano-parakeet to look in our app's models dir, offline.
+
+        Two reasons:
+
+        1. nano-parakeet calls ``huggingface_hub.hf_hub_download(repo_id,
+           filename)`` with no ``cache_dir``, so it falls through to the
+           global default (``~/.cache/huggingface/hub``). Our chunked
+           downloader writes to ``self._model_dir`` — so without
+           ``cache_dir`` an already-downloaded model is invisible.
+
+        2. By the time the adapter loads, the save guard in
+           ``QtSettingsWindow._on_save_clicked`` has already verified
+           ``is_installed(model_name)`` is True. The file IS on disk.
+           Default ``hf_hub_download`` still does a HEAD request to the
+           Hub to validate freshness — slow, leaks "unauthenticated
+           request" warnings, and fails on a flaky network. We pass
+           ``local_files_only=True`` to short-circuit that round trip.
+        """
+        original = nano_parakeet_module.hf_hub_download
+        cache_dir = str(self._model_dir)
+
+        def patched(*args: object, **kwargs: object) -> object:
+            kwargs.setdefault("cache_dir", cache_dir)
+            kwargs.setdefault("local_files_only", True)
+            return original(*args, **kwargs)
+
+        nano_parakeet_module.hf_hub_download = patched
 
     def is_model_loaded(self) -> bool:
         return self._model is not None

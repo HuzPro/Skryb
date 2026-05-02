@@ -19,9 +19,14 @@ from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
+from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
+from voicetotext.output.gui_thread_output_decorator import (
+    GuiThreadOutputDecorator,
+)
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.qt_gui_thread_dispatcher import QtGuiThreadDispatcher
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -115,7 +120,9 @@ def _make_destroyed_handler(
     return _on_destroyed
 
 
-def _build_output(mode: OutputMode) -> TextOutputHandler:
+def _build_output(
+    mode: OutputMode, gui_dispatcher: GuiThreadDispatcher,
+) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter()
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
@@ -127,7 +134,12 @@ def _build_output(mode: OutputMode) -> TextOutputHandler:
             sleeper=sleeper,
         ),
     }
-    return builders[mode]()
+    inner = builders[mode]()
+    # Always marshal output onto the GUI thread. Win32 clipboard and
+    # ``SendInput`` calls require a UI thread, and the use case runs
+    # on a daemon worker. Wrapping every concrete handler with this
+    # decorator means the worker never touches Win32 directly.
+    return GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
 
 
 def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
@@ -320,7 +332,13 @@ def build_app(
         sample_rate=config.get("audio.sample_rate", 16000),
     )
 
-    output = _build_output(_resolve_output_mode(config))
+    # The GUI thread is the only thread that owns a window and a
+    # message pump, so Win32 clipboard / SendInput calls have to run
+    # there. Build the dispatcher once on the main thread (its
+    # QObject affinity is the GUI thread) and inject it everywhere
+    # output handlers are constructed.
+    gui_dispatcher = QtGuiThreadDispatcher()
+    output = _build_output(_resolve_output_mode(config), gui_dispatcher)
 
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -372,7 +390,8 @@ def build_app(
             service=settings_service,
             first_run=False,
             on_save=lambda changes: apply_settings(
-                changes, config, record_and_transcribe_use_case, app
+                changes, config, record_and_transcribe_use_case, app,
+                gui_dispatcher=gui_dispatcher,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
@@ -406,6 +425,7 @@ def apply_settings(
     config: JsonConfigAdapter,
     use_case: RecordAndTranscribeUseCase,
     app: SystemTrayApp,
+    gui_dispatcher: GuiThreadDispatcher,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -414,7 +434,9 @@ def apply_settings(
     UI; this callback only handles the lightweight dispatches.
     """
     if changes.output_changed:
-        use_case.set_output(_build_output(_resolve_output_mode(config)))
+        use_case.set_output(
+            _build_output(_resolve_output_mode(config), gui_dispatcher)
+        )
 
     if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(config, use_case)

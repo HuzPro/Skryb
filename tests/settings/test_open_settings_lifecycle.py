@@ -43,10 +43,12 @@ class _TrackingService:
     def __init__(self) -> None:
         self._engine_listeners: list[object] = []
         self._state_listeners: list[object] = []
+        self._download_listeners: list[object] = []
         self.list_models = MagicMock(return_value=[])
         self.selected_model = MagicMock(return_value="base")
         self.current_draft = MagicMock(return_value=_draft())
         self.any_model_installed = MagicMock(return_value=True)
+        self.is_installed = MagicMock(return_value=True)
         self.can_apply_now = MagicMock(return_value=True)
         self.is_engine_swapping = MagicMock(return_value=False)
         self.apply_draft = MagicMock(
@@ -74,11 +76,21 @@ class _TrackingService:
         if listener in self._state_listeners:
             self._state_listeners.remove(listener)
 
+    def subscribe_downloads(self, listener: object) -> None:
+        self._download_listeners.append(listener)
+
+    def unsubscribe_downloads(self, listener: object) -> None:
+        if listener in self._download_listeners:
+            self._download_listeners.remove(listener)
+
     def engine_listener_count(self) -> int:
         return len(self._engine_listeners)
 
     def state_listener_count(self) -> int:
         return len(self._state_listeners)
+
+    def download_listener_count(self) -> int:
+        return len(self._download_listeners)
 
 
 @pytest.fixture
@@ -95,6 +107,7 @@ class TestOpenSettingsLifecycle:
 
         assert service.engine_listener_count() == 1
         assert service.state_listener_count() == 1
+        assert service.download_listener_count() == 1
 
     def test_should_drop_listeners_on_close(self, qtbot, service):
         window = QtSettingsWindow(service)
@@ -105,6 +118,7 @@ class TestOpenSettingsLifecycle:
 
         assert service.engine_listener_count() == 0
         assert service.state_listener_count() == 0
+        assert service.download_listener_count() == 0
 
     def test_should_not_leak_listeners_across_open_close_reopen(
         self, qtbot, service
@@ -119,6 +133,7 @@ class TestOpenSettingsLifecycle:
 
         assert service.engine_listener_count() == 1
         assert service.state_listener_count() == 1
+        assert service.download_listener_count() == 1
 
     def test_should_keep_exactly_one_listener_after_save_triggered_close(
         self, qtbot, service
@@ -136,3 +151,4 @@ class TestOpenSettingsLifecycle:
 
         assert service.engine_listener_count() == 0
         assert service.state_listener_count() == 0
+        assert service.download_listener_count() == 0

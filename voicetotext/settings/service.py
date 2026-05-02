@@ -127,6 +127,9 @@ class SettingsService:
             for info in self._model_manager.list_models()
         )
 
+    def is_installed(self, name: str) -> bool:
+        return self._install_cache.is_installed(name)
+
     def selected_model(self) -> str:
         return self._config.get("transcription.model_size", "base")
 

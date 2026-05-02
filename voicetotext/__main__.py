@@ -28,6 +28,23 @@ def _apply_torch_env_overrides() -> None:
         os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
 
 
+def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
+    """Point ``huggingface_hub``'s default cache at our models dir.
+
+    Must run **before** any code imports ``huggingface_hub``, because
+    its ``HF_HUB_CACHE`` constant is read once at module import. Our
+    ``ChunkedFileDownloader`` writes to ``paths.models_dir``, but
+    third-party libraries that use ``hf_hub_download()`` (notably
+    ``nano_parakeet``) call it with no ``cache_dir`` argument and fall
+    back to the global default — which would otherwise be
+    ``~/.cache/huggingface/hub``. Pointing the global default at our
+    models dir keeps a single source of truth for cached model files.
+
+    Uses ``setdefault`` so a user-set ``HF_HUB_CACHE`` still wins.
+    """
+    os.environ.setdefault("HF_HUB_CACHE", str(paths.models_dir))
+
+
 def main() -> None:
     _apply_torch_env_overrides()
     try:
@@ -44,6 +61,7 @@ def _run() -> None:
 
     paths = AppPaths()
     paths.ensure_dirs()
+    _apply_hf_cache_env_overrides(paths)
 
     # Single QApplication for the whole process. The tray must outlive
     # any transient window (settings/first-run), so disable Qt's default

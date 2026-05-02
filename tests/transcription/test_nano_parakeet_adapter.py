@@ -25,12 +25,13 @@ def _make_audio(samples: int = 16000) -> AudioSegment:
 
 
 def _mocked_modules() -> dict:
-    return {"nano_parakeet": MagicMock()}
+    return {"nano_parakeet": MagicMock(), "torch": MagicMock()}
 
 
 class TestNanoParakeetAdapterLoadModel:
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_load_model_via_from_pretrained(self) -> None:
+        import torch
         from nano_parakeet import from_pretrained
 
         from voicetotext.transcription.nano_parakeet_adapter import (
@@ -48,11 +49,13 @@ class TestNanoParakeetAdapterLoadModel:
         from_pretrained.assert_called_once_with(
             model_name="nvidia/parakeet-tdt-0.6b-v2",
             device="cpu",
+            dtype=torch.float32,
         )
         assert adapter.is_model_loaded() is True
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_pass_cuda_device_to_from_pretrained(self) -> None:
+        import torch
         from nano_parakeet import from_pretrained
 
         from voicetotext.transcription.nano_parakeet_adapter import (
@@ -70,6 +73,100 @@ class TestNanoParakeetAdapterLoadModel:
         from_pretrained.assert_called_once_with(
             model_name="nvidia/parakeet-tdt-0.6b-v3",
             device="cuda",
+            dtype=torch.float32,
+        )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_force_float32_dtype_to_avoid_bf16_mismatch(self) -> None:
+        # nano_parakeet auto-selects bfloat16 on bf16-capable GPUs (RDNA4
+        # included). When the CUDA-graph fast path is disabled (which we
+        # do to dodge cross-thread replay crashes on ROCm), the slow
+        # `tdt_greedy_decode` path crashes with
+        # "mat1 and mat2 must have the same dtype" because the encoder
+        # output is cast back to float32 while decoder/joint stay bf16.
+        # Forcing float32 avoids the entire bf16 code path.
+        import torch
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cuda",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        kwargs = from_pretrained.call_args.kwargs
+        assert kwargs["dtype"] is torch.float32
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_patch_hf_hub_download_to_use_app_models_dir(self) -> None:
+        # nano_parakeet calls hf_hub_download() with no cache_dir, so it
+        # falls back to the global default — typically ~/.cache/huggingface.
+        # Our chunked downloader writes to model_dir, so without this patch
+        # nano_parakeet would re-download the file from scratch.
+        import nano_parakeet
+
+        original_hf_download = MagicMock()
+        nano_parakeet.hf_hub_download = original_hf_download
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            device="cpu",
+            model_dir=Path("/app/models"),
+        )
+
+        adapter.load_model()
+
+        # The patched function should pass cache_dir on every call.
+        nano_parakeet.hf_hub_download(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            filename="parakeet-tdt-0.6b-v2.nemo",
+        )
+        original_hf_download.assert_called_with(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            filename="parakeet-tdt-0.6b-v2.nemo",
+            cache_dir=str(Path("/app/models")),
+            local_files_only=True,
+        )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_let_caller_override_cache_dir_explicitly(self) -> None:
+        import nano_parakeet
+
+        original_hf_download = MagicMock()
+        nano_parakeet.hf_hub_download = original_hf_download
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            device="cpu",
+            model_dir=Path("/app/models"),
+        )
+        adapter.load_model()
+
+        nano_parakeet.hf_hub_download(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            filename="parakeet-tdt-0.6b-v2.nemo",
+            cache_dir="/explicit/override",
+            local_files_only=False,
+        )
+
+        original_hf_download.assert_called_with(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            filename="parakeet-tdt-0.6b-v2.nemo",
+            cache_dir="/explicit/override",
+            local_files_only=False,
         )
 
     def test_should_report_not_loaded_before_load(self) -> None:
@@ -134,6 +231,7 @@ class TestNanoParakeetAdapterTranscribe:
 
         passed_audio = model.transcribe.call_args[0][0]
         assert np.array_equal(passed_audio, audio.data)
+
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_raise_when_transcribing_before_load(self) -> None:

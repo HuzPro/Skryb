@@ -1,5 +1,10 @@
+import logging
+
 from voicetotext.downloads.download_manager import DownloadHandle
 from voicetotext.transcription.model_manager import ModelManager
+
+
+_logger = logging.getLogger(__name__)
 
 
 class DownloadCoordinator:
@@ -16,7 +21,9 @@ class DownloadCoordinator:
         self._handles: dict[str, DownloadHandle] = {}
 
     def start(self, name: str) -> None:
+        _logger.info("download.start: '%s'", name)
         self._handles[name] = self._model_manager.download(name)
+        _logger.info("download.start: '%s' enqueued", name)
 
     def pause(self, name: str) -> None:
         handle = self._require_handle(name)

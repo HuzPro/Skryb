@@ -35,6 +35,9 @@ class FakeModelManager(ModelManager):
     def list_models(self) -> list[ModelInfo]:
         return list(self._models.values())
 
+    def has_model(self, name: str) -> bool:
+        return name in self._models
+
     def is_installed(self, name: str) -> bool:
         return self._installed.get(name, False)
 

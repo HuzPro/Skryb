@@ -40,6 +40,26 @@ class TestHuggingFaceModelManagerListModels:
         assert "small" in names
 
 
+class TestHuggingFaceModelManagerHasModel:
+    def test_should_return_true_for_known_whisper_model(self, tmp_path):
+        manager = _make_manager(tmp_path)
+
+        assert manager.has_model("base") is True
+
+    def test_should_return_false_for_unknown_model(self, tmp_path):
+        manager = _make_manager(tmp_path)
+
+        assert manager.has_model("does-not-exist") is False
+
+    def test_should_only_recognise_models_in_its_own_dict(self, tmp_path):
+        from voicetotext.transcription.model_info import PARAKEET_MODELS
+
+        manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
+
+        assert manager.has_model("parakeet-tdt-0.6b-v2") is True
+        assert manager.has_model("base") is False
+
+
 class TestHuggingFaceModelManagerIsInstalled:
     def test_should_return_false_when_model_not_downloaded(self, tmp_path):
         manager = _make_manager(tmp_path)
@@ -82,6 +102,24 @@ class TestHuggingFaceModelManagerIsInstalled:
         manager = _make_manager(tmp_path)
 
         assert manager.is_installed("base") is True
+
+    def test_should_return_true_for_nemo_only_snapshot(self, tmp_path):
+        # Parakeet ships as a single .nemo file. nano-parakeet doesn't need
+        # config.json or safetensors — just the .nemo. The install check
+        # must recognise that as a complete model.
+        from voicetotext.transcription.model_info import PARAKEET_MODELS
+
+        snapshot = (
+            tmp_path
+            / "models--nvidia--parakeet-tdt-0.6b-v2"
+            / "snapshots"
+            / "abc123"
+        )
+        snapshot.mkdir(parents=True)
+        (snapshot / "parakeet-tdt-0.6b-v2.nemo").touch()
+        manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
+
+        assert manager.is_installed("parakeet-tdt-0.6b-v2") is True
 
 
 class TestHuggingFaceModelManagerGetModelPath:

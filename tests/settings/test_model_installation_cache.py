@@ -20,6 +20,9 @@ class _FakeModelManager(ModelManager):
     def list_models(self) -> list[ModelInfo]:
         return [ModelInfo(name=name, size_mb=1, description="") for name in self._installed]
 
+    def has_model(self, name: str) -> bool:
+        return name in self._installed
+
     def is_installed(self, name: str) -> bool:
         self.is_installed_call_count += 1
         return self._installed.get(name, False)

@@ -1,4 +1,6 @@
+import logging
 import os
+import threading
 from collections.abc import Callable
 from typing import Protocol
 
@@ -14,12 +16,16 @@ from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 
+_logger = logging.getLogger(__name__)
+
 _STATE_LABELS = {
     AppState.IDLE: "Idle — ready",
     AppState.RECORDING: "Recording...",
     AppState.TRANSCRIBING: "Transcribing...",
     AppState.ERROR: "Error",
 }
+
+_QUIT_CLEANUP_TIMEOUT_SECONDS = 3.0
 
 
 class TrayIcon(Protocol):
@@ -110,13 +116,40 @@ class SystemTrayApp:
         self._on_open_settings()
 
     def _handle_quit(self) -> None:
-        self._hotkey_listener.stop()
-        self._use_case.dispose()
+        # Run cleanup on a background daemon thread with a hard timeout
+        # so a stuck pynput keyboard hook, HTTP read, or PyTorch
+        # finaliser cannot leave the tray Quit feeling broken (process
+        # alive but unresponsive). The os._exit at the bottom is
+        # unconditional — we'd rather skip cleanup than hang forever.
+        cleanup = threading.Thread(target=self._quit_cleanup, daemon=True)
+        cleanup.start()
+        cleanup.join(timeout=_QUIT_CLEANUP_TIMEOUT_SECONDS)
+        if cleanup.is_alive():
+            _logger.warning(
+                "quit cleanup did not finish in %.1fs; forcing exit",
+                _QUIT_CLEANUP_TIMEOUT_SECONDS,
+            )
+        os._exit(0)
+
+    def _quit_cleanup(self) -> None:
+        for step_name, step in (
+            ("hotkey_listener.stop", self._hotkey_listener.stop),
+            ("use_case.dispose", self._use_case.dispose),
+            ("download_manager.shutdown", self._shutdown_download_manager),
+            ("icon.stop", self._stop_icon),
+        ):
+            try:
+                step()
+            except Exception:
+                _logger.exception("quit cleanup step '%s' failed", step_name)
+
+    def _shutdown_download_manager(self) -> None:
         if self._download_manager is not None:
             self._download_manager.shutdown()
+
+    def _stop_icon(self) -> None:
         if self._icon is not None:
             self._icon.stop()
-        os._exit(0)
 
     def _handle_error(
         self, event: ErrorOccurredEvent | TranscriptionFailedEvent

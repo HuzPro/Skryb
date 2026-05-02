@@ -192,6 +192,18 @@ class TestAnyModelInstalled:
         assert service.any_model_installed() is True
 
 
+class TestIsInstalled:
+    def test_should_return_true_when_cache_says_installed(self):
+        service, *_ = _build_service(installed={"base": True})
+
+        assert service.is_installed("base") is True
+
+    def test_should_return_false_when_cache_says_not_installed(self):
+        service, *_ = _build_service(installed={"base": False})
+
+        assert service.is_installed("base") is False
+
+
 class TestSelectedModel:
     def test_should_read_from_config(self):
         service, *_ = _build_service(

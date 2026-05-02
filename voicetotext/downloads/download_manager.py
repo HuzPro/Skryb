@@ -140,7 +140,11 @@ class DownloadManager:
         with self._lock:
             for active in self._jobs.values():
                 active.cancel_event.set()
-        self._pool.shutdown(wait=True, cancel_futures=True)
+        # ``wait=False`` so a stuck HTTP read in a worker thread cannot
+        # block the caller (typically the tray-quit handler). The
+        # process is about to ``os._exit`` anyway, which terminates any
+        # surviving worker thread along with everything else.
+        self._pool.shutdown(wait=False, cancel_futures=True)
 
     # ------------------------------------------------------------------
     # Handle accessors

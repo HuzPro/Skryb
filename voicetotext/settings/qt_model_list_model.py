@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QSize, Qt
 
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.service import SettingsService
+
+
+_ROW_HEIGHT = 72
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,12 @@ class QtModelListModel(QAbstractListModel):
         if role == self.DOWNLOAD_ROLE:
             return self._downloads.get(view.name)
         if role == Qt.DisplayRole:
-            return view.name
+            # Suppressed: the per-row :class:`ModelRowWidget` renders
+            # everything. Returning the name here would paint over the
+            # widget's content.
+            return ""
+        if role == Qt.SizeHintRole:
+            return QSize(0, _ROW_HEIGHT)
         return None
 
     def selected_model_name(self) -> str:

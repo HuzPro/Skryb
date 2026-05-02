@@ -12,6 +12,11 @@ class ModelManager(ABC):
         pass
 
     @abstractmethod
+    def has_model(self, name: str) -> bool:
+        """Whether this manager knows about model *name* (regardless of install state)."""
+        pass
+
+    @abstractmethod
     def is_installed(self, name: str) -> bool:
         pass
 

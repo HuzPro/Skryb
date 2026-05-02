@@ -165,3 +165,88 @@ class TestTranscriptionPageDownloadActions:
         service.pause_download.side_effect = LookupError("missing")
 
         page.request_pause("small")
+
+    def test_should_emit_download_error_when_start_download_raises(
+        self, qtbot, page, service,
+    ):
+        service.start_download.side_effect = ConnectionError("hf unreachable")
+
+        with qtbot.waitSignal(page.download_error, timeout=500) as sig:
+            page.request_download("small")
+
+        assert sig.args == ["small", "hf unreachable"]
+
+
+class TestTranscriptionPageRowWidgets:
+    def test_should_attach_a_row_widget_per_model(self, page, service):
+        from voicetotext.settings.qt_model_row import ModelRowWidget
+
+        for view in service.list_models.return_value:
+            index = page.list_model().index_for_name(view.name)
+            widget = page.list_view().indexWidget(index)
+            assert isinstance(widget, ModelRowWidget)
+            assert widget.model_name() == view.name
+
+    def test_row_widget_download_button_should_call_service_start_download(
+        self, page, service,
+    ):
+        index = page.list_model().index_for_name("small")
+        widget = page.list_view().indexWidget(index)
+
+        widget.action_button().click()
+
+        service.start_download.assert_called_once_with("small")
+
+    def test_row_widget_delete_button_should_call_service_delete_model(
+        self, page, service,
+    ):
+        index = page.list_model().index_for_name("tiny")
+        widget = page.list_view().indexWidget(index)
+
+        widget.action_button().click()
+
+        service.delete_model.assert_called_once_with("tiny")
+
+    def test_row_widget_should_refresh_when_install_state_changes(
+        self, page, service,
+    ):
+        # Start: "small" is not installed → button says "Download"
+        index = page.list_model().index_for_name("small")
+        widget = page.list_view().indexWidget(index)
+        assert widget.action_button().text() == "Download"
+
+        # Service now reports "small" as installed
+        service.list_models.return_value = [
+            _view("tiny", installed=True),
+            _view("base", installed=True),
+            _view("small", installed=True),
+        ]
+        page.list_model().update_install_state("small")
+
+        widget = page.list_view().indexWidget(index)
+        assert widget.action_button().text() == "Delete"
+
+    def test_row_widget_should_show_progress_bar_when_download_progress_set(
+        self, page,
+    ):
+        from voicetotext.settings.qt_model_list_model import (
+            DownloadProgressSnapshot,
+        )
+
+        index = page.list_model().index_for_name("small")
+        widget = page.list_view().indexWidget(index)
+
+        page.list_model().set_download_progress(
+            "small",
+            DownloadProgressSnapshot(
+                state="downloading",
+                bytes_done=10_000_000,
+                bytes_total=100_000_000,
+                speed_bps=0.0,
+                eta_seconds=0.0,
+                error_message=None,
+            ),
+        )
+
+        assert widget.progress_bar().isHidden() is False
+        assert widget.progress_bar().value() == 10

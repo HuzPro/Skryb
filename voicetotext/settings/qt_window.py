@@ -13,13 +13,19 @@ from PySide6.QtWidgets import (
 )
 
 from voicetotext.core.events import (
+    DownloadCompletedEvent,
+    DownloadFailedEvent,
+    DownloadProgressEvent,
+    DownloadStateChangedEvent,
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
     StateChangedEvent,
 )
+from voicetotext.settings.qt_download_bridge import QtDownloadBridge
 from voicetotext.settings.qt_engine_bridge import QtEngineBridge
 from voicetotext.settings.qt_hotkey_capture import CaptureBridge
+from voicetotext.settings.qt_model_list_model import DownloadProgressSnapshot
 from voicetotext.settings.qt_pages.hotkeys_page import HotkeysPage
 from voicetotext.settings.qt_pages.output_page import OutputPage
 from voicetotext.settings.qt_pages.transcription_page import TranscriptionPage
@@ -75,10 +81,15 @@ class QtSettingsWindow(QMainWindow):
 
         self._engine_bridge = QtEngineBridge(parent=self)
         self._state_bridge = QtStateBridge(parent=self)
+        self._download_bridge = QtDownloadBridge(parent=self)
         self._engine_bridge.load_started.connect(self.on_engine_load_started)
         self._engine_bridge.load_completed.connect(self.on_engine_load_completed)
         self._engine_bridge.load_failed.connect(self.on_engine_load_failed)
         self._state_bridge.state_changed.connect(self.on_state_changed)
+        self._download_bridge.progress.connect(self.on_download_progress)
+        self._download_bridge.state.connect(self.on_download_state)
+        self._download_bridge.completed.connect(self.on_download_completed)
+        self._download_bridge.failed.connect(self.on_download_failed)
 
         self.setWindowTitle(
             "VoiceToText Setup" if first_run else "VoiceToText Settings"
@@ -88,6 +99,7 @@ class QtSettingsWindow(QMainWindow):
         self._build_ui()
         self._service.subscribe_engine(self._engine_bridge)
         self._service.subscribe_state_changes(self._state_bridge)
+        self._service.subscribe_downloads(self._download_bridge)
         self._refresh_save_enabled()
 
     # ------------------------------------------------------------------
@@ -111,6 +123,7 @@ class QtSettingsWindow(QMainWindow):
 
         self._pages = QStackedWidget()
         self._transcription_page = TranscriptionPage(self._service)
+        self._transcription_page.download_error.connect(self._on_download_error)
         self._hotkeys_page = HotkeysPage(capture_bridge=self._capture_bridge)
         self._hotkeys_page.recording_state_changed.connect(
             self._on_recording_state_changed
@@ -189,6 +202,12 @@ class QtSettingsWindow(QMainWindow):
             return
 
         draft = self.collect_draft()
+        if not self._service.is_installed(draft.model_size):
+            self._show_status(
+                f"'{draft.model_size}' is not installed. Download it first.",
+                error=True,
+            )
+            return
         changes = self._service.apply_draft(draft)
         self._pending_changes = changes
 
@@ -246,6 +265,70 @@ class QtSettingsWindow(QMainWindow):
         self._refresh_save_enabled()
 
     # ------------------------------------------------------------------
+    # Download slots — invoked on the GUI thread via QtDownloadBridge.
+    # ------------------------------------------------------------------
+
+    def on_download_progress(self, event: DownloadProgressEvent) -> None:
+        snapshot = DownloadProgressSnapshot(
+            state="downloading",
+            bytes_done=event.bytes_done,
+            bytes_total=event.bytes_total,
+            speed_bps=event.speed_bps,
+            eta_seconds=event.eta_seconds,
+            error_message=None,
+        )
+        self._transcription_page.list_model().set_download_progress(
+            event.job_id, snapshot
+        )
+
+    def on_download_state(self, event: DownloadStateChangedEvent) -> None:
+        # Reflect non-progress lifecycle states (queued, paused) onto the
+        # row so the action button can flip between Cancel/Resume.
+        list_model = self._transcription_page.list_model()
+        existing = list_model.data(
+            list_model.index_for_name(event.job_id),
+            list_model.DOWNLOAD_ROLE,
+        )
+        bytes_done = existing.bytes_done if existing else 0
+        bytes_total = existing.bytes_total if existing else 0
+        snapshot = DownloadProgressSnapshot(
+            state=event.state,
+            bytes_done=bytes_done,
+            bytes_total=bytes_total,
+            speed_bps=0.0,
+            eta_seconds=0.0,
+            error_message=None,
+        )
+        list_model.set_download_progress(event.job_id, snapshot)
+
+    def on_download_completed(self, event: DownloadCompletedEvent) -> None:
+        list_model = self._transcription_page.list_model()
+        list_model.clear_download(event.job_id)
+        list_model.update_install_state(event.job_id)
+
+    def on_download_failed(self, event: DownloadFailedEvent) -> None:
+        snapshot = DownloadProgressSnapshot(
+            state="failed",
+            bytes_done=0,
+            bytes_total=0,
+            speed_bps=0.0,
+            eta_seconds=0.0,
+            error_message=event.error,
+        )
+        self._transcription_page.list_model().set_download_progress(
+            event.job_id, snapshot
+        )
+        self._show_status(
+            f"Download '{event.job_id}' failed: {event.error}", error=True,
+        )
+
+    def _on_download_error(self, name: str, error: str) -> None:
+        """Surface synchronous download errors (e.g., HF resolve failure)."""
+        self._show_status(
+            f"Could not start download of '{name}': {error}", error=True,
+        )
+
+    # ------------------------------------------------------------------
     # State-machine listener — enables/disables Save while recording.
     # ------------------------------------------------------------------
 
@@ -268,6 +351,7 @@ class QtSettingsWindow(QMainWindow):
         # QObjects, so this is safe.
         self._service.unsubscribe_engine(self._engine_bridge)
         self._service.unsubscribe_state_changes(self._state_bridge)
+        self._service.unsubscribe_downloads(self._download_bridge)
         super().closeEvent(event)
 
     # ------------------------------------------------------------------

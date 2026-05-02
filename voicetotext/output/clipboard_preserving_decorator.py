@@ -28,6 +28,7 @@ class ClipboardPreservingDecorator(TextOutputHandler):
         self._sleeper = sleeper
 
     def output(self, text: str) -> None:
+        _logger.debug("clipboard_preserving: save snapshot")
         if not self._try_save():
             _logger.error(
                 "Clipboard snapshot failed; transcription not pasted (%d chars). "
@@ -36,10 +37,14 @@ class ClipboardPreservingDecorator(TextOutputHandler):
             )
             return
         try:
+            _logger.debug("clipboard_preserving: inner.output")
             self._inner.output(text)
+            _logger.debug("clipboard_preserving: consume sleep")
             self._sleeper.sleep(_PASTE_CONSUME_DELAY_SECONDS)
         finally:
+            _logger.debug("clipboard_preserving: restore snapshot")
             self._try_restore()
+            _logger.debug("clipboard_preserving: done")
 
     def _try_save(self) -> bool:
         try:

@@ -14,6 +14,9 @@ from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
+from voicetotext.output.gui_thread_output_decorator import (
+    GuiThreadOutputDecorator,
+)
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.settings.settings_draft import ChangeSet
@@ -223,24 +226,41 @@ class TestBuildOutput:
     def test_should_return_decorator_wrapping_paste_and_clipboard_with_preserver(
         self, mock_preserver_cls
     ):
-        result = _build_output(OutputMode.DIRECT_PASTE)
+        dispatcher = MagicMock()
 
-        assert isinstance(result, ClipboardPreservingDecorator)
-        assert isinstance(result._inner, PasteAndClipboardAdapter)
+        result = _build_output(OutputMode.DIRECT_PASTE, dispatcher)
+
+        assert isinstance(result, GuiThreadOutputDecorator)
+        clipboard_preserving = result._inner
+        assert isinstance(clipboard_preserving, ClipboardPreservingDecorator)
+        assert isinstance(clipboard_preserving._inner, PasteAndClipboardAdapter)
         mock_preserver_cls.assert_called_once()
-        assert result._preserver is mock_preserver_cls.return_value
+        assert clipboard_preserving._preserver is mock_preserver_cls.return_value
 
     def test_should_return_paste_and_clipboard_adapter_for_paste_and_clipboard_mode(
         self,
     ):
-        result = _build_output(OutputMode.PASTE_AND_CLIPBOARD)
+        dispatcher = MagicMock()
 
-        assert isinstance(result, PasteAndClipboardAdapter)
+        result = _build_output(OutputMode.PASTE_AND_CLIPBOARD, dispatcher)
+
+        assert isinstance(result, GuiThreadOutputDecorator)
+        assert isinstance(result._inner, PasteAndClipboardAdapter)
 
     def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
-        result = _build_output(OutputMode.CLIPBOARD_ONLY)
+        dispatcher = MagicMock()
 
-        assert isinstance(result, ClipboardAdapter)
+        result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
+
+        assert isinstance(result, GuiThreadOutputDecorator)
+        assert isinstance(result._inner, ClipboardAdapter)
+
+    def test_should_wrap_inner_with_gui_thread_dispatcher(self):
+        dispatcher = MagicMock()
+
+        result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
+
+        assert result._dispatcher is dispatcher
 
 
 class TestApplySettings:
@@ -268,11 +288,14 @@ class TestApplySettings:
         config.get.return_value = "clipboard_only"
         use_case = MagicMock()
         app = MagicMock()
+        dispatcher = MagicMock()
         changes = self._make_changes(output_changed=True)
 
-        apply_settings(changes, config, use_case, app)
+        apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
-        mock_build_output.assert_called_once_with(OutputMode.CLIPBOARD_ONLY)
+        mock_build_output.assert_called_once_with(
+            OutputMode.CLIPBOARD_ONLY, dispatcher
+        )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
     @patch("voicetotext.bootstrap._build_output")
@@ -280,9 +303,10 @@ class TestApplySettings:
         config = MagicMock()
         use_case = MagicMock()
         app = MagicMock()
+        dispatcher = MagicMock()
         changes = self._make_changes(output_changed=False)
 
-        apply_settings(changes, config, use_case, app)
+        apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_output.assert_not_called()
         use_case.set_output.assert_not_called()
@@ -294,9 +318,10 @@ class TestApplySettings:
         config = MagicMock()
         use_case = MagicMock()
         app = MagicMock()
+        dispatcher = MagicMock()
         changes = self._make_changes(hotkey_changed=True)
 
-        apply_settings(changes, config, use_case, app)
+        apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_listener.assert_called_once_with(config, use_case)
         app.set_hotkey_listener.assert_called_once_with(
@@ -310,9 +335,10 @@ class TestApplySettings:
         config = MagicMock()
         use_case = MagicMock()
         app = MagicMock()
+        dispatcher = MagicMock()
         changes = self._make_changes(hotkey_changed=False)
 
-        apply_settings(changes, config, use_case, app)
+        apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_listener.assert_not_called()
         app.set_hotkey_listener.assert_not_called()
@@ -325,9 +351,10 @@ class TestApplySettings:
         config = MagicMock()
         use_case = MagicMock()
         app = MagicMock()
+        dispatcher = MagicMock()
         changes = self._make_changes(hotkey_changed=True, output_changed=True)
 
-        apply_settings(changes, config, use_case, app)
+        apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
         app.set_hotkey_listener.assert_called_once_with(

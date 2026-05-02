@@ -40,17 +40,40 @@ class CompositeModelManager(ModelManager):
                 seen.setdefault(info.name, info)
         return list(seen.values())
 
+    def has_model(self, name: str) -> bool:
+        return any(child.has_model(name) for child in self._by_engine.values())
+
     def is_installed(self, name: str) -> bool:
         return any(child.is_installed(name) for child in self._by_engine.values())
 
     def download(self, name: str) -> DownloadHandle:
-        return self._active_child().download(name)
+        return self._owning_child(name).download(name)
 
     def delete(self, name: str) -> None:
-        self._active_child().delete(name)
+        self._owning_child(name).delete(name)
 
     def get_model_path(self, name: str) -> Path | None:
-        return self._active_child().get_model_path(name)
+        return self._owning_child(name).get_model_path(name)
 
     def _active_child(self) -> ModelManager:
         return self._by_engine[self._active_engine_provider()]
+
+    def _owning_child(self, name: str) -> ModelManager:
+        """Return the child that owns *name*.
+
+        Prefers the active child when it owns the model (so a user with
+        a Whisper variant compatible with both transformers and
+        faster-whisper still gets routed to the engine they configured).
+        Falls through to the first non-active child that owns the
+        model — this is the path Parakeet downloads take when the saved
+        engine is currently a Whisper backend. Falls back to the active
+        child for unknown models so the existing error surface (KeyError
+        from the child's models dict) is preserved.
+        """
+        active = self._active_child()
+        if active.has_model(name):
+            return active
+        for child in self._by_engine.values():
+            if child is not active and child.has_model(name):
+                return child
+        return active

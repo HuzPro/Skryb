@@ -138,22 +138,26 @@ class RecordAndTranscribeUseCase:
         result = self._engine.transcribe(audio)
         self._deliver_transcribed_text(result)
         self._state_machine.transition_to(AppState.IDLE)
+        _logger.debug("post-transcribe: state -> IDLE")
         self._event_bus.publish(
             TranscriptionCompletedEvent(
                 text=result.text,
                 duration_seconds=result.duration_seconds,
             )
         )
+        _logger.debug("post-transcribe: completion event published")
 
     def _deliver_transcribed_text(self, result: TranscriptionResult) -> None:
         if result.is_empty:
             _logger.info("Transcription: (empty, no speech detected)")
             return
         _logger.info("Transcription: '%s'", result.text)
+        _logger.debug("output.output: calling")
         try:
             self._output.output(result.text)
         except ClipboardWriteError as exc:
             self._handle_clipboard_write_failure(exc)
+        _logger.debug("output.output: returned")
 
     def _handle_clipboard_write_failure(self, error: ClipboardWriteError) -> None:
         _logger.warning("Clipboard write failed: %s", error)

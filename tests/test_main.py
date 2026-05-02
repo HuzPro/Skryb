@@ -1,8 +1,14 @@
 import io
+import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicetotext.__main__ import _configured_model_installed, _show_error
+from voicetotext.__main__ import (
+    _apply_hf_cache_env_overrides,
+    _configured_model_installed,
+    _show_error,
+)
 
 
 class TestConfiguredModelInstalled:
@@ -33,6 +39,28 @@ class TestConfiguredModelInstalled:
         _configured_model_installed(config, model_manager)
 
         model_manager.is_installed.assert_called_once_with("base")
+
+
+class TestApplyHfCacheEnvOverrides:
+    def test_should_set_hf_hub_cache_to_app_models_dir(self, tmp_path):
+        models_dir = tmp_path / "models"
+        paths = MagicMock()
+        paths.models_dir = models_dir
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HF_HUB_CACHE", None)
+            _apply_hf_cache_env_overrides(paths)
+
+            assert os.environ.get("HF_HUB_CACHE") == str(models_dir)
+
+    def test_should_not_override_existing_user_value(self, tmp_path):
+        paths = MagicMock()
+        paths.models_dir = tmp_path / "models"
+
+        with patch.dict(os.environ, {"HF_HUB_CACHE": "C:\\user\\custom\\hf"}):
+            _apply_hf_cache_env_overrides(paths)
+
+            assert os.environ.get("HF_HUB_CACHE") == "C:\\user\\custom\\hf"
 
 
 class TestShowError:

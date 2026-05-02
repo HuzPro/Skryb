@@ -51,6 +51,7 @@ def service():
     svc.selected_model.return_value = "base"
     svc.current_draft.return_value = _draft()
     svc.any_model_installed.return_value = True
+    svc.is_installed.return_value = True
     svc.can_apply_now.return_value = True
     svc.is_engine_swapping.return_value = False
     svc.apply_draft.return_value = ChangeSet(
@@ -239,6 +240,108 @@ class TestQtSettingsWindowStateMachineGuard:
         qtbot.addWidget(window)
 
         assert window.save_button().isEnabled() is False
+
+
+class TestQtSettingsWindowSaveGuard:
+    def test_should_block_save_when_selected_model_not_installed(
+        self, qtbot, service,
+    ):
+        service.is_installed.return_value = False
+        received: list[ChangeSet] = []
+        window = QtSettingsWindow(service, on_save=received.append)
+        qtbot.addWidget(window)
+
+        qtbot.mouseClick(window.save_button(), Qt.LeftButton)
+
+        assert received == []
+        assert not service.apply_draft.called
+        assert "not installed" in window.status_label().text().lower()
+
+    def test_should_check_install_for_currently_selected_model(
+        self, qtbot, service,
+    ):
+        service.is_installed.return_value = True
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        qtbot.mouseClick(window.save_button(), Qt.LeftButton)
+
+        service.is_installed.assert_called_with("base")
+
+
+class TestQtSettingsWindowDownloadBridge:
+    def test_should_subscribe_download_bridge_to_service(self, qtbot, service):
+        from voicetotext.settings.qt_download_bridge import QtDownloadBridge
+
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        (download_listener,), _ = service.subscribe_downloads.call_args
+        assert isinstance(download_listener, QtDownloadBridge)
+
+    def test_should_unsubscribe_download_bridge_on_close(self, qtbot, service):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        with qtbot.waitSignal(window.destroyed, timeout=1000):
+            window.close()
+
+        assert service.unsubscribe_downloads.called
+
+    def test_should_propagate_download_progress_to_list_model(
+        self, qtbot, service,
+    ):
+        from voicetotext.core.events import DownloadProgressEvent
+
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        event = DownloadProgressEvent(
+            job_id="small",
+            bytes_done=10_000_000,
+            bytes_total=100_000_000,
+            speed_bps=1_000_000.0,
+            eta_seconds=90.0,
+        )
+        window._download_bridge.on_download_progress(event)
+
+        # The list model should have a snapshot for "small"
+        list_model = window.transcription_page().list_model()
+        from voicetotext.settings.qt_model_list_model import QtModelListModel
+        index = list_model.index_for_name("small")
+        snapshot = list_model.data(index, QtModelListModel.DOWNLOAD_ROLE)
+        assert snapshot is not None
+        assert snapshot.bytes_done == 10_000_000
+
+    def test_should_clear_download_and_refresh_install_on_completed(
+        self, qtbot, service,
+    ):
+        from voicetotext.core.events import (
+            DownloadCompletedEvent,
+            DownloadProgressEvent,
+        )
+        from voicetotext.settings.qt_model_list_model import QtModelListModel
+
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        # Seed a progress snapshot first
+        window._download_bridge.on_download_progress(DownloadProgressEvent(
+            job_id="small",
+            bytes_done=10_000_000,
+            bytes_total=100_000_000,
+            speed_bps=0.0,
+            eta_seconds=0.0,
+        ))
+
+        window._download_bridge.on_download_completed(
+            DownloadCompletedEvent(job_id="small")
+        )
+
+        list_model = window.transcription_page().list_model()
+        index = list_model.index_for_name("small")
+        snapshot = list_model.data(index, QtModelListModel.DOWNLOAD_ROLE)
+        assert snapshot is None
 
 
 class TestQtSettingsWindowFirstRun:

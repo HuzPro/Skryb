@@ -29,6 +29,9 @@ class _FakeManager(ModelManager):
     def list_models(self) -> list[ModelInfo]:
         return list(self._models)
 
+    def has_model(self, name: str) -> bool:
+        return any(info.name == name for info in self._models)
+
     def is_installed(self, name: str) -> bool:
         return self._installed.get(name, False)
 
@@ -132,3 +135,69 @@ class TestCompositeModelManagerRouting:
         composite = _make_composite()
 
         assert isinstance(composite, ModelManager)
+
+
+class TestCompositeModelManagerOwnerRouting:
+    def test_should_route_download_to_owning_child_when_active_does_not_own_model(self):
+        info = _info("parakeet-tdt-0.6b-v2", repo_id="nvidia/parakeet-tdt-0.6b-v2")
+        owner = _FakeManager(models=[info])
+        non_owner = _FakeManager()
+        composite = CompositeModelManager(
+            by_engine={
+                "transformers": non_owner,
+                "nano_parakeet": owner,
+            },
+            active_engine_provider=lambda: "transformers",
+        )
+
+        composite.download("parakeet-tdt-0.6b-v2")
+
+        assert owner.download_calls == ["parakeet-tdt-0.6b-v2"]
+        assert non_owner.download_calls == []
+
+    def test_should_route_delete_to_owning_child_when_active_does_not_own_model(self):
+        info = _info("parakeet-tdt-0.6b-v2", repo_id="nvidia/parakeet-tdt-0.6b-v2")
+        owner = _FakeManager(models=[info])
+        non_owner = _FakeManager()
+        composite = CompositeModelManager(
+            by_engine={
+                "transformers": non_owner,
+                "nano_parakeet": owner,
+            },
+            active_engine_provider=lambda: "transformers",
+        )
+
+        composite.delete("parakeet-tdt-0.6b-v2")
+
+        assert owner.delete_calls == ["parakeet-tdt-0.6b-v2"]
+        assert non_owner.delete_calls == []
+
+    def test_should_prefer_active_child_when_multiple_own_model(self):
+        info = _info("base")
+        active = _FakeManager(models=[info])
+        also_owner = _FakeManager(models=[info])
+        composite = CompositeModelManager(
+            by_engine={
+                "transformers": active,
+                "faster_whisper": also_owner,
+            },
+            active_engine_provider=lambda: "transformers",
+        )
+
+        composite.download("base")
+
+        assert active.download_calls == ["base"]
+        assert also_owner.download_calls == []
+
+    def test_has_model_should_return_true_when_any_child_owns_it(self):
+        info = _info("parakeet-tdt-0.6b-v2", repo_id="nvidia/parakeet-tdt-0.6b-v2")
+        composite = CompositeModelManager(
+            by_engine={
+                "transformers": _FakeManager(),
+                "nano_parakeet": _FakeManager(models=[info]),
+            },
+            active_engine_provider=lambda: "transformers",
+        )
+
+        assert composite.has_model("parakeet-tdt-0.6b-v2") is True
+        assert composite.has_model("does-not-exist") is False

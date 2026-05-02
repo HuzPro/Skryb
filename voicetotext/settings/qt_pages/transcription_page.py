@@ -1,4 +1,6 @@
-from PySide6.QtCore import QModelIndex, Qt
+import logging
+
+from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -8,7 +10,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+
+_logger = logging.getLogger(__name__)
+
 from voicetotext.settings.qt_model_list_model import QtModelListModel
+from voicetotext.settings.qt_model_row import ModelRowWidget
 from voicetotext.settings.service import SettingsService
 
 
@@ -31,6 +37,8 @@ class TranscriptionPage(QWidget):
     The recommended engine is preselected with a reason label.
     """
 
+    download_error = Signal(str, str)  # (model_name, error_message)
+
     def __init__(
         self, service: SettingsService, parent: QWidget | None = None
     ) -> None:
@@ -51,7 +59,12 @@ class TranscriptionPage(QWidget):
         self._list_view.setObjectName("model-list")
         self._list_view.setModel(self._list_model)
         self._list_view.setSelectionMode(QListView.SingleSelection)
+        self._list_view.setUniformItemSizes(False)
         self._list_view.clicked.connect(self._on_model_clicked)
+        self._row_widgets: dict[str, ModelRowWidget] = {}
+        self._attach_row_widgets()
+        self._list_model.dataChanged.connect(self._on_data_changed)
+        self._list_model.modelReset.connect(self._attach_row_widgets)
         layout.addWidget(self._list_view, stretch=1)
         self._select_initial_model(draft.model_size)
 
@@ -84,6 +97,54 @@ class TranscriptionPage(QWidget):
         label = QLabel(text)
         label.setObjectName("page-heading")
         return label
+
+    def _attach_row_widgets(self) -> None:
+        """(Re)build the per-row widgets after model reset.
+
+        Called once during construction and again whenever the underlying
+        :class:`QtModelListModel` resets (refresh after an external change
+        to the model list). Existing widgets are dropped and recreated so
+        their cached :class:`ModelView` snapshot stays in sync.
+        """
+        self._row_widgets.clear()
+        rows = self._list_model.rowCount()
+        for row in range(rows):
+            index = self._list_model.index(row)
+            view = self._list_model.data(index, QtModelListModel.MODEL_ROLE)
+            if view is None:
+                continue
+            widget = ModelRowWidget(view)
+            widget.download_requested.connect(self.request_download)
+            widget.cancel_requested.connect(self.request_cancel)
+            widget.delete_requested.connect(self.request_delete)
+            widget.pause_requested.connect(self.request_pause)
+            widget.resume_requested.connect(self.request_resume)
+            self._row_widgets[view.name] = widget
+            self._list_view.setIndexWidget(index, widget)
+
+    def _on_data_changed(
+        self,
+        top_left: QModelIndex,
+        bottom_right: QModelIndex,
+        roles: list[int],
+    ) -> None:
+        if not roles:
+            return
+        for row in range(top_left.row(), bottom_right.row() + 1):
+            index = self._list_model.index(row)
+            view = self._list_model.data(index, QtModelListModel.MODEL_ROLE)
+            if view is None:
+                continue
+            widget = self._row_widgets.get(view.name)
+            if widget is None:
+                continue
+            if QtModelListModel.MODEL_ROLE in roles:
+                widget.update_view(view)
+            if QtModelListModel.DOWNLOAD_ROLE in roles:
+                snapshot = self._list_model.data(
+                    index, QtModelListModel.DOWNLOAD_ROLE
+                )
+                widget.update_download(snapshot)
 
     def _select_initial_model(self, name: str) -> None:
         self._list_model.set_selected(name)
@@ -165,7 +226,14 @@ class TranscriptionPage(QWidget):
     # ------------------------------------------------------------------
 
     def request_download(self, name: str) -> None:
-        self._service.start_download(name)
+        _logger.info("transcription_page: download requested for '%s'", name)
+        try:
+            self._service.start_download(name)
+        except Exception as exc:  # noqa: BLE001 — surface anything to the user
+            _logger.exception(
+                "transcription_page: download for '%s' failed", name
+            )
+            self.download_error.emit(name, str(exc))
 
     def request_pause(self, name: str) -> None:
         try:

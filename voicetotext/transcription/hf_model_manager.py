@@ -39,6 +39,9 @@ class HuggingFaceModelManager(ModelManager):
     def list_models(self) -> list[ModelInfo]:
         return list(self._models.values())
 
+    def has_model(self, name: str) -> bool:
+        return name in self._models
+
     def is_installed(self, name: str) -> bool:
         if name not in self._models:
             return False
@@ -52,6 +55,12 @@ class HuggingFaceModelManager(ModelManager):
 
     @staticmethod
     def _snapshot_has_complete_model(snapshot: Path) -> bool:
+        # NeMo single-file layout (Parakeet): a `.nemo` file alone is a
+        # complete model — nano-parakeet doesn't need config.json or
+        # safetensors weights.
+        if any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file()):
+            return True
+        # Standard transformers / faster-whisper layout: config + weights.
         if not (snapshot / "config.json").exists():
             return False
         return (

@@ -80,6 +80,27 @@ class TestQtModelListModelData:
 
         assert list_model.data(invalid, QtModelListModel.MODEL_ROLE) is None
 
+    def test_should_return_empty_string_for_display_role(self, model_fixture):
+        # Custom row widget renders the row; default DisplayRole text would
+        # paint behind the widget and overlap it.
+        from PySide6.QtCore import Qt
+
+        list_model, *_ = model_fixture
+        idx = list_model.index(0)
+
+        assert list_model.data(idx, Qt.DisplayRole) == ""
+
+    def test_should_return_size_hint_tall_enough_for_row_widget(self, model_fixture):
+        from PySide6.QtCore import QSize, Qt
+
+        list_model, *_ = model_fixture
+        idx = list_model.index(0)
+
+        size = list_model.data(idx, Qt.SizeHintRole)
+
+        assert isinstance(size, QSize)
+        assert size.height() >= 60  # accommodates name + description rows
+
 
 class TestQtModelListModelSelection:
     def test_should_update_selected_row_when_set_selected_called(self, model_fixture):
