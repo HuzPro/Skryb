@@ -80,14 +80,9 @@ def resolve_engine_id(
     model_info: ModelInfo,
     hardware: HardwareProfile,
     registry: EngineRegistry,
+    *,
+    installed_engines: frozenset[EngineId] = frozenset(),
 ) -> EngineId:
-    """Pick the engine to drive *model_info* on *hardware*.
-
-    An explicit ``transcription.engine`` config setting wins outright;
-    ``"auto"`` defers to :func:`rank_engines` and takes the recommended
-    candidate. Raises :class:`ConfigurationError` when no engine in the
-    registry can drive the model on the current hardware.
-    """
     explicit = config.get("transcription.engine", "auto")
     if explicit and explicit != "auto":
         return explicit  # type: ignore[return-value]
@@ -97,7 +92,35 @@ def resolve_engine_id(
             f"No engine compatible with model "
             f"'{model_info.name}' on hardware '{hardware.kind}'"
         )
+    if installed_engines:
+        installed_candidate = next(
+            (c for c in candidates if c.engine_id in installed_engines),
+            None,
+        )
+        if installed_candidate is not None:
+            return installed_candidate.engine_id
     return candidates[0].engine_id
+
+
+def engines_with_model_on_disk(
+    model_info: ModelInfo,
+    models_dir: Path,
+) -> frozenset[EngineId]:
+    installed: set[EngineId] = set()
+    for engine_id, repo_id in _engine_repo_ids(model_info):
+        snapshots_dir = models_dir / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+        if snapshots_dir.exists() and any(snapshots_dir.iterdir()):
+            installed.add(engine_id)
+    return frozenset(installed)
+
+
+def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
+    pairs: list[tuple[EngineId, str]] = []
+    if model_info.repo_id:
+        pairs.append(("transformers", model_info.repo_id))
+    if model_info.ct2_repo_id:
+        pairs.append(("faster_whisper", model_info.ct2_repo_id))
+    return pairs
 
 
 def create_engine_for_active_model(
@@ -108,10 +131,13 @@ def create_engine_for_active_model(
     *,
     device_override: str | None = None,
 ) -> TranscriptionEngine:
-    """Build the engine that drives the model named in *config*."""
     model_name = config.get("transcription.model_size", "base")
     model_info = WHISPER_MODELS[model_name]
-    engine_id = resolve_engine_id(config, model_info, hardware, registry)
+    installed = engines_with_model_on_disk(model_info, paths.models_dir)
+    engine_id = resolve_engine_id(
+        config, model_info, hardware, registry,
+        installed_engines=installed,
+    )
     spec = EngineSpec(
         model_name=model_name,
         repo_id=_repo_id_for(model_info, engine_id),
@@ -136,6 +162,17 @@ def _resolve_device(
     if configured and configured != "auto":
         return configured  # type: ignore[return-value]
     return "cpu" if hardware.kind == "cpu" else "cuda"
+
+
+def create_model_manager(
+    models_dir: Path,
+    download_manager: DownloadManager,
+) -> ModelManager:
+    return build_composite_model_manager(
+        models_dir,
+        download_manager,
+        active_engine_provider=lambda: "transformers",
+    )
 
 
 def build_composite_model_manager(

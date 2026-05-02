@@ -1,6 +1,8 @@
-from unittest.mock import MagicMock
+import io
+import sys
+from unittest.mock import MagicMock, patch
 
-from voicetotext.__main__ import _configured_model_installed
+from voicetotext.__main__ import _configured_model_installed, _show_error
 
 
 class TestConfiguredModelInstalled:
@@ -31,3 +33,28 @@ class TestConfiguredModelInstalled:
         _configured_model_installed(config, model_manager)
 
         model_manager.is_installed.assert_called_once_with("base")
+
+
+class TestShowError:
+    def test_should_write_message_to_stderr(self):
+        captured = io.StringIO()
+        mock_widgets = MagicMock()
+
+        with (
+            patch("sys.stderr", captured),
+            patch.dict(sys.modules, {"PySide6.QtWidgets": mock_widgets}),
+        ):
+            _show_error("something broke")
+
+        assert "something broke" in captured.getvalue()
+
+    def test_should_write_to_stderr_even_when_qt_unavailable(self):
+        captured = io.StringIO()
+
+        with (
+            patch("sys.stderr", captured),
+            patch.dict(sys.modules, {"PySide6.QtWidgets": None}),
+        ):
+            _show_error("import failed")
+
+        assert "import failed" in captured.getvalue()

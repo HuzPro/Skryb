@@ -8,6 +8,8 @@ from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
     build_engine_registry,
     create_engine_for_active_model,
+    create_model_manager,
+    engines_with_model_on_disk,
     resolve_engine_id,
 )
 from voicetotext.transcription.engine_types import HardwareProfile
@@ -96,6 +98,75 @@ class TestResolveEngineId:
         with pytest.raises(ConfigurationError):
             resolve_engine_id(config, incompatible, _ROCM_PROFILE, registry)
 
+    def test_should_prefer_installed_engine_over_higher_ranked_uninstalled(self):
+        config = _config(engine="auto")
+        registry = build_engine_registry()
+
+        engine_id = resolve_engine_id(
+            config, WHISPER_MODELS["base"], _ROCM_PROFILE, registry,
+            installed_engines=frozenset(["transformers"]),
+        )
+
+        assert engine_id == "transformers"
+
+    def test_should_keep_top_ranked_when_no_engines_installed(self):
+        config = _config(engine="auto")
+        registry = build_engine_registry()
+
+        engine_id = resolve_engine_id(
+            config, WHISPER_MODELS["base"], _ROCM_PROFILE, registry,
+            installed_engines=frozenset(),
+        )
+
+        assert engine_id == "faster_whisper"
+
+    def test_should_ignore_installed_engines_when_engine_is_explicit(self):
+        config = _config(engine="faster_whisper")
+        registry = build_engine_registry()
+
+        engine_id = resolve_engine_id(
+            config, WHISPER_MODELS["base"], _ROCM_PROFILE, registry,
+            installed_engines=frozenset(["transformers"]),
+        )
+
+        assert engine_id == "faster_whisper"
+
+
+def _fake_snapshot(models_dir: Path, repo_id: str) -> None:
+    snapshot = models_dir / f"models--{repo_id.replace('/', '--')}" / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}")
+    (snapshot / "model.safetensors").write_text("")
+
+
+class TestEnginesWithModelOnDisk:
+    def test_should_return_empty_when_no_models_cached(self, tmp_path):
+        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
+
+        assert result == frozenset()
+
+    def test_should_detect_transformers_model(self, tmp_path):
+        _fake_snapshot(tmp_path, "openai/whisper-base")
+
+        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
+
+        assert result == frozenset(["transformers"])
+
+    def test_should_detect_faster_whisper_model(self, tmp_path):
+        _fake_snapshot(tmp_path, "Systran/faster-whisper-base")
+
+        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
+
+        assert result == frozenset(["faster_whisper"])
+
+    def test_should_detect_both_engines(self, tmp_path):
+        _fake_snapshot(tmp_path, "openai/whisper-base")
+        _fake_snapshot(tmp_path, "Systran/faster-whisper-base")
+
+        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
+
+        assert result == frozenset(["transformers", "faster_whisper"])
+
 
 class TestCreateEngineForActiveModel:
     def test_should_build_transformers_adapter_when_engine_is_transformers(
@@ -142,6 +213,34 @@ class TestCreateEngineForActiveModel:
         )
 
         assert engine._repo_id == "Systran/faster-whisper-base"
+
+    def test_should_prefer_installed_engine_in_auto_mode(self, tmp_path):
+        _fake_snapshot(tmp_path, "openai/whisper-base")
+        config = _config(engine="auto", device="cpu")
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert isinstance(engine, TransformersWhisperAdapter)
+
+
+class TestCreateModelManager:
+    def test_should_return_model_manager_listing_all_whisper_models(self, tmp_path):
+        download_manager = MagicMock()
+
+        manager = create_model_manager(tmp_path, download_manager)
+
+        names = {m.name for m in manager.list_models()}
+        assert names == set(WHISPER_MODELS.keys())
+
+    def test_should_report_model_not_installed_on_empty_directory(self, tmp_path):
+        download_manager = MagicMock()
+
+        manager = create_model_manager(tmp_path, download_manager)
+
+        assert manager.is_installed("base") is False
 
 
 class TestBuildCompositeModelManager:

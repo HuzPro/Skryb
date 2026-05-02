@@ -63,6 +63,7 @@ class FasterWhisperAdapter(TranscriptionEngine):
             device=self._device,
             compute_type=compute_type,
             download_root=str(self._model_dir),
+            local_files_only=True,
         )
         self._log_timed_phase("load_model", "model loaded", started_at)
 

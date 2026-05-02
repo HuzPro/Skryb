@@ -113,6 +113,11 @@ def _run_first_time_setup(
 
 
 def _show_error(message: str) -> None:
+    sys.stderr.write(message)
+    _try_show_error_dialog(message)
+
+
+def _try_show_error_dialog(message: str) -> None:
     try:
         import sys as _sys
 

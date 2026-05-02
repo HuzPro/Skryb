@@ -103,6 +103,17 @@ class TestFasterWhisperAdapterLoadModel:
         kwargs = WhisperModel.call_args.kwargs
         assert Path(kwargs["download_root"]) == tmp_path
 
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_pass_local_files_only_true(self):
+        from faster_whisper import WhisperModel
+
+        adapter = _make_adapter()
+
+        adapter.load_model()
+
+        kwargs = WhisperModel.call_args.kwargs
+        assert kwargs["local_files_only"] is True
+
     def test_should_implement_transcription_engine_interface(self):
         adapter = _make_adapter()
 
