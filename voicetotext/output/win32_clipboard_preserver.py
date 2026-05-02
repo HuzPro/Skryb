@@ -20,12 +20,6 @@ _GMEM_MOVEABLE = 0x0002
 # HANDLE (8-byte pointer) return values are truncated to c_int (4 bytes),
 # silently corrupting clipboard handles and cascading into OverflowError
 # when the bogus values flow into _string_at during save().
-#
-# Compatible with pyperclip's signatures — both modules mutate the shared
-# ctypes function objects from ctypes.windll, and pyperclip installs
-# equivalent signatures lazily on its first copy() call. Installing them
-# here at import time closes the timing window where save() could run
-# against the uninitialized state.
 _user32.OpenClipboard.argtypes = [_wt.HWND]
 _user32.OpenClipboard.restype = _wt.BOOL
 

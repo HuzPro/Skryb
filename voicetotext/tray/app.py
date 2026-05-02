@@ -3,7 +3,11 @@ from collections.abc import Callable
 from typing import Protocol
 
 from voicetotext.core.event_bus import EventBus
-from voicetotext.core.events import StateChangedEvent
+from voicetotext.core.events import (
+    ErrorOccurredEvent,
+    StateChangedEvent,
+    TranscriptionFailedEvent,
+)
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.listener import HotkeyListener
@@ -29,6 +33,7 @@ class TrayIcon(Protocol):
     visible: bool
 
     def update_state(self, state: AppState, label: str) -> None: ...
+    def notify(self, title: str, message: str) -> None: ...
     def run(self, setup: Callable[..., None]) -> None: ...
     def stop(self) -> None: ...
 
@@ -65,6 +70,8 @@ class SystemTrayApp:
         self._icon: TrayIcon | None = None
 
         self._event_bus.subscribe(StateChangedEvent, self._handle_state_changed)
+        self._event_bus.subscribe(ErrorOccurredEvent, self._handle_error)
+        self._event_bus.subscribe(TranscriptionFailedEvent, self._handle_error)
 
     def run(self) -> None:
         self._icon = self._tray_factory(
@@ -104,6 +111,13 @@ class SystemTrayApp:
         if self._icon is not None:
             self._icon.stop()
         os._exit(0)
+
+    def _handle_error(
+        self, event: ErrorOccurredEvent | TranscriptionFailedEvent
+    ) -> None:
+        if self._icon is None:
+            return
+        self._icon.notify("VoiceToText", event.error)
 
     def _handle_state_changed(self, event: StateChangedEvent) -> None:
         if self._icon is None:

@@ -43,6 +43,7 @@ class QtTrayAdapter(QObject):
     # queue the slot onto the adapter's owner thread — which is the main
     # thread because the factory is invoked during bootstrap.
     _state_update_requested = Signal(object, str)
+    _notification_requested = Signal(str, str)
 
     def __init__(
         self,
@@ -70,6 +71,7 @@ class QtTrayAdapter(QObject):
         self._tray.setContextMenu(self._menu)
 
         self._state_update_requested.connect(self._apply_state_update)
+        self._notification_requested.connect(self._show_notification)
 
     def _build_menu(self) -> QMenu:
         menu = QMenu()
@@ -116,6 +118,12 @@ class QtTrayAdapter(QObject):
 
     def update_state(self, state: AppState, label: str) -> None:
         self._state_update_requested.emit(state, label)
+
+    def notify(self, title: str, message: str) -> None:
+        self._notification_requested.emit(title, message)
+
+    def _show_notification(self, title: str, message: str) -> None:
+        self._tray.showMessage(title, message)
 
     def _apply_state_update(self, state: AppState, label: str) -> None:
         self._icon = create_qicon(state)

@@ -24,6 +24,7 @@ from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
+from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import (
@@ -109,11 +110,12 @@ def _make_destroyed_handler(
 
 def _build_output(mode: OutputMode) -> TextOutputHandler:
     sleeper = TimeSleeper()
+    writer = Win32ClipboardWriter()
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
-        OutputMode.CLIPBOARD_ONLY: ClipboardAdapter,
-        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(sleeper=sleeper),
+        OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
+        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
         OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
-            inner=PasteAndClipboardAdapter(sleeper=sleeper),
+            inner=PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
             preserver=Win32ClipboardPreserver(),
             sleeper=sleeper,
         ),

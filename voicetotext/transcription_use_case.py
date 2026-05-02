@@ -13,6 +13,7 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
 )
 from voicetotext.core.exceptions import EngineSwapError
+from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.recording.audio_segment import AudioSegment
@@ -149,7 +150,14 @@ class RecordAndTranscribeUseCase:
             _logger.info("Transcription: (empty, no speech detected)")
             return
         _logger.info("Transcription: '%s'", result.text)
-        self._output.output(result.text)
+        try:
+            self._output.output(result.text)
+        except ClipboardWriteError as exc:
+            self._handle_clipboard_write_failure(exc)
+
+    def _handle_clipboard_write_failure(self, error: ClipboardWriteError) -> None:
+        _logger.warning("Clipboard write failed: %s", error)
+        self._event_bus.publish(ErrorOccurredEvent(error=str(error)))
 
     def _report_error(
         self,

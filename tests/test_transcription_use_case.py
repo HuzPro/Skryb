@@ -14,6 +14,7 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
 )
 from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
+from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
@@ -194,6 +195,33 @@ class TestTranscriptionError:
 
         assert len(received) == 1
         assert "model crashed" in received[0].error
+
+
+class TestClipboardWriteFailure:
+    def test_should_publish_error_event_when_clipboard_write_fails(self):
+        use_case, recorder, engine, output, event_bus, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("hello")
+        output.output.side_effect = ClipboardWriteError("GlobalLock returned NULL")
+        received: list[ErrorOccurredEvent] = []
+        event_bus.subscribe(ErrorOccurredEvent, received.append)
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        assert len(received) == 1
+        assert "GlobalLock returned NULL" in received[0].error
+
+    def test_should_return_to_idle_when_clipboard_write_fails(self):
+        use_case, recorder, engine, output, _, state_machine = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("hello")
+        output.output.side_effect = ClipboardWriteError("GlobalLock returned NULL")
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        assert state_machine.state == AppState.IDLE
 
 
 class TestHotSwapEngine:

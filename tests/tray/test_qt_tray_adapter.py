@@ -100,6 +100,19 @@ class TestQtTrayAdapterRunAndStop:
         assert adapter.visible is False
 
 
+class TestQtTrayAdapterNotify:
+    def test_should_call_show_message_on_backend_when_notified(
+        self, qtbot, adapter, tray_backend
+    ):
+        adapter.notify("VoiceToText", "Clipboard write failed.")
+
+        qtbot.wait(50)
+
+        tray_backend.showMessage.assert_called_once_with(
+            "VoiceToText", "Clipboard write failed."
+        )
+
+
 class TestBuildQtTrayAdapterFactory:
     def test_should_return_adapter_with_state_label_from_getter(self, qtbot):
         adapter = build_qt_tray_adapter(

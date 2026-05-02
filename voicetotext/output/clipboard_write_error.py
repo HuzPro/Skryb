@@ -1,0 +1,2 @@
+class ClipboardWriteError(Exception):
+    pass

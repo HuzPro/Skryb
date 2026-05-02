@@ -1,7 +1,11 @@
 from unittest.mock import MagicMock
 
 from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import StateChangedEvent
+from voicetotext.core.events import (
+    ErrorOccurredEvent,
+    StateChangedEvent,
+    TranscriptionFailedEvent,
+)
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.tray.app import SystemTrayApp
 
@@ -81,3 +85,39 @@ class TestStateChangeForwarding:
         )
 
         icon.update_state.assert_called_with(AppState.RECORDING, "Recording...")
+
+
+class TestErrorNotification:
+    def test_should_notify_on_error_occurred_event(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(
+            ErrorOccurredEvent(error="Clipboard write failed.")
+        )
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText", "Clipboard write failed."
+        )
+
+    def test_should_notify_on_transcription_failed_event(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(
+            TranscriptionFailedEvent(error="model crashed")
+        )
+
+        icon.notify.assert_called_once_with("VoiceToText", "model crashed")
