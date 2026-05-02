@@ -83,14 +83,6 @@ _PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
 
 
 PARAKEET_MODELS: dict[str, ModelInfo] = {
-    "parakeet-tdt-0.6b-v2": ModelInfo(
-        name="parakeet-tdt-0.6b-v2",
-        size_mb=2500,
-        description="Best accuracy, built-in punctuation (English)",
-        repo_id="nvidia/parakeet-tdt-0.6b-v2",
-        compatible_engines=("nano_parakeet",),
-        engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
-    ),
     "parakeet-tdt-0.6b-v3": ModelInfo(
         name="parakeet-tdt-0.6b-v3",
         size_mb=2510,
@@ -102,7 +94,26 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
 }
 
 
-ALL_MODELS: dict[str, ModelInfo] = {**WHISPER_MODELS, **PARAKEET_MODELS}
+_GRANITE_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"granite_speech": 100},
+)
+
+
+GRANITE_MODELS: dict[str, ModelInfo] = {
+    "granite-speech-4.1-2b": ModelInfo(
+        name="granite-speech-4.1-2b",
+        size_mb=4500,
+        description="IBM Granite Speech: top OpenASR (English, WER 5.33)",
+        repo_id="ibm-granite/granite-speech-4.1-2b",
+        compatible_engines=("granite_speech",),
+        engine_priorities=_GRANITE_ENGINE_PRIORITIES,
+    ),
+}
+
+
+ALL_MODELS: dict[str, ModelInfo] = {
+    **WHISPER_MODELS, **PARAKEET_MODELS, **GRANITE_MODELS,
+}
 
 
 def get_model_info(name: str) -> ModelInfo:
@@ -117,6 +128,7 @@ def get_model_info(name: str) -> ModelInfo:
 
 _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "medium": "large-v3-turbo",
+    "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
 }
 
 

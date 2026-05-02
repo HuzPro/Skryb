@@ -4,6 +4,7 @@ from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    GRANITE_MODELS,
     PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
@@ -109,8 +110,8 @@ class TestWhisperModels:
 
 
 class TestParakeetModels:
-    def test_should_contain_tdt_v2_and_v3(self):
-        expected = {"parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"}
+    def test_should_contain_tdt_v3(self):
+        expected = {"parakeet-tdt-0.6b-v3"}
 
         assert set(PARAKEET_MODELS.keys()) == expected
 
@@ -128,8 +129,12 @@ class TestParakeetModels:
 
 
 class TestAllModels:
-    def test_should_contain_all_whisper_and_parakeet_models(self):
-        expected = set(WHISPER_MODELS.keys()) | set(PARAKEET_MODELS.keys())
+    def test_should_contain_all_engine_specific_model_dicts(self):
+        expected = (
+            set(WHISPER_MODELS.keys())
+            | set(PARAKEET_MODELS.keys())
+            | set(GRANITE_MODELS.keys())
+        )
 
         assert set(ALL_MODELS.keys()) == expected
 
@@ -141,6 +146,24 @@ class TestAllModels:
         for name, info in PARAKEET_MODELS.items():
             assert ALL_MODELS[name] is info
 
+    def test_granite_entries_should_match_granite_models(self):
+        for name, info in GRANITE_MODELS.items():
+            assert ALL_MODELS[name] is info
+
+
+class TestGraniteModels:
+    def test_all_models_should_have_repo_id(self):
+        for model in GRANITE_MODELS.values():
+            assert model.repo_id != ""
+
+    def test_all_models_should_be_compatible_with_granite_speech_only(self):
+        for model in GRANITE_MODELS.values():
+            assert model.compatible_engines == ("granite_speech",)
+
+    def test_all_models_should_have_no_ct2_repo_id(self):
+        for model in GRANITE_MODELS.values():
+            assert model.ct2_repo_id == ""
+
 
 class TestGetModelInfo:
     def test_should_return_whisper_model_by_name(self):
@@ -149,9 +172,9 @@ class TestGetModelInfo:
         assert info.name == "base"
 
     def test_should_return_parakeet_model_by_name(self):
-        info = get_model_info("parakeet-tdt-0.6b-v2")
+        info = get_model_info("parakeet-tdt-0.6b-v3")
 
-        assert info.name == "parakeet-tdt-0.6b-v2"
+        assert info.name == "parakeet-tdt-0.6b-v3"
 
     def test_should_raise_configuration_error_for_unknown_model(self):
         with pytest.raises(ConfigurationError, match="unknown-model"):

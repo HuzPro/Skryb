@@ -18,6 +18,7 @@ from voicetotext.transcription.engine_types import (
 )
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    GRANITE_MODELS,
     PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
@@ -47,6 +48,13 @@ _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     base_priority=90,
 )
 
+_GRANITE_SPEECH_DESCRIPTOR = EngineDescriptor(
+    engine_id="granite_speech",
+    display_name="IBM Granite Speech (transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=95,
+)
+
 
 def build_engine_registry() -> EngineRegistry:
     """Wire the engine adapters this build ships with."""
@@ -55,11 +63,13 @@ def build_engine_registry() -> EngineRegistry:
             _TRANSFORMERS_DESCRIPTOR,
             _FASTER_WHISPER_DESCRIPTOR,
             _NANO_PARAKEET_DESCRIPTOR,
+            _GRANITE_SPEECH_DESCRIPTOR,
         ],
         builders={
             "transformers": _build_transformers_engine,
             "faster_whisper": _build_faster_whisper_engine,
             "nano_parakeet": _build_nano_parakeet_engine,
+            "granite_speech": _build_granite_speech_engine,
         },
     )
 
@@ -99,6 +109,18 @@ def _build_nano_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
     )
 
     return NanoParakeetAdapter(
+        repo_id=spec.repo_id,
+        device=spec.device,
+        model_dir=spec.model_dir,
+    )
+
+
+def _build_granite_speech_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.granite_speech_adapter import (
+        GraniteSpeechAdapter,
+    )
+
+    return GraniteSpeechAdapter(
         repo_id=spec.repo_id,
         device=spec.device,
         model_dir=spec.model_dir,
@@ -151,6 +173,8 @@ def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
             pairs.append(("transformers", model_info.repo_id))
         if "nano_parakeet" in model_info.compatible_engines:
             pairs.append(("nano_parakeet", model_info.repo_id))
+        if "granite_speech" in model_info.compatible_engines:
+            pairs.append(("granite_speech", model_info.repo_id))
     if model_info.ct2_repo_id:
         pairs.append(("faster_whisper", model_info.ct2_repo_id))
     return pairs
@@ -244,6 +268,9 @@ def build_composite_model_manager(
     parakeet_models = {
         name: info for name, info in PARAKEET_MODELS.items() if info.repo_id
     }
+    granite_models = {
+        name: info for name, info in GRANITE_MODELS.items() if info.repo_id
+    }
 
     transformers_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -266,12 +293,20 @@ def build_composite_model_manager(
         file_downloader=file_downloader,
         models=parakeet_models,
     )
+    granite_speech_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=granite_models,
+    )
 
     return CompositeModelManager(
         by_engine={
             "transformers": transformers_manager,
             "faster_whisper": faster_whisper_manager,
             "nano_parakeet": nano_parakeet_manager,
+            "granite_speech": granite_speech_manager,
         },
         active_engine_provider=active_engine_provider,
     )

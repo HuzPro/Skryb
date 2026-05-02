@@ -2,7 +2,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-EngineId = Literal["transformers", "faster_whisper", "nano_parakeet"]
+EngineId = Literal[
+    "transformers", "faster_whisper", "nano_parakeet", "granite_speech",
+]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 
 

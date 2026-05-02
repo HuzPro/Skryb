@@ -61,11 +61,16 @@ class HuggingFaceModelManager(ModelManager):
         if any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file()):
             return True
         # Standard transformers / faster-whisper layout: config + weights.
+        # Weights may be a single ``model.safetensors`` /
+        # ``pytorch_model.bin`` (Whisper) or a sharded layout indexed by
+        # ``model.safetensors.index.json`` with ``model-NNNNN-of-MMMMM``
+        # shards (Granite Speech and other multi-GB models).
         if not (snapshot / "config.json").exists():
             return False
         return (
             (snapshot / "model.safetensors").exists()
             or (snapshot / "pytorch_model.bin").exists()
+            or (snapshot / "model.safetensors.index.json").exists()
         )
 
     # ------------------------------------------------------------------

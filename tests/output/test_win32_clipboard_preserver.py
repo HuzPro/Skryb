@@ -193,13 +193,13 @@ class TestSaveAndRestoreRoundTrip:
 
         fake_clipboard.contents = {1: b"first"}
         preserver.save()
-        fake_clipboard.contents = {42: b"second"}
+        fake_clipboard.contents = {0xC042: b"second"}
         preserver.save()
 
-        fake_clipboard.contents = {99: b"cleared"}
+        fake_clipboard.contents = {0xC099: b"cleared"}
         preserver.restore()
 
-        assert fake_clipboard.contents == {42: b"second"}
+        assert fake_clipboard.contents == {0xC042: b"second"}
 
 
 class TestSaveEdgeCases:
@@ -213,6 +213,69 @@ class TestSaveEdgeCases:
 
         # A subsequent restore is a no-op and must not crash.
         preserver.restore()
+
+    def test_should_skip_cf_bitmap_to_avoid_segfault_on_hbitmap(
+        self, fake_clipboard: _FakeWin32Clipboard
+    ):
+        # CF_BITMAP (2) returns an HBITMAP, NOT an HGLOBAL, so calling
+        # GlobalSize/GlobalLock on it is undefined behaviour — at best
+        # returns garbage, at worst segfaults the process during
+        # _string_at(ptr, garbage_size). Skip it entirely.
+        fake_clipboard.contents = {
+            2: b"\x00" * 16,  # CF_BITMAP — must be skipped
+            13: b"safe text",  # CF_UNICODETEXT — must still be preserved
+        }
+        preserver = Win32ClipboardPreserver()
+
+        preserver.save()
+        fake_clipboard.contents = {1: b"replaced"}
+        preserver.restore()
+
+        assert 2 not in fake_clipboard.contents
+        assert fake_clipboard.contents[13] == b"safe text"
+
+    def test_should_skip_cf_enhmetafile_and_other_non_hglobal_formats(
+        self, fake_clipboard: _FakeWin32Clipboard
+    ):
+        # CF_METAFILEPICT (3), CF_PALETTE (9), CF_ENHMETAFILE (14),
+        # CF_OWNERDISPLAY (0x80), CF_DSPBITMAP (0x82), CF_DSPMETAFILEPICT
+        # (0x83), CF_DSPENHMETAFILE (0x8E) are non-HGLOBAL and must
+        # never be read with GlobalSize/_string_at.
+        fake_clipboard.contents = {
+            3: b"x", 9: b"x", 14: b"x",
+            0x80: b"x", 0x82: b"x", 0x83: b"x", 0x8E: b"x",
+            13: b"safe text",
+        }
+        preserver = Win32ClipboardPreserver()
+
+        preserver.save()
+        fake_clipboard.contents = {}
+        preserver.restore()
+
+        assert set(fake_clipboard.contents.keys()) == {13}
+
+    def test_should_preserve_registered_formats_above_c000(
+        self, fake_clipboard: _FakeWin32Clipboard
+    ):
+        # Registered formats (>= 0xC000) are HGLOBAL by Win32 convention
+        # and are how apps put HTML/RTF/file-list custom data on the
+        # clipboard — must continue to round-trip.
+        fake_clipboard.contents = {
+            0xC001: b"<html>preserved</html>",
+            0xC123: b"some-app-format",
+            13: b"plain unicode text",
+        }
+        preserver = Win32ClipboardPreserver()
+
+        preserver.save()
+        fake_clipboard.contents = {}
+        preserver.restore()
+
+        assert fake_clipboard.contents == {
+            0xC001: b"<html>preserved</html>",
+            0xC123: b"some-app-format",
+            13: b"plain unicode text",
+        }
 
     def test_should_log_warning_when_open_clipboard_fails(
         self, fake_clipboard: _FakeWin32Clipboard, log_capture

@@ -78,6 +78,12 @@ class TestBuildEngineRegistry:
         ids = {d.engine_id for d in registry.all_descriptors()}
         assert "nano_parakeet" in ids
 
+    def test_should_register_granite_speech_descriptor(self):
+        registry = build_engine_registry()
+
+        ids = {d.engine_id for d in registry.all_descriptors()}
+        assert "granite_speech" in ids
+
 
 class TestResolveEngineId:
     def test_should_return_explicit_engine_when_config_specifies_one(self):
@@ -242,7 +248,7 @@ class TestCreateEngineForActiveModel:
         self, tmp_path,
     ):
         config = _config(
-            model_size="parakeet-tdt-0.6b-v2",
+            model_size="parakeet-tdt-0.6b-v3",
             engine="nano_parakeet",
             device="cpu",
         )
@@ -274,7 +280,7 @@ class TestCreateEngineForActiveModel:
         self, tmp_path,
     ):
         config = _config(
-            model_size="parakeet-tdt-0.6b-v2",
+            model_size="parakeet-tdt-0.6b-v3",
             engine="auto",
             device="cpu",
         )
@@ -285,6 +291,47 @@ class TestCreateEngineForActiveModel:
         )
 
         assert isinstance(engine, NanoParakeetAdapter)
+
+    def test_should_build_granite_speech_adapter_for_granite_model(
+        self, tmp_path,
+    ):
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        config = _config(
+            model_size="granite-speech-4.1-2b",
+            engine="granite_speech",
+            device="cpu",
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert isinstance(engine, GraniteSpeechAdapter)
+        assert engine._repo_id == "ibm-granite/granite-speech-4.1-2b"
+
+    def test_should_auto_select_granite_speech_for_granite_model(
+        self, tmp_path,
+    ):
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        config = _config(
+            model_size="granite-speech-4.1-2b",
+            engine="auto",
+            device="cpu",
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert isinstance(engine, GraniteSpeechAdapter)
 
 
 class TestCreateModelManager:

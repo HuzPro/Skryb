@@ -5,6 +5,7 @@ queued-invoke path. The latter is what fixes the Win32-from-daemon-
 thread crash, so we exercise it with a real worker thread.
 """
 
+import logging
 import threading
 
 import pytest
@@ -13,9 +14,23 @@ from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 from voicetotext.output.qt_gui_thread_dispatcher import QtGuiThreadDispatcher
 
 
+_DISPATCHER_LOGGER = "voicetotext.output.qt_gui_thread_dispatcher"
+
+
 @pytest.fixture
 def dispatcher(qtbot):
     return QtGuiThreadDispatcher()
+
+
+@pytest.fixture()
+def log_capture(caplog: pytest.LogCaptureFixture):
+    # Some other test in the suite mutates logging propagation, so caplog
+    # cannot reliably capture via the root handler. Attach explicitly.
+    logger = logging.getLogger(_DISPATCHER_LOGGER)
+    logger.addHandler(caplog.handler)
+    caplog.handler.setLevel(logging.DEBUG)
+    yield caplog
+    logger.removeHandler(caplog.handler)
 
 
 class TestQtGuiThreadDispatcherInterface:
@@ -88,3 +103,34 @@ class TestQtGuiThreadDispatcherCrossThread:
         qtbot.waitUntil(done.is_set, timeout=1000)
 
         assert results == [0, 1, 2, 3, 4]
+
+
+class TestQtGuiThreadDispatcherExceptionSafety:
+    """An exception escaping a Qt slot can take down the event loop —
+    PySide6 may invoke ``sys.excepthook`` and on some Qt builds this
+    terminates the process. The clipboard-preservation path on the GUI
+    thread is the immediate motivator: a Win32 ctypes call with a bad
+    handle could raise (or even segfault, but at least Python-level
+    exceptions must be contained).
+    """
+
+    def test_should_log_and_swallow_action_exception(
+        self, qtbot, dispatcher, log_capture,
+    ) -> None:
+        def boom() -> None:
+            raise RuntimeError("simulated paste failure")
+
+        dispatcher.dispatch(boom)
+        qtbot.wait(50)
+
+        assert "simulated paste failure" in log_capture.text
+
+    def test_should_still_invoke_subsequent_actions_after_exception(
+        self, qtbot, dispatcher,
+    ) -> None:
+        ran_after_boom = threading.Event()
+
+        dispatcher.dispatch(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        dispatcher.dispatch(ran_after_boom.set)
+
+        qtbot.waitUntil(ran_after_boom.is_set, timeout=1000)

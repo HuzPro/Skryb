@@ -16,6 +16,40 @@ _memmove = ctypes.memmove
 
 _GMEM_MOVEABLE = 0x0002
 
+# Standard clipboard formats that the Win32 docs guarantee use an
+# ``HGLOBAL``-backed handle, which is what ``GlobalSize`` / ``GlobalLock``
+# / ``_string_at`` operate on. Any other format may hand us an
+# ``HBITMAP`` / ``HENHMETAFILE`` / ``HPALETTE`` / etc. — calling
+# ``GlobalSize`` on those is undefined and can return garbage sizes that
+# segfault ``_string_at`` and take the whole process with them. We use
+# an *allowlist* and skip everything else.
+#
+# IDs and meanings come from the Windows ``CF_*`` constants in
+# ``WinUser.h``.
+_HGLOBAL_BACKED_STANDARD_FORMATS: frozenset[int] = frozenset({
+    1,   # CF_TEXT
+    4,   # CF_SYLK
+    5,   # CF_DIF
+    6,   # CF_TIFF
+    7,   # CF_OEMTEXT
+    8,   # CF_DIB
+    10,  # CF_PENDATA
+    11,  # CF_RIFF
+    12,  # CF_WAVE
+    13,  # CF_UNICODETEXT
+    15,  # CF_HDROP
+    16,  # CF_LOCALE
+    17,  # CF_DIBV5
+})
+_REGISTERED_FORMAT_MIN = 0xC000
+
+
+def _is_hglobal_backed(fmt: int) -> bool:
+    return (
+        fmt in _HGLOBAL_BACKED_STANDARD_FORMATS
+        or fmt >= _REGISTERED_FORMAT_MIN
+    )
+
 # Install ctypes signatures. REQUIRED on 64-bit Python — without these,
 # HANDLE (8-byte pointer) return values are truncated to c_int (4 bytes),
 # silently corrupting clipboard handles and cascading into OverflowError
@@ -104,6 +138,12 @@ class Win32ClipboardPreserver(ClipboardPreserver):
             return
         try:
             for fmt in _iter_clipboard_formats():
+                if not _is_hglobal_backed(fmt):
+                    _logger.debug(
+                        "Skipping non-HGLOBAL clipboard format %d "
+                        "(unsafe for raw GlobalSize/_string_at).", fmt,
+                    )
+                    continue
                 data = _read_format_bytes(fmt)
                 if data is not None:
                     self._snapshot.append((fmt, data))

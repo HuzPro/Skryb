@@ -1,8 +1,12 @@
+import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, Signal
 
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
+
+
+_logger = logging.getLogger(__name__)
 
 
 class QtGuiThreadDispatcher(QObject):
@@ -32,7 +36,15 @@ class QtGuiThreadDispatcher(QObject):
         self._action_requested.emit(action)
 
     def _invoke(self, action: Callable[[], None]) -> None:
-        action()
+        # An uncaught exception leaving a Qt slot is undefined: PySide6
+        # may print to stderr, may invoke ``sys.excepthook``, and on
+        # some Qt builds may abort the event loop entirely. We log and
+        # swallow so a single failing action (typically a clipboard /
+        # keyboard simulation hiccup) cannot take the whole app down.
+        try:
+            action()
+        except Exception:
+            _logger.exception("GUI-thread action raised; swallowed.")
 
 
 GuiThreadDispatcher.register(QtGuiThreadDispatcher)

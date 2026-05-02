@@ -56,7 +56,7 @@ class TestHuggingFaceModelManagerHasModel:
 
         manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
 
-        assert manager.has_model("parakeet-tdt-0.6b-v2") is True
+        assert manager.has_model("parakeet-tdt-0.6b-v3") is True
         assert manager.has_model("base") is False
 
 
@@ -103,6 +103,32 @@ class TestHuggingFaceModelManagerIsInstalled:
 
         assert manager.is_installed("base") is True
 
+    def test_should_return_true_when_sharded_safetensors_index_present(
+        self, tmp_path,
+    ):
+        # Granite Speech 4.1-2b ships as sharded safetensors:
+        # ``model-00001-of-00003.safetensors`` etc. plus
+        # ``model.safetensors.index.json``. There is no single
+        # ``model.safetensors`` file, so the install check must accept
+        # the index-file layout as a complete model.
+        from voicetotext.transcription.model_info import GRANITE_MODELS
+
+        snapshot = (
+            tmp_path
+            / "models--ibm-granite--granite-speech-4.1-2b"
+            / "snapshots"
+            / "abc123"
+        )
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").touch()
+        (snapshot / "model.safetensors.index.json").touch()
+        (snapshot / "model-00001-of-00003.safetensors").touch()
+        (snapshot / "model-00002-of-00003.safetensors").touch()
+        (snapshot / "model-00003-of-00003.safetensors").touch()
+        manager = _make_manager(tmp_path, models=GRANITE_MODELS)
+
+        assert manager.is_installed("granite-speech-4.1-2b") is True
+
     def test_should_return_true_for_nemo_only_snapshot(self, tmp_path):
         # Parakeet ships as a single .nemo file. nano-parakeet doesn't need
         # config.json or safetensors — just the .nemo. The install check
@@ -111,15 +137,15 @@ class TestHuggingFaceModelManagerIsInstalled:
 
         snapshot = (
             tmp_path
-            / "models--nvidia--parakeet-tdt-0.6b-v2"
+            / "models--nvidia--parakeet-tdt-0.6b-v3"
             / "snapshots"
             / "abc123"
         )
         snapshot.mkdir(parents=True)
-        (snapshot / "parakeet-tdt-0.6b-v2.nemo").touch()
+        (snapshot / "parakeet-tdt-0.6b-v3.nemo").touch()
         manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
 
-        assert manager.is_installed("parakeet-tdt-0.6b-v2") is True
+        assert manager.is_installed("parakeet-tdt-0.6b-v3") is True
 
 
 class TestHuggingFaceModelManagerGetModelPath:
