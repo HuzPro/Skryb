@@ -249,6 +249,33 @@ class TestNanoParakeetAdapterTranscribe:
             adapter.transcribe(_make_audio())
 
 
+class TestNanoParakeetAdapterWarmup:
+    """Smoke test: the inherited default warmup runs end-to-end through
+    parakeet's transcribe path so CUDA/ROCm kernels are compiled before
+    the first user-triggered transcription."""
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_invoke_model_transcribe_during_warmup(self) -> None:
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        model = from_pretrained.return_value
+        model.transcribe.return_value = ""
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        adapter.warmup()
+
+        assert model.transcribe.call_count == 1
+
+
 class TestNanoParakeetAdapterDispose:
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_clear_model_on_dispose(self) -> None:

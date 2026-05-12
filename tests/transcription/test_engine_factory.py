@@ -333,6 +333,27 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, GraniteSpeechAdapter)
 
+    def test_should_pass_configured_beam_size_to_granite_adapter(
+        self, tmp_path,
+    ):
+        # Users can trade Granite accuracy for ~Nx speed by setting
+        # ``transcription.beam_size`` below the IBM-recommended 4.
+        # The factory must forward whatever the config holds rather
+        # than silently keeping the adapter on its default.
+        config = _config(
+            model_size="granite-speech-4.1-2b",
+            engine="granite_speech",
+            device="cpu",
+            beam_size=2,
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert engine._num_beams == 2
+
 
 class TestCreateModelManager:
     def test_should_return_model_manager_listing_all_models(self, tmp_path):

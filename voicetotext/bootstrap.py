@@ -1,6 +1,7 @@
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable
 
 from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
@@ -8,7 +9,7 @@ from voicetotext.core.debug_logger import setup_debug_logger
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
-from voicetotext.core.state_machine import AppStateMachine
+from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
@@ -54,6 +55,7 @@ from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
 from voicetotext.transcription.model_info import get_model_info
 from voicetotext.transcription.model_manager import ModelManager
+from voicetotext.transcription.placeholder_engine import PlaceholderEngine
 from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
@@ -193,6 +195,7 @@ def _load_engine(
 ) -> TranscriptionEngine:
     engine = create_engine_for_active_model(config, paths, registry, hardware)
     engine.load_model()
+    _warmup_safely(engine)
     return engine
 
 
@@ -206,7 +209,73 @@ def _load_engine_on_cpu(
         config, paths, registry, hardware, device_override="cpu",
     )
     engine.load_model()
+    _warmup_safely(engine)
     return engine
+
+
+def _load_engine_and_attach(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
+    *,
+    use_case: RecordAndTranscribeUseCase,
+    state_machine: AppStateMachine,
+) -> None:
+    """Background-thread entry point for engine load + state attach.
+
+    Loads the engine (with CPU fallback inside
+    ``_load_engine_with_fallback``), then swaps it into the use case
+    and flips the state machine ``LOADING → IDLE``. Failures
+    transition to ``ERROR`` so the tray reflects the broken state.
+    Exceptions never escape — daemon threads silently drop them
+    otherwise.
+    """
+    try:
+        engine = _load_engine_with_fallback(config, paths, registry, hardware)
+    except Exception as exc:
+        _logger.exception("Engine load failed: %s", exc)
+        state_machine.transition_to(AppState.ERROR)
+        return
+    use_case.set_engine(engine)
+    state_machine.transition_to(AppState.IDLE)
+    _logger.info("Engine ready.")
+
+
+def _spawn_engine_load_thread(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
+    *,
+    use_case: RecordAndTranscribeUseCase,
+    state_machine: AppStateMachine,
+) -> None:
+    thread = threading.Thread(
+        target=_load_engine_and_attach,
+        args=(config, paths, registry, hardware),
+        kwargs={"use_case": use_case, "state_machine": state_machine},
+        daemon=True,
+        name="engine-load",
+    )
+    thread.start()
+
+
+def _warmup_safely(engine: TranscriptionEngine) -> None:
+    """Run warmup with errors isolated so a backend quirk on silent
+    audio doesn't trigger CPU fallback or crash startup. The engine is
+    fully loaded at this point — losing warmup only means the first
+    real transcription pays the cold-start cost.
+    """
+    started_at = time.monotonic()
+    try:
+        engine.warmup()
+    except Exception as exc:
+        _logger.warning("Engine warmup failed (non-fatal): %s", exc)
+        return
+    _logger.info(
+        "Engine warmup complete in %.2fs", time.monotonic() - started_at,
+    )
 
 
 def _make_active_engine_provider(
@@ -314,7 +383,7 @@ def build_app(
     if download_manager is None:
         download_manager = DownloadManager(event_bus=event_bus)
 
-    state_machine = AppStateMachine(event_bus)
+    state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
 
     hardware = TorchHardwareDetector().detect()
     _logger.info(
@@ -322,11 +391,6 @@ def build_app(
         hardware.kind, hardware.device_name, hardware.gfx_arch,
     )
     registry = build_engine_registry()
-
-    model_name = config.get("transcription.model_size")
-    _logger.info("Loading Whisper model '%s' ...", model_name)
-    engine = _load_engine_with_fallback(config, paths, registry, hardware)
-    _logger.info("Model loaded.")
 
     recorder = SoundDeviceAdapter(
         sample_rate=config.get("audio.sample_rate", 16000),
@@ -342,13 +406,21 @@ def build_app(
 
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
+    # The real engine load happens on a background thread so the tray
+    # appears immediately. The use case needs an engine reference for
+    # construction — give it a placeholder that raises if anything
+    # actually tries to transcribe through it. Background thread will
+    # swap in the real engine and flip the state machine to IDLE.
     record_and_transcribe_use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
-        engine=engine,
+        engine=PlaceholderEngine(),
         output=output,
         state_machine=state_machine,
         event_bus=event_bus,
         action_dispatcher=action_dispatcher,
+        max_recording_seconds=config.get(
+            "recording.max_duration_seconds", 600.0,
+        ),
     )
 
     listener = _build_hotkey_listener(config, record_and_transcribe_use_case)
@@ -415,7 +487,18 @@ def build_app(
     config.save()
     combo = config.get("hotkey.combination", "ctrl+alt+m")
     mode = config.get("hotkey.mode", "toggle")
-    _logger.info("Ready. Press %s to start recording (%s mode).", combo, mode)
+    model_name = config.get("transcription.model_size")
+    _logger.info(
+        "Tray online. Loading '%s' in the background. "
+        "Hotkey %s (%s mode) will queue until ready.",
+        model_name, combo, mode,
+    )
+
+    _spawn_engine_load_thread(
+        config, paths, registry, hardware,
+        use_case=record_and_transcribe_use_case,
+        state_machine=state_machine,
+    )
 
     return app
 

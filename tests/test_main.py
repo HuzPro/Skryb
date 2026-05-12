@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from voicetotext.__main__ import (
     _apply_hf_cache_env_overrides,
+    _apply_torch_env_overrides,
     _configured_model_installed,
     _show_error,
 )
@@ -61,6 +62,41 @@ class TestApplyHfCacheEnvOverrides:
             _apply_hf_cache_env_overrides(paths)
 
             assert os.environ.get("HF_HUB_CACHE") == "C:\\user\\custom\\hf"
+
+
+class TestApplyTorchEnvOverrides:
+    """Enable the AOTriton-based flash / mem-efficient attention path
+    on AMD ROCm. Without the experimental flag, ``transformers``'
+    default ``sdpa`` attention emits two ``UserWarning``s per attention
+    layer per forward pass and falls back to a slower path. Setting
+    the flag silences the warnings and lets PyTorch use the faster
+    backends. The env var is a no-op on NVIDIA / CPU so we set it
+    unconditionally rather than detecting hardware before torch is
+    importable.
+    """
+
+    def test_should_enable_aotriton_experimental_for_amd_attention(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", None)
+
+            _apply_torch_env_overrides()
+
+            assert (
+                os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL")
+                == "1"
+            )
+
+    def test_should_respect_user_override_of_aotriton_flag(self):
+        with patch.dict(
+            os.environ,
+            {"TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": "0"},
+        ):
+            _apply_torch_env_overrides()
+
+            assert (
+                os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL")
+                == "0"
+            )
 
 
 class TestShowError:

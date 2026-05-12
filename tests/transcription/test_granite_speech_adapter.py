@@ -3,6 +3,14 @@
 ``transformers`` and ``torch`` are patched at the module boundary via
 ``sys.modules`` — the same seam strategy used by the nano-parakeet
 adapter tests.
+
+``torch`` is imported eagerly at the module level so its C-extension
+docstrings register exactly once. Without this, an earlier test that
+patches ``sys.modules["torch"]`` to a ``MagicMock`` and then has its
+patch torn down can leave ``torch.overrides`` un-imported; a later
+test doing ``import torch`` would then try to re-initialise the C
+extension and crash with ``RuntimeError: function
+'_has_torch_function' already has a docstring``.
 """
 
 from pathlib import Path
@@ -10,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+import torch as _torch_eager_import  # noqa: F401 — see module docstring
 
 from voicetotext.core.exceptions import TranscriptionError
 from voicetotext.recording.audio_segment import AudioSegment
@@ -25,6 +34,29 @@ def _make_audio(sample_rate: int = 16000, samples: int = 16000) -> AudioSegment:
         data=np.zeros(samples, dtype=np.float32),
         sample_rate=sample_rate,
     )
+
+
+def _capture_warnings(caplog, logger, action) -> list:
+    """Run ``action`` with caplog's handler attached to ``logger``.
+
+    ``voicetotext.core.debug_logger`` disables propagation on the
+    ``voicetotext`` subtree, so caplog's root-attached handler doesn't
+    see records emitted from the adapter when the debug logger module
+    has been imported (which happens any time ``bootstrap`` is loaded).
+    Attaching caplog's handler directly to the target logger sidesteps
+    the propagation block for the duration of the assertion.
+    """
+    import logging as stdlib_logging
+
+    previous_level = logger.level
+    logger.setLevel(stdlib_logging.WARNING)
+    logger.addHandler(caplog.handler)
+    try:
+        action()
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.setLevel(previous_level)
+    return [r for r in caplog.records if r.levelno >= stdlib_logging.WARNING]
 
 
 def _wire_successful_transcribe(
@@ -130,7 +162,7 @@ class TestGraniteSpeechAdapterLoadModel:
         adapter.load_model()
 
         kwargs = AutoModelForSpeechSeq2Seq.from_pretrained.call_args.kwargs
-        assert kwargs["torch_dtype"] is torch.bfloat16
+        assert kwargs["dtype"] is torch.bfloat16
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_honour_explicit_dtype_override(self) -> None:
@@ -151,7 +183,7 @@ class TestGraniteSpeechAdapterLoadModel:
         adapter.load_model()
 
         kwargs = AutoModelForSpeechSeq2Seq.from_pretrained.call_args.kwargs
-        assert kwargs["torch_dtype"] is torch.float16
+        assert kwargs["dtype"] is torch.float16
 
 
 class TestGraniteSpeechAdapterTranscribeGuards:
@@ -292,6 +324,516 @@ class TestGraniteSpeechAdapterTranscribe:
         assert result.text == "Hello, world!"
         assert result.language == "en"
         assert result.duration_seconds >= 0.0
+
+
+class TestGraniteSpeechAdapterMaxNewTokensBudget:
+    """Output-token budget must scale with audio duration.
+
+    A fixed budget silently truncates long recordings — a 121 s
+    recording previously stopped mid-sentence at the 200-token cap
+    even though the audio was captured fully.
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_scale_budget_with_audio_duration_for_long_chunk(
+        self,
+    ) -> None:
+        # 50 s fits in a single chunk so we can read the budget for that
+        # duration directly off the (sole) ``generate`` call. Multi-chunk
+        # behaviour is covered separately in the chunking tests.
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+        fifty_seconds = _make_audio(samples=16000 * 50)
+
+        adapter.transcribe(fifty_seconds)
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        budget = model.generate.call_args.kwargs["max_new_tokens"]
+        assert budget >= 500, (
+            f"50 s of audio needs a generous output budget; got {budget}"
+        )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_exceed_legacy_fixed_cap_for_thirty_second_chunk(
+        self,
+    ) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+        thirty_seconds = _make_audio(samples=16000 * 30)
+
+        adapter.transcribe(thirty_seconds)
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        budget = model.generate.call_args.kwargs["max_new_tokens"]
+        assert budget > 200, (
+            "Budget must exceed the legacy 200-token cap for a 30 s "
+            f"chunk; got {budget}"
+        )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_apply_floor_so_sub_second_audio_is_not_starved(
+        self,
+    ) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+        half_second = _make_audio(samples=8000)
+
+        adapter.transcribe(half_second)
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        budget = model.generate.call_args.kwargs["max_new_tokens"]
+        assert budget >= 128, (
+            f"Floor must protect short utterances; got {budget}"
+        )
+
+
+class TestGeneratedOnlyRepetitionPenalty:
+    """Custom logits processor: scope the penalty to post-prompt tokens.
+
+    Transformers' built-in ``RepetitionPenaltyLogitsProcessor`` also
+    penalises prompt tokens, which the IBM team has documented as
+    hurting transcription quality. Our variant skips the prompt slice
+    entirely and only penalises tokens the model itself has emitted.
+    """
+
+    def test_should_return_scores_unchanged_when_only_prompt_present(
+        self,
+    ) -> None:
+        import torch
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            _GeneratedOnlyRepetitionPenalty,
+        )
+
+        processor = _GeneratedOnlyRepetitionPenalty(
+            penalty=3.0, prompt_length=4,
+        )
+        input_ids = torch.tensor([[10, 20, 30, 40]])
+        scores = torch.tensor([[0.5, 0.5, 0.5, 0.5, 0.5]])
+
+        result = processor(input_ids, scores.clone())
+
+        assert torch.equal(result, scores)
+
+    def test_should_divide_positive_scores_for_generated_tokens(
+        self,
+    ) -> None:
+        # Prompt is the first 3 tokens; the model has just emitted tokens
+        # 3 and 4. Only the score columns for those two tokens should be
+        # divided by the penalty; the prompt-token column scores stay
+        # untouched.
+        import torch
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            _GeneratedOnlyRepetitionPenalty,
+        )
+
+        processor = _GeneratedOnlyRepetitionPenalty(
+            penalty=2.0, prompt_length=3,
+        )
+        input_ids = torch.tensor([[0, 1, 2, 3, 4]])
+        scores = torch.tensor([[1.0, 1.0, 1.0, 1.0, 1.0]])
+
+        result = processor(input_ids, scores)
+
+        assert result[0, 0].item() == 1.0
+        assert result[0, 1].item() == 1.0
+        assert result[0, 2].item() == 1.0
+        assert result[0, 3].item() == 0.5
+        assert result[0, 4].item() == 0.5
+
+    def test_should_multiply_negative_scores_for_generated_tokens(
+        self,
+    ) -> None:
+        # For negative logits, multiplying by penalty pushes them further
+        # negative — equivalent semantics to dividing positive logits.
+        # Mirrors Transformers' built-in behaviour, just scoped.
+        import torch
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            _GeneratedOnlyRepetitionPenalty,
+        )
+
+        processor = _GeneratedOnlyRepetitionPenalty(
+            penalty=2.0, prompt_length=1,
+        )
+        input_ids = torch.tensor([[0, 1]])
+        scores = torch.tensor([[-1.0, -1.0]])
+
+        result = processor(input_ids, scores)
+
+        assert result[0, 0].item() == -1.0
+        assert result[0, 1].item() == -2.0
+
+
+class TestGraniteSpeechAdapterConfigurableBeamCount:
+    """IBM's tech-report recipe sets ``num_beams=4`` for accuracy.
+    Users who prefer the ~Nx speedup from greedy decoding can lower
+    it via the existing ``transcription.beam_size`` config key —
+    the adapter must honour whatever the engine factory passes in
+    rather than hard-coding 4.
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_default_to_four_beams_when_unspecified(self) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+
+        adapter.transcribe(_make_audio())
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        assert model.generate.call_args.kwargs["num_beams"] == 4
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_use_explicit_num_beams_when_passed(self) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+            num_beams=1,
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+
+        adapter.transcribe(_make_audio())
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        assert model.generate.call_args.kwargs["num_beams"] == 1
+
+
+class TestGraniteSpeechAdapterIBMReferenceRecipe:
+    """Inference must use IBM's reference recipe from the tech report:
+    ``num_beams=4`` and ``repetition_penalty=3.0`` scoped to generated
+    tokens. Greedy with no penalty is known to collapse into loops on
+    audio outside the training distribution (~60 s).
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_use_four_beams_per_ibm_reference_recipe(
+        self,
+    ) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+
+        adapter.transcribe(_make_audio())
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        assert model.generate.call_args.kwargs["num_beams"] == 4
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_pass_generated_only_repetition_penalty(self) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+            _GeneratedOnlyRepetitionPenalty,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe(n_input_tokens=42)
+
+        adapter.transcribe(_make_audio())
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        processors = model.generate.call_args.kwargs["logits_processor"]
+        scoped = [
+            p for p in processors
+            if isinstance(p, _GeneratedOnlyRepetitionPenalty)
+        ]
+        assert len(scoped) == 1, (
+            "Expected exactly one generated-only repetition-penalty "
+            f"processor; got {processors}"
+        )
+        assert scoped[0]._penalty == 3.0
+        assert scoped[0]._prompt_length == 42
+
+
+class TestGraniteSpeechAdapterChunking:
+    """Granite is only trained on ≤60 s utterances. Long audio must be
+    split into chunks below that threshold and transcribed sequentially,
+    or the LLM hallucinates and degenerates into repetition.
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_call_generate_once_for_audio_under_threshold(
+        self,
+    ) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+        fifty_seconds = _make_audio(samples=16000 * 50)
+
+        adapter.transcribe(fifty_seconds)
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        assert model.generate.call_count == 1
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_call_generate_multiple_times_for_long_audio(
+        self,
+    ) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+        two_minutes = _make_audio(samples=16000 * 120)
+
+        adapter.transcribe(two_minutes)
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        assert model.generate.call_count >= 2, (
+            "120 s of audio must be split into ≥2 chunks below the "
+            "Granite training-distribution limit"
+        )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_join_chunk_transcripts_with_single_space(self) -> None:
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        processor, _, _ = _wire_successful_transcribe()
+        # One decoded text per chunk. 120 s of audio splits into at
+        # least two chunks, and the helper rotates through this list as
+        # successive ``batch_decode`` calls fire — so as long as the
+        # adapter joins with a single space, the prefix of the final
+        # text is deterministic regardless of the exact chunk count.
+        processor.tokenizer.batch_decode.side_effect = [
+            ["alpha"],
+            [" beta "],
+            ["gamma"],
+            ["delta"],
+            ["epsilon"],
+        ]
+        two_minutes = _make_audio(samples=16000 * 120)
+
+        result = adapter.transcribe(two_minutes)
+
+        assert result.text.startswith("alpha beta")
+        assert "  " not in result.text
+
+    def test_silence_aware_split_should_snap_to_quietest_window(self) -> None:
+        # Construct 60 s of high-energy noise with a 0.5 s near-silence
+        # gap at the 47 s mark. Asking the splitter for a target offset
+        # of 50 s with a ±5 s search radius must snap the cut into that
+        # quiet gap rather than the noisy area around 50 s.
+        import numpy as np
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            _find_quietest_offset,
+        )
+
+        rng = np.random.default_rng(0)
+        sample_rate = 16000
+        data = rng.standard_normal(sample_rate * 60).astype(np.float32)
+        quiet_start = int(47 * sample_rate)
+        quiet_end = int(47.5 * sample_rate)
+        data[quiet_start:quiet_end] = 0.0
+        target_offset = int(50 * sample_rate)
+
+        split_at = _find_quietest_offset(data, target_offset, sample_rate)
+
+        assert quiet_start <= split_at <= quiet_end, (
+            f"split should fall inside the quiet zone "
+            f"[{quiet_start}, {quiet_end}], got {split_at}"
+        )
+
+
+class TestGraniteSpeechAdapterRepetitionWarning:
+    """Defence in depth: if a chunk still degenerates into repetition
+    despite the recipe, surface it as a WARNING so the failure mode is
+    debuggable instead of silently bad output.
+
+    ``voicetotext.core.debug_logger`` sets ``propagate=False`` on the
+    ``voicetotext`` logger at import time so production logs only land
+    in the app's own debug file. That blocks pytest's ``caplog`` (which
+    attaches to root) from seeing our records when any other test has
+    imported the debug logger. We work around it by attaching the
+    caplog handler directly to the adapter's logger for the duration of
+    each test below.
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_warn_when_chunk_output_loops(self, caplog) -> None:
+        import logging as stdlib_logging
+
+        from voicetotext.transcription import granite_speech_adapter
+
+        adapter = granite_speech_adapter.GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        looping = (
+            "the quick brown fox jumps over "
+            "the quick brown fox jumps over "
+            "the quick brown fox jumps over "
+            "the quick brown fox jumps over"
+        )
+        _wire_successful_transcribe(decoded_text=looping)
+
+        warnings = _capture_warnings(
+            caplog, granite_speech_adapter._logger,
+            lambda: adapter.transcribe(_make_audio()),
+        )
+
+        assert any(
+            "repetit" in record.getMessage().lower() for record in warnings
+        ), (
+            "Expected a repetition warning; got records: "
+            f"{[r.getMessage() for r in warnings]}"
+        )
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_not_warn_when_chunk_output_is_normal(
+        self, caplog,
+    ) -> None:
+        from voicetotext.transcription import granite_speech_adapter
+
+        adapter = granite_speech_adapter.GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe(
+            decoded_text="A normal English sentence with no looping.",
+        )
+
+        warnings = _capture_warnings(
+            caplog, granite_speech_adapter._logger,
+            lambda: adapter.transcribe(_make_audio()),
+        )
+
+        repetition_warnings = [
+            r for r in warnings
+            if "repetit" in r.getMessage().lower()
+        ]
+        assert not repetition_warnings, (
+            "Expected no repetition warning; got "
+            f"{[r.getMessage() for r in repetition_warnings]}"
+        )
+
+
+class TestGraniteSpeechAdapterWarmup:
+    """Smoke test: the inherited default warmup must run end-to-end
+    through Granite's chunked transcribe pipeline without crashing,
+    exercising the beam search + repetition penalty kernels so the
+    first user-triggered transcription is fast.
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_invoke_model_generate_during_warmup(self) -> None:
+        from transformers import AutoModelForSpeechSeq2Seq
+
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+        _wire_successful_transcribe()
+
+        adapter.warmup()
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained.return_value
+        assert model.generate.call_count == 1
 
 
 class TestGraniteSpeechAdapterDispose:

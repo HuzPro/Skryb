@@ -23,9 +23,18 @@ def _apply_torch_env_overrides() -> None:
     caching allocator entirely. Tensor deallocations then return memory
     to the driver immediately, at a notable perf cost. Use only if the
     normal teardown path fails to release VRAM between model swaps.
+
+    ``TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`` opts into the
+    AOTriton flash / mem-efficient attention kernels on AMD ROCm.
+    Without it, ``transformers``' default SDPA path emits two
+    ``UserWarning``s per attention layer per forward pass and falls
+    back to the slower math implementation. The flag is a no-op on
+    NVIDIA / CPU, so we set it unconditionally; ``setdefault`` lets a
+    user explicitly opt out by exporting ``=0`` first.
     """
     if os.environ.get("VOICETOTEXT_DISABLE_CUDA_CACHE") == "1":
         os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
+    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 
 def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:

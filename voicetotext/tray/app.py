@@ -1,24 +1,28 @@
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable
 from typing import Protocol
 
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     ErrorOccurredEvent,
+    RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.listener import HotkeyListener
+from voicetotext.tray.duration_format import format_duration
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 
 _logger = logging.getLogger(__name__)
 
 _STATE_LABELS = {
+    AppState.LOADING: "Loading model...",
     AppState.IDLE: "Idle — ready",
     AppState.RECORDING: "Recording...",
     AppState.TRANSCRIBING: "Transcribing...",
@@ -34,11 +38,17 @@ class TrayIcon(Protocol):
     ``run(setup)`` blocks until ``stop()`` is called (or the event loop
     exits). ``update_state`` lets the adapter re-render for the current
     app state; ``visible`` toggles the icon's visibility.
+    ``set_elapsed_provider`` swaps in a callable the adapter polls on
+    a timer to keep an "elapsed since recording started" indicator
+    live; ``None`` clears it.
     """
 
     visible: bool
 
     def update_state(self, state: AppState, label: str) -> None: ...
+    def set_elapsed_provider(
+        self, provider: Callable[[], float] | None,
+    ) -> None: ...
     def notify(self, title: str, message: str) -> None: ...
     def run(self, setup: Callable[..., None]) -> None: ...
     def stop(self) -> None: ...
@@ -78,6 +88,9 @@ class SystemTrayApp:
         self._event_bus.subscribe(StateChangedEvent, self._handle_state_changed)
         self._event_bus.subscribe(ErrorOccurredEvent, self._handle_error)
         self._event_bus.subscribe(TranscriptionFailedEvent, self._handle_error)
+        self._event_bus.subscribe(
+            RecordingCappedEvent, self._handle_recording_capped,
+        )
 
     def run(self) -> None:
         self._icon = self._tray_factory(
@@ -116,19 +129,20 @@ class SystemTrayApp:
         self._on_open_settings()
 
     def _handle_quit(self) -> None:
-        # Run cleanup on a background daemon thread with a hard timeout
-        # so a stuck pynput keyboard hook, HTTP read, or PyTorch
-        # finaliser cannot leave the tray Quit feeling broken (process
-        # alive but unresponsive). The os._exit at the bottom is
-        # unconditional — we'd rather skip cleanup than hang forever.
-        cleanup = threading.Thread(target=self._quit_cleanup, daemon=True)
-        cleanup.start()
-        cleanup.join(timeout=_QUIT_CLEANUP_TIMEOUT_SECONDS)
-        if cleanup.is_alive():
-            _logger.warning(
-                "quit cleanup did not finish in %.1fs; forcing exit",
-                _QUIT_CLEANUP_TIMEOUT_SECONDS,
-            )
+        # Schedule a hard exit FIRST, before any cleanup. Cleanup may
+        # hang on cross-thread Qt operations (tray icon) or stuck OS
+        # hooks (pynput); when that happens the timer kills the
+        # process anyway, so the user never sees a "ghost" voicetotext
+        # process after clicking Quit. Cleanup itself runs inline on
+        # the GUI thread — QSystemTrayIcon mutations require it and
+        # the previous daemon-thread design was silently hanging on
+        # ``self._tray.hide()`` on some Windows versions, leaving the
+        # join blocked indefinitely.
+        threading.Timer(
+            _QUIT_CLEANUP_TIMEOUT_SECONDS,
+            lambda: os._exit(0),
+        ).start()
+        self._quit_cleanup()
         os._exit(0)
 
     def _quit_cleanup(self) -> None:
@@ -158,6 +172,15 @@ class SystemTrayApp:
             return
         self._icon.notify("VoiceToText", event.error)
 
+    def _handle_recording_capped(self, event: RecordingCappedEvent) -> None:
+        if self._icon is None:
+            return
+        self._icon.notify(
+            "VoiceToText",
+            f"Recording auto-stopped at "
+            f"{format_duration(event.max_duration_seconds)} cap.",
+        )
+
     def _handle_state_changed(self, event: StateChangedEvent) -> None:
         if self._icon is None:
             return
@@ -165,3 +188,19 @@ class SystemTrayApp:
         self._icon.update_state(
             new_state, _STATE_LABELS.get(new_state, "Unknown")
         )
+        self._update_elapsed_tracking(
+            old_state=AppState(event.old_state),
+            new_state=new_state,
+        )
+
+    def _update_elapsed_tracking(
+        self, *, old_state: AppState, new_state: AppState,
+    ) -> None:
+        if new_state == AppState.RECORDING:
+            recording_started_at = time.monotonic()
+            self._icon.set_elapsed_provider(
+                lambda: time.monotonic() - recording_started_at,
+            )
+            return
+        if old_state == AppState.RECORDING:
+            self._icon.set_elapsed_provider(None)

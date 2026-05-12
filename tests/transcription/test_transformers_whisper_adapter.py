@@ -64,9 +64,10 @@ class TestTransformersWhisperAdapterLoadModel:
         WhisperProcessor.from_pretrained.assert_called_once_with(
             "openai/whisper-base"
         )
-        WhisperForConditionalGeneration.from_pretrained.assert_called_once_with(
-            "openai/whisper-base", dtype=torch.float32
-        )
+        model_call = WhisperForConditionalGeneration.from_pretrained.call_args
+        assert model_call.args == ("openai/whisper-base",)
+        assert model_call.kwargs["dtype"] is torch.float32
+        assert model_call.kwargs["attn_implementation"] == "sdpa"
         assert adapter.is_model_loaded() is True
 
     @patch.dict("sys.modules", _mocked_modules())
@@ -85,12 +86,12 @@ class TestTransformersWhisperAdapterLoadModel:
             cache_dir="/tmp/models",
             local_files_only=True,
         )
-        WhisperForConditionalGeneration.from_pretrained.assert_called_once_with(
-            "openai/whisper-small",
-            cache_dir="/tmp/models",
-            local_files_only=True,
-            dtype=torch.float32,
-        )
+        model_call = WhisperForConditionalGeneration.from_pretrained.call_args
+        assert model_call.args == ("openai/whisper-small",)
+        assert model_call.kwargs["cache_dir"] == "/tmp/models"
+        assert model_call.kwargs["local_files_only"] is True
+        assert model_call.kwargs["dtype"] is torch.float32
+        assert model_call.kwargs["attn_implementation"] == "sdpa"
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_force_fp32_dtype_when_loading_on_cpu(self):
@@ -124,6 +125,21 @@ class TestTransformersWhisperAdapterLoadModel:
         adapter = TransformersWhisperAdapter(model_size="base")
 
         assert adapter.is_model_loaded() is False
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_request_sdpa_attention_implementation(self):
+        # SDPA attention is 20-30% faster than the legacy eager kernel
+        # on every backend we ship (CUDA, ROCm/AOTriton, CPU). Picking
+        # it explicitly rather than relying on transformers' default
+        # makes the choice visible and stable across HF versions.
+        from transformers import WhisperForConditionalGeneration
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+
+        adapter.load_model()
+
+        call_kwargs = WhisperForConditionalGeneration.from_pretrained.call_args[1]
+        assert call_kwargs.get("attn_implementation") == "sdpa"
 
 
 class TestTransformersWhisperAdapterTranscribe:
@@ -219,6 +235,25 @@ class TestTransformersWhisperAdapterTranscribe:
 
         kwargs = model.generate.call_args[1]
         assert kwargs[kwarg] == expected
+
+
+class TestTransformersWhisperAdapterWarmup:
+    """Smoke test: the inherited default warmup runs end-to-end through
+    the Whisper transcribe path so kernels are compiled before the
+    user's first hotkey press."""
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_invoke_model_generate_during_warmup(self):
+        from transformers import WhisperForConditionalGeneration
+
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+        adapter.load_model()
+        _setup_transcribe_mocks()
+
+        adapter.warmup()
+
+        model = WhisperForConditionalGeneration.from_pretrained.return_value
+        assert model.generate.call_count == 1
 
 
 class TestTransformersWhisperAdapterDispose:

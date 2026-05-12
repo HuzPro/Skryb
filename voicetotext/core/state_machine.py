@@ -6,6 +6,7 @@ from voicetotext.core.events import StateChangedEvent
 
 
 class AppState(Enum):
+    LOADING = "loading"
     IDLE = "idle"
     RECORDING = "recording"
     TRANSCRIBING = "transcribing"
@@ -13,6 +14,7 @@ class AppState(Enum):
 
 
 _VALID_TRANSITIONS: dict[AppState, set[AppState]] = {
+    AppState.LOADING: {AppState.IDLE, AppState.ERROR},
     AppState.IDLE: {AppState.RECORDING, AppState.ERROR},
     AppState.RECORDING: {AppState.TRANSCRIBING, AppState.IDLE, AppState.ERROR},
     AppState.TRANSCRIBING: {AppState.IDLE, AppState.ERROR},
@@ -22,8 +24,12 @@ _VALID_TRANSITIONS: dict[AppState, set[AppState]] = {
 
 class AppStateMachine:
 
-    def __init__(self, event_bus: EventBus) -> None:
-        self._state = AppState.IDLE
+    def __init__(
+        self,
+        event_bus: EventBus,
+        initial_state: AppState = AppState.IDLE,
+    ) -> None:
+        self._state = initial_state
         self._event_bus = event_bus
         self._lock = threading.Lock()
 

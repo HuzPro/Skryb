@@ -1,14 +1,16 @@
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from voicetotext.core.state_machine import AppState
+from voicetotext.tray.duration_format import format_duration
 from voicetotext.tray.qt_icons import create_qicon
 
 
 _TITLE_PREFIX = "VoiceToText — "
+_ELAPSED_REFRESH_INTERVAL_MS = 1000
 
 
 def _run_event_loop() -> None:
@@ -44,6 +46,12 @@ class QtTrayAdapter(QObject):
     # thread because the factory is invoked during bootstrap.
     _state_update_requested = Signal(object, str)
     _notification_requested = Signal(str, str)
+    # Cross-thread seam for the elapsed-time tooltip: the use case
+    # transitions state from the worker thread, ``SystemTrayApp``
+    # forwards the provider here, and the QTimer that polls it must
+    # be created/owned by the GUI thread. ``object`` allows ``None``
+    # to flow through, which means "stop tracking".
+    _elapsed_provider_requested = Signal(object)
 
     def __init__(
         self,
@@ -70,8 +78,12 @@ class QtTrayAdapter(QObject):
         self._menu = self._build_menu()
         self._tray.setContextMenu(self._menu)
 
+        self._elapsed_provider: Callable[[], float] | None = None
+        self._elapsed_timer: QTimer | None = None
+
         self._state_update_requested.connect(self._apply_state_update)
         self._notification_requested.connect(self._show_notification)
+        self._elapsed_provider_requested.connect(self._apply_elapsed_provider)
 
     def _build_menu(self) -> QMenu:
         menu = QMenu()
@@ -119,6 +131,11 @@ class QtTrayAdapter(QObject):
     def update_state(self, state: AppState, label: str) -> None:
         self._state_update_requested.emit(state, label)
 
+    def set_elapsed_provider(
+        self, provider: Callable[[], float] | None,
+    ) -> None:
+        self._elapsed_provider_requested.emit(provider)
+
     def notify(self, title: str, message: str) -> None:
         self._notification_requested.emit(title, message)
 
@@ -131,6 +148,37 @@ class QtTrayAdapter(QObject):
         self._tray.setIcon(self._icon)
         self._tray.setToolTip(self._title)
         self._refresh_state_label()
+
+    def _apply_elapsed_provider(
+        self, provider: Callable[[], float] | None,
+    ) -> None:
+        self._stop_elapsed_timer()
+        self._elapsed_provider = provider
+        if provider is None:
+            self._tray.setToolTip(self._title)
+            return
+        self._start_elapsed_timer()
+        self._refresh_elapsed_tooltip()
+
+    def _start_elapsed_timer(self) -> None:
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(_ELAPSED_REFRESH_INTERVAL_MS)
+        self._elapsed_timer.timeout.connect(self._refresh_elapsed_tooltip)
+        self._elapsed_timer.start()
+
+    def _stop_elapsed_timer(self) -> None:
+        if self._elapsed_timer is None:
+            return
+        self._elapsed_timer.stop()
+        self._elapsed_timer = None
+
+    def _refresh_elapsed_tooltip(self) -> None:
+        if self._elapsed_provider is None:
+            return
+        elapsed = self._elapsed_provider()
+        self._tray.setToolTip(
+            f"{_TITLE_PREFIX}Recording {format_duration(elapsed)}"
+        )
 
     # Exposed for tests/diagnostics — not part of the TrayIcon Protocol.
     def current_icon(self) -> QIcon:

@@ -113,6 +113,57 @@ class TestQtTrayAdapterNotify:
         )
 
 
+class TestQtTrayAdapterElapsedProvider:
+    """Live elapsed tooltip: while the use case publishes RECORDING,
+    the tray app hands the adapter a ``time-since-start`` callable.
+    The adapter polls it on a QTimer and overwrites the tooltip with
+    ``Recording 0:47``. Clearing the provider restores the static
+    state label.
+    """
+
+    def test_should_render_elapsed_in_tooltip_via_refresh_hook(
+        self, qtbot, adapter, tray_backend,
+    ):
+        adapter.set_elapsed_provider(lambda: 47.9)
+        qtbot.wait(20)  # let the cross-thread signal land
+        tray_backend.reset_mock()
+
+        adapter._refresh_elapsed_tooltip()
+
+        tray_backend.setToolTip.assert_called_with(
+            "VoiceToText — Recording 0:47"
+        )
+
+    def test_should_restore_static_tooltip_when_provider_cleared(
+        self, qtbot, adapter, tray_backend,
+    ):
+        adapter.set_elapsed_provider(lambda: 10.0)
+        qtbot.wait(20)
+        tray_backend.reset_mock()
+
+        adapter.set_elapsed_provider(None)
+        qtbot.wait(20)
+
+        # Static title was captured at construction ("Idle — ready").
+        tray_backend.setToolTip.assert_called_with("VoiceToText — Idle — ready")
+
+    def test_should_no_op_refresh_after_provider_cleared(
+        self, qtbot, adapter, tray_backend,
+    ):
+        # Stale ticks fired by a not-yet-stopped timer between
+        # clearing the provider and the timer actually stopping must
+        # not overwrite the tooltip with the elapsed phrasing.
+        adapter.set_elapsed_provider(lambda: 99.0)
+        qtbot.wait(20)
+        adapter.set_elapsed_provider(None)
+        qtbot.wait(20)
+        tray_backend.reset_mock()
+
+        adapter._refresh_elapsed_tooltip()
+
+        tray_backend.setToolTip.assert_not_called()
+
+
 class TestBuildQtTrayAdapterFactory:
     def test_should_return_adapter_with_state_label_from_getter(self, qtbot):
         adapter = build_qt_tray_adapter(

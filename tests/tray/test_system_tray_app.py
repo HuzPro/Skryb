@@ -1,13 +1,14 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     ErrorOccurredEvent,
+    RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.tray.app import SystemTrayApp
+from voicetotext.tray.app import SystemTrayApp, format_duration
 
 
 def _build_app(on_open_settings=None, tray_factory=None):
@@ -86,6 +87,32 @@ class TestStateChangeForwarding:
 
         icon.update_state.assert_called_with(AppState.RECORDING, "Recording...")
 
+    def test_should_label_loading_state_for_user_facing_display(self):
+        # Without a label, the tray would render "Unknown" while the
+        # engine is loading on a background thread — confusing to a
+        # user expecting "the app is starting".
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._handle_state_changed(
+            StateChangedEvent(
+                old_state=AppState.LOADING.value,
+                new_state=AppState.LOADING.value,
+            )
+        )
+
+        called_with_state, called_with_label = icon.update_state.call_args.args
+        assert called_with_state == AppState.LOADING
+        assert called_with_label.lower() != "unknown", (
+            f"LOADING should have a user-friendly label, got '{called_with_label}'"
+        )
+
 
 class TestPauseResumeListener:
     def test_should_call_pause_on_listener_when_pause_listener_called(self):
@@ -115,6 +142,238 @@ class TestPauseResumeListener:
         app.resume_listener()
 
         listener.resume.assert_called_once()
+
+
+class TestFormatDuration:
+    """``format_duration`` powers both the recording-cap notification
+    and the live elapsed-time tooltip — its output ends up directly
+    in user-facing surfaces, so the formatting rules are tested in
+    isolation rather than via the consumers.
+    """
+
+    def test_should_render_zero_as_minutes_seconds(self):
+        assert format_duration(0) == "0:00"
+
+    def test_should_zero_pad_seconds_below_ten(self):
+        assert format_duration(7) == "0:07"
+
+    def test_should_round_sub_second_values_down(self):
+        # Live tooltip should never claim more time than has actually
+        # elapsed — floor rather than round.
+        assert format_duration(0.9) == "0:00"
+        assert format_duration(1.999) == "0:01"
+
+    def test_should_render_minute_boundary(self):
+        assert format_duration(60) == "1:00"
+
+    def test_should_render_arbitrary_minute_value(self):
+        assert format_duration(47) == "0:47"
+        assert format_duration(600) == "10:00"
+
+    def test_should_render_hour_when_over_one_hour(self):
+        # The recording cap is configurable; long caps should not
+        # collapse into a confusing "60:00", they should escalate to
+        # H:MM:SS.
+        assert format_duration(3600) == "1:00:00"
+        assert format_duration(3661) == "1:01:01"
+
+    def test_should_treat_negative_values_as_zero(self):
+        # Defensive — clock skew between recording-start timestamp
+        # and tooltip-tick reads should not produce gibberish.
+        assert format_duration(-5) == "0:00"
+
+
+class TestQuitHandling:
+    """Quit must reliably terminate the process even when one of the
+    cleanup steps hangs. The strategy is to schedule an unconditional
+    hard-exit via a timer *before* running cleanup, so the timer fires
+    if cleanup itself never finishes. Cleanup also runs inline on the
+    GUI thread because the Qt tray icon operations are not safe from
+    background threads on Windows.
+    """
+
+    def _build_app_with_mocks(self):
+        use_case = MagicMock()
+        listener = MagicMock()
+        download_manager = MagicMock()
+        icon = MagicMock()
+        app = SystemTrayApp(
+            use_case=use_case,
+            state_machine=AppStateMachine(event_bus=SimpleEventBus()),
+            event_bus=SimpleEventBus(),
+            hotkey_listener=listener,
+            tray_factory=lambda **kwargs: icon,
+            download_manager=download_manager,
+        )
+        # Inject the icon as if ``run`` had assigned it. This is the
+        # state ``_handle_quit`` operates in.
+        app._icon = icon
+        return app, use_case, listener, download_manager, icon
+
+    def test_should_call_os_exit_after_cleanup_runs(self):
+        with (
+            patch("voicetotext.tray.app.threading.Timer"),
+            patch("voicetotext.tray.app.os._exit") as os_exit,
+        ):
+            app, *_ = self._build_app_with_mocks()
+
+            app._handle_quit()
+
+            os_exit.assert_called_with(0)
+
+    def test_should_schedule_hard_exit_timer_before_cleanup_starts(self):
+        with (
+            patch("voicetotext.tray.app.threading.Timer") as Timer,
+            patch("voicetotext.tray.app.os._exit") as os_exit,
+        ):
+            app, *_ = self._build_app_with_mocks()
+
+            app._handle_quit()
+
+            Timer.assert_called_once()
+            interval, callback = Timer.call_args.args
+            assert interval > 0
+            # The timer's job is to force-exit if cleanup hangs.
+            # Verify the callback actually terminates by invoking it
+            # and confirming ``os._exit`` fires.
+            os_exit.reset_mock()
+            callback()
+            os_exit.assert_called_with(0)
+            Timer.return_value.start.assert_called_once()
+
+    def test_should_run_cleanup_steps_in_documented_order(self):
+        with (
+            patch("voicetotext.tray.app.threading.Timer"),
+            patch("voicetotext.tray.app.os._exit"),
+        ):
+            app, use_case, listener, download_manager, icon = (
+                self._build_app_with_mocks()
+            )
+            call_order: list[str] = []
+            listener.stop.side_effect = lambda: call_order.append("listener")
+            use_case.dispose.side_effect = lambda: call_order.append("use_case")
+            download_manager.shutdown.side_effect = (
+                lambda: call_order.append("downloads")
+            )
+            icon.stop.side_effect = lambda: call_order.append("icon")
+
+            app._handle_quit()
+
+            assert call_order == ["listener", "use_case", "downloads", "icon"]
+
+    def test_should_continue_remaining_cleanup_when_one_step_raises(self):
+        with (
+            patch("voicetotext.tray.app.threading.Timer"),
+            patch("voicetotext.tray.app.os._exit"),
+        ):
+            app, use_case, listener, download_manager, icon = (
+                self._build_app_with_mocks()
+            )
+            use_case.dispose.side_effect = RuntimeError("dispose broke")
+
+            app._handle_quit()
+
+            # Listener.stop ran (it was step 1, before the raising one).
+            listener.stop.assert_called_once()
+            # download_manager + icon still ran despite the earlier raise.
+            download_manager.shutdown.assert_called_once()
+            icon.stop.assert_called_once()
+
+
+class TestLiveRecordingTooltip:
+    """While recording, the tray tooltip shows elapsed seconds so the
+    user can see they're actually capturing audio (and roughly how
+    much). The tray app hands the icon adapter a callable that
+    returns ``time-since-recording-started``; the adapter is
+    responsible for refreshing the tooltip on a timer. When recording
+    ends the provider is cleared so the tooltip falls back to the
+    static state label.
+    """
+
+    def _build_app_with_icon(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+        return app, icon
+
+    def test_should_install_elapsed_provider_on_entering_recording(self):
+        app, icon = self._build_app_with_icon()
+
+        app._handle_state_changed(
+            StateChangedEvent(
+                old_state=AppState.IDLE.value,
+                new_state=AppState.RECORDING.value,
+            )
+        )
+
+        icon.set_elapsed_provider.assert_called_once()
+        provider = icon.set_elapsed_provider.call_args.args[0]
+        assert callable(provider)
+
+    def test_elapsed_provider_should_grow_with_wall_clock_time(self):
+        # The provider is a closure over ``time.monotonic`` and a
+        # captured start time. Patching ``time.monotonic`` with a
+        # known sequence sidesteps Windows' 15.6 ms monotonic-clock
+        # resolution that would otherwise make a short ``sleep``
+        # unreliable in CI.
+        with patch(
+            "voicetotext.tray.app.time.monotonic",
+            side_effect=[100.0, 100.5, 101.0],
+        ):
+            app, icon = self._build_app_with_icon()
+            app._handle_state_changed(
+                StateChangedEvent(
+                    old_state=AppState.IDLE.value,
+                    new_state=AppState.RECORDING.value,
+                )
+            )
+            provider = icon.set_elapsed_provider.call_args.args[0]
+            first = provider()
+            second = provider()
+
+        assert first == 0.5
+        assert second == 1.0
+
+    def test_should_clear_elapsed_provider_on_leaving_recording(self):
+        app, icon = self._build_app_with_icon()
+        app._handle_state_changed(
+            StateChangedEvent(
+                old_state=AppState.IDLE.value,
+                new_state=AppState.RECORDING.value,
+            )
+        )
+        icon.set_elapsed_provider.reset_mock()
+
+        app._handle_state_changed(
+            StateChangedEvent(
+                old_state=AppState.RECORDING.value,
+                new_state=AppState.TRANSCRIBING.value,
+            )
+        )
+
+        icon.set_elapsed_provider.assert_called_once_with(None)
+
+    def test_should_not_touch_elapsed_provider_for_non_recording_transitions(
+        self,
+    ):
+        # IDLE → ERROR or LOADING → IDLE should NOT publish elapsed
+        # updates, otherwise the adapter would needlessly stop and
+        # restart a non-existent timer.
+        app, icon = self._build_app_with_icon()
+
+        app._handle_state_changed(
+            StateChangedEvent(
+                old_state=AppState.LOADING.value,
+                new_state=AppState.IDLE.value,
+            )
+        )
+
+        icon.set_elapsed_provider.assert_not_called()
 
 
 class TestErrorNotification:
@@ -151,3 +410,22 @@ class TestErrorNotification:
         )
 
         icon.notify.assert_called_once_with("VoiceToText", "model crashed")
+
+    def test_should_notify_user_when_recording_is_auto_capped(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(
+            RecordingCappedEvent(max_duration_seconds=600.0)
+        )
+
+        icon.notify.assert_called_once()
+        args = icon.notify.call_args.args
+        assert args[0] == "VoiceToText"
+        assert "10:00" in args[1] or "10 min" in args[1]

@@ -124,6 +124,7 @@ def _build_granite_speech_engine(spec: EngineSpec) -> TranscriptionEngine:
         repo_id=spec.repo_id,
         device=spec.device,
         model_dir=spec.model_dir,
+        num_beams=spec.beam_size,
     )
 
 

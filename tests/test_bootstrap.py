@@ -4,12 +4,15 @@ import pytest
 
 from voicetotext.bootstrap import (
     _build_output,
+    _load_engine_and_attach,
     _load_engine_with_fallback,
     _make_destroyed_handler,
     apply_settings,
     migrate_language,
     migrate_output_mode,
 )
+from voicetotext.core.event_bus import SimpleEventBus
+from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -83,6 +86,62 @@ class TestLoadEngineWithFallback:
             )
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_warm_engine_up_after_successful_load(self, mock_create):
+        # Warmup runs one inference pass right after ``load_model`` so
+        # ROCm/CUDA kernels are compiled before the user's first hotkey
+        # press — without it, the first transcription pays a one-off
+        # multi-second penalty even after the model is fully resident
+        # in VRAM.
+        engine = MagicMock()
+        mock_create.return_value = engine
+
+        _load_engine_with_fallback(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+        )
+
+        engine.load_model.assert_called_once()
+        engine.warmup.assert_called_once()
+        assert (
+            engine.method_calls.index(call.warmup())
+            > engine.method_calls.index(call.load_model())
+        ), "warmup must follow load_model, never precede it"
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_swallow_warmup_failures_without_dropping_engine(
+        self, mock_create,
+    ):
+        # Warmup is a latency optimisation — if it fails (e.g. a backend
+        # quirk on silent audio), the engine is still usable and the
+        # first real transcription just pays the cold-start penalty.
+        # The app must continue, not flip to CPU fallback or crash.
+        engine = MagicMock()
+        engine.warmup.side_effect = RuntimeError("warmup crash")
+        mock_create.return_value = engine
+
+        result = _load_engine_with_fallback(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+        )
+
+        assert result is engine
+        engine.load_model.assert_called_once()
+        engine.warmup.assert_called_once()
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_warm_cpu_fallback_engine_too(self, mock_create):
+        gpu_engine = MagicMock()
+        gpu_engine.load_model.side_effect = RuntimeError("GPU OOM")
+        cpu_engine = MagicMock()
+        mock_create.side_effect = [gpu_engine, cpu_engine]
+
+        result = _load_engine_with_fallback(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+        )
+
+        assert result is cpu_engine
+        cpu_engine.load_model.assert_called_once()
+        cpu_engine.warmup.assert_called_once()
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_never_silently_switch_engines_on_fallback(self, mock_create):
         """CPU fallback must reuse the same engine_id, only changing device.
 
@@ -105,6 +164,76 @@ class TestLoadEngineWithFallback:
         assert first_call.args == (config, paths, _REGISTRY, _HARDWARE)
         assert second_call.args == (config, paths, _REGISTRY, _HARDWARE)
         assert second_call.kwargs == {"device_override": "cpu"}
+
+
+class TestLoadEngineAndAttach:
+    """The background-load worker swaps the placeholder for the real
+    engine and transitions ``LOADING → IDLE`` on success, or
+    ``LOADING → ERROR`` on failure. Tests run the worker on the
+    calling thread — bootstrap spawns the thread separately."""
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_attach_loaded_engine_to_use_case(self, mock_create):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        loaded_engine = MagicMock()
+        mock_create.return_value = loaded_engine
+        use_case = MagicMock()
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=use_case, state_machine=state_machine,
+        )
+
+        use_case.set_engine.assert_called_once_with(loaded_engine)
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_transition_to_idle_on_successful_load(self, mock_create):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        mock_create.return_value = MagicMock()
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=MagicMock(), state_machine=state_machine,
+        )
+
+        assert state_machine.state == AppState.IDLE
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_transition_to_error_on_load_failure(self, mock_create):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        broken = MagicMock()
+        broken.load_model.side_effect = RuntimeError("VRAM exhausted")
+        mock_create.side_effect = [broken, broken]
+        use_case = MagicMock()
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=use_case, state_machine=state_machine,
+        )
+
+        assert state_machine.state == AppState.ERROR
+        use_case.set_engine.assert_not_called()
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_not_propagate_load_exception(self, mock_create):
+        # Exceptions raised on the background thread would otherwise
+        # vanish into thread-default handling; the worker swallows the
+        # exception after transitioning the state machine to ERROR so
+        # the app's diagnostics (state subscriber + logger) own the
+        # failure surface.
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        broken = MagicMock()
+        broken.load_model.side_effect = RuntimeError("boom")
+        mock_create.side_effect = [broken, broken]
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=MagicMock(), state_machine=state_machine,
+        )
 
 
 class TestMigrateRemovedModels:

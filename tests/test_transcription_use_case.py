@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -8,6 +8,7 @@ from voicetotext.core.action_dispatcher import ActionDispatcher
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     ErrorOccurredEvent,
+    RecordingCappedEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     TranscriptionCompletedEvent,
@@ -31,9 +32,13 @@ def _make_result(text: str = "hello world") -> TranscriptionResult:
     )
 
 
-def _build_use_case(dispatcher: ActionDispatcher | None = None):
+def _build_use_case(
+    dispatcher: ActionDispatcher | None = None,
+    initial_state: AppState = AppState.IDLE,
+    max_recording_seconds: float = 600.0,
+):
     event_bus = SimpleEventBus()
-    state_machine = AppStateMachine(event_bus)
+    state_machine = AppStateMachine(event_bus, initial_state=initial_state)
     recorder = MagicMock()
     engine = MagicMock()
     output = MagicMock()
@@ -44,6 +49,7 @@ def _build_use_case(dispatcher: ActionDispatcher | None = None):
         state_machine=state_machine,
         event_bus=event_bus,
         action_dispatcher=dispatcher or InlineActionDispatcher(),
+        max_recording_seconds=max_recording_seconds,
     )
     return use_case, recorder, engine, output, event_bus, state_machine
 
@@ -265,6 +271,72 @@ class TestHotSwapEngine:
         new_engine.dispose.assert_not_called()
 
 
+class TestLoadingStateBehaviour:
+    """While the engine is loading on a background thread, the use case
+    holds a :class:`PlaceholderEngine` and must (a) accept the real
+    engine via ``set_engine`` and (b) ignore hotkey presses safely —
+    queueing one for replay so the user's "press hotkey the moment
+    the app starts" expectation works once the engine is ready.
+    """
+
+    def test_should_allow_set_engine_during_loading(self):
+        use_case, _, old_engine, _, _, _ = _build_use_case(
+            initial_state=AppState.LOADING,
+        )
+        new_engine = MagicMock()
+
+        use_case.set_engine(new_engine)
+
+        old_engine.dispose.assert_called_once()
+
+    def test_should_not_start_recording_when_hotkey_pressed_during_loading(
+        self,
+    ):
+        use_case, recorder, _, _, _, state_machine = _build_use_case(
+            initial_state=AppState.LOADING,
+        )
+
+        use_case.on_hotkey_activated()
+
+        recorder.start_recording.assert_not_called()
+        assert state_machine.state == AppState.LOADING
+
+    def test_should_replay_queued_hotkey_when_loading_completes(self):
+        use_case, recorder, _, _, _, state_machine = _build_use_case(
+            initial_state=AppState.LOADING,
+        )
+        use_case.on_hotkey_activated()
+
+        state_machine.transition_to(AppState.IDLE)
+
+        recorder.start_recording.assert_called_once()
+        assert state_machine.state == AppState.RECORDING
+
+    def test_should_do_nothing_on_loading_to_idle_when_no_hotkey_queued(
+        self,
+    ):
+        use_case, recorder, _, _, _, state_machine = _build_use_case(
+            initial_state=AppState.LOADING,
+        )
+
+        state_machine.transition_to(AppState.IDLE)
+
+        recorder.start_recording.assert_not_called()
+        assert state_machine.state == AppState.IDLE
+
+    def test_should_coalesce_repeated_hotkey_presses_during_loading(self):
+        use_case, recorder, _, _, _, state_machine = _build_use_case(
+            initial_state=AppState.LOADING,
+        )
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+        state_machine.transition_to(AppState.IDLE)
+
+        recorder.start_recording.assert_called_once()
+
+
 class TestDisposeCurrentEngine:
     def test_should_dispose_current_engine(self):
         use_case, _, engine, _, _, _ = _build_use_case()
@@ -278,6 +350,98 @@ class TestDisposeCurrentEngine:
 
         use_case.dispose_current_engine()
         use_case.dispose_current_engine()
+
+
+class TestRecordingDurationCap:
+    """A hard recording cap auto-stops the recorder after a configured
+    duration so a forgotten hotkey (or held-down push-to-talk) doesn't
+    fill memory with audio that no engine can actually transcribe.
+    The cap is implemented as a ``threading.Timer`` scheduled at
+    recording start and cancelled at recording stop.
+    """
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_should_schedule_cap_timer_when_recording_starts(self, MockTimer):
+        from unittest.mock import ANY
+
+        use_case, recorder, *_ = _build_use_case(
+            max_recording_seconds=42.0,
+        )
+
+        use_case.on_hotkey_activated()
+
+        MockTimer.assert_called_once_with(42.0, ANY)
+        MockTimer.return_value.start.assert_called_once()
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_should_cancel_cap_timer_when_recording_stops_normally(
+        self, MockTimer,
+    ):
+        use_case, recorder, engine, _, _, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("done")
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        MockTimer.return_value.cancel.assert_called_once()
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_should_auto_stop_when_cap_timer_fires(self, MockTimer):
+        use_case, recorder, engine, _, _, state_machine = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("auto-capped")
+        use_case.on_hotkey_activated()
+
+        # Pull the callback the use case handed to ``Timer`` and fire
+        # it directly — equivalent to the real timer thread firing.
+        _interval, callback = MockTimer.call_args.args
+        callback()
+
+        recorder.stop_recording.assert_called_once()
+        engine.transcribe.assert_called_once()
+        assert state_machine.state == AppState.IDLE
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_should_publish_recording_capped_event_on_auto_stop(
+        self, MockTimer,
+    ):
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case(
+            max_recording_seconds=600.0,
+        )
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("done")
+        received: list[RecordingCappedEvent] = []
+        event_bus.subscribe(RecordingCappedEvent, received.append)
+        use_case.on_hotkey_activated()
+
+        _interval, callback = MockTimer.call_args.args
+        callback()
+
+        assert len(received) == 1
+        assert received[0].max_duration_seconds == 600.0
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_should_no_op_when_cap_fires_after_recording_already_stopped(
+        self, MockTimer,
+    ):
+        # Real-world race: user releases push-to-talk a millisecond
+        # before the timer thread wakes up. The callback must see
+        # state != RECORDING and exit cleanly without double-stopping
+        # the recorder or republishing the capped event.
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("normal")
+        capped: list[RecordingCappedEvent] = []
+        event_bus.subscribe(RecordingCappedEvent, capped.append)
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()  # normal stop
+
+        _interval, callback = MockTimer.call_args.args
+        callback()  # late-firing cap; should be a no-op
+
+        assert recorder.stop_recording.call_count == 1
+        assert capped == []
 
 
 class TestHotSwapOutput:

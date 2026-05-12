@@ -18,6 +18,11 @@ class RecordingStoppedEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class RecordingCappedEvent(DomainEvent):
+    max_duration_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
 class StateChangedEvent(DomainEvent):
     old_state: str = ""
     new_state: str = ""

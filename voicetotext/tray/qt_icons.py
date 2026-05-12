@@ -5,6 +5,7 @@ from voicetotext.core.state_machine import AppState
 
 
 _COLORS: dict[AppState, str] = {
+    AppState.LOADING: "#4488DD",
     AppState.IDLE: "#808080",
     AppState.RECORDING: "#FF3333",
     AppState.TRANSCRIBING: "#FFCC00",

@@ -179,6 +179,25 @@ class TestFasterWhisperAdapterTranscribe:
         assert result.language_probability == pytest.approx(0.87)
 
 
+class TestFasterWhisperAdapterWarmup:
+    """Smoke test: the inherited default warmup runs end-to-end through
+    faster-whisper's transcribe path so CTranslate2 kernels are
+    compiled before the first user-triggered transcription."""
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_invoke_model_transcribe_during_warmup(self):
+        from faster_whisper import WhisperModel
+
+        info = SimpleNamespace(language="en", language_probability=0.0)
+        WhisperModel.return_value.transcribe.return_value = (_segments(""), info)
+        adapter = _make_adapter()
+        adapter.load_model()
+
+        adapter.warmup()
+
+        assert WhisperModel.return_value.transcribe.call_count == 1
+
+
 class TestFasterWhisperAdapterDispose:
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_clear_model_on_dispose(self):
