@@ -65,7 +65,7 @@ class TestTranscribeShortAudio:
 
         result = real_whisper_engine.transcribe(audio)
 
-        assert result.duration_seconds > 0.0
+        assert result.transcription_seconds > 0.0
 
 
 class TestTranscribeLongAudio:

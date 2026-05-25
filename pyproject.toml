@@ -8,7 +8,20 @@ version = "0.1.0"
 description = "Local voice-to-text with HuggingFace Whisper (PyTorch) — CUDA/ROCm/CPU"
 requires-python = ">=3.11"
 dependencies = [
-    "transformers>=4.52.1",
+    # `transformers` is capped below 5.9 because 5.9.0 added an
+    # unconditional `from torch.distributed.tensor.device_mesh import
+    # DeviceMesh` in `generation/continuous_batching/distributed.py`
+    # (PR huggingface/transformers#45821). AMD's Windows ROCm 7.2.x
+    # PyTorch build does not ship `torch._C._distributed_c10d`, so any
+    # transformers >=5.9 crashes at import time on Windows AMD. 5.8.1
+    # is the last release before the regression and supports both
+    # Whisper and Granite Speech 4.1-2b.
+    "transformers>=4.52.1,<5.9",
+    # `accelerate` is a soft dependency of transformers required as soon
+    # as `from_pretrained(device_map=...)` is called — the Granite
+    # Speech adapter relies on it for direct-to-GPU model loading. >=1.1
+    # matches what transformers 5.8.1 itself declares as its minimum.
+    "accelerate>=1.1.0",
     "torch>=2.2.0",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
@@ -57,6 +70,7 @@ markers = [
     "acceptance: full-use-case scenarios via fakes",
     "integration: touch real filesystem or real third-party libs",
     "slow: tests that take longer than 100ms (deselected by default; opt in via `-m slow`)",
+    "performance: model performance benchmarks (very slow; opt in via `-m performance` and VOICETOTEXT_RUN_PERFORMANCE_TESTS=1)",
 ]
 filterwarnings = [
     "error",

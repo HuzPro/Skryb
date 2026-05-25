@@ -24,7 +24,7 @@ class _FakeEngine(TranscriptionEngine):
 
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         return TranscriptionResult(
-            text="", language="en", language_probability=0.0, duration_seconds=0.0,
+            text="", language="en", language_probability=0.0, transcription_seconds=0.0,
         )
 
     def load_model(self) -> None: ...

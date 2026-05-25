@@ -1,0 +1,30 @@
+# One-shot install for AMD GPU machines on LINUX (Python 3.10 / 3.11 /
+# 3.12 / 3.13).
+#
+# Pulls PyTorch ROCm 7.2.1 + AMD's TheRock runtime SDK from AMD's
+# official manylinux index at https://repo.radeon.com/rocm/manylinux/.
+# Like the Windows index, this is a flat HTTP directory listing, so we
+# use --find-links.
+#
+# AMD's Linux ROCm wheels carry a `.lw.git<sha>` local-version suffix
+# (e.g. `2.9.1+rocm7.2.1.lw.gitff65f5bc`) instead of the plain
+# `+rocm7.2.1` Windows uses. Pinning the major.minor.patch and letting
+# pip pick the AMD wheel works because PEP 440 sorts the local-version
+# suffix above PyPI's plain `2.9.1`.
+
+--find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
+
+# AMD ROCm runtime (TheRock build).
+rocm==7.2.1
+rocm-sdk-core==7.2.1
+rocm-sdk-libraries-custom==7.2.1
+
+# PyTorch + audio/vision built against ROCm 7.2.1. Constraints are
+# minor-bounded so a future ROCm 7.2.x rebuild gets picked up without
+# silently jumping to 2.10.
+torch>=2.9.1,<2.10
+torchaudio>=2.9.1,<2.10
+torchvision>=0.24.1,<0.25
+
+# Rest of the app dependencies.
+-r requirements-all.txt

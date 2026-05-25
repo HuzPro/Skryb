@@ -1,0 +1,39 @@
+# One-shot install for AMD GPU machines on WINDOWS (Python 3.12 only).
+#
+# Pulls PyTorch ROCm 7.2.1 + AMD's TheRock runtime SDK from AMD's
+# official Windows index at https://repo.radeon.com/rocm/windows/. That
+# index is a flat HTTP directory listing, not a PEP 503 simple index,
+# so we use --find-links rather than --extra-index-url. Pinning the
+# `+rocm7.2.1` local-version segment is the safety latch that stops
+# pip's resolver from substituting PyPI's CPU torch — the segment only
+# exists on AMD's index.
+#
+# Windows ROCm wheels are published for cp312 ONLY (no cp310/cp311/cp313).
+# On any other Python interpreter pip will refuse and you should switch
+# to a fresh Python 3.12 venv. The single wheel covers all RDNA archs
+# (RDNA3 gfx1100/gfx1101 and RDNA4 gfx1200/gfx1201).
+#
+# Linux AMD users: use requirements-amd-linux.txt instead — AMD's Linux
+# wheels have a different local-version suffix that this file's pins
+# won't match.
+
+--find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/
+
+# AMD ROCm runtime (TheRock build). Pinned to 7.2.1 so the ABI matches
+# the torch wheel exactly. `rocm` is the umbrella package torch's
+# metadata depends on; `rocm-sdk-core` provides the HIP runtime; the
+# `libraries-custom` wheel ships MIOpen / hipBLAS / etc. (the ML
+# kernels). We deliberately omit `rocm-sdk-devel` — those are build
+# headers, unused at inference time.
+rocm==7.2.1
+rocm-sdk-core==7.2.1
+rocm-sdk-libraries-custom==7.2.1
+
+# PyTorch + audio/vision built against ROCm 7.2.1.
+torch==2.9.1+rocm7.2.1
+torchaudio==2.9.1+rocm7.2.1
+torchvision==0.24.1+rocm7.2.1
+
+# Rest of the app dependencies (transformers, sounddevice, PySide6, etc.,
+# plus optional engines faster-whisper + nano-parakeet).
+-r requirements-all.txt

@@ -56,6 +56,22 @@ _GRANITE_SPEECH_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# Per-engine beam_size defaults applied when the user has not set
+# ``transcription.beam_size``. Granite ships IBM's tech-report recipe
+# (``num_beams=4``); the whisper-family decoders converged on 5 as
+# their HF/CTranslate2 default. Keeping these here — not on the
+# adapters — means the config layer owns the "what does unset mean"
+# question, and the adapters keep their own sane defaults intact for
+# direct instantiation.
+_DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
+    "transformers": 5,
+    "faster_whisper": 5,
+    "granite_speech": 4,
+    "nano_parakeet": 1,
+}
+_FALLBACK_BEAM_SIZE = 5
+
+
 def build_engine_registry() -> EngineRegistry:
     """Wire the engine adapters this build ships with."""
     return EngineRegistry(
@@ -201,10 +217,19 @@ def create_engine_for_active_model(
         repo_id=_repo_id_for(model_info, engine_id),
         device=device_override or _resolve_device(config, hardware),
         language=config.get("transcription.language", "en"),
-        beam_size=config.get("transcription.beam_size", 5),
+        beam_size=_resolve_beam_size(config, engine_id),
         model_dir=paths.models_dir,
     )
     return registry.build(engine_id, spec)
+
+
+def _resolve_beam_size(
+    config: ConfigurationStore, engine_id: EngineId,
+) -> int:
+    explicit = config.get("transcription.beam_size", None)
+    if explicit is None:
+        return _DEFAULT_BEAM_SIZE_BY_ENGINE.get(engine_id, _FALLBACK_BEAM_SIZE)
+    return explicit  # type: ignore[return-value]
 
 
 def _repo_id_for(model_info: ModelInfo, engine_id: EngineId) -> str:

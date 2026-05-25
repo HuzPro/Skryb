@@ -11,7 +11,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.result import TranscriptionResult
@@ -103,15 +106,31 @@ class TestNanoParakeetAdapterLoadModel:
         assert kwargs["dtype"] is torch.float32
 
     @patch.dict("sys.modules", _mocked_modules())
-    def test_should_patch_hf_hub_download_to_use_app_models_dir(self) -> None:
-        # nano_parakeet calls hf_hub_download() with no cache_dir, so it
-        # falls back to the global default — typically ~/.cache/huggingface.
-        # Our chunked downloader writes to model_dir, so without this patch
-        # nano_parakeet would re-download the file from scratch.
+    def test_should_route_hf_hub_download_through_app_models_dir_during_load(
+        self,
+    ) -> None:
+        # nano_parakeet calls ``hf_hub_download`` from inside its
+        # ``from_pretrained`` — we patch the module-level function so
+        # those internal calls land in our app's models dir, with
+        # ``local_files_only`` short-circuiting the upstream freshness
+        # HEAD request. The patch is active only for the duration of
+        # ``from_pretrained``; we simulate that here by making
+        # ``from_pretrained`` exercise the patched function before
+        # returning.
         import nano_parakeet
+        from nano_parakeet import from_pretrained
 
         original_hf_download = MagicMock()
         nano_parakeet.hf_hub_download = original_hf_download
+
+        def call_hf_download_during_load(**kwargs: object) -> object:
+            nano_parakeet.hf_hub_download(
+                repo_id=kwargs["model_name"],
+                filename="parakeet.nemo",
+            )
+            return MagicMock()
+
+        from_pretrained.side_effect = call_hf_download_during_load
 
         from voicetotext.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
@@ -122,23 +141,22 @@ class TestNanoParakeetAdapterLoadModel:
             device="cpu",
             model_dir=Path("/app/models"),
         )
-
         adapter.load_model()
 
-        # The patched function should pass cache_dir on every call.
-        nano_parakeet.hf_hub_download(
+        original_hf_download.assert_called_once_with(
             repo_id="nvidia/parakeet-tdt-0.6b-v2",
-            filename="parakeet-tdt-0.6b-v2.nemo",
-        )
-        original_hf_download.assert_called_with(
-            repo_id="nvidia/parakeet-tdt-0.6b-v2",
-            filename="parakeet-tdt-0.6b-v2.nemo",
+            filename="parakeet.nemo",
             cache_dir=str(Path("/app/models")),
             local_files_only=True,
         )
 
     @patch.dict("sys.modules", _mocked_modules())
-    def test_should_let_caller_override_cache_dir_explicitly(self) -> None:
+    def test_should_restore_original_hf_hub_download_after_load(self) -> None:
+        # Module-level mutation lasts only for the ``from_pretrained``
+        # call. Without restoring, back-to-back adapter loads stomp
+        # each other's closures and any code that imported the
+        # original function after the first load runs against a stale
+        # patch.
         import nano_parakeet
 
         original_hf_download = MagicMock()
@@ -155,19 +173,35 @@ class TestNanoParakeetAdapterLoadModel:
         )
         adapter.load_model()
 
-        nano_parakeet.hf_hub_download(
-            repo_id="nvidia/parakeet-tdt-0.6b-v2",
-            filename="parakeet-tdt-0.6b-v2.nemo",
-            cache_dir="/explicit/override",
-            local_files_only=False,
+        assert nano_parakeet.hf_hub_download is original_hf_download
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_restore_original_hf_hub_download_when_load_raises(
+        self,
+    ) -> None:
+        # Even on a failed model load, the module-global must come
+        # back so the next attempt sees a clean slate. The restore
+        # belongs in a finally block, not after the call.
+        import nano_parakeet
+        from nano_parakeet import from_pretrained
+
+        original_hf_download = MagicMock()
+        nano_parakeet.hf_hub_download = original_hf_download
+        from_pretrained.side_effect = RuntimeError("kernel compile failed")
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
         )
 
-        original_hf_download.assert_called_with(
+        adapter = NanoParakeetAdapter(
             repo_id="nvidia/parakeet-tdt-0.6b-v2",
-            filename="parakeet-tdt-0.6b-v2.nemo",
-            cache_dir="/explicit/override",
-            local_files_only=False,
+            device="cpu",
+            model_dir=Path("/app/models"),
         )
+        with pytest.raises(RuntimeError):
+            adapter.load_model()
+
+        assert nano_parakeet.hf_hub_download is original_hf_download
 
     def test_should_report_not_loaded_before_load(self) -> None:
         from voicetotext.transcription.nano_parakeet_adapter import (
@@ -206,7 +240,7 @@ class TestNanoParakeetAdapterTranscribe:
 
         assert isinstance(result, TranscriptionResult)
         assert result.text == "Hello, world!"
-        assert result.duration_seconds >= 0.0
+        assert result.transcription_seconds >= 0.0
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_pass_numpy_audio_data_to_model(self) -> None:
@@ -363,3 +397,34 @@ class TestNanoParakeetAdapterIsATranscriptionEngine:
         )
 
         assert isinstance(adapter, TranscriptionEngine)
+
+
+class TestNanoParakeetAdapterDependencyMissing:
+    """When the ``nano_parakeet`` package is not installed,
+    :meth:`NanoParakeetAdapter.load_model` must raise
+    :class:`EngineDependencyMissingError` with an actionable install
+    hint instead of leaking a bare ``ImportError``.
+    """
+
+    def test_should_raise_engine_dependency_missing_when_backend_not_installed(
+        self,
+    ) -> None:
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v2",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+
+        with patch.dict(
+            "sys.modules", {"nano_parakeet": None, "torch": MagicMock()}
+        ):
+            with pytest.raises(EngineDependencyMissingError) as exc_info:
+                adapter.load_model()
+
+        message = str(exc_info.value).lower()
+        assert "nano-parakeet" in message
+        assert "pip install" in message

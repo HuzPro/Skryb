@@ -2,7 +2,13 @@ import logging
 import time
 from typing import Protocol
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
+from voicetotext.transcription.backend_imports import (
+    make_engine_dependency_error,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_diagnostics import vram_snapshot
@@ -56,7 +62,7 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         self._processor: _WhisperProcessor | None = None
 
     def load_model(self) -> None:
-        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+        whisper_model_class, whisper_processor_class = self._import_backend()
 
         self._log_phase("load_model", f"start device={self._device}")
 
@@ -67,11 +73,13 @@ class TransformersWhisperAdapter(TranscriptionEngine):
             shared_kwargs["local_files_only"] = True
 
         started_at = time.monotonic()
-        self._processor = WhisperProcessor.from_pretrained(repo_id, **shared_kwargs)
+        self._processor = whisper_processor_class.from_pretrained(
+            repo_id, **shared_kwargs,
+        )
         self._log_timed_phase("load_model", "processor loaded", started_at)
 
         started_at = time.monotonic()
-        self._model = WhisperForConditionalGeneration.from_pretrained(
+        self._model = whisper_model_class.from_pretrained(
             repo_id, **self._model_load_kwargs(shared_kwargs)
         )
         self._log_timed_phase("load_model", "model loaded", started_at)
@@ -79,6 +87,20 @@ class TransformersWhisperAdapter(TranscriptionEngine):
         self._optimize_for_device()
 
         self._log_phase("load_model", "complete")
+
+    def _import_backend(self) -> tuple[object, object]:
+        try:
+            from transformers import (
+                WhisperForConditionalGeneration,
+                WhisperProcessor,
+            )
+        except ImportError as exc:
+            raise make_engine_dependency_error(
+                package_name="transformers",
+                install_hint="transformers not installed: pip install transformers",
+                underlying=exc,
+            ) from exc
+        return WhisperForConditionalGeneration, WhisperProcessor
 
     def _model_load_kwargs(self, base: dict[str, object]) -> dict[str, object]:
         # HF 5.x honors config.json ``torch_dtype`` (fp16 for large-v3-turbo),
@@ -138,7 +160,7 @@ class TransformersWhisperAdapter(TranscriptionEngine):
             text=text,
             language=self._language,
             language_probability=0.0,
-            duration_seconds=time.monotonic() - start,
+            transcription_seconds=time.monotonic() - start,
         )
 
     def _preprocess_audio(self, audio: AudioSegment) -> tuple[object, object]:

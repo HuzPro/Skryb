@@ -7,9 +7,11 @@ from typing import Protocol
 
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
+    EngineLoadFailedEvent,
     ErrorOccurredEvent,
     RecordingCappedEvent,
     StateChangedEvent,
+    TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -84,10 +86,23 @@ class SystemTrayApp:
         self._on_open_settings = on_open_settings
         self._download_manager = download_manager
         self._icon: TrayIcon | None = None
+        # ``_error_sticky`` keeps the icon in ERROR colour after an
+        # error event even once the state machine has cycled back to
+        # IDLE. The OS notification balloon can be silenced by Focus
+        # Assist, hidden trays, or DND, so the icon is the only
+        # guaranteed second channel. Cleared when the user activates
+        # a new recording — that's the implicit acknowledgement.
+        self._error_sticky = False
 
         self._event_bus.subscribe(StateChangedEvent, self._handle_state_changed)
         self._event_bus.subscribe(ErrorOccurredEvent, self._handle_error)
         self._event_bus.subscribe(TranscriptionFailedEvent, self._handle_error)
+        self._event_bus.subscribe(
+            EngineLoadFailedEvent, self._handle_engine_load_failed,
+        )
+        self._event_bus.subscribe(
+            TranscriptionEmptyEvent, self._handle_transcription_empty,
+        )
         self._event_bus.subscribe(
             RecordingCappedEvent, self._handle_recording_capped,
         )
@@ -170,7 +185,12 @@ class SystemTrayApp:
     ) -> None:
         if self._icon is None:
             return
+        self._error_sticky = True
         self._icon.notify("VoiceToText", event.error)
+        # Force the icon to ERROR even for error paths that never
+        # transitioned the state machine through ERROR (e.g.
+        # start-recording failures, clipboard errors).
+        self._icon.update_state(AppState.ERROR, _STATE_LABELS[AppState.ERROR])
 
     def _handle_recording_capped(self, event: RecordingCappedEvent) -> None:
         if self._icon is None:
@@ -181,16 +201,42 @@ class SystemTrayApp:
             f"{format_duration(event.max_duration_seconds)} cap.",
         )
 
+    def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
+        if self._icon is None:
+            return
+        self._error_sticky = True
+        self._icon.notify("VoiceToText", event.error)
+        # Mirror ``_handle_error``: flip the icon to ERROR so the
+        # broken state is visible even if the OS notification balloon
+        # is suppressed by Focus Assist / DND.
+        self._icon.update_state(AppState.ERROR, _STATE_LABELS[AppState.ERROR])
+
+    def _handle_transcription_empty(self, event: TranscriptionEmptyEvent) -> None:
+        if self._icon is None:
+            return
+        # Soft signal — the engine ran successfully, it just produced
+        # no text (silent audio, unsupported language). No sticky
+        # ERROR icon; just inform the user so they know why the
+        # clipboard is empty.
+        self._icon.notify("VoiceToText", "No speech detected.")
+
     def _handle_state_changed(self, event: StateChangedEvent) -> None:
         if self._icon is None:
             return
         new_state = AppState(event.new_state)
-        self._icon.update_state(
-            new_state, _STATE_LABELS.get(new_state, "Unknown")
-        )
+        if new_state == AppState.RECORDING:
+            self._error_sticky = False
+        # The elapsed-time provider tracks the domain state, not the
+        # icon presentation — install/clear it regardless of whether
+        # the error sticky is suppressing the icon update.
         self._update_elapsed_tracking(
             old_state=AppState(event.old_state),
             new_state=new_state,
+        )
+        if self._error_sticky and new_state != AppState.ERROR:
+            return
+        self._icon.update_state(
+            new_state, _STATE_LABELS.get(new_state, "Unknown"),
         )
 
     def _update_elapsed_tracking(

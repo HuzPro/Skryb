@@ -12,7 +12,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.faster_whisper_adapter import FasterWhisperAdapter
@@ -196,6 +199,29 @@ class TestFasterWhisperAdapterWarmup:
         adapter.warmup()
 
         assert WhisperModel.return_value.transcribe.call_count == 1
+
+
+class TestFasterWhisperAdapterDependencyMissing:
+    """When the ``faster_whisper`` backend is not installed,
+    :meth:`FasterWhisperAdapter.load_model` must raise
+    :class:`EngineDependencyMissingError` with an actionable install
+    hint so the tray can surface "pip install faster-whisper" to the
+    user instead of leaking a bare ``ImportError``.
+    """
+
+    def test_should_raise_engine_dependency_missing_when_backend_not_installed(self):
+        adapter = _make_adapter()
+
+        # ``sys.modules[name] = None`` is the canonical way to make
+        # ``import name`` raise ``ImportError`` regardless of whether
+        # the package is installed in the test environment.
+        with patch.dict("sys.modules", {"faster_whisper": None}):
+            with pytest.raises(EngineDependencyMissingError) as exc_info:
+                adapter.load_model()
+
+        message = str(exc_info.value).lower()
+        assert "faster-whisper" in message
+        assert "pip install" in message
 
 
 class TestFasterWhisperAdapterDispose:

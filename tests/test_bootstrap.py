@@ -7,11 +7,17 @@ from voicetotext.bootstrap import (
     _load_engine_and_attach,
     _load_engine_with_fallback,
     _make_destroyed_handler,
+    _warmup_safely,
     apply_settings,
     migrate_language,
     migrate_output_mode,
 )
 from voicetotext.core.event_bus import SimpleEventBus
+from voicetotext.core.events import EngineLoadFailedEvent
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    EngineWarmupError,
+)
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
@@ -182,7 +188,9 @@ class TestLoadEngineAndAttach:
 
         _load_engine_and_attach(
             MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
-            use_case=use_case, state_machine=state_machine,
+            use_case=use_case,
+            state_machine=state_machine,
+            event_bus=bus,
         )
 
         use_case.set_engine.assert_called_once_with(loaded_engine)
@@ -195,7 +203,9 @@ class TestLoadEngineAndAttach:
 
         _load_engine_and_attach(
             MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
-            use_case=MagicMock(), state_machine=state_machine,
+            use_case=MagicMock(),
+            state_machine=state_machine,
+            event_bus=bus,
         )
 
         assert state_machine.state == AppState.IDLE
@@ -211,7 +221,9 @@ class TestLoadEngineAndAttach:
 
         _load_engine_and_attach(
             MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
-            use_case=use_case, state_machine=state_machine,
+            use_case=use_case,
+            state_machine=state_machine,
+            event_bus=bus,
         )
 
         assert state_machine.state == AppState.ERROR
@@ -232,8 +244,148 @@ class TestLoadEngineAndAttach:
 
         _load_engine_and_attach(
             MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
-            use_case=MagicMock(), state_machine=state_machine,
+            use_case=MagicMock(),
+            state_machine=state_machine,
+            event_bus=bus,
         )
+
+
+class TestLoadEngineAndAttachFailureSurface:
+    """When the background engine load fails, the worker must publish
+    :class:`EngineLoadFailedEvent` carrying the active model name and
+    the underlying error message so the tray can show an actionable
+    notification balloon instead of just flipping the icon to ERROR.
+    """
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_publish_engine_load_failed_event_when_dependency_missing(
+        self, mock_create,
+    ):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        config = MagicMock()
+        config.get.return_value = "large-v3-turbo"
+        broken = MagicMock()
+        broken.load_model.side_effect = EngineDependencyMissingError(
+            "Faster-Whisper not installed: pip install faster-whisper"
+        )
+        # ``_load_engine_with_fallback`` only catches RuntimeError/OSError
+        # for CPU fallback; EngineDependencyMissingError propagates
+        # straight through and is observed once by mock_create.
+        mock_create.side_effect = [broken, broken]
+        received: list[EngineLoadFailedEvent] = []
+        bus.subscribe(EngineLoadFailedEvent, received.append)
+
+        _load_engine_and_attach(
+            config, MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=MagicMock(),
+            state_machine=state_machine,
+            event_bus=bus,
+        )
+
+        assert len(received) == 1
+        assert "Faster-Whisper not installed" in received[0].error
+        assert received[0].model_name == "large-v3-turbo"
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_publish_event_before_transitioning_to_error(
+        self, mock_create,
+    ):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        config = MagicMock()
+        config.get.return_value = "base"
+        broken = MagicMock()
+        broken.load_model.side_effect = RuntimeError("VRAM exhausted")
+        mock_create.side_effect = [broken, broken]
+        received: list[EngineLoadFailedEvent] = []
+        bus.subscribe(EngineLoadFailedEvent, received.append)
+
+        _load_engine_and_attach(
+            config, MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=MagicMock(),
+            state_machine=state_machine,
+            event_bus=bus,
+        )
+
+        assert len(received) == 1
+        assert state_machine.state == AppState.ERROR
+
+    @patch("voicetotext.bootstrap.create_engine_for_active_model")
+    def test_should_not_publish_event_on_successful_load(self, mock_create):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        mock_create.return_value = MagicMock()
+        received: list[EngineLoadFailedEvent] = []
+        bus.subscribe(EngineLoadFailedEvent, received.append)
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            use_case=MagicMock(),
+            state_machine=state_machine,
+            event_bus=bus,
+        )
+
+        assert received == []
+
+
+class TestWarmupSafelyErrorClassification:
+    """``_warmup_safely`` distinguishes between transient warmup quirks
+    (e.g. ``RuntimeError`` from a backend's first-pass kernel compile on
+    silent audio) and unrecoverable errors that imply the engine itself
+    will never transcribe (missing backend, missing model file, dead
+    device). The transient case is swallowed so the first real
+    transcription pays the cold-start cost; the unrecoverable case is
+    re-raised as :class:`EngineWarmupError` so the bootstrap surface
+    can publish ``EngineLoadFailedEvent`` instead of leaving a half-
+    broken engine attached.
+    """
+
+    def test_should_swallow_runtime_error_as_transient(self):
+        engine = MagicMock()
+        engine.warmup.side_effect = RuntimeError("backend kernel glitch")
+
+        _warmup_safely(engine)
+
+    def test_should_reraise_engine_dependency_missing_during_warmup(self):
+        engine = MagicMock()
+        engine.warmup.side_effect = EngineDependencyMissingError(
+            "Faster-Whisper not installed: pip install faster-whisper"
+        )
+
+        with pytest.raises(EngineWarmupError, match="faster-whisper"):
+            _warmup_safely(engine)
+
+    def test_should_reraise_import_error_during_warmup(self):
+        engine = MagicMock()
+        engine.warmup.side_effect = ImportError("CUDA runtime missing")
+
+        with pytest.raises(EngineWarmupError, match="CUDA runtime missing"):
+            _warmup_safely(engine)
+
+    def test_should_reraise_file_not_found_during_warmup(self):
+        engine = MagicMock()
+        engine.warmup.side_effect = FileNotFoundError("model.bin")
+
+        with pytest.raises(EngineWarmupError, match="model.bin"):
+            _warmup_safely(engine)
+
+    def test_should_reraise_os_error_during_warmup(self):
+        engine = MagicMock()
+        engine.warmup.side_effect = OSError("device went away")
+
+        with pytest.raises(EngineWarmupError, match="device went away"):
+            _warmup_safely(engine)
+
+    def test_should_chain_original_exception_via_from(self):
+        original = ImportError("missing cudnn")
+        engine = MagicMock()
+        engine.warmup.side_effect = original
+
+        with pytest.raises(EngineWarmupError) as exc_info:
+            _warmup_safely(engine)
+
+        assert exc_info.value.__cause__ is original
 
 
 class TestMigrateRemovedModels:

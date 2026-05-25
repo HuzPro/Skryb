@@ -32,6 +32,7 @@ def _config(
     device: str = "auto",
     language: str = "en",
     beam_size: int = 5,
+    beam_size_set: bool = True,
     engine: str = "auto",
 ):
     config = MagicMock()
@@ -39,9 +40,10 @@ def _config(
         "transcription.model_size": model_size,
         "transcription.device": device,
         "transcription.language": language,
-        "transcription.beam_size": beam_size,
         "transcription.engine": engine,
     }
+    if beam_size_set:
+        values["transcription.beam_size"] = beam_size
     config.get.side_effect = lambda key, default=None: values.get(key, default)
     return config
 
@@ -353,6 +355,47 @@ class TestCreateEngineForActiveModel:
         )
 
         assert engine._num_beams == 2
+
+    def test_should_default_granite_to_ibm_recipe_when_beam_size_unset(
+        self, tmp_path,
+    ):
+        # IBM's tech report recommends ``num_beams=4`` for Granite
+        # Speech. When the user has not explicitly set
+        # ``transcription.beam_size``, the factory must defer to the
+        # per-engine recommendation rather than the whisper default
+        # of 5 — otherwise every default-config user pays a ~25%
+        # decoder latency tax on Granite.
+        config = _config(
+            model_size="granite-speech-4.1-2b",
+            engine="granite_speech",
+            device="cpu",
+            beam_size_set=False,
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert engine._num_beams == 4
+
+    def test_should_default_whisper_to_five_when_beam_size_unset(
+        self, tmp_path,
+    ):
+        # Regression guard for the per-engine default lookup: changing
+        # the unset-default routing must not lower whisper beam from 5.
+        config = _config(
+            engine="transformers",
+            device="cpu",
+            beam_size_set=False,
+        )
+        registry = build_engine_registry()
+
+        engine = create_engine_for_active_model(
+            config, _paths(tmp_path), registry, _CPU_PROFILE,
+        )
+
+        assert engine._beam_size == 5
 
 
 class TestCreateModelManager:

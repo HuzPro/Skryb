@@ -12,6 +12,7 @@ from voicetotext.core.events import (
     RecordingStoppedEvent,
     StateChangedEvent,
     TranscriptionCompletedEvent,
+    TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.exceptions import EngineSwapError
@@ -218,22 +219,37 @@ class RecordAndTranscribeUseCase:
         self._event_bus.publish(
             TranscriptionCompletedEvent(
                 text=result.text,
-                duration_seconds=result.duration_seconds,
+                transcription_seconds=result.transcription_seconds,
             )
         )
         _logger.debug("post-transcribe: completion event published")
 
     def _deliver_transcribed_text(self, result: TranscriptionResult) -> None:
         if result.is_empty:
-            _logger.info("Transcription: (empty, no speech detected)")
+            self._announce_empty_transcription(result)
             return
-        _logger.info("Transcription: '%s'", result.text)
+        _logger.info(
+            "Transcription in %.2fs: '%s'",
+            result.transcription_seconds,
+            result.text,
+        )
         _logger.debug("output.output: calling")
         try:
             self._output.output(result.text)
         except ClipboardWriteError as exc:
             self._handle_clipboard_write_failure(exc)
         _logger.debug("output.output: returned")
+
+    def _announce_empty_transcription(self, result: TranscriptionResult) -> None:
+        _logger.info(
+            "Transcription in %.2fs: (empty, no speech detected)",
+            result.transcription_seconds,
+        )
+        self._event_bus.publish(
+            TranscriptionEmptyEvent(
+                transcription_seconds=result.transcription_seconds,
+            )
+        )
 
     def _handle_clipboard_write_failure(self, error: ClipboardWriteError) -> None:
         _logger.warning("Clipboard write failed: %s", error)

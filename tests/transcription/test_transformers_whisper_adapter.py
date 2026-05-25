@@ -12,7 +12,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.result import TranscriptionResult
@@ -153,7 +156,7 @@ class TestTransformersWhisperAdapterTranscribe:
 
         assert isinstance(result, TranscriptionResult)
         assert result.text == "hello world"
-        assert result.duration_seconds >= 0.0
+        assert result.transcription_seconds >= 0.0
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_raise_when_transcribing_before_load(self):
@@ -299,3 +302,24 @@ class TestTransformersWhisperAdapterIsATranscriptionEngine:
         adapter = TransformersWhisperAdapter(model_size="base")
 
         assert isinstance(adapter, TranscriptionEngine)
+
+
+class TestTransformersWhisperAdapterDependencyMissing:
+    """If ``transformers`` is missing (or otherwise unimportable), the
+    adapter must raise :class:`EngineDependencyMissingError` with an
+    actionable install hint so the tray can surface the real reason
+    instead of a stuck LOADING icon or empty result.
+    """
+
+    def test_should_raise_engine_dependency_missing_when_transformers_not_installed(
+        self,
+    ):
+        adapter = TransformersWhisperAdapter(model_size="base", device="cpu")
+
+        with patch.dict("sys.modules", {"transformers": None}):
+            with pytest.raises(EngineDependencyMissingError) as exc_info:
+                adapter.load_model()
+
+        message = str(exc_info.value).lower()
+        assert "transformers" in message
+        assert "pip install" in message

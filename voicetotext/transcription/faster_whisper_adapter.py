@@ -3,7 +3,13 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
+from voicetotext.transcription.backend_imports import (
+    make_engine_dependency_error,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_diagnostics import vram_snapshot
@@ -52,13 +58,26 @@ class FasterWhisperAdapter(TranscriptionEngine):
         self._model: _CT2WhisperModel | None = None
 
     def load_model(self) -> None:
-        from faster_whisper import WhisperModel
+        whisper_model_class = self._import_whisper_model_class()
+        self._instantiate_model(whisper_model_class)
 
+    def _import_whisper_model_class(self) -> object:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise make_engine_dependency_error(
+                package_name="faster_whisper",
+                install_hint="Faster-Whisper not installed: pip install faster-whisper",
+                underlying=exc,
+            ) from exc
+        return WhisperModel
+
+    def _instantiate_model(self, whisper_model_class: object) -> None:
         compute_type = self._resolve_compute_type()
         self._log_phase("load_model", f"start device={self._device} compute_type={compute_type}")
 
         started_at = time.monotonic()
-        self._model = WhisperModel(
+        self._model = whisper_model_class(
             self._repo_id,
             device=self._device,
             compute_type=compute_type,
@@ -91,7 +110,7 @@ class FasterWhisperAdapter(TranscriptionEngine):
             text=text,
             language=str(getattr(info, "language", self._language)),
             language_probability=float(getattr(info, "language_probability", 0.0)),
-            duration_seconds=time.monotonic() - start,
+            transcription_seconds=time.monotonic() - start,
         )
 
     def dispose(self) -> None:

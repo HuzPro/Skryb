@@ -13,7 +13,7 @@ class TranscriptionResultBuilder:
         self._text: str = "hello world"
         self._language: str = "en"
         self._language_probability: float = 0.95
-        self._duration_seconds: float = 1.0
+        self._transcription_seconds: float = 1.0
 
     def with_text(self, text: str) -> "TranscriptionResultBuilder":
         self._text = text
@@ -31,7 +31,7 @@ class TranscriptionResultBuilder:
         return self
 
     def lasting(self, seconds: float) -> "TranscriptionResultBuilder":
-        self._duration_seconds = seconds
+        self._transcription_seconds = seconds
         return self
 
     def build(self) -> TranscriptionResult:
@@ -39,7 +39,7 @@ class TranscriptionResultBuilder:
             text=self._text,
             language=self._language,
             language_probability=self._language_probability,
-            duration_seconds=self._duration_seconds,
+            transcription_seconds=self._transcription_seconds,
         )
 
 

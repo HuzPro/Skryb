@@ -1,0 +1,8 @@
+# One-shot install for NVIDIA GPU machines (fresh venv, no torch yet).
+# Pulls torch from PyTorch's CUDA 12.6 wheel index, then everything else.
+# If you have a different CUDA version, change cu126 to cu124 / cu121 /
+# cu118 to match your driver. PyTorch wheels bundle the CUDA runtime,
+# so only the driver version matters.
+--extra-index-url https://download.pytorch.org/whl/cu126
+-r requirements-all.txt
+torch>=2.2.0

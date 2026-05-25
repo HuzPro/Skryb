@@ -10,6 +10,31 @@ class TranscriptionError(VoiceToTextError):
     pass
 
 
+class EngineDependencyMissingError(TranscriptionError):
+    """The Python package backing an engine is not installed.
+
+    Raised by adapter ``load_model()`` implementations when the lazy
+    backend import fails. The message must be actionable — it is
+    surfaced verbatim to the user via the tray (e.g. ``"Faster-Whisper
+    not installed: pip install faster-whisper"``).
+    """
+    pass
+
+
+class EngineWarmupError(TranscriptionError):
+    """Engine warmup raised an unrecoverable error.
+
+    Distinct from ``EngineDependencyMissingError`` so callers can tell
+    "the engine cannot run at all" from "warmup hit a transient backend
+    quirk". The bootstrap warmup helper only converts unrecoverable
+    underlying errors (``ImportError``, ``FileNotFoundError``,
+    ``OSError``) into this exception; transient ``RuntimeError``\\ s
+    stay swallowed so a backend quirk on silent audio doesn't crash
+    startup.
+    """
+    pass
+
+
 class EngineSwapError(VoiceToTextError):
     """Raised when a transcription engine hot-swap cannot be performed.
 

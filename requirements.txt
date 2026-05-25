@@ -1,0 +1,22 @@
+# Base dependencies — does NOT include `torch`.
+# Install PyTorch separately so the existing CUDA/ROCm/CPU build is not
+# disturbed. See INSTALL.md, or use requirements-nvidia.txt /
+# requirements-amd.txt / requirements-cpu.txt for one-shot installs.
+#
+# `transformers` is capped below 5.9 because 5.9.0 added an
+# unconditional `from torch.distributed.tensor.device_mesh import
+# DeviceMesh` that crashes on AMD Windows ROCm (which ships torch
+# without `torch._C._distributed_c10d`). 5.8.1 supports both Whisper
+# and Granite Speech 4.1-2b. See huggingface/transformers#45821.
+transformers>=4.52.1,<5.9
+# `accelerate` is a soft dependency of transformers — required as soon
+# as `from_pretrained(device_map=...)` is called, which the Granite
+# Speech adapter does for direct-to-GPU model loading.
+accelerate>=1.1.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+pynput>=1.7.6
+pyautogui>=0.9.54
+PySide6>=6.6.0
+huggingface-hub>=0.20.0
+requests>=2.31.0

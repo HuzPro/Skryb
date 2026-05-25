@@ -2,9 +2,11 @@ from unittest.mock import MagicMock, patch
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
+    EngineLoadFailedEvent,
     ErrorOccurredEvent,
     RecordingCappedEvent,
     StateChangedEvent,
+    TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -429,3 +431,189 @@ class TestErrorNotification:
         args = icon.notify.call_args.args
         assert args[0] == "VoiceToText"
         assert "10:00" in args[1] or "10 min" in args[1]
+
+
+class TestEngineLoadFailureNotification:
+    """When the background engine load fails, the user must see the
+    actionable reason (e.g. "Faster-Whisper not installed: pip install
+    faster-whisper") rather than a silently stuck LOADING icon or an
+    empty clipboard on the next hotkey press.
+    """
+
+    def _build_app_with_icon(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+        return app, icon
+
+    def test_should_notify_user_when_engine_load_fails(self):
+        app, icon = self._build_app_with_icon()
+
+        app._event_bus.publish(
+            EngineLoadFailedEvent(
+                model_name="large-v3-turbo",
+                error="Faster-Whisper not installed: pip install faster-whisper",
+            )
+        )
+
+        icon.notify.assert_called_once()
+        args = icon.notify.call_args.args
+        assert args[0] == "VoiceToText"
+        assert "Faster-Whisper not installed" in args[1]
+
+    def test_should_flip_icon_to_error_when_engine_load_fails(self):
+        # Tray balloons can be silenced by Focus Assist or DND; the
+        # icon is the second channel that must reflect the broken
+        # state regardless of notification visibility.
+        app, icon = self._build_app_with_icon()
+        icon.update_state.reset_mock()
+
+        app._event_bus.publish(
+            EngineLoadFailedEvent(model_name="base", error="missing")
+        )
+
+        icon.update_state.assert_any_call(AppState.ERROR, "Error")
+
+
+class TestTranscriptionEmptyNotification:
+    """An empty transcription is the symptom the friend reported. The
+    tray must surface "No speech detected" so the user sees a reason
+    for the empty clipboard rather than silence.
+    """
+
+    def _build_app_with_icon(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+        return app, icon
+
+    def test_should_notify_user_when_transcription_is_empty(self):
+        app, icon = self._build_app_with_icon()
+
+        app._event_bus.publish(
+            TranscriptionEmptyEvent(transcription_seconds=0.5)
+        )
+
+        icon.notify.assert_called_once()
+        args = icon.notify.call_args.args
+        assert args[0] == "VoiceToText"
+        message = args[1].lower()
+        assert "speech" in message or "empty" in message
+
+    def test_should_not_flip_icon_to_error_on_empty_transcription(self):
+        # Empty audio / no speech is not a hard error — the engine
+        # ran successfully, it just had nothing to transcribe. The
+        # icon must NOT enter the sticky ERROR state for this.
+        app, icon = self._build_app_with_icon()
+        icon.update_state.reset_mock()
+
+        app._event_bus.publish(
+            TranscriptionEmptyEvent(transcription_seconds=0.5)
+        )
+
+        for update_call in icon.update_state.call_args_list:
+            assert update_call.args[0] != AppState.ERROR
+
+
+class TestErrorIconStickiness:
+    """The tray balloon notification can be silently suppressed by
+    Focus Assist, Do Not Disturb, or a hidden notification area. A
+    second, persistent visual channel — the tray icon itself — must
+    keep the ERROR state visible until the user acknowledges it by
+    starting a new recording.
+    """
+
+    def _build_app_with_icon(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+        return app, icon
+
+    def test_should_set_icon_to_error_on_error_event(self):
+        # Errors that don't go through ``_report_error`` (e.g.
+        # ``_start_recording`` failures, clipboard write errors)
+        # publish ``ErrorOccurredEvent`` without ever transitioning
+        # the state machine to ERROR. The tray must still flip the
+        # icon — relying on the balloon alone is unreliable.
+        app, icon = self._build_app_with_icon()
+        icon.update_state.reset_mock()
+
+        app._event_bus.publish(ErrorOccurredEvent(error="boom"))
+
+        icon.update_state.assert_any_call(AppState.ERROR, "Error")
+
+    def test_should_keep_error_icon_after_state_reverts_to_idle(self):
+        # ``_report_error`` runs ERROR → IDLE back-to-back; without
+        # stickiness the red icon would flash for ~10ms and the
+        # user would miss it whenever the OS notification was
+        # suppressed.
+        app, icon = self._build_app_with_icon()
+        app._event_bus.publish(ErrorOccurredEvent(error="boom"))
+        icon.update_state.reset_mock()
+
+        app._event_bus.publish(
+            StateChangedEvent(
+                old_state=AppState.ERROR.value,
+                new_state=AppState.IDLE.value,
+            )
+        )
+
+        icon.update_state.assert_not_called()
+
+    def test_should_clear_error_icon_when_user_starts_recording(self):
+        # The user pressing the hotkey to start a new recording is
+        # an implicit acknowledgement of the previous error. From
+        # that point on the icon tracks the state machine again.
+        app, icon = self._build_app_with_icon()
+        app._event_bus.publish(ErrorOccurredEvent(error="boom"))
+        app._event_bus.publish(
+            StateChangedEvent(
+                old_state=AppState.ERROR.value,
+                new_state=AppState.IDLE.value,
+            )
+        )
+        icon.update_state.reset_mock()
+
+        app._event_bus.publish(
+            StateChangedEvent(
+                old_state=AppState.IDLE.value,
+                new_state=AppState.RECORDING.value,
+            )
+        )
+
+        icon.update_state.assert_called_with(AppState.RECORDING, "Recording...")
+
+    def test_should_still_update_elapsed_provider_while_sticky(self):
+        # The icon is decoupled from the state machine while sticky,
+        # but the elapsed-time provider must still install on entry
+        # to RECORDING and clear on exit — those drive the live
+        # tooltip, which is a separate channel from the icon colour.
+        app, icon = self._build_app_with_icon()
+        app._event_bus.publish(ErrorOccurredEvent(error="boom"))
+        icon.set_elapsed_provider.reset_mock()
+
+        app._event_bus.publish(
+            StateChangedEvent(
+                old_state=AppState.IDLE.value,
+                new_state=AppState.RECORDING.value,
+            )
+        )
+
+        icon.set_elapsed_provider.assert_called_once()
+        provider = icon.set_elapsed_provider.call_args.args[0]
+        assert callable(provider)

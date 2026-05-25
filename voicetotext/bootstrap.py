@@ -6,7 +6,12 @@ from collections.abc import Callable
 
 from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
 from voicetotext.core.debug_logger import setup_debug_logger
-from voicetotext.core.event_bus import SimpleEventBus
+from voicetotext.core.event_bus import EventBus, SimpleEventBus
+from voicetotext.core.events import EngineLoadFailedEvent
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    EngineWarmupError,
+)
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -221,20 +226,27 @@ def _load_engine_and_attach(
     *,
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
+    event_bus: EventBus,
 ) -> None:
     """Background-thread entry point for engine load + state attach.
 
     Loads the engine (with CPU fallback inside
     ``_load_engine_with_fallback``), then swaps it into the use case
-    and flips the state machine ``LOADING → IDLE``. Failures
-    transition to ``ERROR`` so the tray reflects the broken state.
-    Exceptions never escape — daemon threads silently drop them
-    otherwise.
+    and flips the state machine ``LOADING → IDLE``. Failures publish
+    :class:`EngineLoadFailedEvent` (so the tray can show an actionable
+    notification) and transition to ``ERROR``. Exceptions never
+    escape — daemon threads silently drop them otherwise.
     """
     try:
         engine = _load_engine_with_fallback(config, paths, registry, hardware)
     except Exception as exc:
         _logger.exception("Engine load failed: %s", exc)
+        event_bus.publish(
+            EngineLoadFailedEvent(
+                model_name=str(config.get("transcription.model_size", "base")),
+                error=str(exc),
+            )
+        )
         state_machine.transition_to(AppState.ERROR)
         return
     use_case.set_engine(engine)
@@ -250,11 +262,16 @@ def _spawn_engine_load_thread(
     *,
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
+    event_bus: EventBus,
 ) -> None:
     thread = threading.Thread(
         target=_load_engine_and_attach,
         args=(config, paths, registry, hardware),
-        kwargs={"use_case": use_case, "state_machine": state_machine},
+        kwargs={
+            "use_case": use_case,
+            "state_machine": state_machine,
+            "event_bus": event_bus,
+        },
         daemon=True,
         name="engine-load",
     )
@@ -262,20 +279,36 @@ def _spawn_engine_load_thread(
 
 
 def _warmup_safely(engine: TranscriptionEngine) -> None:
-    """Run warmup with errors isolated so a backend quirk on silent
-    audio doesn't trigger CPU fallback or crash startup. The engine is
-    fully loaded at this point — losing warmup only means the first
-    real transcription pays the cold-start cost.
+    """Run warmup, classifying failures into transient vs. unrecoverable.
+
+    Transient failures (e.g. ``RuntimeError`` from a backend's first
+    kernel compile on silent audio) are swallowed so the first real
+    transcription just pays the cold-start cost. Unrecoverable failures
+    — missing backend, missing model file, dead device — are re-raised
+    as :class:`EngineWarmupError` so the bootstrap layer can publish
+    :class:`EngineLoadFailedEvent` and surface an actionable message
+    to the tray instead of leaving a half-broken engine attached.
     """
     started_at = time.monotonic()
     try:
-        engine.warmup()
+        _run_warmup(engine)
+    except (
+        EngineDependencyMissingError,
+        ImportError,
+        FileNotFoundError,
+        OSError,
+    ) as exc:
+        raise EngineWarmupError(str(exc)) from exc
     except Exception as exc:
         _logger.warning("Engine warmup failed (non-fatal): %s", exc)
         return
     _logger.info(
         "Engine warmup complete in %.2fs", time.monotonic() - started_at,
     )
+
+
+def _run_warmup(engine: TranscriptionEngine) -> None:
+    engine.warmup()
 
 
 def _make_active_engine_provider(
@@ -498,6 +531,7 @@ def build_app(
         config, paths, registry, hardware,
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
+        event_bus=event_bus,
     )
 
     return app

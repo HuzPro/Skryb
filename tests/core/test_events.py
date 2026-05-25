@@ -1,10 +1,12 @@
 from voicetotext.core.events import (
     DomainEvent,
+    EngineLoadFailedEvent,
     ErrorOccurredEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     StateChangedEvent,
     TranscriptionCompletedEvent,
+    TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
 )
 
@@ -32,10 +34,10 @@ class TestStateChangedEvent:
 
 class TestTranscriptionCompletedEvent:
     def test_should_carry_text_and_duration(self):
-        event = TranscriptionCompletedEvent(text="hello", duration_seconds=1.5)
+        event = TranscriptionCompletedEvent(text="hello", transcription_seconds=1.5)
 
         assert event.text == "hello"
-        assert event.duration_seconds == 1.5
+        assert event.transcription_seconds == 1.5
 
 
 class TestTranscriptionFailedEvent:
@@ -43,6 +45,38 @@ class TestTranscriptionFailedEvent:
         event = TranscriptionFailedEvent(error="Model not loaded")
 
         assert event.error == "Model not loaded"
+
+
+class TestTranscriptionEmptyEvent:
+    """Surface engine-returned-no-speech as an explicit event so the
+    tray can notify the user instead of swallowing the empty clipboard
+    silently.
+    """
+
+    def test_should_carry_transcription_seconds(self):
+        event = TranscriptionEmptyEvent(transcription_seconds=0.42)
+
+        assert event.transcription_seconds == 0.42
+
+    def test_should_default_transcription_seconds_to_zero(self):
+        event = TranscriptionEmptyEvent()
+
+        assert event.transcription_seconds == 0.0
+
+
+class TestEngineLoadFailedEvent:
+    """Surface engine-load failures (missing backend, missing model
+    file) to the tray so the user sees the actionable reason rather
+    than a stuck LOADING icon.
+    """
+
+    def test_should_carry_model_name_and_error(self):
+        event = EngineLoadFailedEvent(
+            model_name="large-v3-turbo", error="Faster-Whisper not installed",
+        )
+
+        assert event.model_name == "large-v3-turbo"
+        assert event.error == "Faster-Whisper not installed"
 
 
 class TestErrorOccurredEvent:
@@ -69,8 +103,10 @@ class TestEventInheritance:
             RecordingStartedEvent(),
             RecordingStoppedEvent(),
             StateChangedEvent(old_state="IDLE", new_state="RECORDING"),
-            TranscriptionCompletedEvent(text="hi", duration_seconds=1.0),
+            TranscriptionCompletedEvent(text="hi", transcription_seconds=1.0),
             TranscriptionFailedEvent(error="fail"),
+            TranscriptionEmptyEvent(transcription_seconds=0.5),
+            EngineLoadFailedEvent(model_name="base", error="missing"),
             ErrorOccurredEvent(error="oops"),
         ]
 

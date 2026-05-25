@@ -20,7 +20,10 @@ import numpy as np
 import pytest
 import torch as _torch_eager_import  # noqa: F401 — see module docstring
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 
@@ -323,7 +326,7 @@ class TestGraniteSpeechAdapterTranscribe:
         assert isinstance(result, TranscriptionResult)
         assert result.text == "Hello, world!"
         assert result.language == "en"
-        assert result.duration_seconds >= 0.0
+        assert result.transcription_seconds >= 0.0
 
 
 class TestGraniteSpeechAdapterMaxNewTokensBudget:
@@ -910,3 +913,34 @@ class TestGraniteSpeechAdapterDispose:
         )
 
         adapter.dispose()
+
+
+class TestGraniteSpeechAdapterDependencyMissing:
+    """If ``transformers`` is missing the Granite adapter must raise
+    :class:`EngineDependencyMissingError` with an actionable install
+    hint rather than leaking a bare ``ImportError`` to the bootstrap
+    layer.
+    """
+
+    def test_should_raise_engine_dependency_missing_when_transformers_not_installed(
+        self,
+    ) -> None:
+        from voicetotext.transcription.granite_speech_adapter import (
+            GraniteSpeechAdapter,
+        )
+
+        adapter = GraniteSpeechAdapter(
+            repo_id="ibm-granite/granite-speech-4.1-2b",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+
+        with patch.dict(
+            "sys.modules", {"transformers": None, "torch": MagicMock()}
+        ):
+            with pytest.raises(EngineDependencyMissingError) as exc_info:
+                adapter.load_model()
+
+        message = str(exc_info.value).lower()
+        assert "transformers" in message
+        assert "pip install" in message

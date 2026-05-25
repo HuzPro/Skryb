@@ -5,7 +5,13 @@ from pathlib import Path
 
 import numpy as np
 
-from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.core.exceptions import (
+    EngineDependencyMissingError,
+    TranscriptionError,
+)
+from voicetotext.transcription.backend_imports import (
+    make_engine_dependency_error,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_diagnostics import vram_snapshot
@@ -184,22 +190,21 @@ class GraniteSpeechAdapter(TranscriptionEngine):
         self._model: object | None = None
 
     def load_model(self) -> None:
-        import torch
-        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+        torch_module, auto_model_class, auto_processor_class = self._import_backend()
 
         cache_dir = str(self._model_dir)
-        torch_dtype = getattr(torch, self._dtype_name)
+        torch_dtype = getattr(torch_module, self._dtype_name)
         self._log_phase(
             "load_model",
             f"start device={self._device} dtype={self._dtype_name}",
         )
         started_at = time.monotonic()
-        self._processor = AutoProcessor.from_pretrained(
+        self._processor = auto_processor_class.from_pretrained(
             self._repo_id,
             cache_dir=cache_dir,
             local_files_only=True,
         )
-        self._model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        self._model = auto_model_class.from_pretrained(
             self._repo_id,
             cache_dir=cache_dir,
             local_files_only=True,
@@ -207,6 +212,18 @@ class GraniteSpeechAdapter(TranscriptionEngine):
             dtype=torch_dtype,
         )
         self._log_timed_phase("load_model", "complete", started_at)
+
+    def _import_backend(self) -> tuple[object, object, object]:
+        try:
+            import torch
+            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+        except ImportError as exc:
+            raise make_engine_dependency_error(
+                package_name="transformers",
+                install_hint="transformers not installed: pip install transformers",
+                underlying=exc,
+            ) from exc
+        return torch, AutoModelForSpeechSeq2Seq, AutoProcessor
 
     def is_model_loaded(self) -> bool:
         return self._model is not None
@@ -235,7 +252,7 @@ class GraniteSpeechAdapter(TranscriptionEngine):
             text=" ".join(parts),
             language="en",
             language_probability=0.0,
-            duration_seconds=time.monotonic() - started_at,
+            transcription_seconds=time.monotonic() - started_at,
         )
 
     def _transcribe_chunk(

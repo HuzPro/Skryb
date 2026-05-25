@@ -9,20 +9,20 @@ class TestTranscriptionResultCreation:
             text="hello world",
             language="en",
             language_probability=0.95,
-            duration_seconds=1.5,
+            transcription_seconds=1.5,
         )
 
         assert result.text == "hello world"
         assert result.language == "en"
         assert result.language_probability == 0.95
-        assert result.duration_seconds == 1.5
+        assert result.transcription_seconds == 1.5
 
     def test_should_detect_empty_text(self):
         result = TranscriptionResult(
             text="",
             language="en",
             language_probability=0.0,
-            duration_seconds=0.0,
+            transcription_seconds=0.0,
         )
 
         assert result.is_empty is True
@@ -32,7 +32,7 @@ class TestTranscriptionResultCreation:
             text="   \n\t  ",
             language="en",
             language_probability=0.0,
-            duration_seconds=0.0,
+            transcription_seconds=0.0,
         )
 
         assert result.is_empty is True
@@ -42,7 +42,7 @@ class TestTranscriptionResultCreation:
             text="some words",
             language="en",
             language_probability=0.9,
-            duration_seconds=2.0,
+            transcription_seconds=2.0,
         )
 
         assert result.is_empty is False
@@ -54,7 +54,7 @@ class TestTranscriptionResultImmutability:
             text="hello",
             language="en",
             language_probability=0.9,
-            duration_seconds=1.0,
+            transcription_seconds=1.0,
         )
 
         with pytest.raises(AttributeError):

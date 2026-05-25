@@ -23,3 +23,6 @@ CLAUDE.md
 tests/fixtures/audio/*.mp3
 tests/fixtures/audio/*.wav
 tests/fixtures/audio/*.flac
+
+# Performance benchmark results — accumulating local history, machine-specific
+tests/performance/.results/

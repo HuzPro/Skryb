@@ -6,7 +6,7 @@ class TranscriptionResult:
     text: str
     language: str
     language_probability: float
-    duration_seconds: float
+    transcription_seconds: float
 
     @property
     def is_empty(self) -> bool:

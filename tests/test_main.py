@@ -9,6 +9,7 @@ from voicetotext.__main__ import (
     _apply_torch_env_overrides,
     _configured_model_installed,
     _show_error,
+    main,
 )
 
 
@@ -97,6 +98,36 @@ class TestApplyTorchEnvOverrides:
                 os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL")
                 == "0"
             )
+
+
+class TestDoctorCli:
+    """``voicetotext --doctor`` must print the diagnostic report and
+    exit before any Qt or engine code runs, so a user whose engine
+    can't load can still get a usable report from the command line.
+    """
+
+    def test_should_print_doctor_report_when_doctor_flag_in_argv(self):
+        captured = io.StringIO()
+        with (
+            patch.object(sys, "argv", ["voicetotext", "--doctor"]),
+            patch("sys.stdout", captured),
+            patch("voicetotext.__main__._run") as mock_run,
+        ):
+            main()
+
+        output = captured.getvalue()
+        assert "[Python]" in output
+        assert "[Engine backends]" in output
+        mock_run.assert_not_called()
+
+    def test_should_call_run_when_doctor_flag_absent(self):
+        with (
+            patch.object(sys, "argv", ["voicetotext"]),
+            patch("voicetotext.__main__._run") as mock_run,
+        ):
+            main()
+
+        mock_run.assert_called_once()
 
 
 class TestShowError:

@@ -56,11 +56,24 @@ def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
 
 def main() -> None:
     _apply_torch_env_overrides()
+    if _is_doctor_request():
+        _print_doctor_report()
+        return
     try:
         _run()
     except Exception:
         _show_error(traceback.format_exc())
         sys.exit(1)
+
+
+def _is_doctor_request() -> bool:
+    return "--doctor" in sys.argv[1:]
+
+
+def _print_doctor_report() -> None:
+    from voicetotext.diagnostics.doctor import run_doctor
+
+    print(run_doctor())
 
 
 def _run() -> None:

@@ -12,6 +12,7 @@ from voicetotext.core.events import (
     RecordingStartedEvent,
     RecordingStoppedEvent,
     TranscriptionCompletedEvent,
+    TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
@@ -26,10 +27,40 @@ def _make_audio(samples: int = 16000) -> AudioSegment:
     return AudioSegment(data=np.zeros(samples, dtype=np.float32), sample_rate=16000)
 
 
-def _make_result(text: str = "hello world") -> TranscriptionResult:
+def _make_result(
+    text: str = "hello world", seconds: float = 0.5,
+) -> TranscriptionResult:
     return TranscriptionResult(
-        text=text, language="en", language_probability=0.95, duration_seconds=0.5
+        text=text,
+        language="en",
+        language_probability=0.95,
+        transcription_seconds=seconds,
     )
+
+
+def _capture_use_case_info_logs(caplog, action) -> list:
+    """Capture INFO records emitted by the use case's logger.
+
+    ``voicetotext.core.debug_logger`` disables propagation on the
+    ``voicetotext`` subtree at import time, which makes caplog's
+    root-attached handler blind to records from the use case once any
+    other test has imported bootstrap. Attaching caplog's handler
+    directly to the use case's logger sidesteps that for the duration
+    of one assertion.
+    """
+    import logging as stdlib_logging
+    from voicetotext import transcription_use_case
+
+    logger = transcription_use_case._logger
+    previous_level = logger.level
+    logger.setLevel(stdlib_logging.INFO)
+    logger.addHandler(caplog.handler)
+    try:
+        action()
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.setLevel(previous_level)
+    return [r for r in caplog.records if r.levelno >= stdlib_logging.INFO]
 
 
 def _build_use_case(
@@ -106,6 +137,31 @@ class TestActivateFromRecording:
 
         output.output.assert_not_called()
 
+    def test_should_publish_transcription_empty_event_when_result_is_empty(self):
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result(text="", seconds=0.27)
+        received: list[TranscriptionEmptyEvent] = []
+        event_bus.subscribe(TranscriptionEmptyEvent, received.append)
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        assert len(received) == 1
+        assert received[0].transcription_seconds == 0.27
+
+    def test_should_not_publish_empty_event_when_result_has_text(self):
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("hello")
+        received: list[TranscriptionEmptyEvent] = []
+        event_bus.subscribe(TranscriptionEmptyEvent, received.append)
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        assert received == []
+
     def test_should_return_to_idle_after_transcription(self):
         use_case, recorder, engine, _, _, state_machine = _build_use_case()
         recorder.stop_recording.return_value = _make_audio()
@@ -140,6 +196,64 @@ class TestActivateFromRecording:
 
         assert len(received) == 1
         assert received[0].text == "hello"
+
+
+class TestTranscriptionLogging:
+    """The use case logs the transcription processing time once the
+    engine returns so the user can see how long every model/engine
+    took, not just how long the recording was. The value comes from
+    ``TranscriptionResult.transcription_seconds`` so it is engine-
+    agnostic — every adapter sets it via ``time.monotonic()`` around
+    inference.
+    """
+
+    def test_should_log_transcription_time_and_text_when_completed(
+        self, caplog,
+    ):
+        use_case, recorder, engine, _, _, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result(
+            text="hello", seconds=0.42,
+        )
+
+        records = _capture_use_case_info_logs(
+            caplog,
+            lambda: (
+                use_case.on_hotkey_activated(),
+                use_case.on_hotkey_activated(),
+            ),
+        )
+
+        transcription_logs = [
+            r.getMessage() for r in records
+            if r.getMessage().startswith("Transcription")
+        ]
+        assert any(
+            "0.42" in msg and "hello" in msg for msg in transcription_logs
+        ), f"Expected log with time and text; got: {transcription_logs}"
+
+    def test_should_log_transcription_time_when_result_is_empty(
+        self, caplog,
+    ):
+        use_case, recorder, engine, _, _, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result(text="", seconds=0.31)
+
+        records = _capture_use_case_info_logs(
+            caplog,
+            lambda: (
+                use_case.on_hotkey_activated(),
+                use_case.on_hotkey_activated(),
+            ),
+        )
+
+        transcription_logs = [
+            r.getMessage() for r in records
+            if r.getMessage().startswith("Transcription")
+        ]
+        assert any(
+            "0.31" in msg and "empty" in msg for msg in transcription_logs
+        ), f"Expected log with time and empty marker; got: {transcription_logs}"
 
 
 class TestActivateFromTranscribing:

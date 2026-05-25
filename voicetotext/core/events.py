@@ -31,12 +31,24 @@ class StateChangedEvent(DomainEvent):
 @dataclass(frozen=True)
 class TranscriptionCompletedEvent(DomainEvent):
     text: str = ""
-    duration_seconds: float = 0.0
+    transcription_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
 class TranscriptionFailedEvent(DomainEvent):
     error: str = ""
+
+
+@dataclass(frozen=True)
+class TranscriptionEmptyEvent(DomainEvent):
+    """Engine returned no text — surfaces "no speech detected" to the UI.
+
+    Without this event the use case silently dropped empty results,
+    leaving the user with an empty clipboard and no indication of
+    whether the engine ran at all. The tray subscribes to this and
+    shows a notification balloon.
+    """
+    transcription_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
