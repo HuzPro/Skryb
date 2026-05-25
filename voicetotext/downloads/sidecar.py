@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -6,6 +7,8 @@ from voicetotext.downloads.state import ChunkState
 
 
 _SIDECAR_VERSION = 1
+_SIDECAR_TMP_SUFFIX = ".tmp"
+_SIDECAR_BAK_SUFFIX = ".bak"
 
 
 class SidecarCorruptError(Exception):
@@ -58,7 +61,11 @@ class Sidecar:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
+        payload = self._build_payload()
+        self._atomic_write_json(path, payload)
+
+    def _build_payload(self) -> dict[str, object]:
+        return {
             "version": _SIDECAR_VERSION,
             "url": self.url,
             "etag": self.etag,
@@ -73,38 +80,82 @@ class Sidecar:
                 for c in self.chunks
             ],
         }
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+        tmp = path.with_suffix(path.suffix + _SIDECAR_TMP_SUFFIX)
+        try:
+            Sidecar._write_and_swap(path=path, tmp=tmp, payload=payload)
+        except OSError:
+            if tmp.exists():
+                tmp.unlink()
+            raise
+
+    @staticmethod
+    def _write_and_swap(path: Path, tmp: Path, payload: dict[str, object]) -> None:
+        data = json.dumps(payload, indent=2).encode("utf-8")
+        with open(tmp, "wb") as fd:
+            fd.write(data)
+            fd.flush()
+            os.fsync(fd.fileno())
+        if path.exists():
+            bak = path.with_suffix(path.suffix + _SIDECAR_BAK_SUFFIX)
+            os.replace(path, bak)
+        os.replace(tmp, path)
 
     @classmethod
     def load(cls, path: Path) -> "Sidecar":
         if not path.exists():
             raise FileNotFoundError(f"Sidecar not found: {path}")
+        payload = cls._load_json_payload(path)
+        return cls._from_payload(path, payload)
+
+    @staticmethod
+    def _load_json_payload(path: Path) -> dict[str, object]:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
+            backup_payload = Sidecar._read_backup_payload(path)
+            if backup_payload is not None:
+                return backup_payload
             raise SidecarCorruptError(f"Sidecar {path} is not valid JSON: {exc}")
 
+    @staticmethod
+    def _read_backup_payload(path: Path) -> dict[str, object] | None:
+        backup = path.with_suffix(path.suffix + _SIDECAR_BAK_SUFFIX)
+        if not backup.exists():
+            return None
+        try:
+            return json.loads(backup.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+
+    @classmethod
+    def _from_payload(cls, path: Path, payload: dict[str, object]) -> "Sidecar":
         version = payload.get("version")
         if version != _SIDECAR_VERSION:
             raise SidecarVersionError(
                 f"Sidecar {path} has version {version}, expected {_SIDECAR_VERSION}"
             )
-
         try:
-            chunks = tuple(
-                ChunkState(
-                    index=c["index"],
-                    start=c["start"],
-                    end=c["end"],
-                    bytes_done=c["bytes_done"],
-                )
-                for c in payload["chunks"]
-            )
-            return cls(
-                url=payload["url"],
-                etag=payload.get("etag"),
-                content_length=payload["content_length"],
-                chunks=chunks,
-            )
+            return cls._build_from_fields(payload)
         except (KeyError, TypeError) as exc:
             raise SidecarCorruptError(f"Sidecar {path} missing required field: {exc}")
+
+    @classmethod
+    def _build_from_fields(cls, payload: dict[str, object]) -> "Sidecar":
+        chunks = tuple(
+            ChunkState(
+                index=c["index"],
+                start=c["start"],
+                end=c["end"],
+                bytes_done=c["bytes_done"],
+            )
+            for c in payload["chunks"]
+        )
+        return cls(
+            url=payload["url"],
+            etag=payload.get("etag"),
+            content_length=payload["content_length"],
+            chunks=chunks,
+        )

@@ -8,6 +8,7 @@ from voicetotext.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
+    ModelDeletedEvent,
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.model_view import ModelView
@@ -342,6 +343,66 @@ class TestQtSettingsWindowDownloadBridge:
         index = list_model.index_for_name("small")
         snapshot = list_model.data(index, QtModelListModel.DOWNLOAD_ROLE)
         assert snapshot is None
+
+
+class TestQtSettingsWindowModelDeleted:
+    def test_should_subscribe_to_model_deleted_events_on_service(
+        self, qtbot, service,
+    ):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        assert service.subscribe_model_deleted.called
+
+    def test_should_flip_row_button_from_delete_to_download_when_model_deleted(
+        self, qtbot, service,
+    ):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        # Sanity: "tiny" starts installed, button reads "Delete".
+        list_model = window.transcription_page().list_model()
+        index = list_model.index_for_name("tiny")
+        widget = window.transcription_page().list_view().indexWidget(index)
+        assert widget.action_button().text() == "Delete"
+
+        # Service now reports "tiny" as no longer installed (simulates
+        # successful delete on the model manager) and a deletion event
+        # arrives on the GUI thread via the bridge.
+        service.list_models.return_value = [
+            _view("tiny", installed=False),
+            _view("base", installed=True),
+            _view("small"),
+        ]
+        window.on_model_deleted(ModelDeletedEvent(name="tiny"))
+
+        widget = window.transcription_page().list_view().indexWidget(index)
+        assert widget.action_button().text() == "Download"
+
+    def test_should_unsubscribe_model_deleted_handler_on_close(
+        self, qtbot, service,
+    ):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        with qtbot.waitSignal(window.destroyed, timeout=1000):
+            window.close()
+
+        assert service.unsubscribe_model_deleted.called
+
+    def test_should_route_delete_error_signal_to_status_label(
+        self, qtbot, service,
+    ):
+        window = QtSettingsWindow(service)
+        qtbot.addWidget(window)
+
+        window.transcription_page().delete_error.emit(
+            "base", "cannot delete active model 'base'",
+        )
+
+        status_text = window.status_label().text().lower()
+        assert "base" in status_text
+        assert "cannot delete" in status_text
 
 
 class TestQtSettingsWindowFirstRun:

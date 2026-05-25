@@ -52,6 +52,19 @@ class ModelInstallationCache:
         with self._lock:
             self._cache.pop(name, None)
 
+    def clear(self) -> None:
+        """Drop every cached entry.
+
+        Engine swaps change the meaning of ``is_installed`` for the
+        whole catalogue — each engine has its own on-disk layout, so a
+        cached ``True`` from the old engine is meaningless for the new
+        one. ``invalidate(name)`` is per-model; this is the broadcast
+        version called from the settings service when the active engine
+        changes.
+        """
+        with self._lock:
+            self._cache.clear()
+
     def dispose(self) -> None:
         self._event_bus.unsubscribe(DownloadCompletedEvent, self._on_download_completed)
         self._event_bus.unsubscribe(DownloadFailedEvent, self._on_download_failed)

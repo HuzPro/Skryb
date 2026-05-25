@@ -20,6 +20,7 @@ from voicetotext.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
+    ModelDeletedEvent,
     StateChangedEvent,
 )
 from voicetotext.settings.qt_download_bridge import QtDownloadBridge
@@ -90,6 +91,7 @@ class QtSettingsWindow(QMainWindow):
         self._download_bridge.state.connect(self.on_download_state)
         self._download_bridge.completed.connect(self.on_download_completed)
         self._download_bridge.failed.connect(self.on_download_failed)
+        self._download_bridge.deleted.connect(self.on_model_deleted)
 
         self.setWindowTitle(
             "VoiceToText Setup" if first_run else "VoiceToText Settings"
@@ -100,6 +102,7 @@ class QtSettingsWindow(QMainWindow):
         self._service.subscribe_engine(self._engine_bridge)
         self._service.subscribe_state_changes(self._state_bridge)
         self._service.subscribe_downloads(self._download_bridge)
+        self._service.subscribe_model_deleted(self._download_bridge.on_model_deleted)
         self._refresh_save_enabled()
 
     # ------------------------------------------------------------------
@@ -124,6 +127,7 @@ class QtSettingsWindow(QMainWindow):
         self._pages = QStackedWidget()
         self._transcription_page = TranscriptionPage(self._service)
         self._transcription_page.download_error.connect(self._on_download_error)
+        self._transcription_page.delete_error.connect(self._on_delete_error)
         self._hotkeys_page = HotkeysPage(capture_bridge=self._capture_bridge)
         self._hotkeys_page.recording_state_changed.connect(
             self._on_recording_state_changed
@@ -328,6 +332,23 @@ class QtSettingsWindow(QMainWindow):
             f"Could not start download of '{name}': {error}", error=True,
         )
 
+    def _on_delete_error(self, name: str, error: str) -> None:
+        """Surface synchronous delete errors (e.g., active-model guard)."""
+        self._show_status(
+            f"Cannot delete '{name}': {error}", error=True,
+        )
+
+    def on_model_deleted(self, event: ModelDeletedEvent) -> None:
+        """Refresh the row of the just-deleted model.
+
+        Drops any stale download snapshot and asks the list model to
+        re-query the service for the row's install state, which flips
+        the action button from "Delete" back to "Download".
+        """
+        list_model = self._transcription_page.list_model()
+        list_model.clear_download(event.name)
+        list_model.update_install_state(event.name)
+
     # ------------------------------------------------------------------
     # State-machine listener — enables/disables Save while recording.
     # ------------------------------------------------------------------
@@ -352,6 +373,9 @@ class QtSettingsWindow(QMainWindow):
         self._service.unsubscribe_engine(self._engine_bridge)
         self._service.unsubscribe_state_changes(self._state_bridge)
         self._service.unsubscribe_downloads(self._download_bridge)
+        self._service.unsubscribe_model_deleted(
+            self._download_bridge.on_model_deleted,
+        )
         super().closeEvent(event)
 
     # ------------------------------------------------------------------

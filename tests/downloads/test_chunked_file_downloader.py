@@ -1,7 +1,7 @@
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -24,7 +24,7 @@ class _HeadResult:
 class _FakeHttpClient:
     """Stub for the HTTP client — we don't exercise requests directly here."""
 
-    def __init__(self, head: _HeadResult, bodies: dict[tuple[int, int], bytes]):
+    def __init__(self, head: _HeadResult, bodies: dict[tuple[int, int], bytes]) -> None:
         self.head_response = head
         self._bodies = bodies
         self.range_calls: list[tuple[int, int]] = []
@@ -276,3 +276,196 @@ class TestChunkedFileDownloaderSizeMismatch:
                 cancel_event=threading.Event(),
                 pause_event=threading.Event(),
             )
+
+
+class _MidStreamFailingHttpClient:
+    """First call to a specific chunk yields one piece, then raises. Then a healthy fallback."""
+
+    def __init__(
+        self,
+        head: _HeadResult,
+        bodies: dict[tuple[int, int], bytes],
+        failing_range: tuple[int, int],
+    ) -> None:
+        self.head_response = head
+        self._bodies = bodies
+        self._failing_range = failing_range
+        self._failed_once = False
+        self.range_calls: list[tuple[int, int]] = []
+
+    def head(self, url):
+        return self.head_response
+
+    def stream_range(self, url, start, end):
+        self.range_calls.append((start, end))
+        data = self._bodies[(start, end)]
+        mid = max(len(data) // 2, 1)
+        if (start, end) == self._failing_range and not self._failed_once:
+            self._failed_once = True
+
+            def _broken_generator():
+                yield data[:mid]
+                raise RuntimeError("connection reset mid-stream")
+
+            return _broken_generator()
+        # Healthy stream (used after failure for resume; also used for other chunks)
+        return iter([data[:mid], data[mid:]])
+
+    def get_full(self, url):
+        raise AssertionError("not used in this test")
+
+
+class TestChunkedFileDownloaderMidStreamError:
+    def test_should_resume_after_stream_raises_mid_piece_without_byte_loss(self, tmp_path):
+        size = 4000
+        body = bytes(range(256)) * (size // 256) + b"Z" * (size % 256)
+        assert len(body) == size
+        chunk_size = size // 4
+        bodies = {
+            (0, chunk_size - 1): body[0:chunk_size],
+            (chunk_size, 2 * chunk_size - 1): body[chunk_size : 2 * chunk_size],
+            (2 * chunk_size, 3 * chunk_size - 1): body[2 * chunk_size : 3 * chunk_size],
+            (3 * chunk_size, size - 1): body[3 * chunk_size : size],
+        }
+        failing_range = (chunk_size, 2 * chunk_size - 1)
+        http = _MidStreamFailingHttpClient(
+            head=_HeadResult(content_length=size, etag='"abc"', accept_ranges="bytes"),
+            bodies=bodies,
+            failing_range=failing_range,
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4)
+        plan = _make_plan(tmp_path, size)
+
+        with pytest.raises(FileDownloadError):
+            downloader.download(
+                plan=plan,
+                on_progress=lambda n: None,
+                cancel_event=threading.Event(),
+                pause_event=threading.Event(),
+            )
+
+        # Second run with extended bodies for resumed tail of the failed chunk
+        first_piece_len = max((chunk_size) // 2, 1)
+        resumed_start = chunk_size + first_piece_len
+        resumed_end = 2 * chunk_size - 1
+        bodies[(resumed_start, resumed_end)] = body[resumed_start : resumed_end + 1]
+
+        downloader.download(
+            plan=plan,
+            on_progress=lambda n: None,
+            cancel_event=threading.Event(),
+            pause_event=threading.Event(),
+        )
+
+        target = tmp_path / "file.bin"
+        assert target.exists()
+        assert target.read_bytes() == body
+        # Verify the failed chunk only re-requested its missing tail on resume
+        assert (resumed_start, resumed_end) in http.range_calls
+
+    def test_should_preserve_bytes_when_sidecar_file_is_corrupted_between_runs(self, tmp_path):
+        size = 1000
+        body = b"R" * size
+        # Pretend first chunk already downloaded; .part has correct first 250 bytes
+        part = tmp_path / "file.bin.part"
+        part.write_bytes(body[:250] + b"\x00" * 750)
+        meta = tmp_path / "file.bin.part.meta"
+
+        # First save establishes a baseline; the second save will leave the first as .bak
+        Sidecar(
+            url="https://example.com/file.bin",
+            etag='"same"',
+            content_length=size,
+            chunks=[
+                ChunkState(index=0, start=0, end=249, bytes_done=250),
+                ChunkState(index=1, start=250, end=499, bytes_done=0),
+                ChunkState(index=2, start=500, end=749, bytes_done=0),
+                ChunkState(index=3, start=750, end=999, bytes_done=0),
+            ],
+        ).save(meta)
+        Sidecar(
+            url="https://example.com/file.bin",
+            etag='"same"',
+            content_length=size,
+            chunks=[
+                ChunkState(index=0, start=0, end=249, bytes_done=250),
+                ChunkState(index=1, start=250, end=499, bytes_done=0),
+                ChunkState(index=2, start=500, end=749, bytes_done=0),
+                ChunkState(index=3, start=750, end=999, bytes_done=0),
+            ],
+        ).save(meta)
+        # Corrupt the primary sidecar file. The .bak written by save() should survive.
+        meta.write_text("{broken", encoding="utf-8")
+
+        bodies = {
+            (250, 499): body[250:500],
+            (500, 749): body[500:750],
+            (750, 999): body[750:1000],
+        }
+        http = _FakeHttpClient(
+            head=_HeadResult(content_length=size, etag='"same"', accept_ranges="bytes"),
+            bodies=bodies,
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4)
+
+        downloader.download(
+            plan=_make_plan(tmp_path, size),
+            on_progress=lambda n: None,
+            cancel_event=threading.Event(),
+            pause_event=threading.Event(),
+        )
+
+        # Recovered via .bak: the already-downloaded first chunk is NOT refetched
+        assert (0, 249) not in http.range_calls
+        assert (tmp_path / "file.bin").read_bytes() == body
+
+    def test_should_flush_part_file_before_recording_offset_in_sidecar(self, tmp_path):
+        size = 1000
+        body = b"F" * size
+        bodies = {
+            (0, 249): body[0:250],
+            (250, 499): body[250:500],
+            (500, 749): body[500:750],
+            (750, 999): body[750:1000],
+        }
+        http = _FakeHttpClient(
+            head=_HeadResult(content_length=size, etag=None, accept_ranges="bytes"),
+            bodies=bodies,
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4)
+
+        part_path = tmp_path / "file.bin.part"
+        chunk_by_index = {
+            0: (0, 249),
+            1: (250, 499),
+            2: (500, 749),
+            3: (750, 999),
+        }
+
+        from voicetotext.downloads import chunked_file_downloader as cfd
+
+        original_update = cfd._SharedDownloadState.update_chunk
+
+        def _verifying_update(self, index, bytes_done, meta_path):
+            start_offset, _ = chunk_by_index[index]
+            full_chunk_body = bodies[chunk_by_index[index]]
+            expected = full_chunk_body[:bytes_done]
+            # bytes must be on disk BEFORE the sidecar claims them
+            with open(part_path, "rb") as fd:
+                fd.seek(start_offset)
+                actual = fd.read(bytes_done)
+            assert actual == expected, (
+                f"Sidecar claimed {bytes_done} bytes for chunk {index} "
+                f"but disk only had {len(actual.rstrip(bytes([0])))} non-zero bytes"
+            )
+            return original_update(self, index, bytes_done, meta_path)
+
+        with patch.object(cfd._SharedDownloadState, "update_chunk", _verifying_update):
+            downloader.download(
+                plan=_make_plan(tmp_path, size),
+                on_progress=lambda n: None,
+                cancel_event=threading.Event(),
+                pause_event=threading.Event(),
+            )
+
+        assert (tmp_path / "file.bin").read_bytes() == body

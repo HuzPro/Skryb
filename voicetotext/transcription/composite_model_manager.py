@@ -20,9 +20,13 @@ class CompositeModelManager(ModelManager):
     the user's config — for actions whose target storage matters
     (download, delete, get_model_path).
 
-    Listing and installation queries aggregate across children: a model
-    counts as installed if *any* engine has its weights on disk, since
-    the user can hot-swap into that engine without re-downloading.
+    Listing aggregates across children so the UI shows the union
+    catalogue. Installation, in contrast, is engine-scoped: each engine
+    has its own on-disk repo layout, so ``is_installed`` delegates to
+    the *owning* child (preferring the active engine) and reports
+    ``True`` only when that child's weights are present. Reporting
+    ``True`` across engines would lie to the loader, which would then
+    try to read repo files that were never downloaded.
     """
 
     def __init__(
@@ -44,7 +48,12 @@ class CompositeModelManager(ModelManager):
         return any(child.has_model(name) for child in self._by_engine.values())
 
     def is_installed(self, name: str) -> bool:
-        return any(child.is_installed(name) for child in self._by_engine.values())
+        return self._installed_check_for(name)
+
+    def _installed_check_for(self, name: str) -> bool:
+        if not self.has_model(name):
+            return False
+        return self._owning_child(name).is_installed(name)
 
     def download(self, name: str) -> DownloadHandle:
         return self._owning_child(name).download(name)

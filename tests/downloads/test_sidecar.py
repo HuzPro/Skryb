@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -144,3 +145,52 @@ class TestSidecarUpdateChunk:
         assert updated.chunks[1].bytes_done == 300
         # Original stays immutable
         assert sidecar.chunks[1].bytes_done == 0
+
+
+class TestSidecarAtomicSave:
+    def test_should_not_leave_corrupt_file_when_write_is_interrupted(self, tmp_path):
+        path = tmp_path / "file.meta"
+        original = Sidecar(
+            url="https://example.com/file.bin",
+            etag='"first"',
+            content_length=1000,
+            chunks=[
+                ChunkState(index=0, start=0, end=499, bytes_done=499),
+                ChunkState(index=1, start=500, end=999, bytes_done=200),
+            ],
+        )
+        original.save(path)
+
+        updated = original.with_chunk_progress(index=1, bytes_done=500)
+        with patch(
+            "voicetotext.downloads.sidecar.os.replace",
+            side_effect=OSError("disk yanked"),
+        ):
+            with pytest.raises(OSError):
+                updated.save(path)
+
+        # Original sidecar still loads cleanly and equals the pre-interruption state
+        reloaded = Sidecar.load(path)
+        assert reloaded == original
+        # No leftover .tmp sibling
+        leftover = list(tmp_path.glob("*.tmp"))
+        assert leftover == []
+
+    def test_should_replace_existing_sidecar_atomically_on_windows(self, tmp_path):
+        path = tmp_path / "file.meta"
+        first = Sidecar(
+            url="https://example.com/file.bin",
+            etag='"v1"',
+            content_length=1000,
+            chunks=[ChunkState(index=0, start=0, end=999, bytes_done=100)],
+        )
+        first.save(path)
+
+        second = first.with_chunk_progress(index=0, bytes_done=750)
+        second.save(path)
+
+        reloaded = Sidecar.load(path)
+        assert reloaded.bytes_done == 750
+        # No leftover .tmp sibling
+        leftover = list(tmp_path.glob("*.tmp"))
+        assert leftover == []

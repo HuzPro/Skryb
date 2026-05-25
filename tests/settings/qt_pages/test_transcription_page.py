@@ -156,10 +156,17 @@ class TestTranscriptionPageDownloadActions:
 
         service.delete_model.assert_called_once_with("tiny")
 
-    def test_should_swallow_delete_valueerror_to_avoid_ui_crash(self, page, service):
-        service.delete_model.side_effect = ValueError("active")
+    def test_should_emit_delete_error_when_delete_model_raises_valueerror(
+        self, qtbot, page, service,
+    ):
+        service.delete_model.side_effect = ValueError(
+            "cannot delete active model 'base'"
+        )
 
-        page.request_delete("base")
+        with qtbot.waitSignal(page.delete_error, timeout=500) as sig:
+            page.request_delete("base")
+
+        assert sig.args == ["base", "cannot delete active model 'base'"]
 
     def test_should_swallow_pause_lookuperror(self, page, service):
         service.pause_download.side_effect = LookupError("missing")

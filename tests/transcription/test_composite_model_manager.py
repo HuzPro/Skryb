@@ -76,21 +76,55 @@ class TestCompositeModelManagerListing:
 
 
 class TestCompositeModelManagerInstallation:
-    def test_should_report_installed_when_any_child_has_model(self):
+    def test_should_report_not_installed_when_only_inactive_engine_has_model(self):
+        info = _info("large-v3-turbo")
         composite = _make_composite(
-            transformers=_FakeManager(installed={"base": False}),
-            faster_whisper=_FakeManager(installed={"base": True}),
+            transformers=_FakeManager(
+                models=[info], installed={"large-v3-turbo": True},
+            ),
+            faster_whisper=_FakeManager(
+                models=[info], installed={"large-v3-turbo": False},
+            ),
+            active="faster_whisper",
         )
 
-        assert composite.is_installed("base") is True
+        assert composite.is_installed("large-v3-turbo") is False
 
-    def test_should_report_not_installed_when_no_child_has_model(self):
+    def test_should_report_installed_when_active_engine_has_model(self):
+        info = _info("large-v3-turbo")
         composite = _make_composite(
-            transformers=_FakeManager(installed={"base": False}),
-            faster_whisper=_FakeManager(installed={"base": False}),
+            transformers=_FakeManager(
+                models=[info], installed={"large-v3-turbo": False},
+            ),
+            faster_whisper=_FakeManager(
+                models=[info], installed={"large-v3-turbo": True},
+            ),
+            active="faster_whisper",
         )
 
-        assert composite.is_installed("base") is False
+        assert composite.is_installed("large-v3-turbo") is True
+
+    def test_should_report_not_installed_when_no_child_owns_model(self):
+        composite = _make_composite()
+
+        assert composite.is_installed("unknown") is False
+
+    def test_should_delegate_to_owning_child_when_active_does_not_own_model(self):
+        info = _info(
+            "parakeet-tdt-0.6b-v3", repo_id="nvidia/parakeet-tdt-0.6b-v3",
+        )
+        composite = CompositeModelManager(
+            by_engine={
+                "transformers": _FakeManager(),
+                "nano_parakeet": _FakeManager(
+                    models=[info],
+                    installed={"parakeet-tdt-0.6b-v3": True},
+                ),
+            },
+            active_engine_provider=lambda: "transformers",
+        )
+
+        assert composite.is_installed("parakeet-tdt-0.6b-v3") is True
 
 
 class TestCompositeModelManagerRouting:

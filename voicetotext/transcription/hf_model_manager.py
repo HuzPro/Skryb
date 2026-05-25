@@ -9,6 +9,10 @@ from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
 
+_CT2_WEIGHTS_FILENAME = "model.bin"
+_TRANSFORMERS_CONFIG_FILENAME = "config.json"
+
+
 class HuggingFaceModelManager(ModelManager):
     """ModelManager backed by the chunked DownloadManager and HfRepoResolver.
 
@@ -55,17 +59,36 @@ class HuggingFaceModelManager(ModelManager):
 
     @staticmethod
     def _snapshot_has_complete_model(snapshot: Path) -> bool:
+        return (
+            HuggingFaceModelManager._is_nemo_layout(snapshot)
+            or HuggingFaceModelManager._is_ct2_layout(snapshot)
+            or HuggingFaceModelManager._is_transformers_layout(snapshot)
+        )
+
+    @staticmethod
+    def _is_nemo_layout(snapshot: Path) -> bool:
         # NeMo single-file layout (Parakeet): a `.nemo` file alone is a
         # complete model — nano-parakeet doesn't need config.json or
         # safetensors weights.
-        if any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file()):
-            return True
-        # Standard transformers / faster-whisper layout: config + weights.
-        # Weights may be a single ``model.safetensors`` /
-        # ``pytorch_model.bin`` (Whisper) or a sharded layout indexed by
+        return any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file())
+
+    @staticmethod
+    def _is_ct2_layout(snapshot: Path) -> bool:
+        # CTranslate2 layout (Systran/faster-whisper-*): ``config.json`` +
+        # ``model.bin``. Loaded directly by ``ctranslate2.models.Whisper``.
+        return (
+            (snapshot / _TRANSFORMERS_CONFIG_FILENAME).exists()
+            and (snapshot / _CT2_WEIGHTS_FILENAME).exists()
+        )
+
+    @staticmethod
+    def _is_transformers_layout(snapshot: Path) -> bool:
+        # Standard transformers layout: ``config.json`` + weights. Weights
+        # may be a single ``model.safetensors`` / ``pytorch_model.bin``
+        # (Whisper) or a sharded layout indexed by
         # ``model.safetensors.index.json`` with ``model-NNNNN-of-MMMMM``
         # shards (Granite Speech and other multi-GB models).
-        if not (snapshot / "config.json").exists():
+        if not (snapshot / _TRANSFORMERS_CONFIG_FILENAME).exists():
             return False
         return (
             (snapshot / "model.safetensors").exists()

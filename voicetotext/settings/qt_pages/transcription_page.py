@@ -38,6 +38,7 @@ class TranscriptionPage(QWidget):
     """
 
     download_error = Signal(str, str)  # (model_name, error_message)
+    delete_error = Signal(str, str)  # (model_name, error_message)
 
     def __init__(
         self, service: SettingsService, parent: QWidget | None = None
@@ -253,5 +254,5 @@ class TranscriptionPage(QWidget):
     def request_delete(self, name: str) -> None:
         try:
             self._service.delete_model(name)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            self.delete_error.emit(name, str(exc))

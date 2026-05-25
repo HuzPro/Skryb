@@ -1,3 +1,4 @@
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from voicetotext.downloads.state import ChunkState
 
 
 _DEFAULT_N_CHUNKS = 8
+_SIDECAR_BACKUP_SUFFIX = ".bak"
 
 
 class FileDownloadError(Exception):
@@ -233,27 +235,52 @@ class ChunkedFileDownloader:
         stream = self._http.stream_range(
             plan.url, chunk.start + chunk.bytes_done, chunk.end
         )
-        cursor = chunk.start + chunk.bytes_done
-        bytes_in_chunk = chunk.bytes_done
         try:
-            with open(part_path, "r+b") as fd:
-                for piece in stream:
-                    if not piece:
-                        continue
-                    if cancel_event.is_set():
-                        return
-                    fd.seek(cursor)
-                    fd.write(piece)
-                    cursor += len(piece)
-                    bytes_in_chunk += len(piece)
-                    shared.update_chunk(chunk.index, bytes_in_chunk, meta_path)
-                    on_progress(len(piece))
-                    if pause_event.is_set():
-                        return
+            self._stream_into_part(
+                stream=stream,
+                chunk=chunk,
+                part_path=part_path,
+                meta_path=meta_path,
+                shared=shared,
+                on_progress=on_progress,
+                cancel_event=cancel_event,
+                pause_event=pause_event,
+            )
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
                 close()
+
+    @staticmethod
+    def _stream_into_part(
+        *,
+        stream: Iterable[bytes],
+        chunk: ChunkState,
+        part_path: Path,
+        meta_path: Path,
+        shared: "_SharedDownloadState",
+        on_progress: Callable[[int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
+        cursor = chunk.start + chunk.bytes_done
+        bytes_in_chunk = chunk.bytes_done
+        with open(part_path, "r+b") as fd:
+            for piece in stream:
+                if not piece:
+                    continue
+                if cancel_event.is_set():
+                    return
+                fd.seek(cursor)
+                fd.write(piece)
+                fd.flush()
+                os.fsync(fd.fileno())  # bytes on disk BEFORE we claim them
+                cursor += len(piece)
+                bytes_in_chunk += len(piece)
+                shared.update_chunk(chunk.index, bytes_in_chunk, meta_path)
+                on_progress(len(piece))
+                if pause_event.is_set():
+                    return
 
     @staticmethod
     def _ensure_part_file_sized(part_path: Path, size: int) -> None:
@@ -296,3 +323,8 @@ class ChunkedFileDownloader:
         part_path.rename(plan.target)
         if meta_path.exists():
             meta_path.unlink()
+        meta_backup = meta_path.with_suffix(
+            meta_path.suffix + _SIDECAR_BACKUP_SUFFIX
+        )
+        if meta_backup.exists():
+            meta_backup.unlink()

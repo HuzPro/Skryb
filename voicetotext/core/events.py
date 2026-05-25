@@ -96,3 +96,13 @@ class EngineLoadCompletedEvent(DomainEvent):
 class EngineLoadFailedEvent(DomainEvent):
     model_name: str = ""
     error: str = ""
+
+
+@dataclass(frozen=True)
+class ModelDeletedEvent(DomainEvent):
+    """Published after a model's files are removed and its cache cleared.
+
+    The settings UI subscribes to this so the affected row's button
+    flips from "Delete" back to "Download" without a manual refresh.
+    """
+    name: str = ""

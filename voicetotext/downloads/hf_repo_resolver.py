@@ -5,10 +5,10 @@ from typing import Protocol
 
 
 _IGNORE_PATTERNS = (
-    "*.bin",            # PyTorch pickle
-    "*.h5",             # TensorFlow
-    "*.msgpack",        # Flax
-    "*.fp32-*",         # FP32 sharded variants
+    "pytorch_model.bin",  # PyTorch pickle weights (we ship safetensors instead)
+    "*.h5",               # TensorFlow
+    "*.msgpack",          # Flax
+    "*.fp32-*",           # FP32 sharded variants
     "*.index.fp32.json",
     "README*",
     ".gitattributes",

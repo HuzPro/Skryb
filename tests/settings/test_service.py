@@ -12,6 +12,7 @@ from voicetotext.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
+    ModelDeletedEvent,
     StateChangedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -257,6 +258,32 @@ class TestDeleteModel:
         views = {v.name: v for v in service.list_models()}
         assert views["tiny"].installed is False
 
+    def test_should_publish_model_deleted_event_on_successful_delete(self):
+        service, _, _, bus, _ = _build_service(
+            config_overrides={"transcription.model_size": "base"},
+            installed={"tiny": True},
+        )
+        received: list[ModelDeletedEvent] = []
+        bus.subscribe(ModelDeletedEvent, received.append)
+
+        service.delete_model("tiny")
+
+        assert len(received) == 1
+        assert received[0].name == "tiny"
+
+    def test_should_not_publish_event_when_delete_rejected_for_active_model(self):
+        service, _, _, bus, _ = _build_service(
+            config_overrides={"transcription.model_size": "base"},
+            installed={"base": True},
+        )
+        received: list[ModelDeletedEvent] = []
+        bus.subscribe(ModelDeletedEvent, received.append)
+
+        with pytest.raises(ValueError):
+            service.delete_model("base")
+
+        assert received == []
+
 
 class TestCurrentDraft:
     def test_should_project_config_into_draft(self):
@@ -347,6 +374,50 @@ class TestApplyDraft:
         assert changes.engine_reload_required is True
         assert changes.hotkey_changed is False
         assert changes.output_changed is False
+
+    def test_should_clear_install_cache_when_engine_changes(self):
+        service, _, manager, *_ = _build_service(
+            config_overrides={"transcription.engine": "transformers"},
+            installed={"base": True},
+        )
+        # Prime the cache so a stale True would survive a non-clearing apply.
+        assert service.is_installed("base") is True
+        manager._installed["base"] = False
+
+        draft = SettingsDraft(
+            model_size="base",
+            language="en",
+            device="auto",
+            engine="faster_whisper",  # changed from "transformers"
+            hotkey_combination="ctrl+alt+m",
+            hotkey_mode="toggle",
+            output_mode=OutputMode.DIRECT_PASTE,
+        )
+        service.apply_draft(draft)
+
+        assert service.is_installed("base") is False
+
+    def test_should_preserve_install_cache_when_engine_unchanged(self):
+        service, _, manager, *_ = _build_service(
+            config_overrides={"transcription.engine": "transformers"},
+            installed={"base": True},
+        )
+        assert service.is_installed("base") is True
+        manager._installed["base"] = False  # simulate stale disk read
+
+        draft = SettingsDraft(
+            model_size="base",
+            language="en",
+            device="auto",
+            engine="transformers",  # unchanged
+            hotkey_combination="ctrl+alt+m",
+            hotkey_mode="toggle",
+            output_mode=OutputMode.DIRECT_PASTE,
+        )
+        service.apply_draft(draft)
+
+        # Cache preserved → stale True still returned.
+        assert service.is_installed("base") is True
 
 
 class TestTriggerEngineSwap:

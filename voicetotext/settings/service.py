@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.event_bus import EventBus
@@ -10,6 +11,7 @@ from voicetotext.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
+    ModelDeletedEvent,
     StateChangedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -150,10 +152,14 @@ class SettingsService:
         self._downloads.cancel(name)
 
     def delete_model(self, name: str) -> None:
-        if name == self.selected_model():
-            raise ValueError(f"cannot delete active model '{name}'")
+        self._reject_if_active(name)
         self._model_manager.delete(name)
         self._install_cache.invalidate(name)
+        self._event_bus.publish(ModelDeletedEvent(name=name))
+
+    def _reject_if_active(self, name: str) -> None:
+        if name == self.selected_model():
+            raise ValueError(f"cannot delete active model '{name}'")
 
     # ------------------------------------------------------------------
     # Draft lifecycle
@@ -180,7 +186,23 @@ class SettingsService:
         self._config.set("hotkey.mode", draft.hotkey_mode)
         self._config.set("output.mode", draft.output_mode.value)
         self._config.save()
+        self._invalidate_cache_on_engine_change(original, draft)
         return ChangeSet.between(original, draft)
+
+    def _invalidate_cache_on_engine_change(
+        self, original: SettingsDraft, updated: SettingsDraft,
+    ) -> None:
+        """Drop cached ``is_installed`` results when the engine changed.
+
+        Cache keys are model names — engine-agnostic — but the truth
+        they cache (``CompositeModelManager.is_installed``) now routes
+        to the active engine's repo. A stale ``True`` from before the
+        swap would tell the loader a model is ready when its files live
+        in a sibling engine's cache, surfacing as the original
+        ``LocalEntryNotFoundError``.
+        """
+        if original.engine != updated.engine:
+            self._install_cache.clear()
 
     # ------------------------------------------------------------------
     # Engine + device queries (hardware-aware)
@@ -265,6 +287,23 @@ class SettingsService:
     def unsubscribe_state_changes(self, listener: StateChangeListener) -> None:
         if listener in self._state_listeners:
             self._state_listeners.remove(listener)
+
+    def subscribe_model_deleted(
+        self, handler: Callable[[ModelDeletedEvent], None],
+    ) -> None:
+        """Register *handler* to be invoked on every :class:`ModelDeletedEvent`.
+
+        The settings window uses this to refresh the affected row when a
+        model is removed. Subscriptions are reference-counted by the
+        underlying :class:`EventBus`, so the window must call
+        :meth:`unsubscribe_model_deleted` on close.
+        """
+        self._event_bus.subscribe(ModelDeletedEvent, handler)
+
+    def unsubscribe_model_deleted(
+        self, handler: Callable[[ModelDeletedEvent], None],
+    ) -> None:
+        self._event_bus.unsubscribe(ModelDeletedEvent, handler)
 
     def _fanout_progress(self, event: DownloadProgressEvent) -> None:
         for listener in list(self._download_listeners):

@@ -110,6 +110,19 @@ class TestModelInstallationCacheInvalidation:
 
         assert cache.is_installed("base") is False
 
+    def test_should_clear_all_cached_entries_when_clear_is_called(self):
+        manager = _FakeModelManager({"tiny": True, "base": True})
+        cache = ModelInstallationCache(manager, SimpleEventBus())
+        cache.is_installed("tiny")
+        cache.is_installed("base")
+        calls_before_clear = manager.is_installed_call_count
+
+        cache.clear()
+        cache.is_installed("tiny")
+        cache.is_installed("base")
+
+        assert manager.is_installed_call_count == calls_before_clear + 2
+
 
 class TestModelInstallationCacheThreadSafety:
     def test_should_serialize_concurrent_populate_and_reads(self):

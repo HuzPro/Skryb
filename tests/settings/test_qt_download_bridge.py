@@ -5,6 +5,7 @@ from voicetotext.core.events import (
     DownloadFailedEvent,
     DownloadProgressEvent,
     DownloadStateChangedEvent,
+    ModelDeletedEvent,
 )
 from voicetotext.settings.qt_download_bridge import QtDownloadBridge
 
@@ -57,3 +58,9 @@ class TestQtDownloadBridgeSignals:
         bridge.on_download_failed(event)
 
         assert received == [event]
+
+    def test_should_re_emit_model_deleted_event_as_qt_signal(self, qtbot, bridge):
+        with qtbot.waitSignal(bridge.deleted, timeout=500) as sig:
+            bridge.on_model_deleted(ModelDeletedEvent(name="tiny"))
+
+        assert sig.args[0].name == "tiny"
