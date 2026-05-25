@@ -52,7 +52,7 @@ class TestNanoParakeetAdapterLoadModel:
         from_pretrained.assert_called_once_with(
             model_name="nvidia/parakeet-tdt-0.6b-v2",
             device="cpu",
-            dtype=torch.float32,
+            dtype=torch.bfloat16,
         )
         assert adapter.is_model_loaded() is True
 
@@ -76,18 +76,20 @@ class TestNanoParakeetAdapterLoadModel:
         from_pretrained.assert_called_once_with(
             model_name="nvidia/parakeet-tdt-0.6b-v3",
             device="cuda",
-            dtype=torch.float32,
+            dtype=torch.bfloat16,
         )
 
     @patch.dict("sys.modules", _mocked_modules())
-    def test_should_force_float32_dtype_to_avoid_bf16_mismatch(self) -> None:
-        # nano_parakeet auto-selects bfloat16 on bf16-capable GPUs (RDNA4
-        # included). When the CUDA-graph fast path is disabled (which we
-        # do to dodge cross-thread replay crashes on ROCm), the slow
-        # `tdt_greedy_decode` path crashes with
-        # "mat1 and mat2 must have the same dtype" because the encoder
-        # output is cast back to float32 while decoder/joint stay bf16.
-        # Forcing float32 avoids the entire bf16 code path.
+    def test_should_request_bfloat16_dtype_for_throughput_and_vram(
+        self,
+    ) -> None:
+        # The dtype sweep at tests/performance/.results/
+        # dtype_comparison_chunked_results.json showed bf16 cuts long-
+        # audio latency roughly 2x vs fp32 (4.78s vs 6.72s for 9 min)
+        # and the chunked-VRAM peak stays under 4.2 GB. End-to-end
+        # verification through this adapter on RDNA4 (gfx1200) produced
+        # identical text to fp32 with no dtype-mismatch crash, so the
+        # adapter requests bf16 explicitly.
         import torch
         from nano_parakeet import from_pretrained
 
@@ -103,7 +105,7 @@ class TestNanoParakeetAdapterLoadModel:
         adapter.load_model()
 
         kwargs = from_pretrained.call_args.kwargs
-        assert kwargs["dtype"] is torch.float32
+        assert kwargs["dtype"] is torch.bfloat16
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_route_hf_hub_download_through_app_models_dir_during_load(
@@ -281,6 +283,134 @@ class TestNanoParakeetAdapterTranscribe:
 
         with pytest.raises(TranscriptionError, match="not loaded"):
             adapter.transcribe(_make_audio())
+
+
+class TestNanoParakeetAdapterChunking:
+    """Long audio is split into <=60 s chunks before being handed to the
+    underlying model, then each chunk's transcription is joined with a
+    single space. The unchunked path on a 9-minute clip allocates ~9 GB
+    of activation memory and only just fits on a 16 GB card; chunking
+    keeps the peak under ~4 GB. Audio that fits in a single chunk takes
+    the same one-shot transcribe call as before.
+    """
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_call_model_transcribe_once_when_audio_fits_in_single_chunk(
+        self,
+    ) -> None:
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        model = from_pretrained.return_value
+        model.transcribe.return_value = "short clip"
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        adapter.transcribe(_make_audio(samples=16000))
+
+        assert model.transcribe.call_count == 1
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_split_long_audio_into_60_second_chunks(self) -> None:
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        model = from_pretrained.return_value
+        model.transcribe.return_value = "chunk"
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        # 130 s of audio at 16 kHz → 60 s + 60 s + 10 s = 3 chunks
+        adapter.transcribe(_make_audio(samples=130 * 16000))
+
+        assert model.transcribe.call_count == 3
+        chunk_sizes = [call.args[0].shape[0] for call in model.transcribe.call_args_list]
+        assert chunk_sizes == [60 * 16000, 60 * 16000, 10 * 16000]
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_concatenate_text_from_each_chunk_with_single_space(
+        self,
+    ) -> None:
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        model = from_pretrained.return_value
+        model.transcribe.side_effect = [
+            "  first chunk.  ",
+            " second chunk.",
+            "third chunk.",
+        ]
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        result = adapter.transcribe(_make_audio(samples=130 * 16000))
+
+        assert result.text == "first chunk. second chunk. third chunk."
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_emit_text_from_single_chunk_unchanged_when_audio_short(
+        self,
+    ) -> None:
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        model = from_pretrained.return_value
+        model.transcribe.return_value = "  hello world  "
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        result = adapter.transcribe(_make_audio(samples=16000))
+
+        assert result.text == "hello world"
+
+    @patch.dict("sys.modules", _mocked_modules())
+    def test_should_skip_empty_chunk_text_when_joining(self) -> None:
+        from nano_parakeet import from_pretrained
+
+        from voicetotext.transcription.nano_parakeet_adapter import (
+            NanoParakeetAdapter,
+        )
+
+        model = from_pretrained.return_value
+        model.transcribe.side_effect = ["first.", "   ", "third."]
+        adapter = NanoParakeetAdapter(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
+            device="cpu",
+            model_dir=Path("/tmp/models"),
+        )
+        adapter.load_model()
+
+        result = adapter.transcribe(_make_audio(samples=130 * 16000))
+
+        assert result.text == "first. third."
 
 
 class TestNanoParakeetAdapterWarmup:

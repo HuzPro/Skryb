@@ -20,6 +20,15 @@ from voicetotext.transcription.result import TranscriptionResult
 _logger = logging.getLogger(__name__)
 
 
+# Long-audio inference allocates encoder activations proportional to the
+# clip length. On the 9-minute LongStory fixture the unchunked path peaks
+# at ~9 GB of VRAM, barely fitting on a 16 GB card and OOMing on smaller
+# ones. Splitting into 60 s chunks caps the peak under ~4.2 GB with
+# negligible extra latency (see
+# ``tests/performance/.results/dtype_comparison_chunked_results.json``).
+_CHUNK_SECONDS = 60.0
+
+
 class _ParakeetModel(Protocol):
     def transcribe(self, audio: object) -> str: ...
 
@@ -72,14 +81,16 @@ class NanoParakeetAdapter(TranscriptionEngine):
         and forces ``local_files_only`` to skip the freshness HEAD
         request. We install it only for the lifetime of the
         ``from_pretrained`` call and restore the original in a
-        ``finally`` block — without that, back-to-back adapter loads
+        ``finally`` block; without that, back-to-back adapter loads
         stomp each other's closures and the module-global stays
         tainted long after the engine has been disposed.
 
-        Force float32 because nano-parakeet auto-selects bfloat16 on
-        bf16-capable GPUs (RDNA4 included) and ROCm's bf16 kernels
-        are less battle-tested than fp32 — the perf/memory cost is
-        worth the stability.
+        Request bfloat16 explicitly. The sweep at
+        ``tests/performance/.results/dtype_comparison_chunked_results.json``
+        showed bf16 produces text identical to fp32 on RDNA4 (gfx1200)
+        while cutting long-audio latency roughly 30% and trimming VRAM
+        by ~10%. Combined with the 60 s chunking in :meth:`transcribe`
+        the peak stays under 4.2 GB on a 9-minute clip.
         """
         original_download = nano_parakeet_module.hf_hub_download
         nano_parakeet_module.hf_hub_download = self._make_patched_download(
@@ -89,7 +100,7 @@ class NanoParakeetAdapter(TranscriptionEngine):
             self._model = nano_parakeet_module.from_pretrained(
                 model_name=self._repo_id,
                 device=self._device,
-                dtype=torch_module.float32,
+                dtype=torch_module.bfloat16,
             )
         finally:
             nano_parakeet_module.hf_hub_download = original_download
@@ -121,18 +132,42 @@ class NanoParakeetAdapter(TranscriptionEngine):
         return self._model is not None
 
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
-        if not self.is_model_loaded():
-            raise TranscriptionError("Model not loaded")
-
+        self._raise_if_not_loaded()
         start = time.monotonic()
-        text = self._model.transcribe(audio.data)
-
+        text = self._transcribe_chunked(audio)
         return TranscriptionResult(
-            text=str(text).strip(),
+            text=text,
             language="en",
             language_probability=0.0,
             transcription_seconds=time.monotonic() - start,
         )
+
+    def _raise_if_not_loaded(self) -> None:
+        if not self.is_model_loaded():
+            raise TranscriptionError("Model not loaded")
+
+    def _transcribe_chunked(self, audio: AudioSegment) -> str:
+        chunks = self._split_into_chunks(audio)
+        parts = [
+            str(self._model.transcribe(chunk.data)).strip()
+            for chunk in chunks
+        ]
+        return " ".join(part for part in parts if part)
+
+    @staticmethod
+    def _split_into_chunks(audio: AudioSegment) -> list[AudioSegment]:
+        samples_per_chunk = int(_CHUNK_SECONDS * audio.sample_rate)
+        total_samples = audio.sample_count
+        chunks: list[AudioSegment] = []
+        for start in range(0, total_samples, samples_per_chunk):
+            end = min(start + samples_per_chunk, total_samples)
+            chunk_data = audio.data[start:end]
+            if chunk_data.size == 0:
+                continue
+            chunks.append(
+                AudioSegment(data=chunk_data, sample_rate=audio.sample_rate),
+            )
+        return chunks
 
     def dispose(self) -> None:
         if self._model is None:
