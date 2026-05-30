@@ -1,0 +1,96 @@
+"""Contract: every one-shot install file pulls the full torch family.
+
+The platform requirements files (`requirements-nvidia.txt`,
+`requirements-cpu.txt`, `requirements-amd.txt`,
+`requirements-amd-linux.txt`) are the ONLY place torch-family wheels
+get pinned. `requirements.txt` / `requirements-all.txt` deliberately
+omit torch so a pre-existing custom build is left untouched, so they
+are not one-shot files and are not checked here.
+
+`torchaudio` is a hard runtime dependency, not optional: the Granite
+Speech engine's transformers feature extractor calls
+`requires_backends(self, ["torchaudio"])` and builds a
+`torchaudio.transforms.MelSpectrogram`. It was originally declared
+only in the AMD files, so an NVIDIA user hit a runtime
+"install torchaudio" error because `requirements-nvidia.txt` shipped
+`torch` alone. This contract fails the build if any one-shot file —
+or the canonical `pyproject.toml` dependency list — drops a required
+torch package again.
+"""
+
+import re
+import tomllib
+from pathlib import Path
+
+import pytest
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Torch-family packages every one-shot install must provide. `torch`
+# is the engine backbone; `torchaudio` is required by the Granite
+# Speech feature extractor. `torchvision` is deliberately NOT listed —
+# no engine imports it, so it stays out of the required set even though
+# AMD's ROCm trio happens to ship it.
+_REQUIRED_TORCH_PACKAGES = frozenset({"torch", "torchaudio"})
+
+_ONE_SHOT_INSTALL_FILES = (
+    "requirements-nvidia.txt",
+    "requirements-cpu.txt",
+    "requirements-amd.txt",
+    "requirements-amd-linux.txt",
+)
+
+_PACKAGE_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def _normalize(name: str) -> str:
+    return name.lower().replace("_", "-")
+
+
+def _names_from_requirement_lines(lines: list[str]) -> set[str]:
+    names: set[str] = set()
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        match = _PACKAGE_NAME.match(line)
+        if match:
+            names.add(_normalize(match.group(1)))
+    return names
+
+
+def _missing_required_packages(declared: set[str]) -> set[str]:
+    return {_normalize(pkg) for pkg in _REQUIRED_TORCH_PACKAGES} - declared
+
+
+def _packages_in_requirements_file(filename: str) -> set[str]:
+    text = (_REPO_ROOT / filename).read_text(encoding="utf-8")
+    return _names_from_requirement_lines(text.splitlines())
+
+
+def _packages_in_pyproject_dependencies() -> set[str]:
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    return _names_from_requirement_lines(pyproject["project"]["dependencies"])
+
+
+@pytest.mark.parametrize("filename", _ONE_SHOT_INSTALL_FILES)
+def test_one_shot_install_file_declares_every_required_torch_package(
+    filename: str,
+) -> None:
+    missing = _missing_required_packages(_packages_in_requirements_file(filename))
+    assert not missing, (
+        f"{filename} is a one-shot install file but omits {sorted(missing)}; "
+        f"users on this platform cannot install all required deps from it."
+    )
+
+
+def test_pyproject_dependencies_declare_every_required_torch_package() -> None:
+    missing = _missing_required_packages(_packages_in_pyproject_dependencies())
+    assert not missing, (
+        f"pyproject.toml [project].dependencies omits {sorted(missing)}; "
+        f"the canonical dependency list must declare every torch-family "
+        f"runtime dependency."
+    )

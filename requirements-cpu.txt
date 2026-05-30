@@ -1,7 +1,12 @@
 # One-shot install for machines with no GPU (or for users who want a
-# small CPU-only install). Pulls CPU torch from PyTorch's dedicated CPU
-# wheel index — about half the download size of the default torch
-# wheel, which bundles CUDA libraries even on CPU-only machines.
+# small CPU-only install). Pulls CPU torch + torchaudio from PyTorch's
+# dedicated CPU wheel index — about half the download size of the
+# default torch wheel, which bundles CUDA libraries even on CPU-only
+# machines.
 --extra-index-url https://download.pytorch.org/whl/cpu
 -r requirements-all.txt
+# `torchaudio` is not optional: the Granite Speech feature extractor
+# calls `requires_backends(self, ["torchaudio"])`. Both wheels resolve
+# from the CPU index above so their builds match.
 torch>=2.2.0
+torchaudio>=2.2.0

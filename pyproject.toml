@@ -23,6 +23,13 @@ dependencies = [
     # matches what transformers 5.8.1 itself declares as its minimum.
     "accelerate>=1.1.0",
     "torch>=2.2.0",
+    # `torchaudio` is a hard runtime dependency, not optional: the
+    # Granite Speech feature extractor calls
+    # `requires_backends(self, ["torchaudio"])` and builds a
+    # `torchaudio.transforms.MelSpectrogram`. Like torch, the actual
+    # CUDA/ROCm/CPU build is pinned per-platform in the requirements-*
+    # files; this floor keeps the canonical metadata honest.
+    "torchaudio>=2.2.0",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
     "pynput>=1.7.6",

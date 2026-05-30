@@ -94,3 +94,16 @@ pip install "accelerate>=1.1.0"
 ```
 
 The requirements files now declare it explicitly, so a fresh `pip install -r requirements-amd.txt` will pull it.
+
+### "GraniteSpeechFeatureExtractor requires the torchaudio library"
+
+Granite Speech's feature extractor builds its mel-spectrogram with `torchaudio`, so it's a hard dependency of that engine. Earlier `requirements-nvidia.txt` / `requirements-cpu.txt` shipped `torch` alone, so NVIDIA/CPU users hit this at transcription time. Install the matching build:
+
+```powershell
+# NVIDIA (match the CUDA index from requirements-nvidia.txt)
+pip install torchaudio --extra-index-url https://download.pytorch.org/whl/cu126
+# CPU
+pip install torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
+```
+
+Or simply re-run `pip install -r requirements-nvidia.txt` (or `-cpu`) after pulling the latest changes — all one-shot files now pull `torchaudio` alongside `torch`.
