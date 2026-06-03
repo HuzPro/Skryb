@@ -9,6 +9,12 @@ the test body so the setup is visible.
 import os
 import sys
 
+# Mirror ``voicetotext.__main__._apply_torch_env_overrides``: the ROCm
+# AOTriton attention path must be enabled before torch is imported, or
+# loading a real model on an AMD GPU can hard-crash the interpreter
+# during a streaming/warmup pass. Harmless on CPU/CUDA boxes.
+os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+
 import pytest
 
 from tests.fakes import (

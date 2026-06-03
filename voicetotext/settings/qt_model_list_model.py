@@ -4,6 +4,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, QSize, Qt
 
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.service import SettingsService
+from voicetotext.settings.transcription_mode import TranscriptionMode
 
 
 _ROW_HEIGHT = 72
@@ -42,11 +43,17 @@ class QtModelListModel(QAbstractListModel):
         self._views: list[ModelView] = []
         self._downloads: dict[str, DownloadProgressSnapshot] = {}
         self._selected: str = ""
+        self._mode: TranscriptionMode | None = None
+        self.refresh()
+
+    def set_mode(self, mode: TranscriptionMode) -> None:
+        """Filter the list to *mode*'s eligible models (preview before save)."""
+        self._mode = mode
         self.refresh()
 
     def refresh(self) -> None:
         self.beginResetModel()
-        self._views = list(self._service.list_models())
+        self._views = list(self._service.list_models(self._mode))
         self._selected = self._service.selected_model()
         self.endResetModel()
 

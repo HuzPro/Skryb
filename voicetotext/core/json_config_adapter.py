@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
         "device": "auto",
         "language": "en",
         "beam_size": 5,
+        "mode": "batch",
     },
     "audio": {
         "sample_rate": 16000,

@@ -46,6 +46,7 @@ _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     display_name="nano-parakeet (PyTorch)",
     supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
     base_priority=90,
+    supports_streaming=True,
 )
 
 _GRANITE_SPEECH_DESCRIPTOR = EngineDescriptor(

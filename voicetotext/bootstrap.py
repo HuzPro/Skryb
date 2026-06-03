@@ -36,7 +36,9 @@ from voicetotext.output.qt_gui_thread_dispatcher import QtGuiThreadDispatcher
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
+from voicetotext.recording.recording_cue_player import CueBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
+from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import (
     EngineHotSwapCoordinator,
@@ -415,6 +417,11 @@ def build_app(
         event_bus = SimpleEventBus()
     if download_manager is None:
         download_manager = DownloadManager(event_bus=event_bus)
+
+    # Short audio cue on record start/stop, in both batch and streaming.
+    # The event bus retains the subscriptions, so the beeper outlives this
+    # function without an explicit reference.
+    CueBeeper(event_bus, SoundDeviceCuePlayer())
 
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
 

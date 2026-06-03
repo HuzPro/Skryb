@@ -16,6 +16,7 @@ _logger = logging.getLogger(__name__)
 from voicetotext.settings.qt_model_list_model import QtModelListModel
 from voicetotext.settings.qt_model_row import ModelRowWidget
 from voicetotext.settings.service import SettingsService
+from voicetotext.settings.transcription_mode import TranscriptionMode
 
 
 _SUPPORTED_LANGUAGES = [
@@ -26,6 +27,10 @@ _SUPPORTED_LANGUAGES = [
 _AUTO_DEVICE = "auto"
 _GPU_DEVICE = "cuda"
 _DEVICE_LABELS: dict[str, str] = {_GPU_DEVICE: "GPU"}
+
+# The only streaming-capable model today; auto-selected when streaming
+# mode is turned on while a non-streaming model is active.
+_STREAMING_MODEL = "parakeet-tdt-0.6b-v3"
 
 
 def _device_label(device: str) -> str:
@@ -59,6 +64,7 @@ class TranscriptionPage(QWidget):
 
     def _build(self) -> None:
         draft = self._service.current_draft()
+        self._mode = draft.transcription_mode
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -209,9 +215,14 @@ class TranscriptionPage(QWidget):
     def _refresh_device_enabled(self, model_name: str) -> None:
         """Enable the device picker only for models that may leave the GPU.
 
-        Larger models are pinned to ``auto`` and greyed out so a tester
+        Streaming pins the device to the GPU (it is GPU-only). Otherwise
+        larger models are pinned to ``auto`` and greyed out so a tester
         cannot accidentally run a multi-gigabyte model on the CPU.
         """
+        if self._mode is TranscriptionMode.STREAMING:
+            self._select_device_value(_GPU_DEVICE)
+            self._device_combo.setEnabled(False)
+            return
         selectable = self._service.allows_device_selection(model_name)
         self._device_combo.setEnabled(selectable)
         if not selectable:
@@ -234,6 +245,21 @@ class TranscriptionPage(QWidget):
         self._list_model.set_selected(name)
         self._sync_view_selection(name)
         self._refresh_device_enabled(name)
+
+    def apply_mode(self, mode: TranscriptionMode) -> None:
+        """React to a batch/streaming toggle from the Mode tab.
+
+        Re-filters the model list to the new mode, auto-selects the
+        streaming model if the current one can't stream, and re-locks the
+        device picker (streaming pins it to the GPU).
+        """
+        self._mode = mode
+        self._list_model.set_mode(mode)
+        if mode is TranscriptionMode.STREAMING and not (
+            self._service.model_supports_streaming(self.current_model())
+        ):
+            self.set_model(_STREAMING_MODEL)
+        self._refresh_device_enabled(self.current_model())
 
     def current_language(self) -> str:
         return self._language_combo.currentText()

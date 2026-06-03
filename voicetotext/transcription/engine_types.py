@@ -21,6 +21,7 @@ class EngineDescriptor:
     display_name: str
     supported_hardware: tuple[HardwareKind, ...]
     base_priority: int
+    supports_streaming: bool = False
 
 
 @dataclass(frozen=True)
