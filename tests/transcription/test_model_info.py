@@ -8,6 +8,7 @@ from voicetotext.transcription.model_info import (
     PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
+    allows_device_selection,
     get_model_info,
     migrate_engine_field,
 )
@@ -179,6 +180,23 @@ class TestGetModelInfo:
     def test_should_raise_configuration_error_for_unknown_model(self):
         with pytest.raises(ConfigurationError, match="unknown-model"):
             get_model_info("unknown-model")
+
+
+class TestAllowsDeviceSelection:
+    def test_should_allow_device_selection_for_tiny(self):
+        assert allows_device_selection("tiny") is True
+
+    def test_should_allow_device_selection_for_base(self):
+        assert allows_device_selection("base") is True
+
+    def test_should_disallow_device_selection_for_small(self):
+        assert allows_device_selection("small") is False
+
+    def test_should_disallow_device_selection_for_large_v3_turbo(self):
+        assert allows_device_selection("large-v3-turbo") is False
+
+    def test_should_disallow_device_selection_for_unknown_model(self):
+        assert allows_device_selection("unknown-model") is False
 
 
 class TestMigrateEngineField:

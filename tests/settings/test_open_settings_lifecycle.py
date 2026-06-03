@@ -61,6 +61,9 @@ class _TrackingService:
         )
         self.trigger_engine_swap = MagicMock()
         self.available_devices = MagicMock(return_value=["auto", "cuda", "cpu"])
+        self.allows_device_selection = MagicMock(
+            side_effect=lambda n: n in {"tiny", "base"}
+        )
         self.engine_candidates_for = MagicMock(return_value=())
 
     def subscribe_engine(self, listener: object) -> None:

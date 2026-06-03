@@ -24,7 +24,10 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_selector import rank_engines
 from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
-from voicetotext.transcription.model_info import ALL_MODELS
+from voicetotext.transcription.model_info import (
+    ALL_MODELS,
+    allows_device_selection as _allows_device_selection,
+)
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -234,6 +237,14 @@ class SettingsService:
         if self._hardware is None or self._hardware.kind == "cpu":
             return ["auto", "cpu"]
         return ["auto", "cuda", "cpu"]
+
+    def allows_device_selection(self, model_name: str) -> bool:
+        """Whether the device picker should be enabled for *model_name*.
+
+        Delegates to the model catalog so the settings UI never imports
+        the transcription domain directly (see class docstring).
+        """
+        return _allows_device_selection(model_name)
 
     # ------------------------------------------------------------------
     # Engine hot-swap

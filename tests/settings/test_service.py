@@ -142,6 +142,18 @@ class TestAvailableDevices:
         assert service.available_devices() == ["auto", "cuda", "cpu"]
 
 
+class TestAllowsDeviceSelection:
+    def test_should_allow_device_selection_for_base(self):
+        service, *_ = _build_service()
+
+        assert service.allows_device_selection("base") is True
+
+    def test_should_disallow_device_selection_for_large_v3(self):
+        service, *_ = _build_service()
+
+        assert service.allows_device_selection("large-v3") is False
+
+
 class _RecordingListener(DownloadEventListener, EngineEventListener):
     def __init__(self):
         self.progress: list = []

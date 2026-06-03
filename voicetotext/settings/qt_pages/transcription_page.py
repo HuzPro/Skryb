@@ -23,6 +23,16 @@ _SUPPORTED_LANGUAGES = [
 ]
 
 
+_AUTO_DEVICE = "auto"
+_GPU_DEVICE = "cuda"
+_DEVICE_LABELS: dict[str, str] = {_GPU_DEVICE: "GPU"}
+
+
+def _device_label(device: str) -> str:
+    """User-facing name for a torch device string (``cuda`` shows as ``GPU``)."""
+    return _DEVICE_LABELS.get(device, device)
+
+
 class TranscriptionPage(QWidget):
     """Page for picking the active Whisper model, language, device, and engine.
 
@@ -80,9 +90,11 @@ class TranscriptionPage(QWidget):
         form.addRow("Language:", self._language_combo)
 
         self._device_combo = QComboBox()
-        self._device_combo.addItems(self._service.available_devices())
-        self._device_combo.setCurrentText(draft.device)
+        for device in self._service.available_devices():
+            self._device_combo.addItem(_device_label(device), userData=device)
+        self._select_device_value(draft.device)
         form.addRow("Device:", self._device_combo)
+        self._refresh_device_enabled(draft.model_size)
 
         self._engine_combo = QComboBox()
         self._engine_combo.setObjectName("engine-combo")
@@ -157,6 +169,7 @@ class TranscriptionPage(QWidget):
             return
         self._list_model.set_selected(view.name)
         self._populate_engine_combo(view.name)
+        self._refresh_device_enabled(view.name)
 
     def _sync_view_selection(self, name: str) -> None:
         index = self._list_model.index_for_name(name)
@@ -185,6 +198,25 @@ class TranscriptionPage(QWidget):
                 return
         self._engine_combo.setCurrentIndex(0)
 
+    def _select_device_value(self, device: str) -> None:
+        for idx in range(self._device_combo.count()):
+            if self._device_combo.itemData(idx) == device:
+                self._device_combo.setCurrentIndex(idx)
+                return
+        if self._device_combo.count():
+            self._device_combo.setCurrentIndex(0)
+
+    def _refresh_device_enabled(self, model_name: str) -> None:
+        """Enable the device picker only for models that may leave the GPU.
+
+        Larger models are pinned to ``auto`` and greyed out so a tester
+        cannot accidentally run a multi-gigabyte model on the CPU.
+        """
+        selectable = self._service.allows_device_selection(model_name)
+        self._device_combo.setEnabled(selectable)
+        if not selectable:
+            self._select_device_value(_AUTO_DEVICE)
+
     # ------------------------------------------------------------------
     # Public getters/setters (consumed by the main window)
     # ------------------------------------------------------------------
@@ -201,6 +233,7 @@ class TranscriptionPage(QWidget):
     def set_model(self, name: str) -> None:
         self._list_model.set_selected(name)
         self._sync_view_selection(name)
+        self._refresh_device_enabled(name)
 
     def current_language(self) -> str:
         return self._language_combo.currentText()
@@ -209,10 +242,11 @@ class TranscriptionPage(QWidget):
         self._language_combo.setCurrentText(language)
 
     def current_device(self) -> str:
-        return self._device_combo.currentText()
+        data = self._device_combo.currentData()
+        return str(data) if data is not None else _AUTO_DEVICE
 
     def set_device(self, device: str) -> None:
-        self._device_combo.setCurrentText(device)
+        self._select_device_value(device)
 
     def current_engine(self) -> str:
         data = self._engine_combo.currentData()

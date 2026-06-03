@@ -44,6 +44,7 @@ def service():
     svc.selected_model.return_value = "base"
     svc.current_draft.return_value = _draft()
     svc.available_devices.return_value = ["auto", "cuda", "cpu"]
+    svc.allows_device_selection.side_effect = lambda n: n in {"tiny", "base"}
     svc.engine_candidates_for.return_value = ()
     return svc
 
@@ -92,6 +93,56 @@ class TestTranscriptionPageDevice:
         assert page._device_combo.count() == 2
         items = [page._device_combo.itemText(i) for i in range(2)]
         assert items == ["auto", "cpu"]
+
+    def test_should_display_gpu_label_for_cuda_device(self, page):
+        idx = page._device_combo.findData("cuda")
+
+        assert idx != -1
+        assert page._device_combo.itemText(idx) == "GPU"
+
+    def test_should_keep_cuda_as_internal_value_when_gpu_selected(self, page):
+        page._device_combo.setCurrentIndex(page._device_combo.findData("cuda"))
+
+        assert page.current_device() == "cuda"
+
+
+class TestTranscriptionPageDeviceLock:
+    def test_should_enable_device_combo_for_base(self, page):
+        assert page._device_combo.isEnabled() is True
+
+    def test_should_enable_device_combo_for_tiny(self, qtbot, service):
+        service.current_draft.return_value = _draft(model="tiny")
+        page = TranscriptionPage(service)
+        qtbot.addWidget(page)
+
+        assert page._device_combo.isEnabled() is True
+
+    def test_should_disable_device_combo_for_large_model(self, qtbot, service):
+        service.current_draft.return_value = _draft(model="large-v3-turbo")
+        page = TranscriptionPage(service)
+        qtbot.addWidget(page)
+
+        assert page._device_combo.isEnabled() is False
+
+    def test_should_lock_device_to_auto_for_large_model(self, qtbot, service):
+        service.current_draft.return_value = _draft(
+            model="large-v3-turbo", device="cuda",
+        )
+        page = TranscriptionPage(service)
+        qtbot.addWidget(page)
+
+        assert page.current_device() == "auto"
+
+    def test_should_disable_when_switching_to_large_model(self, page):
+        page.set_model("large-v3-turbo")
+
+        assert page._device_combo.isEnabled() is False
+
+    def test_should_reenable_when_switching_back_to_small(self, page):
+        page.set_model("large-v3-turbo")
+        page.set_model("tiny")
+
+        assert page._device_combo.isEnabled() is True
 
 
 class TestTranscriptionPageEngine:

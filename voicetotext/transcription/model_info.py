@@ -126,6 +126,20 @@ def get_model_info(name: str) -> ModelInfo:
     return info
 
 
+_DEVICE_SELECTABLE_MODELS: frozenset[str] = frozenset({"tiny", "base"})
+
+
+def allows_device_selection(name: str) -> bool:
+    """Whether the user may pick a compute device for model *name*.
+
+    Only the two smallest Whisper models expose the device picker. Larger
+    models are pinned to ``auto`` (the GPU on accelerated hardware) so a
+    tester cannot accidentally run a multi-gigabyte model on the CPU and
+    trigger a multi-minute transcription or an out-of-memory error.
+    """
+    return name in _DEVICE_SELECTABLE_MODELS
+
+
 _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "medium": "large-v3-turbo",
     "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
