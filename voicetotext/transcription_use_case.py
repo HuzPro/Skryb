@@ -22,7 +22,14 @@ from voicetotext.output.handler import TextOutputHandler
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.transcription.engine import TranscriptionEngine
+from voicetotext.transcription.placeholder_engine import PlaceholderEngine
 from voicetotext.transcription.result import TranscriptionResult
+from voicetotext.transcription.streaming.live_streaming_controller import (
+    LiveStreamingController,
+)
+from voicetotext.transcription.streaming.streaming_engine import (
+    StreamingTranscriptionEngine,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -41,6 +48,8 @@ class RecordAndTranscribeUseCase:
         event_bus: EventBus,
         action_dispatcher: ActionDispatcher,
         max_recording_seconds: float = _DEFAULT_MAX_RECORDING_SECONDS,
+        streaming_controller: LiveStreamingController | None = None,
+        is_streaming_mode: Callable[[], bool] | None = None,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -49,6 +58,9 @@ class RecordAndTranscribeUseCase:
         self._event_bus = event_bus
         self._dispatcher = action_dispatcher
         self._max_recording_seconds = max_recording_seconds
+        self._streaming = streaming_controller
+        self._is_streaming_mode = is_streaming_mode or (lambda: False)
+        self._streaming_active = False
         self._action_lock = threading.Lock()
         # Latched signal: did the user press the hotkey while the
         # engine was still loading? On ``LOADING → IDLE`` we replay
@@ -77,9 +89,9 @@ class RecordAndTranscribeUseCase:
                 _logger.info("Hotkey queued — engine still loading.")
                 return
             if state == AppState.IDLE:
-                self._start_recording()
+                self._begin_capture()
             elif state == AppState.RECORDING:
-                self._stop_and_transcribe()
+                self._end_capture()
             # TRANSCRIBING is intentionally ignored; no action while engine is busy.
 
     def _on_state_changed(self, event: StateChangedEvent) -> None:
@@ -97,7 +109,7 @@ class RecordAndTranscribeUseCase:
     def _handle_deactivate(self) -> None:
         with self._action_lock:
             if self._state_machine.state == AppState.RECORDING:
-                self._stop_and_transcribe()
+                self._end_capture()
 
     def dispose_current_engine(self) -> None:
         self._engine.dispose()
@@ -107,17 +119,62 @@ class RecordAndTranscribeUseCase:
         # the placeholder that the use case was constructed with on a
         # background thread, before the state machine flips to
         # ``IDLE``.
-        if self._state_machine.state not in {AppState.IDLE, AppState.LOADING}:
-            raise EngineSwapError("Can only swap engine when idle or loading")
+        self._require_swappable_state()
         old_engine = self._engine
         self._engine = engine
         old_engine.dispose()
+        if self._streaming is not None:
+            self._streaming.set_engine(None)
+
+    def set_streaming_engine(
+        self, engine: StreamingTranscriptionEngine,
+    ) -> None:
+        """Install the streaming engine and park the batch slot.
+
+        The batch engine is replaced with a :class:`PlaceholderEngine` so
+        its model frees its VRAM while streaming mode is active.
+        """
+        self._require_swappable_state()
+        if self._streaming is None:
+            engine.dispose()
+            raise EngineSwapError("no streaming controller configured")
+        self._streaming.set_engine(engine)
+        old_engine = self._engine
+        self._engine = PlaceholderEngine()
+        old_engine.dispose()
+
+    def _require_swappable_state(self) -> None:
+        if self._state_machine.state not in {AppState.IDLE, AppState.LOADING}:
+            raise EngineSwapError("Can only swap engine when idle or loading")
 
     def set_output(self, output: TextOutputHandler) -> None:
         self._output = output
+        if self._streaming is not None:
+            self._streaming.set_output(output)
 
     def dispose(self) -> None:
         self.dispose_current_engine()
+        if self._streaming is not None:
+            self._streaming.set_engine(None)
+
+    def _begin_capture(self) -> None:
+        if self._streaming_ready():
+            self._start_streaming()
+        else:
+            self._start_recording()
+
+    def _end_capture(self) -> None:
+        if self._streaming_active:
+            self._stop_streaming()
+        else:
+            self._stop_and_transcribe()
+
+    def _streaming_ready(self) -> bool:
+        return (
+            self._streaming is not None
+            and self._streaming.has_engine()
+            and self._is_streaming_mode()
+        )
 
     def _start_recording(self) -> None:
         try:
@@ -130,6 +187,41 @@ class RecordAndTranscribeUseCase:
         self._event_bus.publish(RecordingStartedEvent())
         self._schedule_cap_timer()
         _logger.info("Recording started.")
+
+    def _start_streaming(self) -> None:
+        try:
+            self._streaming.start(self._on_stream_complete)
+        except Exception as exc:  # noqa: BLE001 — surface to the user
+            _logger.error("Failed to start streaming: %s", exc)
+            self._event_bus.publish(ErrorOccurredEvent(error=str(exc)))
+            return
+        self._streaming_active = True
+        self._state_machine.transition_to(AppState.RECORDING)
+        self._event_bus.publish(RecordingStartedEvent())
+        self._schedule_cap_timer()
+        _logger.info("Streaming started.")
+
+    def _stop_streaming(self) -> None:
+        self._cancel_cap_timer()
+        self._streaming_active = False
+        self._state_machine.transition_to(AppState.TRANSCRIBING)
+        self._event_bus.publish(RecordingStoppedEvent())
+        # Finalize (a GPU decode of the trailing window) off the action
+        # lock, mirroring the batch path's dispatched transcription.
+        self._dispatcher.dispatch(self._streaming.stop)
+
+    def _on_stream_complete(self, error: Exception | None) -> None:
+        if error is not None:
+            self._report_error(
+                "Streaming failed",
+                error,
+                lambda message: TranscriptionFailedEvent(error=message),
+            )
+            return
+        self._state_machine.transition_to(AppState.IDLE)
+        self._event_bus.publish(
+            TranscriptionCompletedEvent(text="", transcription_seconds=0.0)
+        )
 
     def _schedule_cap_timer(self) -> None:
         self._cap_timer = threading.Timer(
@@ -166,7 +258,7 @@ class RecordAndTranscribeUseCase:
                     max_duration_seconds=self._max_recording_seconds,
                 )
             )
-            self._stop_and_transcribe()
+            self._end_capture()
 
     def _stop_and_transcribe(self) -> None:
         self._cancel_cap_timer()

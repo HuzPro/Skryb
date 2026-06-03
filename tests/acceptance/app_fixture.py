@@ -22,6 +22,7 @@ from voicetotext.output.clipboard_preserving_decorator import (
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
 from voicetotext.transcription.engine import TranscriptionEngine
+from voicetotext.transcription.engine_install import make_engine_installer
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 from tests.builders import a_transcription_result, an_audio_segment
@@ -232,10 +233,11 @@ class VoiceToTextApp:
     # Internal wiring
     # ------------------------------------------------------------------
 
-    def _loader(self) -> FakeTranscriptionEngine:
-        if self._next_engine is None:
-            return FakeTranscriptionEngine()
-        return self._next_engine
+    def _loader(self):
+        engine = self._next_engine or FakeTranscriptionEngine()
+        return make_engine_installer(
+            engine, lambda use_case, loaded: use_case.set_engine(loaded),
+        )
 
     def _on_engine_load_completed(
         self, event: EngineLoadCompletedEvent

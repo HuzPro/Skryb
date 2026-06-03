@@ -29,6 +29,9 @@ _CADENCE_SECONDS = 0.6
 # committed word so the full-context encoder never re-runs on an
 # unbounded buffer (the O(n^2) guard for long dictation).
 _MAX_WINDOW_SECONDS = 30.0
+# Silent audio fed at load time to force one decode and compile kernels.
+_WARMUP_SECONDS = 0.6
+_WARMUP_CHUNKS = 3
 
 
 def _join(prefix: str, suffix: str) -> str:
@@ -183,6 +186,18 @@ class StreamingNanoParakeetEngine(StreamingTranscriptionEngine):
 
     def is_model_loaded(self) -> bool:
         return self._model is not None
+
+    def warmup(self) -> None:
+        """Run one silent session so the first real stream is warm."""
+        if not self.is_model_loaded():
+            return
+        session = self.start_session()
+        silence = np.zeros(
+            int(_WARMUP_SECONDS * self._sample_rate), dtype=np.float32,
+        )
+        for _ in range(_WARMUP_CHUNKS):
+            session.feed(silence)
+        session.finalize()
 
     def start_session(self) -> StreamingTranscriptionSession:
         if not self.is_model_loaded():

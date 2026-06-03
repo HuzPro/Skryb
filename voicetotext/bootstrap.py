@@ -58,9 +58,16 @@ from voicetotext.transcription.engine_factory import (
     create_engine_for_active_model,
     resolve_engine_id,
 )
+from voicetotext.transcription.engine_install import (
+    EngineInstaller,
+    make_engine_installer,
+)
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
 from voicetotext.transcription.model_info import get_model_info
+from voicetotext.transcription.streaming.live_streaming_controller import (
+    LiveStreamingController,
+)
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription.placeholder_engine import PlaceholderEngine
 from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
@@ -220,6 +227,52 @@ def _load_engine_on_cpu(
     return engine
 
 
+_STREAMING_DEVICE = "cuda"
+
+
+def _load_streaming_engine(
+    config: JsonConfigAdapter, paths: AppPaths,
+) -> object:
+    """Build, load, and warm the GPU-only Parakeet streaming engine."""
+    from voicetotext.transcription.streaming.parakeet_streaming_engine import (
+        StreamingNanoParakeetEngine,
+    )
+
+    model_info = get_model_info(
+        config.get("transcription.model_size", "base")
+    )
+    engine = StreamingNanoParakeetEngine(
+        repo_id=model_info.repo_id,
+        model_dir=paths.models_dir,
+        device=_STREAMING_DEVICE,
+    )
+    engine.load_model()
+    _warmup_safely(engine)
+    return engine
+
+
+def _load_active_engine_installer(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
+) -> EngineInstaller:
+    """Load the engine for the active mode and return its installer.
+
+    Streaming is GPU-only and never falls back to CPU; batch keeps the
+    CPU fallback inside ``_load_engine_with_fallback``.
+    """
+    if config.get("transcription.mode", "batch") == "streaming":
+        engine = _load_streaming_engine(config, paths)
+        return make_engine_installer(
+            engine, lambda use_case, loaded: use_case.set_streaming_engine(loaded),
+        )
+    engine = _load_engine_with_fallback(config, paths, registry, hardware)
+    return make_engine_installer(
+        engine, lambda use_case, loaded: use_case.set_engine(loaded),
+    )
+
+
 def _load_engine_and_attach(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -232,15 +285,16 @@ def _load_engine_and_attach(
 ) -> None:
     """Background-thread entry point for engine load + state attach.
 
-    Loads the engine (with CPU fallback inside
-    ``_load_engine_with_fallback``), then swaps it into the use case
-    and flips the state machine ``LOADING → IDLE``. Failures publish
-    :class:`EngineLoadFailedEvent` (so the tray can show an actionable
-    notification) and transition to ``ERROR``. Exceptions never
-    escape — daemon threads silently drop them otherwise.
+    Loads the mode-appropriate engine and installs it into the use case,
+    then flips ``LOADING → IDLE``. Failures publish
+    :class:`EngineLoadFailedEvent` and transition to ``ERROR``.
+    Exceptions never escape — daemon threads silently drop them.
     """
     try:
-        engine = _load_engine_with_fallback(config, paths, registry, hardware)
+        installer = _load_active_engine_installer(
+            config, paths, registry, hardware,
+        )
+        installer(use_case)
     except Exception as exc:
         _logger.exception("Engine load failed: %s", exc)
         event_bus.publish(
@@ -251,7 +305,6 @@ def _load_engine_and_attach(
         )
         state_machine.transition_to(AppState.ERROR)
         return
-    use_case.set_engine(engine)
     state_machine.transition_to(AppState.IDLE)
     _logger.info("Engine ready.")
 
@@ -345,7 +398,7 @@ def _build_settings_service(
     hot_swap = EngineHotSwapCoordinator(
         use_case=use_case,
         event_bus=event_bus,
-        loader=lambda: _load_engine_with_fallback(config, paths, registry, hardware),
+        loader=lambda: _load_active_engine_installer(config, paths, registry, hardware),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
     )
@@ -451,6 +504,7 @@ def build_app(
     # construction — give it a placeholder that raises if anything
     # actually tries to transcribe through it. Background thread will
     # swap in the real engine and flip the state machine to IDLE.
+    streaming_controller = LiveStreamingController(recorder, output)
     record_and_transcribe_use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
         engine=PlaceholderEngine(),
@@ -460,6 +514,10 @@ def build_app(
         action_dispatcher=action_dispatcher,
         max_recording_seconds=config.get(
             "recording.max_duration_seconds", 600.0,
+        ),
+        streaming_controller=streaming_controller,
+        is_streaming_mode=lambda: (
+            config.get("transcription.mode", "batch") == "streaming"
         ),
     )
 

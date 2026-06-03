@@ -15,6 +15,13 @@ from voicetotext.settings.engine_hot_swap import (
     EngineHotSwapCoordinator,
     NullEngineHotSwap,
 )
+from voicetotext.transcription.engine_install import make_engine_installer
+
+
+def _installer_for(engine):
+    return make_engine_installer(
+        engine, lambda use_case, loaded: use_case.set_engine(loaded),
+    )
 
 
 def _collect(bus: SimpleEventBus, *event_types) -> list:
@@ -48,7 +55,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
             event_bus=bus,
-            loader=lambda: new_engine,
+            loader=lambda: _installer_for(new_engine),
             action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("small")
@@ -62,7 +69,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
 
         def loader():
             call_order.append("load")
-            return MagicMock()
+            return _installer_for(MagicMock())
 
         use_case.set_engine.side_effect = lambda _e: call_order.append("install")
 
@@ -95,7 +102,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         coord = EngineHotSwapCoordinator(
             use_case=MagicMock(),
             event_bus=SimpleEventBus(),
-            loader=lambda: new_engine,
+            loader=lambda: _installer_for(new_engine),
             action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("small")
@@ -112,7 +119,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
             event_bus=SimpleEventBus(),
-            loader=lambda: new_engine,
+            loader=lambda: _installer_for(new_engine),
             action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("small")
@@ -130,7 +137,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         coord = EngineHotSwapCoordinator(
             use_case=use_case,
             event_bus=bus,
-            loader=lambda: MagicMock(),
+            loader=lambda: _installer_for(MagicMock()),
             action_dispatcher=InlineActionDispatcher(),
         )
         coord.start_swap("small")

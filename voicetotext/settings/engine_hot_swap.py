@@ -13,18 +13,21 @@ from voicetotext.core.events import (
     EngineLoadStartedEvent,
 )
 from voicetotext.core.exceptions import EngineSwapError
-from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_diagnostics import (
     count_live_adapters,
     vram_snapshot,
 )
+from voicetotext.transcription.engine_install import EngineInstaller
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 
 _logger = logging.getLogger(__name__)
 
 
-EngineLoader = Callable[[], TranscriptionEngine]
+# The loader builds + loads the next engine and returns an installer that
+# attaches it to the use case (set_engine for batch, set_streaming_engine
+# for streaming) — so this coordinator never needs to know the type.
+EngineLoader = Callable[[], EngineInstaller]
 
 
 class EngineHotSwap(ABC):
@@ -119,21 +122,21 @@ class EngineHotSwapCoordinator(EngineHotSwap):
             return exc
 
     def _perform_swap(self) -> None:
-        new_engine = self._load_new_engine()
-        self._install_or_discard(new_engine)
+        installer = self._load_new_engine()
+        self._install(installer)
 
-    def _load_new_engine(self) -> TranscriptionEngine:
+    def _load_new_engine(self) -> EngineInstaller:
         started_at = time.monotonic()
-        new_engine = self._invoke_loader()
+        installer = self._invoke_loader()
         self._log_phase(f"loader done in {time.monotonic() - started_at:.2f}s")
-        return new_engine
+        return installer
 
-    def _invoke_loader(self) -> TranscriptionEngine:
+    def _invoke_loader(self) -> EngineInstaller:
         if self._timeout_seconds is None:
             return self._loader()
         return self._invoke_loader_with_timeout()
 
-    def _invoke_loader_with_timeout(self) -> TranscriptionEngine:
+    def _invoke_loader_with_timeout(self) -> EngineInstaller:
         executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="engine-load"
         )
@@ -148,12 +151,10 @@ class EngineHotSwapCoordinator(EngineHotSwap):
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
-    def _install_or_discard(self, new_engine: TranscriptionEngine) -> None:
-        try:
-            self._use_case.set_engine(new_engine)
-        except EngineSwapError:
-            new_engine.dispose()
-            raise
+    def _install(self, installer: EngineInstaller) -> None:
+        # The installer attaches the engine and disposes it on rejection;
+        # any failure propagates to ``_try_swap`` as a failed-swap outcome.
+        installer(self._use_case)
         self._log_phase("engine installed")
 
     def _announce_swap_started(self, model_name: str) -> None:
