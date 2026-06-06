@@ -6,6 +6,7 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
@@ -151,6 +152,57 @@ class TestStreamingRouting:
         use_case.on_hotkey_activated()
 
         assert len(failures) == 1
+        assert state_machine.state is AppState.IDLE
+
+    def test_should_recover_streaming_state_when_worker_fails_mid_run(self):
+        # The worker can fail mid-run (e.g. a decode error) and call
+        # on_complete(error) WITHOUT going through the user-stop path. That
+        # must not leave _streaming_active latched, or the next capture's
+        # stop would wrongly route to _stop_streaming and drop the audio.
+        mode = {"streaming": True}
+        bus = RecordingEventBus()
+        state_machine = AppStateMachine(bus)
+        if state_machine.state is not AppState.IDLE:
+            state_machine.transition_to(AppState.IDLE)
+        recorder = FakeAudioRecorder()
+        recorder.will_return(
+            AudioSegment(
+                data=np.zeros(16000, dtype=np.float32), sample_rate=16000,
+            )
+        )
+        batch = FakeTranscriptionEngine()
+        controller = _StubController()
+        use_case = RecordAndTranscribeUseCase(
+            recorder=recorder,
+            engine=batch,
+            output=FakeTextOutputHandler(),
+            state_machine=state_machine,
+            event_bus=bus,
+            action_dispatcher=InlineActionDispatcher(),
+            streaming_controller=controller,
+            is_streaming_mode=lambda: mode["streaming"],
+        )
+        failures: list = []
+        bus.subscribe(TranscriptionFailedEvent, failures.append)
+
+        use_case.on_hotkey_activated()  # streaming starts
+        # Worker dies mid-run and reports the error out-of-band.
+        controller._on_complete(RuntimeError("decode failed"))
+
+        assert len(failures) == 1
+        assert state_machine.state is AppState.IDLE
+
+        # The app must be usable again: a batch capture now records and
+        # transcribes through the batch engine. If _streaming_active were
+        # left latched, the stop would misroute to _stop_streaming
+        # (controller.stop) and the audio would never reach the engine.
+        mode["streaming"] = False
+        use_case.on_hotkey_activated()   # batch recording starts
+        use_case.on_hotkey_activated()   # stop -> transcribe
+
+        assert recorder.start_calls == 1
+        assert controller.stop_calls == 0
+        assert len(batch.transcribe_calls) == 1
         assert state_machine.state is AppState.IDLE
 
 

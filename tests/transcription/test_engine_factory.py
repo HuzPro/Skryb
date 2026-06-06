@@ -154,7 +154,23 @@ class TestResolveEngineId:
 
 
 def _fake_snapshot(models_dir: Path, repo_id: str) -> None:
-    snapshot = models_dir / f"models--{repo_id.replace('/', '--')}" / "snapshots" / "abc123"
+    """Lay down a complete, loadable cache entry (with ``refs/main``)."""
+    repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
+    snapshot = repo_dir / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}")
+    (snapshot / "model.safetensors").write_text("")
+    refs_main = repo_dir / "refs" / "main"
+    refs_main.parent.mkdir(parents=True, exist_ok=True)
+    refs_main.write_text("abc123")
+
+
+def _partial_snapshot(models_dir: Path, repo_id: str) -> None:
+    """Lay down snapshot files but NO ``refs/main`` (a cancelled download)."""
+    snapshot = (
+        models_dir / f"models--{repo_id.replace('/', '--')}"
+        / "snapshots" / "abc123"
+    )
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").write_text("{}")
     (snapshot / "model.safetensors").write_text("")
@@ -187,6 +203,16 @@ class TestEnginesWithModelOnDisk:
         result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
 
         assert result == frozenset(["transformers", "faster_whisper"])
+
+    def test_should_ignore_partial_snapshot_without_refs_main(self, tmp_path):
+        # A cancelled download leaves snapshot files but no refs/main. The
+        # loader (local_files_only) cannot open it, so it must not count as
+        # an engine-on-disk and bias selection toward a broken cache.
+        _partial_snapshot(tmp_path, "Systran/faster-whisper-base")
+
+        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
+
+        assert result == frozenset()
 
 
 class TestCreateEngineForActiveModel:
@@ -426,3 +452,38 @@ class TestBuildCompositeModelManager:
 
         names = {m.name for m in manager.list_models()}
         assert names == set(ALL_MODELS.keys())
+
+    def test_should_not_register_turbo_in_faster_whisper_child(self, tmp_path):
+        # turbo has no ct2_repo_id, so _ct2_models excludes it: the
+        # faster-whisper child must never advertise a turbo download (the
+        # old Systran turbo repo 401'd).
+        manager = build_composite_model_manager(
+            tmp_path, MagicMock(), active_engine_provider=lambda: "faster_whisper",
+        )
+
+        # The aggregate catalogue still lists turbo (via the transformers
+        # child), but the faster-whisper child does not own it.
+        assert manager.has_model("large-v3-turbo") is True
+        fw_child = manager._by_engine["faster_whisper"]
+        assert fw_child.has_model("large-v3-turbo") is False
+
+
+class TestInstallStateMatchesLoadableEngine:
+    """Regression for the large-v3 / large-v3-turbo Download-vs-Delete
+    confusion: the install state must reflect the engine that will actually
+    load the model, not a top-ranked engine whose cache is empty.
+    """
+
+    def test_should_report_turbo_installed_from_transformers_snapshot(
+        self, tmp_path,
+    ):
+        # turbo lives only under the openai (transformers) cache. Even when
+        # faster_whisper is the active/top-ranked engine, the composite must
+        # report turbo installed because transformers is what loads it.
+        _fake_snapshot(tmp_path, "openai/whisper-large-v3-turbo")
+        manager = build_composite_model_manager(
+            tmp_path, MagicMock(),
+            active_engine_provider=lambda: "faster_whisper",
+        )
+
+        assert manager.is_installed("large-v3-turbo") is True

@@ -365,6 +365,21 @@ class TestHotSwapEngine:
         with pytest.raises(EngineSwapError, match="idle"):
             use_case.set_engine(MagicMock())
 
+    def test_should_allow_swap_after_recovering_from_a_failed_load(self):
+        # Bug 7: a failed load used to strand the machine in ERROR, where
+        # every set_engine raised "Can only swap engine when idle or
+        # loading", locking the app until restart. The bootstrap recovery
+        # drives ERROR -> IDLE; once idle, the swap must succeed so the
+        # user can pick another model without restarting.
+        use_case, _, old_engine, _, _, state_machine = _build_use_case()
+        state_machine.transition_to(AppState.ERROR)
+        state_machine.transition_to(AppState.IDLE)
+        new_engine = MagicMock()
+
+        use_case.set_engine(new_engine)  # must not raise
+
+        old_engine.dispose.assert_called_once()
+
     def test_should_dispose_old_engine_when_swapped_out(self):
         use_case, _, old_engine, _, _, _ = _build_use_case()
         new_engine = MagicMock()

@@ -66,6 +66,34 @@ class TestTranscriptionPageModel:
         assert page.current_model() == "tiny"
 
 
+class TestTranscriptionPageModelSelection:
+    """Clicking a model row selects it — but only when it is installed.
+
+    Regression for Bug 8's "selecting large-v3 loads large-v3-turbo": the
+    click handler drops clicks on uninstalled rows, so when install-state
+    was wrong a real model looked uninstalled, its click was ignored, and
+    the previously-selected model stayed selected (and got loaded). With
+    install-state now accurate, only genuinely-uninstalled rows are ignored.
+    """
+
+    def test_should_select_installed_model_when_row_clicked(self, page):
+        index = page.list_model().index_for_name("tiny")  # installed=True
+
+        page._on_model_clicked(index)
+
+        assert page.current_model() == "tiny"
+
+    def test_should_ignore_click_on_uninstalled_model_and_keep_selection(
+        self, page,
+    ):
+        assert page.current_model() == "base"  # initial selection
+
+        index = page.list_model().index_for_name("small")  # installed=False
+        page._on_model_clicked(index)
+
+        assert page.current_model() == "base"  # click dropped, selection kept
+
+
 class TestTranscriptionPageLanguage:
     def test_should_return_initial_language(self, page):
         assert page.current_language() == "en"

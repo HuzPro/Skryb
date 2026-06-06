@@ -141,7 +141,10 @@ class TestSoundDeviceAdapterEmptyRecording:
 
 class TestSoundDeviceAdapterLiveFrames:
     @patch("voicetotext.recording.sounddevice_adapter.sd")
-    def test_should_forward_each_frame_to_on_frame(self, mock_sd):
+    def test_should_forward_mono_one_dimensional_frame_to_on_frame(self, mock_sd):
+        # The recorder contract promises "float32, mono" frames. sounddevice
+        # delivers (frames, 1); the adapter must flatten to (frames,) so the
+        # streaming model's torch.stft does not reflect-pad a size-1 axis.
         adapter = SoundDeviceAdapter(sample_rate=16000)
         received: list[np.ndarray] = []
 
@@ -153,7 +156,8 @@ class TestSoundDeviceAdapterLiveFrames:
         )
 
         assert len(received) == 2
-        assert received[0].shape == (1024, 1)
+        assert received[0].shape == (1024,)
+        assert received[1].shape == (512,)
 
     @patch("voicetotext.recording.sounddevice_adapter.sd")
     def test_should_still_assemble_segment_when_on_frame_set(self, mock_sd):
@@ -176,7 +180,7 @@ class TestSoundDeviceAdapterLiveFrames:
         _feed(mock_sd, chunk)
         chunk[0, 0] = 9.0  # mutate the source after the callback ran
 
-        assert received[0][0, 0] == 1.0  # on_frame got an independent copy
+        assert received[0][0] == 1.0  # on_frame got an independent (1-D) copy
 
     @patch("voicetotext.recording.sounddevice_adapter.sd")
     def test_should_clear_on_frame_after_stop(self, mock_sd):

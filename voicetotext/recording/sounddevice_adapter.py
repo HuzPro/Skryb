@@ -73,7 +73,13 @@ class SoundDeviceAdapter(AudioRecorder):
         time_info: object,
         status: sd.CallbackFlags,
     ) -> None:
-        chunk = indata.copy()
+        # sounddevice delivers (frames, channels); for our mono stream that
+        # is (frames, 1). Flatten to a 1-D (frames,) mono buffer so every
+        # consumer gets the "float32, mono" frame the recorder contract
+        # promises. The batch path already flattened at stop; the streaming
+        # path fed the raw 2-D frame straight into the model, where
+        # ``torch.stft`` reflect-padded the size-1 trailing axis and crashed.
+        chunk = indata.reshape(-1).copy()
         self._chunks.append(chunk)
         on_frame = self._on_frame
         if on_frame is not None:

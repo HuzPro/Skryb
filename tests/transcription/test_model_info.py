@@ -96,18 +96,39 @@ class TestWhisperModels:
         for model in WHISPER_MODELS.values():
             assert model.repo_id.startswith("openai/whisper-")
 
-    def test_all_models_should_have_systran_ct2_repo_ids(self):
+    def test_ct2_repo_ids_are_official_systran_when_present(self):
+        # A CT2 repo id, when set, must point at the official Systran
+        # mirror. large-v3-turbo deliberately has none (Systran never
+        # published a turbo CT2 repo — the old id 401'd), so it is skipped.
         for model in WHISPER_MODELS.values():
-            assert model.ct2_repo_id.startswith("Systran/faster-whisper-")
+            if model.ct2_repo_id:
+                assert model.ct2_repo_id.startswith("Systran/faster-whisper-")
 
-    def test_all_models_should_be_compatible_with_both_engines(self):
+    def test_faster_whisper_compatibility_matches_ct2_repo_presence(self):
+        # Every Whisper model runs on transformers; faster-whisper is
+        # offered only when there is a real CT2 repo to load from.
         for model in WHISPER_MODELS.values():
             assert "transformers" in model.compatible_engines
-            assert "faster_whisper" in model.compatible_engines
+            assert ("faster_whisper" in model.compatible_engines) == bool(
+                model.ct2_repo_id
+            )
 
-    def test_faster_whisper_should_outrank_transformers_for_every_model(self):
+    def test_large_v3_turbo_is_transformers_only(self):
+        # Systran has no faster-whisper-large-v3-turbo CT2 repo and the only
+        # working mirror is community-hosted, so turbo runs through the
+        # transformers engine alone (no ct2_repo_id, no faster_whisper).
+        turbo = WHISPER_MODELS["large-v3-turbo"]
+
+        assert turbo.ct2_repo_id == ""
+        assert turbo.compatible_engines == ("transformers",)
+
+    def test_faster_whisper_should_outrank_transformers_when_both_offered(self):
         for model in WHISPER_MODELS.values():
-            assert model.engine_priorities["faster_whisper"] > model.engine_priorities["transformers"]
+            if "faster_whisper" in model.compatible_engines:
+                assert (
+                    model.engine_priorities["faster_whisper"]
+                    > model.engine_priorities["transformers"]
+                )
 
 
 class TestParakeetModels:

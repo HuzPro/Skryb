@@ -16,6 +16,7 @@ from voicetotext.transcription.engine_types import (
     EngineId,
     HardwareProfile,
 )
+from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapshot
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     GRANITE_MODELS,
@@ -176,10 +177,18 @@ def engines_with_model_on_disk(
     model_info: ModelInfo,
     models_dir: Path,
 ) -> frozenset[EngineId]:
+    """Engines whose on-disk cache for *model_info* is actually loadable.
+
+    Uses the same ``refs/main`` + complete-snapshot predicate as
+    ``is_installed`` (see
+    :func:`~voicetotext.transcription.hf_model_manager.repo_has_loadable_snapshot`),
+    so a partial or cancelled download never biases engine selection toward
+    an engine whose weights cannot actually be opened.
+    """
     installed: set[EngineId] = set()
     for engine_id, repo_id in _engine_repo_ids(model_info):
-        snapshots_dir = models_dir / f"models--{repo_id.replace('/', '--')}" / "snapshots"
-        if snapshots_dir.exists() and any(snapshots_dir.iterdir()):
+        repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
+        if repo_has_loadable_snapshot(repo_dir):
             installed.add(engine_id)
     return frozenset(installed)
 

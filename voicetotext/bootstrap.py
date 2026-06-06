@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
 from voicetotext.core.debug_logger import setup_debug_logger
@@ -56,6 +57,7 @@ from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
     build_engine_registry,
     create_engine_for_active_model,
+    engines_with_model_on_disk,
     resolve_engine_id,
 )
 from voicetotext.transcription.engine_install import (
@@ -287,7 +289,8 @@ def _load_engine_and_attach(
 
     Loads the mode-appropriate engine and installs it into the use case,
     then flips ``LOADING → IDLE``. Failures publish
-    :class:`EngineLoadFailedEvent` and transition to ``ERROR``.
+    :class:`EngineLoadFailedEvent` and recover to ``IDLE`` (via ``ERROR``)
+    so the app stays swappable — see :func:`_recover_from_failed_load`.
     Exceptions never escape — daemon threads silently drop them.
     """
     try:
@@ -296,17 +299,42 @@ def _load_engine_and_attach(
         )
         installer(use_case)
     except Exception as exc:
-        _logger.exception("Engine load failed: %s", exc)
-        event_bus.publish(
-            EngineLoadFailedEvent(
-                model_name=str(config.get("transcription.model_size", "base")),
-                error=str(exc),
-            )
-        )
-        state_machine.transition_to(AppState.ERROR)
+        _recover_from_failed_load(exc, config, state_machine, event_bus)
         return
     state_machine.transition_to(AppState.IDLE)
     _logger.info("Engine ready.")
+
+
+def _recover_from_failed_load(
+    exc: Exception,
+    config: JsonConfigAdapter,
+    state_machine: AppStateMachine,
+    event_bus: EventBus,
+) -> None:
+    """Surface a failed initial load, then return to a swappable IDLE state.
+
+    ``RecordAndTranscribeUseCase._require_swappable_state`` only permits
+    ``IDLE``/``LOADING``, so leaving the machine in ``ERROR`` would make
+    every later model swap raise ``EngineSwapError`` and lock the app until
+    restart (the reported "Can only swap engine when idle or loading"). The
+    machine passes *through* ``ERROR`` — the tray paints its sticky error
+    icon on :class:`EngineLoadFailedEvent` and holds it across the
+    subsequent ``ERROR → IDLE`` change — then settles on ``IDLE`` so the
+    user can pick or re-download a working model. Going via ``ERROR``
+    (rather than straight ``LOADING → IDLE``) also avoids replaying a hotkey
+    that was queued during the failed load into the still-placeholder
+    engine, since that replay only fires on a direct ``LOADING → IDLE``
+    transition.
+    """
+    _logger.exception("Engine load failed: %s", exc)
+    event_bus.publish(
+        EngineLoadFailedEvent(
+            model_name=str(config.get("transcription.model_size", "base")),
+            error=str(exc),
+        )
+    )
+    state_machine.transition_to(AppState.ERROR)
+    state_machine.transition_to(AppState.IDLE)
 
 
 def _spawn_engine_load_thread(
@@ -370,12 +398,30 @@ def _make_active_engine_provider(
     config: JsonConfigAdapter,
     hardware: HardwareProfile,
     registry: EngineRegistry,
+    models_dir: Path,
 ) -> Callable[[], EngineId]:
-    """Return a callable the composite ModelManager can poll on each op."""
+    """Return a callable the composite ModelManager polls on each op.
+
+    Resolves the active engine the SAME way the loader does — biased
+    toward whichever engine actually has loadable files on disk (see
+    ``create_engine_for_active_model``). The composite routes
+    ``is_installed`` to this active child, so without the on-disk bias the
+    provider always returned the top-ranked engine (``faster_whisper`` for
+    Whisper under ``auto``) and a model present only under another engine's
+    repo — e.g. ``large-v3-turbo`` under the transformers cache — looked
+    uninstalled in the UI even though the loader could open it. Tying both
+    to the same resolution keeps the install state and the loader in
+    agreement.
+    """
     def provider() -> EngineId:
         model_name = config.get("transcription.model_size", "base")
         model_info = get_model_info(model_name)
-        return resolve_engine_id(config, model_info, hardware, registry)
+        return resolve_engine_id(
+            config, model_info, hardware, registry,
+            installed_engines=engines_with_model_on_disk(
+                model_info, models_dir,
+            ),
+        )
     return provider
 
 
@@ -523,7 +569,9 @@ def build_app(
 
     listener = _build_hotkey_listener(config, record_and_transcribe_use_case)
 
-    active_engine_provider = _make_active_engine_provider(config, hardware, registry)
+    active_engine_provider = _make_active_engine_provider(
+        config, hardware, registry, paths.models_dir,
+    )
     model_manager = build_composite_model_manager(
         paths.models_dir, download_manager, active_engine_provider,
     )

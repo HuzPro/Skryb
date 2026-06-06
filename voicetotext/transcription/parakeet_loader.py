@@ -6,6 +6,9 @@ from voicetotext.transcription.backend_imports import (
 )
 
 
+_CPU_DEVICE = "cpu"
+
+
 class ParakeetModelLoader:
     """Loads a nano-parakeet ``ParakeetTDT`` model into the app's cache.
 
@@ -50,8 +53,14 @@ class ParakeetModelLoader:
         and restored in a ``finally`` block, so back-to-back loads never
         stomp each other's closure on the module-global.
 
-        bf16 is requested explicitly: the chunked sweep showed it matches
-        fp32 text on RDNA4 (gfx1200) while cutting latency and VRAM.
+        The dtype is chosen by device: bf16 on GPU (the chunked sweep
+        showed it matches fp32 text on RDNA4/gfx1200 while cutting latency
+        and VRAM), but fp32 on CPU. nano-parakeet casts the encoder,
+        decoder, and joint to the requested dtype while leaving the
+        preprocessor in fp32; on CPU the fp32 encoder output then hits the
+        bf16 joint and ``F.linear`` raises "mat1 and mat2 must have the
+        same dtype". CPU has no accelerated bf16 matmul anyway, so fp32 is
+        both correct and faster there.
         """
         original_download = nano_parakeet_module.hf_hub_download
         nano_parakeet_module.hf_hub_download = self._make_patched_download(
@@ -61,10 +70,16 @@ class ParakeetModelLoader:
             return nano_parakeet_module.from_pretrained(
                 model_name=self._repo_id,
                 device=device,
-                dtype=torch_module.bfloat16,
+                dtype=self._dtype_for(torch_module, device),
             )
         finally:
             nano_parakeet_module.hf_hub_download = original_download
+
+    @staticmethod
+    def _dtype_for(torch_module: object, device: str) -> object:
+        if device == _CPU_DEVICE:
+            return torch_module.float32
+        return torch_module.bfloat16
 
     def _make_patched_download(
         self, original: Callable[..., object],

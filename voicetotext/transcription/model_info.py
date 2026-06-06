@@ -58,12 +58,17 @@ WHISPER_MODELS: dict[str, ModelInfo] = {
         compatible_engines=("transformers", "faster_whisper"),
         engine_priorities=_WHISPER_ENGINE_PRIORITIES,
     ),
+    # large-v3-turbo is transformers-only: Systran never published a
+    # `faster-whisper-large-v3-turbo` CT2 repo (the old ct2_repo_id 401'd
+    # on HuggingFace), and the only working CT2 mirror is community-hosted.
+    # Rather than depend on an unofficial repo, turbo runs through the
+    # transformers engine (PyTorch, every backend) — leaving no ct2_repo_id
+    # keeps it out of the faster-whisper child entirely.
     "large-v3-turbo": ModelInfo(
         name="large-v3-turbo", size_mb=1620,
         description="Recommended: nearly large-v3 quality, 6-8x faster",
         repo_id="openai/whisper-large-v3-turbo",
-        ct2_repo_id="Systran/faster-whisper-large-v3-turbo",
-        compatible_engines=("transformers", "faster_whisper"),
+        compatible_engines=("transformers",),
         engine_priorities=_WHISPER_ENGINE_PRIORITIES,
     ),
     "large-v3": ModelInfo(

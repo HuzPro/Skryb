@@ -202,15 +202,25 @@ class RecordAndTranscribeUseCase:
         _logger.info("Streaming started.")
 
     def _stop_streaming(self) -> None:
-        self._cancel_cap_timer()
-        self._streaming_active = False
+        self._finish_streaming()
         self._state_machine.transition_to(AppState.TRANSCRIBING)
         self._event_bus.publish(RecordingStoppedEvent())
         # Finalize (a GPU decode of the trailing window) off the action
         # lock, mirroring the batch path's dispatched transcription.
         self._dispatcher.dispatch(self._streaming.stop)
 
+    def _finish_streaming(self) -> None:
+        # Tear down the per-run streaming bookkeeping. Idempotent on
+        # purpose: the user-stop path runs it, and ``_on_stream_complete``
+        # runs it again so a mid-run worker failure — which never passes
+        # through ``_stop_streaming`` — cannot leave ``_streaming_active``
+        # latched (which would misroute the next stop) or a cap timer
+        # pending (which would auto-stop the next run).
+        self._cancel_cap_timer()
+        self._streaming_active = False
+
     def _on_stream_complete(self, error: Exception | None) -> None:
+        self._finish_streaming()
         if error is not None:
             self._report_error(
                 "Streaming failed",

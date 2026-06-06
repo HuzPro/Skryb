@@ -21,12 +21,15 @@ class CompositeModelManager(ModelManager):
     (download, delete, get_model_path).
 
     Listing aggregates across children so the UI shows the union
-    catalogue. Installation, in contrast, is engine-scoped: each engine
-    has its own on-disk repo layout, so ``is_installed`` delegates to
-    the *owning* child (preferring the active engine) and reports
-    ``True`` only when that child's weights are present. Reporting
-    ``True`` across engines would lie to the loader, which would then
-    try to read repo files that were never downloaded.
+    catalogue. ``is_installed`` means *loadable by some compatible
+    engine*: the loader (``create_engine_for_active_model``) picks
+    whichever engine has files on disk, so a model present under any
+    owning child's cache is installed. Reporting this engine-agnostically
+    keeps every install check — the settings UI, the first-run gate, and
+    the startup auto-load decision — consistent regardless of which engine
+    the active config currently names. Routing that mutates a specific
+    engine's storage (download, delete, get_model_path) still goes to the
+    *owning* child, preferring the active engine.
     """
 
     def __init__(
@@ -51,9 +54,16 @@ class CompositeModelManager(ModelManager):
         return self._installed_check_for(name)
 
     def _installed_check_for(self, name: str) -> bool:
-        if not self.has_model(name):
-            return False
-        return self._owning_child(name).is_installed(name)
+        # Installed == loadable by SOME compatible engine. The loader picks
+        # whichever engine has files on disk, so checking only the active
+        # child would report a model present under another engine's cache
+        # as missing — the root of the large-v3/turbo Download-vs-Delete
+        # confusion and the "last model not auto-loaded on startup" report.
+        return any(
+            child.is_installed(name)
+            for child in self._by_engine.values()
+            if child.has_model(name)
+        )
 
     def download(self, name: str) -> DownloadHandle:
         return self._owning_child(name).download(name)

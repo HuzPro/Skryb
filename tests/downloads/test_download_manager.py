@@ -191,6 +191,120 @@ class TestDownloadManagerPauseResume:
         manager.shutdown()
 
 
+class _HangingDownloader:
+    """Blocks until cancelled/paused so a job can be observed mid-flight."""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.calls = 0
+
+    def download(self, plan, on_progress, cancel_event, pause_event):
+        self.calls += 1
+        self.started.set()
+        while not pause_event.is_set() and not cancel_event.is_set():
+            time.sleep(0.005)
+        raise RuntimeError("interrupted")
+
+
+class TestDownloadManagerRestart:
+    """A re-download with the same job_id must start a fresh run once the
+    previous one reached a terminal state (CANCELLED, COMPLETED, FAILED),
+    not silently no-op. Only an in-flight job (QUEUED/DOWNLOADING) is
+    protected from a duplicate submit.
+    """
+
+    def test_enqueue_should_rerun_a_cancelled_job_when_re_enqueued_with_same_id(
+        self, tmp_path,
+    ):
+        bus = SimpleEventBus()
+        completed: list = []
+        bus.subscribe(DownloadCompletedEvent, completed.append)
+        manager = DownloadManager(event_bus=bus, max_concurrent_downloads=1)
+
+        hanging = _HangingDownloader()
+        handle = manager.enqueue(_make_job(tmp_path, downloader=hanging))
+        hanging.started.wait(timeout=2)
+        handle.cancel()
+        _wait_for(lambda: handle.state() == DownloadState.CANCELLED)
+
+        # Re-download the same model with a downloader that finishes.
+        manager.enqueue(_make_job(tmp_path, downloader=_SlowDownloader()))
+        _wait_for(lambda: handle.state() == DownloadState.COMPLETED)
+
+        assert any(e.job_id == "tiny" for e in completed)
+        manager.shutdown()
+
+    def test_enqueue_should_rerun_a_completed_job_when_re_enqueued_with_same_id(
+        self, tmp_path,
+    ):
+        bus = SimpleEventBus()
+        completed: list = []
+        bus.subscribe(DownloadCompletedEvent, completed.append)
+        manager = DownloadManager(event_bus=bus, max_concurrent_downloads=1)
+
+        handle = manager.enqueue(_make_job(tmp_path))
+        _wait_for(lambda: handle.state() == DownloadState.COMPLETED)
+        assert len(completed) == 1
+
+        # Re-download (e.g. after the model was deleted from disk).
+        manager.enqueue(_make_job(tmp_path))
+        _wait_for(lambda: len(completed) == 2)
+
+        manager.shutdown()
+
+    def test_enqueue_should_be_a_noop_while_job_is_still_downloading(
+        self, tmp_path,
+    ):
+        manager = DownloadManager(
+            event_bus=SimpleEventBus(), max_concurrent_downloads=2,
+        )
+        hanging = _HangingDownloader()
+        manager.enqueue(_make_job(tmp_path, downloader=hanging))
+        hanging.started.wait(timeout=2)
+
+        # Same id while in-flight: must not start a second worker.
+        manager.enqueue(_make_job(tmp_path, downloader=hanging))
+        time.sleep(0.1)
+
+        assert hanging.calls == 1
+        manager.shutdown()
+
+    def test_re_enqueue_after_cancel_should_reset_progress_counters_to_zero(
+        self, tmp_path,
+    ):
+        manager = DownloadManager(
+            event_bus=SimpleEventBus(), max_concurrent_downloads=1,
+        )
+
+        class _ProgressThenHang:
+            def __init__(self) -> None:
+                self.started = threading.Event()
+
+            def download(self, plan, on_progress, cancel_event, pause_event):
+                on_progress(50)
+                self.started.set()
+                while not cancel_event.is_set():
+                    time.sleep(0.005)
+                raise RuntimeError("cancelled")
+
+        first = _ProgressThenHang()
+        handle = manager.enqueue(_make_job(tmp_path, downloader=first))
+        first.started.wait(timeout=2)
+        _wait_for(lambda: handle.stats().bytes_done == 50)
+        handle.cancel()
+        _wait_for(lambda: handle.state() == DownloadState.CANCELLED)
+
+        # A fresh run replaces the _ActiveJob, so counters start at zero
+        # rather than showing the stale partial fill from the cancelled run.
+        blocker = _HangingDownloader()
+        manager.enqueue(_make_job(tmp_path, downloader=blocker))
+        blocker.started.wait(timeout=2)
+
+        assert handle.stats().bytes_done == 0
+        assert handle.stats().speed_bps == 0.0
+        manager.shutdown()
+
+
 class TestDownloadManagerConcurrency:
     def test_should_run_up_to_max_concurrent_jobs_simultaneously(self, tmp_path):
         in_flight = 0
