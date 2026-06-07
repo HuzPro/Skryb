@@ -6,7 +6,9 @@ from voicetotext.recording.recording_cue_player import (
     SAMPLE_RATE,
     START_FREQUENCY_HZ,
     STOP_FREQUENCY_HZ,
+    ReadyCuePlayer,
     RecordingCuePlayer,
+    ready_chime_to_samples,
     tone_to_samples,
 )
 
@@ -14,7 +16,7 @@ from voicetotext.recording.recording_cue_player import (
 _logger = logging.getLogger(__name__)
 
 
-class SoundDeviceCuePlayer(RecordingCuePlayer):
+class SoundDeviceCuePlayer(RecordingCuePlayer, ReadyCuePlayer):
     """Plays cues on the default output device via sounddevice (non-blocking).
 
     Cue playback must never break recording, so a missing or busy output
@@ -25,12 +27,16 @@ class SoundDeviceCuePlayer(RecordingCuePlayer):
         self._sample_rate = sample_rate
         self._start = tone_to_samples(START_FREQUENCY_HZ)
         self._stop = tone_to_samples(STOP_FREQUENCY_HZ)
+        self._ready = ready_chime_to_samples()
 
     def play_start(self) -> None:
         self._play(self._start)
 
     def play_stop(self) -> None:
         self._play(self._stop)
+
+    def play_ready(self) -> None:
+        self._play(self._ready)
 
     def _play(self, samples: np.ndarray) -> None:
         try:

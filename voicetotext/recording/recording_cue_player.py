@@ -4,9 +4,12 @@ import numpy as np
 
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
+    EngineLoadCompletedEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
+    StateChangedEvent,
 )
+from voicetotext.core.state_machine import AppState
 
 
 SAMPLE_RATE = 16000
@@ -17,6 +20,10 @@ _AMPLITUDE = 0.2
 # distinguishable by ear.
 START_FREQUENCY_HZ = 880.0
 STOP_FREQUENCY_HZ = 587.33
+# A two-note ascending chime for "engine ready / you can dictate now" — longer
+# and clearly different from the single start/stop boops.
+READY_LOW_FREQUENCY_HZ = 659.25   # E5
+READY_HIGH_FREQUENCY_HZ = 987.77  # B5
 
 
 def tone_to_samples(
@@ -42,6 +49,13 @@ def _envelope(count: int, sample_rate: int) -> np.ndarray:
     envelope[:fade] = ramp
     envelope[-fade:] = ramp[::-1]
     return envelope
+
+
+def ready_chime_to_samples(sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+    """Render the two-note ascending 'ready' chime as float32 mono samples."""
+    low = tone_to_samples(READY_LOW_FREQUENCY_HZ, sample_rate=sample_rate)
+    high = tone_to_samples(READY_HIGH_FREQUENCY_HZ, sample_rate=sample_rate)
+    return np.concatenate([low, high])
 
 
 class RecordingCuePlayer(ABC):
@@ -71,3 +85,39 @@ class CueBeeper:
 
     def _on_stopped(self, event: RecordingStoppedEvent) -> None:
         self._player.play_stop()
+
+
+class ReadyCuePlayer(ABC):
+    """Plays the cue announcing the engine is ready to transcribe."""
+
+    @abstractmethod
+    def play_ready(self) -> None: ...
+
+
+class EngineReadyBeeper:
+    """Observer that plays a cue when the engine becomes ready to transcribe.
+
+    Two paths signal readiness, and this listens to both: the initial load
+    flips the state machine ``LOADING -> IDLE`` (and publishes no completion
+    event), while a model hot-swap publishes :class:`EngineLoadCompletedEvent`
+    (and changes no state). Failed loads settle via ``ERROR -> IDLE``, so they
+    never ding.
+    """
+
+    def __init__(self, event_bus: EventBus, player: ReadyCuePlayer) -> None:
+        self._player = player
+        event_bus.subscribe(StateChangedEvent, self._on_state_changed)
+        event_bus.subscribe(EngineLoadCompletedEvent, self._on_load_completed)
+
+    def _on_state_changed(self, event: StateChangedEvent) -> None:
+        if self._is_initial_load_finished(event):
+            self._player.play_ready()
+
+    def _is_initial_load_finished(self, event: StateChangedEvent) -> bool:
+        return (
+            event.old_state == AppState.LOADING.value
+            and event.new_state == AppState.IDLE.value
+        )
+
+    def _on_load_completed(self, event: EngineLoadCompletedEvent) -> None:
+        self._player.play_ready()
