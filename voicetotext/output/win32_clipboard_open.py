@@ -1,5 +1,6 @@
-import time
 from typing import Protocol
+
+from voicetotext.output.sleeper import Sleeper
 
 
 # OpenClipboard fails when another window currently holds the clipboard
@@ -17,7 +18,7 @@ class _User32(Protocol):
     def OpenClipboard(self, hwnd: object) -> int: ...  # noqa: N802 (Win32 name)
 
 
-def open_clipboard_with_retry(user32: _User32) -> bool:
+def open_clipboard_with_retry(user32: _User32, sleeper: Sleeper) -> bool:
     """Open the clipboard, retrying briefly on contention.
 
     Returns ``True`` once ``OpenClipboard`` succeeds, or ``False`` if every
@@ -28,5 +29,5 @@ def open_clipboard_with_retry(user32: _User32) -> bool:
         if user32.OpenClipboard(None):
             return True
         if attempt + 1 < _OPEN_ATTEMPTS:
-            time.sleep(_RETRY_SECONDS)
+            sleeper.sleep(_RETRY_SECONDS)
     return False

@@ -1,5 +1,4 @@
-import pytest
-
+from tests.fakes import InstantSleeper
 from voicetotext.output import win32_clipboard_open
 from voicetotext.output.win32_clipboard_open import open_clipboard_with_retry
 
@@ -16,27 +15,33 @@ class _FakeUser32:
         return 0 if self.calls <= self._fail_first else 1
 
 
-@pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Keep the bounded retry instant under test.
-    monkeypatch.setattr(win32_clipboard_open, "_RETRY_SECONDS", 0.0)
-
-
 class TestOpenClipboardWithRetry:
     def test_should_succeed_without_retry_when_clipboard_is_free(self) -> None:
         fake = _FakeUser32(fail_first=0)
 
-        assert open_clipboard_with_retry(fake) is True
+        assert open_clipboard_with_retry(fake, InstantSleeper()) is True
         assert fake.calls == 1
 
     def test_should_retry_then_succeed_under_brief_contention(self) -> None:
         fake = _FakeUser32(fail_first=2)
 
-        assert open_clipboard_with_retry(fake) is True
+        assert open_clipboard_with_retry(fake, InstantSleeper()) is True
         assert fake.calls == 3
 
     def test_should_give_up_after_max_attempts(self) -> None:
         fake = _FakeUser32(fail_first=99)
 
-        assert open_clipboard_with_retry(fake) is False
+        assert open_clipboard_with_retry(fake, InstantSleeper()) is False
         assert fake.calls == win32_clipboard_open._OPEN_ATTEMPTS
+
+    def test_should_wait_via_injected_sleeper_between_failed_attempts(self) -> None:
+        fake = _FakeUser32(fail_first=2)
+        sleeper = InstantSleeper()
+
+        open_clipboard_with_retry(fake, sleeper)
+
+        # Two failures before success -> two waits, each the retry interval.
+        assert sleeper.requested_durations == [
+            win32_clipboard_open._RETRY_SECONDS,
+            win32_clipboard_open._RETRY_SECONDS,
+        ]

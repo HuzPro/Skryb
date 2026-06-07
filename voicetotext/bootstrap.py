@@ -66,7 +66,10 @@ from voicetotext.transcription.engine_install import (
 )
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
-from voicetotext.transcription.model_info import get_model_info
+from voicetotext.transcription.model_info import ModelInfo, get_model_info
+from voicetotext.transcription.streaming.streaming_engine import (
+    StreamingTranscriptionEngine,
+)
 from voicetotext.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
 )
@@ -142,13 +145,13 @@ def _build_output(
     mode: OutputMode, gui_dispatcher: GuiThreadDispatcher,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
-    writer = Win32ClipboardWriter()
+    writer = Win32ClipboardWriter(sleeper=sleeper)
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
         OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
         OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
         OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
             inner=PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
-            preserver=Win32ClipboardPreserver(),
+            preserver=Win32ClipboardPreserver(sleeper=sleeper),
             sleeper=sleeper,
         ),
     }
@@ -234,7 +237,7 @@ _STREAMING_DEVICE = "cuda"
 
 def _load_streaming_engine(
     config: JsonConfigAdapter, paths: AppPaths,
-) -> object:
+) -> StreamingTranscriptionEngine:
     """Build, load, and warm the GPU-only streaming engine for the active model."""
     model_info = get_model_info(
         config.get("transcription.model_size", "base")
@@ -245,7 +248,9 @@ def _load_streaming_engine(
     return engine
 
 
-def _build_streaming_engine_for(model_info: object, paths: AppPaths) -> object:
+def _build_streaming_engine_for(
+    model_info: ModelInfo, paths: AppPaths,
+) -> StreamingTranscriptionEngine:
     """Route to the streaming engine class declared by the model.
 
     ``nemotron_streaming`` models use the clean-room cache-aware engine; all
@@ -267,8 +272,8 @@ def _build_streaming_engine_for(model_info: object, paths: AppPaths) -> object:
 
 
 def _build_cache_aware_streaming_engine(
-    model_info: object, paths: AppPaths,
-) -> object:
+    model_info: ModelInfo, paths: AppPaths,
+) -> StreamingTranscriptionEngine:
     from voicetotext.transcription.streaming.cache_aware.engine import (
         CacheAwareStreamingEngine,
     )
@@ -286,8 +291,8 @@ def _build_cache_aware_streaming_engine(
 
 
 def _wrap_with_batch_comparison(
-    streaming: object, batch_repo_id: str, paths: AppPaths,
-) -> object:
+    streaming: StreamingTranscriptionEngine, batch_repo_id: str, paths: AppPaths,
+) -> StreamingTranscriptionEngine:
     from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
     from voicetotext.transcription.streaming.comparing_streaming_engine import (
         ComparingStreamingEngine,
