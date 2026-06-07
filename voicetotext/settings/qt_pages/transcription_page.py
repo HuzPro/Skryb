@@ -28,8 +28,7 @@ _AUTO_DEVICE = "auto"
 _GPU_DEVICE = "cuda"
 _DEVICE_LABELS: dict[str, str] = {_GPU_DEVICE: "GPU"}
 
-# The only streaming-capable model today; auto-selected when streaming
-# mode is turned on while a non-streaming model is active.
+# Fallback streaming model if the service lists none (shouldn't happen).
 _STREAMING_MODEL = "parakeet-tdt-0.6b-v3"
 
 
@@ -258,8 +257,18 @@ class TranscriptionPage(QWidget):
         if mode is TranscriptionMode.STREAMING and not (
             self._service.model_supports_streaming(self.current_model())
         ):
-            self.set_model(_STREAMING_MODEL)
+            self.set_model(self._default_streaming_model())
         self._refresh_device_enabled(self.current_model())
+
+    def _default_streaming_model(self) -> str:
+        """Pick a streaming model to auto-select: prefer an installed one."""
+        models = self._service.list_models(TranscriptionMode.STREAMING)
+        installed = [m for m in models if m.installed]
+        if installed:
+            return installed[0].name
+        if models:
+            return models[0].name
+        return _STREAMING_MODEL
 
     def current_language(self) -> str:
         return self._language_combo.currentText()

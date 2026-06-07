@@ -20,6 +20,7 @@ from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapsho
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     GRANITE_MODELS,
+    NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
@@ -57,6 +58,15 @@ _GRANITE_SPEECH_DESCRIPTOR = EngineDescriptor(
     base_priority=95,
 )
 
+_NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
+    engine_id="nemotron_streaming",
+    display_name="Nemotron Streaming (cache-aware, GPU)",
+    supported_hardware=("nvidia_cuda", "amd_rocm"),
+    base_priority=85,
+    supports_streaming=True,
+    streaming_only=True,
+)
+
 
 # Per-engine beam_size defaults applied when the user has not set
 # ``transcription.beam_size``. Granite ships IBM's tech-report recipe
@@ -70,6 +80,7 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "faster_whisper": 5,
     "granite_speech": 4,
     "nano_parakeet": 1,
+    "nemotron_streaming": 1,
 }
 _FALLBACK_BEAM_SIZE = 5
 
@@ -82,13 +93,24 @@ def build_engine_registry() -> EngineRegistry:
             _FASTER_WHISPER_DESCRIPTOR,
             _NANO_PARAKEET_DESCRIPTOR,
             _GRANITE_SPEECH_DESCRIPTOR,
+            _NEMOTRON_STREAMING_DESCRIPTOR,
         ],
         builders={
             "transformers": _build_transformers_engine,
             "faster_whisper": _build_faster_whisper_engine,
             "nano_parakeet": _build_nano_parakeet_engine,
             "granite_speech": _build_granite_speech_engine,
+            "nemotron_streaming": _build_nemotron_streaming_engine,
         },
+    )
+
+
+def _build_nemotron_streaming_engine(spec: EngineSpec) -> TranscriptionEngine:
+    # Streaming-only: it has no batch TranscriptionEngine. The live streaming
+    # engine is built directly in bootstrap (_load_streaming_engine); the batch
+    # registry should never reach this model (the picker hides it in batch).
+    raise ConfigurationError(
+        "nemotron-speech-streaming is streaming-only; it has no batch engine."
     )
 
 
@@ -202,6 +224,8 @@ def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
             pairs.append(("nano_parakeet", model_info.repo_id))
         if "granite_speech" in model_info.compatible_engines:
             pairs.append(("granite_speech", model_info.repo_id))
+        if "nemotron_streaming" in model_info.compatible_engines:
+            pairs.append(("nemotron_streaming", model_info.repo_id))
     if model_info.ct2_repo_id:
         pairs.append(("faster_whisper", model_info.ct2_repo_id))
     return pairs
@@ -307,6 +331,9 @@ def build_composite_model_manager(
     granite_models = {
         name: info for name, info in GRANITE_MODELS.items() if info.repo_id
     }
+    nemotron_streaming_models = {
+        name: info for name, info in NEMOTRON_STREAMING_MODELS.items() if info.repo_id
+    }
 
     transformers_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -336,6 +363,13 @@ def build_composite_model_manager(
         file_downloader=file_downloader,
         models=granite_models,
     )
+    nemotron_streaming_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=nemotron_streaming_models,
+    )
 
     return CompositeModelManager(
         by_engine={
@@ -343,6 +377,7 @@ def build_composite_model_manager(
             "faster_whisper": faster_whisper_manager,
             "nano_parakeet": nano_parakeet_manager,
             "granite_speech": granite_speech_manager,
+            "nemotron_streaming": nemotron_streaming_manager,
         },
         active_engine_provider=active_engine_provider,
     )

@@ -2,6 +2,7 @@ import ctypes
 import ctypes.wintypes as _wt
 
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
+from voicetotext.output.win32_clipboard_open import open_clipboard_with_retry
 
 
 _user32 = ctypes.windll.user32
@@ -40,7 +41,7 @@ class Win32ClipboardWriter:
 
 
 def _write_text_to_clipboard(text: str) -> None:
-    if not _user32.OpenClipboard(None):
+    if not open_clipboard_with_retry(_user32):
         raise ClipboardWriteError("Could not open clipboard for write.")
     try:
         _user32.EmptyClipboard()

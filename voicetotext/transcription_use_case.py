@@ -205,6 +205,7 @@ class RecordAndTranscribeUseCase:
         self._finish_streaming()
         self._state_machine.transition_to(AppState.TRANSCRIBING)
         self._event_bus.publish(RecordingStoppedEvent())
+        _logger.info("Streaming stopped. Finalizing transcript...")
         # Finalize (a GPU decode of the trailing window) off the action
         # lock, mirroring the batch path's dispatched transcription.
         self._dispatcher.dispatch(self._streaming.stop)
@@ -219,7 +220,11 @@ class RecordAndTranscribeUseCase:
         self._cancel_cap_timer()
         self._streaming_active = False
 
-    def _on_stream_complete(self, error: Exception | None) -> None:
+    def _on_stream_complete(
+        self,
+        result: TranscriptionResult | None,
+        error: Exception | None,
+    ) -> None:
         self._finish_streaming()
         if error is not None:
             self._report_error(
@@ -228,9 +233,29 @@ class RecordAndTranscribeUseCase:
                 lambda message: TranscriptionFailedEvent(error=message),
             )
             return
+        if result is None:
+            self._state_machine.transition_to(AppState.IDLE)
+            return
+        # The committed text was already pasted live by the streaming
+        # writer; this only mirrors the batch path's terminal log and
+        # completion event so streaming has the same observability.
+        self._log_streaming_result(result)
         self._state_machine.transition_to(AppState.IDLE)
         self._event_bus.publish(
-            TranscriptionCompletedEvent(text="", transcription_seconds=0.0)
+            TranscriptionCompletedEvent(
+                text=result.text,
+                transcription_seconds=result.transcription_seconds,
+            )
+        )
+
+    def _log_streaming_result(self, result: TranscriptionResult) -> None:
+        if result.is_empty:
+            self._announce_empty_transcription(result)
+            return
+        _logger.info(
+            "Streaming transcription in %.2fs: '%s'",
+            result.transcription_seconds,
+            result.text,
         )
 
     def _schedule_cap_timer(self) -> None:

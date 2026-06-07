@@ -4,6 +4,7 @@ import logging
 from typing import Iterator
 
 from voicetotext.output.clipboard_preserver import ClipboardPreserver
+from voicetotext.output.win32_clipboard_open import open_clipboard_with_retry
 
 
 _logger = logging.getLogger(__name__)
@@ -86,10 +87,10 @@ _kernel32.GlobalAlloc.restype = _wt.HGLOBAL
 
 
 def _try_open_clipboard(action: str) -> bool:
-    if not _user32.OpenClipboard(None):
-        _logger.warning("Could not open clipboard for %s.", action)
-        return False
-    return True
+    if open_clipboard_with_retry(_user32):
+        return True
+    _logger.warning("Could not open clipboard for %s.", action)
+    return False
 
 
 def _iter_clipboard_formats() -> Iterator[int]:

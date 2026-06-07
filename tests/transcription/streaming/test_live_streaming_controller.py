@@ -83,20 +83,41 @@ class TestHappyPath:
         controller, recorder, out = _controller(session)
         completions: list = []
 
-        controller.start(completions.append)
+        controller.start(lambda result, error: completions.append((result, error)))
         for _ in range(3):
             recorder.captured_on_frame(_frame())
         controller.stop()
 
         assert "".join(out.outputs) == "hello world done"
-        assert completions == [None]
+        assert len(completions) == 1
+        result, error = completions[0]
+        assert error is None
+        assert result.text == "hello world done"  # finalized transcript handed back
         assert recorder.stop_calls == 1
         assert controller.is_active() is False
+
+    def test_should_paste_final_word_when_finalize_repunctuates_earlier_word(self):
+        # End-to-end mirror of the real Parakeet bug: the live ticks commit
+        # "Testing one two," then finalize re-decodes the whole utterance as
+        # "Testing. one two, three." with the first word re-punctuated. The
+        # new final word must still reach the output, not be dropped.
+        session = _FakeSession(
+            ["Testing", "Testing one", "Testing one two,"],
+            "Testing. one two, three.",
+        )
+        controller, recorder, out = _controller(session)
+
+        controller.start(lambda _r, _e: None)
+        for _ in range(3):
+            recorder.captured_on_frame(_frame())
+        controller.stop()
+
+        assert "three." in "".join(out.outputs)
 
     def test_is_active_between_start_and_stop(self):
         controller, recorder, out = _controller(_FakeSession(["x"], "x"))
 
-        controller.start(lambda _e: None)
+        controller.start(lambda _r, _e: None)
         assert controller.is_active() is True
         controller.stop()
 
@@ -107,8 +128,8 @@ class TestReentrancy:
     def test_double_start_is_a_noop(self):
         controller, recorder, out = _controller(_FakeSession(["x"], "x"))
 
-        controller.start(lambda _e: None)
-        controller.start(lambda _e: None)
+        controller.start(lambda _r, _e: None)
+        controller.start(lambda _r, _e: None)
 
         assert recorder.start_calls == 1
         controller.stop()
@@ -121,7 +142,7 @@ class TestErrors:
         done = threading.Event()
         errors: list = []
 
-        controller.start(lambda e: (errors.append(e), done.set()))
+        controller.start(lambda result, error: (errors.append(error), done.set()))
         recorder.captured_on_frame(_frame())
         recorder.captured_on_frame(_frame())
 
@@ -137,11 +158,13 @@ class TestErrors:
         controller, recorder, out = _controller(session)
         completions: list = []
 
-        controller.start(completions.append)
+        controller.start(lambda result, error: completions.append((result, error)))
         recorder.captured_on_frame(_frame())
         controller.stop()
 
-        assert isinstance(completions[0], RuntimeError)
+        result, error = completions[0]
+        assert result is None
+        assert isinstance(error, RuntimeError)
         assert controller.is_active() is False
 
 
@@ -171,4 +194,4 @@ class TestEngineSlot:
         controller, recorder, out = _controller()
 
         with pytest.raises(TranscriptionError, match="no streaming engine"):
-            controller.start(lambda _e: None)
+            controller.start(lambda _r, _e: None)

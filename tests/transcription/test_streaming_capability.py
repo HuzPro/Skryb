@@ -1,5 +1,6 @@
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_selector import (
+    model_supports_batch,
     model_supports_streaming,
     rank_engines,
 )
@@ -62,6 +63,41 @@ class TestModelSupportsStreaming:
         assert model_supports_streaming(
             get_model_info("granite-speech-4.1-2b"), _descriptors(),
         ) is False
+
+
+class TestNemotronStreamingDescriptor:
+    def test_should_register_nemotron_streaming_as_streaming_only(self):
+        by_id = {d.engine_id: d for d in _descriptors()}
+
+        assert by_id["nemotron_streaming"].supports_streaming is True
+        assert by_id["nemotron_streaming"].streaming_only is True
+
+    def test_should_be_gpu_only(self):
+        by_id = {d.engine_id: d for d in _descriptors()}
+
+        assert "cpu" not in by_id["nemotron_streaming"].supported_hardware
+
+
+class TestModelSupportsBatch:
+    def test_should_report_nemotron_not_batch_capable(self):
+        assert model_supports_batch(
+            get_model_info("nemotron-speech-streaming-en-0.6b"), _descriptors(),
+        ) is False
+
+    def test_should_report_nemotron_streaming_capable(self):
+        assert model_supports_streaming(
+            get_model_info("nemotron-speech-streaming-en-0.6b"), _descriptors(),
+        ) is True
+
+    def test_should_report_parakeet_batch_capable(self):
+        assert model_supports_batch(
+            get_model_info("parakeet-tdt-0.6b-v3"), _descriptors(),
+        ) is True
+
+    def test_should_report_whisper_batch_capable(self):
+        assert model_supports_batch(
+            get_model_info("base"), _descriptors(),
+        ) is True
 
 
 class TestSelectorUnaffectedByStreamingFlag:

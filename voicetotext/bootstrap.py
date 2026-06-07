@@ -235,22 +235,70 @@ _STREAMING_DEVICE = "cuda"
 def _load_streaming_engine(
     config: JsonConfigAdapter, paths: AppPaths,
 ) -> object:
-    """Build, load, and warm the GPU-only Parakeet streaming engine."""
+    """Build, load, and warm the GPU-only streaming engine for the active model."""
+    model_info = get_model_info(
+        config.get("transcription.model_size", "base")
+    )
+    engine = _build_streaming_engine_for(model_info, paths)
+    engine.load_model()
+    _warmup_safely(engine)
+    return engine
+
+
+def _build_streaming_engine_for(model_info: object, paths: AppPaths) -> object:
+    """Route to the streaming engine class declared by the model.
+
+    ``nemotron_streaming`` models use the clean-room cache-aware engine; all
+    other streaming models use the windowed nano-parakeet engine. A model that
+    declares ``compare_batch_repo_id`` is additionally wrapped to log a batch
+    A/B transcript per dictation (a temporary testing mode).
+    """
+    if "nemotron_streaming" in model_info.compatible_engines:
+        return _build_cache_aware_streaming_engine(model_info, paths)
     from voicetotext.transcription.streaming.parakeet_streaming_engine import (
         StreamingNanoParakeetEngine,
     )
 
-    model_info = get_model_info(
-        config.get("transcription.model_size", "base")
-    )
-    engine = StreamingNanoParakeetEngine(
+    return StreamingNanoParakeetEngine(
         repo_id=model_info.repo_id,
         model_dir=paths.models_dir,
         device=_STREAMING_DEVICE,
     )
-    engine.load_model()
-    _warmup_safely(engine)
-    return engine
+
+
+def _build_cache_aware_streaming_engine(
+    model_info: object, paths: AppPaths,
+) -> object:
+    from voicetotext.transcription.streaming.cache_aware.engine import (
+        CacheAwareStreamingEngine,
+    )
+
+    streaming = CacheAwareStreamingEngine(
+        repo_id=model_info.repo_id,
+        model_dir=paths.models_dir,
+        device=_STREAMING_DEVICE,
+    )
+    if not model_info.compare_batch_repo_id:
+        return streaming
+    return _wrap_with_batch_comparison(
+        streaming, model_info.compare_batch_repo_id, paths,
+    )
+
+
+def _wrap_with_batch_comparison(
+    streaming: object, batch_repo_id: str, paths: AppPaths,
+) -> object:
+    from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
+    from voicetotext.transcription.streaming.comparing_streaming_engine import (
+        ComparingStreamingEngine,
+    )
+
+    batch = NanoParakeetAdapter(
+        repo_id=batch_repo_id,
+        device=_STREAMING_DEVICE,
+        model_dir=paths.models_dir,
+    )
+    return ComparingStreamingEngine(streaming=streaming, batch=batch)
 
 
 def _load_active_engine_installer(

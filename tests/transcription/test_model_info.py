@@ -5,6 +5,7 @@ from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     GRANITE_MODELS,
+    NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
@@ -76,6 +77,11 @@ class TestModelInfoEntity:
         info = ModelInfo(name="base", size_mb=142, description="test")
 
         assert info.ct2_repo_id == ""
+
+    def test_compare_batch_repo_id_defaults_to_empty(self):
+        info = ModelInfo(name="base", size_mb=142, description="test")
+
+        assert info.compare_batch_repo_id == ""
 
     def test_should_store_explicit_ct2_repo_id(self):
         info = ModelInfo(
@@ -155,6 +161,7 @@ class TestAllModels:
         expected = (
             set(WHISPER_MODELS.keys())
             | set(PARAKEET_MODELS.keys())
+            | set(NEMOTRON_STREAMING_MODELS.keys())
             | set(GRANITE_MODELS.keys())
         )
 
@@ -171,6 +178,33 @@ class TestAllModels:
     def test_granite_entries_should_match_granite_models(self):
         for name, info in GRANITE_MODELS.items():
             assert ALL_MODELS[name] is info
+
+
+class TestNemotronStreamingModels:
+    def test_should_contain_streaming_and_compare_models(self):
+        assert set(NEMOTRON_STREAMING_MODELS.keys()) == {
+            "nemotron-speech-streaming-en-0.6b", "nemotron-streaming-compare",
+        }
+
+    def test_plain_streaming_model_declares_no_batch_comparison(self):
+        info = NEMOTRON_STREAMING_MODELS["nemotron-speech-streaming-en-0.6b"]
+
+        assert info.compare_batch_repo_id == ""
+
+    def test_compare_model_declares_parakeet_tdt_as_batch_reference(self):
+        info = get_model_info("nemotron-streaming-compare")
+
+        assert info.compare_batch_repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+
+    def test_compare_model_is_nemotron_streaming_only(self):
+        info = get_model_info("nemotron-streaming-compare")
+
+        assert info.compatible_engines == ("nemotron_streaming",)
+
+    def test_compare_model_description_flags_it_as_temporary_testing(self):
+        description = get_model_info("nemotron-streaming-compare").description.upper()
+
+        assert "TEMPORARY" in description or "TESTING" in description
 
 
 class TestGraniteModels:

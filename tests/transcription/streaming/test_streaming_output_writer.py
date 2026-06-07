@@ -65,3 +65,52 @@ class TestStreamingOutputWriter:
         StreamingOutputWriter(out).emit("")
 
         assert out.outputs == []
+
+    def test_should_append_new_word_when_an_earlier_word_is_repunctuated(self):
+        # Regression for the dropped final word: the full-utterance finalize
+        # re-decode can re-punctuate an already-emitted word ("Testing" ->
+        # "Testing." once the model hears the trailing pause). The genuinely
+        # new final word must still be pasted, not discarded because the
+        # whole string no longer prefix-matches what was already emitted.
+        out = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(out)
+
+        writer.emit("Testing")
+        writer.emit("Testing one")
+        writer.emit("Testing one two,")
+        writer.emit("Testing. one two, three.")
+
+        assert out.outputs[-1] == " three."
+
+    def test_should_not_repaste_earlier_words_on_repunctuation(self):
+        out = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(out)
+
+        writer.emit("Testing one two,")
+        writer.emit("Testing. one two, three.")
+
+        assert "".join(out.outputs) == "Testing one two, three."
+
+    def test_typed_output_equals_final_for_whole_word_growth(self):
+        # The invariant a streaming session must uphold: feeding monotonic
+        # WHOLE-WORD-growing snapshots types exactly the final text.
+        out = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(out)
+
+        for snapshot in ["", "this", "this is", "this is being", "this is being typed"]:
+            writer.emit(snapshot)
+
+        assert "".join(out.outputs) == "this is being typed"
+
+    def test_cannot_extend_a_growing_last_word(self):
+        # Documents WHY the cache-aware session holds back the in-progress
+        # word: if a snapshot grows the LAST word in place (subword completion
+        # '_iss' -> 'ue'), the word-count writer cannot extend it, so 'issue'
+        # would be typed as 'iss'. The session must only emit complete words.
+        out = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(out)
+
+        writer.emit("the iss")
+        writer.emit("the issue")
+
+        assert "".join(out.outputs) == "the iss"

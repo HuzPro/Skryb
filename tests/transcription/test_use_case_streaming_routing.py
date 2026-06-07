@@ -3,6 +3,7 @@ import numpy as np
 from voicetotext.core.events import (
     RecordingStartedEvent,
     RecordingStoppedEvent,
+    TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -26,9 +27,12 @@ from tests.fakes import (
 class _StubController:
     """Records routing calls; simulates worker completion in ``stop``."""
 
-    def __init__(self, has_engine: bool = True, complete_error=None) -> None:
+    def __init__(
+        self, has_engine: bool = True, complete_error=None, complete_result=None,
+    ) -> None:
         self._has_engine = has_engine
         self._complete_error = complete_error
+        self._complete_result = complete_result
         self.start_calls = 0
         self.stop_calls = 0
         self.set_engine_calls: list = []
@@ -54,7 +58,7 @@ class _StubController:
         self.stop_calls += 1
         self._active = False
         if self._on_complete is not None:
-            self._on_complete(self._complete_error)
+            self._on_complete(self._complete_result, self._complete_error)
 
 
 class _FakeStreamingEngine:
@@ -154,6 +158,27 @@ class TestStreamingRouting:
         assert len(failures) == 1
         assert state_machine.state is AppState.IDLE
 
+    def test_should_publish_streamed_transcript_and_duration_on_completion(self):
+        # Streaming used to publish an empty completion event (text="",
+        # seconds=0), so the terminal showed nothing after a stream. The
+        # finalized transcript + duration must now flow through.
+        result = TranscriptionResult(
+            text="hello world", language="en",
+            language_probability=0.0, transcription_seconds=1.23,
+        )
+        controller = _StubController(complete_result=result)
+        use_case, recorder, batch, state_machine, bus = _make(controller)
+        completed: list = []
+        bus.subscribe(TranscriptionCompletedEvent, completed.append)
+
+        use_case.on_hotkey_activated()   # start streaming
+        use_case.on_hotkey_activated()   # stop -> finalize -> complete
+
+        assert len(completed) == 1
+        assert completed[0].text == "hello world"
+        assert completed[0].transcription_seconds == 1.23
+        assert state_machine.state is AppState.IDLE
+
     def test_should_recover_streaming_state_when_worker_fails_mid_run(self):
         # The worker can fail mid-run (e.g. a decode error) and call
         # on_complete(error) WITHOUT going through the user-stop path. That
@@ -187,7 +212,7 @@ class TestStreamingRouting:
 
         use_case.on_hotkey_activated()  # streaming starts
         # Worker dies mid-run and reports the error out-of-band.
-        controller._on_complete(RuntimeError("decode failed"))
+        controller._on_complete(None, RuntimeError("decode failed"))
 
         assert len(failures) == 1
         assert state_machine.state is AppState.IDLE

@@ -24,6 +24,7 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_selector import (
+    model_supports_batch as _model_supports_batch,
     model_supports_streaming as _model_supports_streaming,
     rank_engines,
 )
@@ -137,6 +138,8 @@ class SettingsService:
         infos = self._model_manager.list_models()
         if effective_mode is TranscriptionMode.STREAMING:
             infos = [info for info in infos if self._is_streaming_model(info)]
+        else:
+            infos = [info for info in infos if self._is_batch_model(info)]
         return [
             ModelView.from_info(info, installed=self._install_cache.is_installed(info.name))
             for info in infos
@@ -154,6 +157,11 @@ class SettingsService:
         if self._registry is None:
             return False
         return _model_supports_streaming(info, self._registry.all_descriptors())
+
+    def _is_batch_model(self, info: ModelInfo) -> bool:
+        if self._registry is None:
+            return True
+        return _model_supports_batch(info, self._registry.all_descriptors())
 
     def any_model_installed(self) -> bool:
         return any(

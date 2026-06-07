@@ -4,6 +4,7 @@ from typing import Literal
 
 EngineId = Literal[
     "transformers", "faster_whisper", "nano_parakeet", "granite_speech",
+    "nemotron_streaming",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 
@@ -22,6 +23,9 @@ class EngineDescriptor:
     supported_hardware: tuple[HardwareKind, ...]
     base_priority: int
     supports_streaming: bool = False
+    # True for engines that ONLY do live streaming (no batch transcription),
+    # so the batch model picker can hide their models.
+    streaming_only: bool = False
 
 
 @dataclass(frozen=True)

@@ -1,9 +1,11 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from voicetotext.bootstrap import (
     _build_output,
+    _build_streaming_engine_for,
     _load_engine_and_attach,
     _load_engine_with_fallback,
     _make_active_engine_provider,
@@ -759,3 +761,34 @@ class TestMakeDestroyedHandler:
         handler(window)  # Qt's destroyed emits the QObject
 
         assert ref["current"] is None
+
+
+class TestBuildStreamingEngineRouting:
+    def _streaming_model(self, compare_batch_repo_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            compatible_engines=("nemotron_streaming",),
+            repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
+            compare_batch_repo_id=compare_batch_repo_id,
+        )
+
+    def test_should_wrap_compare_model_with_batch_comparison(self, tmp_path):
+        from voicetotext.transcription.streaming.comparing_streaming_engine import (
+            ComparingStreamingEngine,
+        )
+        model_info = self._streaming_model("nvidia/parakeet-tdt-0.6b-v3")
+        paths = SimpleNamespace(models_dir=tmp_path)
+
+        engine = _build_streaming_engine_for(model_info, paths)
+
+        assert isinstance(engine, ComparingStreamingEngine)
+
+    def test_should_return_plain_cache_aware_engine_when_no_comparison(self, tmp_path):
+        from voicetotext.transcription.streaming.cache_aware.engine import (
+            CacheAwareStreamingEngine,
+        )
+        model_info = self._streaming_model("")
+        paths = SimpleNamespace(models_dir=tmp_path)
+
+        engine = _build_streaming_engine_for(model_info, paths)
+
+        assert isinstance(engine, CacheAwareStreamingEngine)

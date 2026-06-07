@@ -71,7 +71,11 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {"parakeet-tdt-0.6b-v3"}
+        assert names == {
+            "parakeet-tdt-0.6b-v3",
+            "nemotron-speech-streaming-en-0.6b",
+            "nemotron-streaming-compare",
+        }
 
     def test_should_report_streaming_capability_per_model(self):
         service, *_ = _build_service(registry=build_engine_registry())

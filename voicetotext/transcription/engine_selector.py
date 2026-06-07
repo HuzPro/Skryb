@@ -49,6 +49,22 @@ def model_supports_streaming(
     )
 
 
+def model_supports_batch(
+    model: ModelInfo,
+    descriptors: Sequence[EngineDescriptor],
+) -> bool:
+    """Whether any engine that can drive *model* does batch transcription.
+
+    A model is batch-capable unless every compatible engine is
+    ``streaming_only`` (e.g. the cache-aware streaming engine), which lets the
+    batch model picker hide streaming-only models.
+    """
+    compatible = [d for d in descriptors if d.engine_id in model.compatible_engines]
+    if not compatible:
+        return True  # unknown engine (e.g. tests) — don't hide it
+    return any(not d.streaming_only for d in compatible)
+
+
 def _filter_compatible(
     model: ModelInfo,
     hardware: HardwareProfile,
