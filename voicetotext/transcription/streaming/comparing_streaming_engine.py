@@ -49,6 +49,11 @@ class ComparingStreamingEngine(StreamingTranscriptionEngine):
     def is_model_loaded(self) -> bool:
         return self._streaming.is_model_loaded()
 
+    def reports_own_transcript(self) -> bool:
+        # The comparison session logs the streaming transcript next to the
+        # batch one, so the use case must not also log the generic line.
+        return True
+
     def warmup(self) -> None:
         # Only the live engine is warmed; the batch reference pays its
         # cold-start on the first finalize (off the typing path).

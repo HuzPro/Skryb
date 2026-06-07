@@ -59,6 +59,9 @@ class LiveStreamingController:
     def has_engine(self) -> bool:
         return self._engine is not None
 
+    def reports_own_transcript(self) -> bool:
+        return self._engine is not None and self._engine.reports_own_transcript()
+
     def is_active(self) -> bool:
         return self._active
 

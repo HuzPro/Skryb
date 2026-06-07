@@ -168,3 +168,13 @@ class TestBatchReferenceDegradation:
 
         assert streaming.disposed is True
         assert batch.disposed is False  # was nulled, never loaded
+
+
+class TestSelfReporting:
+    def test_engine_reports_it_logs_its_own_transcript(self) -> None:
+        engine = ComparingStreamingEngine(_FakeStreamingEngine(), _FakeBatchEngine())
+
+        assert engine.reports_own_transcript() is True
+
+    def test_plain_streaming_engine_does_not_report_own_transcript(self) -> None:
+        assert _FakeStreamingEngine().reports_own_transcript() is False

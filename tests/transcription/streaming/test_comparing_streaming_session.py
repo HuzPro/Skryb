@@ -113,6 +113,15 @@ class TestBatchComparison:
         assert "hello world" in app_caplog.text       # streaming transcript
         assert "Hello, world." in app_caplog.text      # batch transcript
 
+    def test_comparison_log_includes_the_streaming_duration(self, app_caplog) -> None:
+        inner = _FakeInnerSession(_UPDATE, _STREAMING_RESULT)  # 1.0s
+        session = ComparingStreamingSession(inner, _FakeBatchEngine(_BATCH_RESULT))
+        session.feed(_chunk(1, 2))
+
+        session.finalize()
+
+        assert "1.00s" in app_caplog.text   # timing folded into the side-by-side line
+
     def test_batch_failure_is_logged_and_does_not_break_finalize(
         self, app_caplog,
     ) -> None:

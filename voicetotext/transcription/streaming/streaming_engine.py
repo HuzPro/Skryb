@@ -52,3 +52,13 @@ class StreamingTranscriptionEngine(ABC):
 
     @abstractmethod
     def dispose(self) -> None: ...
+
+    def reports_own_transcript(self) -> bool:
+        """Whether this engine logs its own end-of-run transcript.
+
+        When ``True`` the caller skips the generic streaming-result log line so
+        the transcript is not printed twice (e.g. the comparison decorator
+        already logs it side by side with the batch reference). Defaults to
+        ``False``; engines opt in by overriding.
+        """
+        return False

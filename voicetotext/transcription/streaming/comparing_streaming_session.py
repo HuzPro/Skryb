@@ -59,7 +59,9 @@ class ComparingStreamingSession(StreamingTranscriptionSession):
         if segment is None:
             return
         batch = self._batch.transcribe(segment)
-        _log_side_by_side(streaming.text, batch.text)
+        _log_side_by_side(
+            streaming.text, batch.text, streaming.transcription_seconds,
+        )
 
     def _captured_segment(self) -> AudioSegment | None:
         if not self._captured:
@@ -70,11 +72,13 @@ class ComparingStreamingSession(StreamingTranscriptionSession):
         return AudioSegment(data=data, sample_rate=_SAMPLE_RATE)
 
 
-def _log_side_by_side(streaming_text: str, batch_text: str) -> None:
+def _log_side_by_side(
+    streaming_text: str, batch_text: str, seconds: float,
+) -> None:
     verdict = "identical" if _same(streaming_text, batch_text) else "differs"
     _logger.info(
-        "=== streaming vs batch (%s) ===\n  streaming: %s\n  batch    : %s",
-        verdict, streaming_text, batch_text,
+        "=== streaming vs batch (%s) in %.2fs ===\n  streaming: %s\n  batch    : %s",
+        verdict, seconds, streaming_text, batch_text,
     )
 
 
