@@ -471,6 +471,17 @@ class TestMigrateRemovedModels:
         )
         config.save.assert_called_once()
 
+    def test_should_rewrite_granite_to_large_v3_turbo(self):
+        config = MagicMock()
+        config.get.return_value = "granite-speech-4.1-2b"
+
+        migrate_removed_models(config)
+
+        config.set.assert_called_once_with(
+            "transcription.model_size", "large-v3-turbo"
+        )
+        config.save.assert_called_once()
+
     def test_should_leave_other_models_alone(self):
         config = MagicMock()
         config.get.return_value = "small"

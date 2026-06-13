@@ -122,6 +122,18 @@ ALL_MODELS: dict[str, ModelInfo] = {
 }
 
 
+# Models kept defined for the engine layer but withheld from the
+# user-facing catalog (e.g. their load is currently unstable). They cannot
+# be selected; an existing config pinned to one is migrated off it (see
+# ``_REMOVED_MODEL_REPLACEMENTS``). Re-enable by removing the entry here.
+HIDDEN_MODELS: frozenset[str] = frozenset({"granite-speech-4.1-2b"})
+
+
+def is_catalog_model(name: str) -> bool:
+    """Whether *name* should appear in the user-facing model catalog."""
+    return name in ALL_MODELS and name not in HIDDEN_MODELS
+
+
 def get_model_info(name: str) -> ModelInfo:
     info = ALL_MODELS.get(name)
     if info is None:
@@ -150,6 +162,9 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "medium": "large-v3-turbo",
     "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
+    # Withdrawn from the catalog (unstable load); move quality-seeking
+    # users to the recommended high-accuracy batch model.
+    "granite-speech-4.1-2b": "large-v3-turbo",
 }
 
 

@@ -635,3 +635,21 @@ class TestStateChangeSubscription:
         bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
 
         assert listener.events == []
+
+
+class TestCatalogHiding:
+    """Hidden models (e.g. unstable loads) are kept defined for the engine
+    layer but withheld from the user-facing catalog so they cannot be
+    selected and loaded."""
+
+    def test_should_hide_unavailable_models_from_list_models(self):
+        from voicetotext.transcription.model_info import (
+            GRANITE_MODELS,
+            WHISPER_MODELS,
+        )
+
+        service, *_ = _build_service(models={**WHISPER_MODELS, **GRANITE_MODELS})
+
+        names = [view.name for view in service.list_models()]
+        assert "granite-speech-4.1-2b" not in names
+        assert "base" in names
