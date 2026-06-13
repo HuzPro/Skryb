@@ -145,8 +145,8 @@ class SystemTrayApp:
 
     def _handle_quit(self) -> None:
         # Schedule a hard exit FIRST, before any cleanup. Cleanup may
-        # hang on cross-thread Qt operations (tray icon) or stuck OS
-        # hooks (pynput); when that happens the timer kills the
+        # hang on cross-thread Qt operations (tray icon) or a stuck OS
+        # keyboard hook; when that happens the timer kills the
         # process anyway, so the user never sees a "ghost" voicetotext
         # process after clicking Quit. Cleanup itself runs inline on
         # the GUI thread — QSystemTrayIcon mutations require it and

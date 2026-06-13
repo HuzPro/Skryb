@@ -19,7 +19,7 @@ from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
-from voicetotext.hotkeys.pynput_adapter import PynputAdapter
+from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
@@ -48,7 +48,7 @@ from voicetotext.settings.engine_hot_swap import (
 )
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.qt_download_bridge import QtDownloadBridge
-from voicetotext.settings.pynput_capture_bridge import PynputCaptureBridge
+from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
 from voicetotext.settings.qt_engine_bridge import QtEngineBridge
 from voicetotext.settings.qt_window import QtSettingsWindow
 from voicetotext.settings.service import SettingsService
@@ -182,7 +182,7 @@ def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscr
     else:
         strategy = ToggleStrategy(keys=keys)
 
-    listener = PynputAdapter(strategy)
+    listener = Win32HookAdapter(strategy)
     listener.set_on_activate(use_case.on_hotkey_activated)
     listener.set_on_deactivate(use_case.on_hotkey_deactivated)
     return listener
@@ -641,7 +641,7 @@ def build_app(
             # (via WA_DeleteOnClose on QtSettingsWindow).
             settings_window_ref["current"] = None
             existing.close()
-        capture_bridge = PynputCaptureBridge()
+        capture_bridge = Win32CaptureBridge()
         window = QtSettingsWindow(
             service=settings_service,
             first_run=False,

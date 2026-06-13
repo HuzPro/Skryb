@@ -1,17 +1,17 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from pynput.keyboard import Key, KeyCode
+from voicetotext.hotkeys.keys import HotkeyKey
 
 
 class HotkeyStrategy(ABC):
 
     @abstractmethod
-    def on_key_press(self, key: Key | KeyCode) -> None:
+    def on_key_press(self, key: HotkeyKey) -> None:
         pass
 
     @abstractmethod
-    def on_key_release(self, key: Key | KeyCode) -> None:
+    def on_key_release(self, key: HotkeyKey) -> None:
         pass
 
     @abstractmethod

@@ -1,57 +1,45 @@
-from pynput.keyboard import Key, KeyCode
-
-_CHAR_TO_VIRTUAL_KEY_CODE = {chr(i + ord("a")): 0x41 + i for i in range(26)}
-
-
-def canonicalize_key(key: Key | KeyCode) -> Key | KeyCode:
-    if isinstance(key, KeyCode):
-        virtual_key = key.vk
-        if virtual_key is None and key.char is not None:
-            virtual_key = _CHAR_TO_VIRTUAL_KEY_CODE.get(key.char.lower())
-            if virtual_key is None:
-                code = ord(key.char)
-                if 1 <= code <= 26:
-                    virtual_key = 0x41 + code - 1
-        if virtual_key is not None:
-            return KeyCode.from_vk(virtual_key)
-    return key
+from voicetotext.hotkeys.keys import (
+    VK_F1,
+    VK_LCONTROL,
+    VK_LMENU,
+    VK_LSHIFT,
+    VK_LWIN,
+    VK_RCONTROL,
+    VK_RMENU,
+    VK_RSHIFT,
+    VK_SPACE,
+    HotkeyKey,
+    from_char,
+)
 
 
-_MODIFIER_MAP = {
-    "ctrl": Key.ctrl_l,
-    "ctrl_l": Key.ctrl_l,
-    "ctrl_r": Key.ctrl_r,
-    "alt": Key.alt_l,
-    "alt_l": Key.alt_l,
-    "alt_r": Key.alt_r,
-    "shift": Key.shift_l,
-    "shift_l": Key.shift_l,
-    "shift_r": Key.shift_r,
-    "cmd": Key.cmd,
-    "space": Key.space,
-    "f1": Key.f1,
-    "f2": Key.f2,
-    "f3": Key.f3,
-    "f4": Key.f4,
-    "f5": Key.f5,
-    "f6": Key.f6,
-    "f7": Key.f7,
-    "f8": Key.f8,
-    "f9": Key.f9,
-    "f10": Key.f10,
-    "f11": Key.f11,
-    "f12": Key.f12,
+# A generic modifier name resolves to the LEFT virtual key; the explicit
+# ``_l``/``_r`` forms let a config pin a specific side. Both display as the
+# same generic name (see ``keys.name_for_vk``).
+_MODIFIER_MAP: dict[str, HotkeyKey] = {
+    "ctrl": HotkeyKey(VK_LCONTROL, "ctrl"),
+    "ctrl_l": HotkeyKey(VK_LCONTROL, "ctrl"),
+    "ctrl_r": HotkeyKey(VK_RCONTROL, "ctrl"),
+    "alt": HotkeyKey(VK_LMENU, "alt"),
+    "alt_l": HotkeyKey(VK_LMENU, "alt"),
+    "alt_r": HotkeyKey(VK_RMENU, "alt"),
+    "shift": HotkeyKey(VK_LSHIFT, "shift"),
+    "shift_l": HotkeyKey(VK_LSHIFT, "shift"),
+    "shift_r": HotkeyKey(VK_RSHIFT, "shift"),
+    "cmd": HotkeyKey(VK_LWIN, "cmd"),
+    "space": HotkeyKey(VK_SPACE, "space"),
+    **{f"f{n}": HotkeyKey(VK_F1 + n - 1, f"f{n}") for n in range(1, 13)},
 }
 
 
-def parse_hotkey_combo(combo_string: str) -> tuple[Key | KeyCode, ...]:
-    keys: list[Key | KeyCode] = []
-    for part in combo_string.lower().split("+"):
-        part = part.strip()
+def parse_hotkey_combo(combo_string: str) -> tuple[HotkeyKey, ...]:
+    parsed: list[HotkeyKey] = []
+    for raw_part in combo_string.lower().split("+"):
+        part = raw_part.strip()
         if part in _MODIFIER_MAP:
-            keys.append(_MODIFIER_MAP[part])
-        elif len(part) == 1:
-            keys.append(KeyCode.from_vk(_CHAR_TO_VIRTUAL_KEY_CODE[part]))
+            parsed.append(_MODIFIER_MAP[part])
+        elif len(part) == 1 and part.isalpha():
+            parsed.append(from_char(part))
         else:
             raise ValueError(f"Unknown key: {part}")
-    return tuple(keys)
+    return tuple(parsed)

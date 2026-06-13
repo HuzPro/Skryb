@@ -1,31 +1,31 @@
 from collections.abc import Callable
 
-from pynput import keyboard
-
+from voicetotext.hotkeys import keys
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.strategy import HotkeyStrategy
+from voicetotext.hotkeys.win32_keyboard_hook import Win32KeyboardHook
 
 
-class PynputAdapter(HotkeyListener):
+class Win32HookAdapter(HotkeyListener):
+    """Global hotkey listener backed by a native Win32 keyboard hook.
+
+    Translates each raw virtual-key event into a :class:`HotkeyKey` and
+    delegates to the strategy. It never suppresses keys — a global hotkey
+    must not swallow the user's keystrokes.
+    """
 
     def __init__(self, strategy: HotkeyStrategy) -> None:
         self._strategy = strategy
-        self._listener: keyboard.Listener | None = None
+        self._hook = Win32KeyboardHook(self._handle_key)
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
         self._paused: bool = False
 
     def start(self) -> None:
-        self._listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release,
-        )
-        self._listener.start()
+        self._hook.start()
 
     def stop(self) -> None:
-        if self._listener:
-            self._listener.stop()
-            self._listener = None
+        self._hook.stop()
 
     def set_on_activate(self, callback: Callable[[], None]) -> None:
         self._on_activate = callback
@@ -45,12 +45,12 @@ class PynputAdapter(HotkeyListener):
     def resume(self) -> None:
         self._paused = False
 
-    def _on_press(self, key: keyboard.Key) -> None:
+    def _handle_key(self, is_key_down: bool, vk: int) -> bool:
         if self._paused:
-            return
-        self._strategy.on_key_press(key)
-
-    def _on_release(self, key: keyboard.Key) -> None:
-        if self._paused:
-            return
-        self._strategy.on_key_release(key)
+            return False
+        key = keys.from_vk(vk)
+        if is_key_down:
+            self._strategy.on_key_press(key)
+        else:
+            self._strategy.on_key_release(key)
+        return False

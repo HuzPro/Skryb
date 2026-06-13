@@ -52,6 +52,9 @@ if sys.platform != "win32":
         "output/test_win32_clipboard_preserver.py",
         "output/test_win32_clipboard_writer.py",
         "output/test_win32_key_sender.py",
+        "hotkeys/test_win32_keyboard_hook.py",
+        "hotkeys/test_win32_hook_adapter.py",
+        "settings/test_win32_capture_bridge.py",
         "performance",
     ]
 

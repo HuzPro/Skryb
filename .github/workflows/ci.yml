@@ -20,8 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Qt has no real display in CI; the offscreen plugin avoids the xcb
-      # stack. pynput (imported by the hotkey modules) still needs a real
-      # X display, which xvfb-run supplies for the test step.
+      # stack. xvfb-run still wraps the test step as a safety net for the
+      # Qt widget tests (the native Win32 hotkey modules are Windows-only
+      # and excluded from collection on Linux).
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v5
@@ -35,7 +36,7 @@ jobs:
       # System libraries the suite pulls in at import time on Linux:
       #   libportaudio2   -> sounddevice (recording adapter)
       #   libsndfile1     -> soundfile (audio test dep)
-      #   xvfb + xauth    -> virtual X display for pynput and Qt
+      #   xvfb + xauth    -> virtual X display safety net for the Qt tests
       #   EGL/GL/xkb/dbus -> PySide6's offscreen platform plugin
       - name: Install system libraries
         run: |
