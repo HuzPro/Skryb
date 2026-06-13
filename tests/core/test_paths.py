@@ -1,4 +1,7 @@
+import sys
 from pathlib import Path
+
+import pytest
 
 from voicetotext.core.paths import AppPaths
 
@@ -14,6 +17,10 @@ class TestAppPathsResolution:
 
         assert paths.models_dir == tmp_path / "models"
 
+    @pytest.mark.skipif(
+        sys.platform != "win32",
+        reason="APPDATA + backslash path semantics are Windows-only",
+    )
     def test_should_default_to_appdata_voicetotext(self, monkeypatch):
         monkeypatch.setenv("APPDATA", "C:\\Users\\Test\\AppData\\Roaming")
 

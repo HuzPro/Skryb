@@ -33,6 +33,34 @@ from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.state_machine import AppStateMachine
 
 
+# Desktop/Windows-only test modules, dropped from collection off-Windows
+# because they fail to *import* there (collection runs before marker
+# deselection, so a marker alone cannot save them). Three causes:
+#   * ``ctypes.windll`` — the ``win32_clipboard_*`` modules, and
+#     ``voicetotext.bootstrap`` (which imports them at module top, so any
+#     test that imports bootstrap is affected), touch this Windows-only
+#     attribute.
+#   * ``APPDATA`` — ``tests/performance/conftest.py`` reads this
+#     Windows-only environment variable at import time.
+#   * ``pyautogui`` — the paste adapter imports it at module top; on
+#     Linux it pulls in pyscreeze, whose import leaks a file handle that
+#     ``filterwarnings = error`` then turns into a spurious failure.
+# Windows runs every module here; on Linux the paste adapter is unusable
+# headless anyway (it drives a real desktop).
+collect_ignore: list[str] = []
+if sys.platform != "win32":
+    collect_ignore = [
+        "test_bootstrap.py",
+        "test_mode_aware_loader.py",
+        "integration/test_config_persistence.py",
+        "output/test_win32_clipboard_open.py",
+        "output/test_win32_clipboard_preserver.py",
+        "output/test_win32_clipboard_writer.py",
+        "output/test_paste_and_clipboard_adapter.py",
+        "performance",
+    ]
+
+
 @pytest.fixture()
 def event_bus() -> SimpleEventBus:
     return SimpleEventBus()
@@ -116,14 +144,17 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 @pytest.hookimpl(trylast=True)
 def pytest_unconfigure(config: pytest.Config) -> None:
-    """Bypass a sentencepiece destructor crash on Windows + Python 3.12.
+    """Bypass a C-extension finalizer crash during interpreter shutdown.
 
-    Whisper's tokenizer pulls in ``_sentencepiece.cp312-win_amd64.pyd``
-    whose destructor segfaults during ``Py_FinalizeEx``. This hook
-    fires after the terminal summary is printed, so we flush and exit
-    immediately rather than let the broken finalizer run.
+    Whisper's tokenizer pulls in ``sentencepiece`` (and torch loads its
+    own native libraries) whose destructors segfault during
+    ``Py_FinalizeEx`` — on Windows (``_sentencepiece.cp312-win_amd64.pyd``)
+    and on Linux alike — turning an all-green run into a 139 exit. This
+    hook fires after the terminal summary is printed and after pytest-cov
+    has written its data, so we flush and exit with the real status
+    immediately, before the broken finalizers run.
     """
-    if sys.platform != "win32":
+    if sys.platform not in ("win32", "linux"):
         return
     sys.stdout.flush()
     sys.stderr.flush()
