@@ -55,6 +55,7 @@ if sys.platform != "win32":
         "hotkeys/test_win32_keyboard_hook.py",
         "hotkeys/test_win32_hook_adapter.py",
         "settings/test_win32_capture_bridge.py",
+        "tray/test_win32_tray_adapter.py",
         "performance",
     ]
 
