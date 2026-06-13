@@ -123,12 +123,13 @@ class TkSettingsWindow(tkinter.Toplevel):
             body, width=16, exportselection=False, activestyle="none",
         )
         for label in _SECTIONS:
-            self._sidebar.insert("end", label)
+            self._sidebar.insert("end", f"  {label}")
         self._sidebar.bind("<<ListboxSelect>>", self._on_sidebar_select)
-        self._sidebar.pack(side="left", fill="y")
+        # Inset from the window edge so the tabs are not flush against it.
+        self._sidebar.pack(side="left", fill="y", padx=(12, 4), pady=(12, 0))
 
         content = ttk.Frame(body)
-        content.pack(side="left", fill="both", expand=True)
+        content.pack(side="left", fill="both", expand=True, padx=(4, 12), pady=(12, 0))
         content.rowconfigure(0, weight=1)
         content.columnconfigure(0, weight=1)
 
@@ -416,7 +417,9 @@ class TkSettingsWindow(tkinter.Toplevel):
         return not self._save_button.instate(["disabled"])
 
     def sidebar_labels(self) -> list[str]:
-        return [self._sidebar.get(i) for i in range(self._sidebar.size())]
+        return [
+            self._sidebar.get(i).strip() for i in range(self._sidebar.size())
+        ]
 
     def _model_list(self):
         return self._transcription_page.model_list()

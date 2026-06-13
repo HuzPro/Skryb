@@ -36,6 +36,7 @@ class Theme:
     selection_background: str
     accent: str
     border: str
+    scrollbar_thumb: str
     status_neutral: str
     status_error: str
 
@@ -54,6 +55,7 @@ LIGHT_THEME = Theme(
     selection_background="#d6e6ff",
     accent="#1f6feb",
     border="#d0d0d0",
+    scrollbar_thumb="#bcbcbc",
     status_neutral="#444444",
     status_error="#c0392b",
 )
@@ -68,6 +70,7 @@ DARK_THEME = Theme(
     selection_background="#2d4a6b",
     accent="#6fa8ff",
     border="#3f3f46",
+    scrollbar_thumb="#5a5a5e",
     status_neutral="#cccccc",
     status_error="#ff6b6b",
 )
@@ -115,6 +118,9 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         insertcolor=theme.foreground,
         selectbackground=theme.select_background,
         selectforeground=theme.select_foreground,
+        # Hide the dotted focus ring (the ugly dotted box around a selected
+        # radio's label) by painting it in the background colour.
+        focuscolor=theme.background,
         font=_BODY_FONT,
     )
     style.configure("TFrame", background=theme.background)
@@ -207,8 +213,9 @@ def _configure_flat_button(style: ttk.Style, theme: Theme) -> None:
 
 
 def _configure_slim_scrollbar(style: ttk.Style, theme: Theme) -> None:
-    # Drop the up/down arrow buttons for a thin modern bar: just a trough
-    # and an expanding thumb.
+    # Drop the up/down arrow buttons for a clean modern bar: just a trough
+    # and an expanding thumb. ``arrowsize`` still sets the bar thickness
+    # even with the arrows removed, so keep it wide enough to grab.
     style.layout(
         "Vertical.TScrollbar",
         [
@@ -226,13 +233,16 @@ def _configure_slim_scrollbar(style: ttk.Style, theme: Theme) -> None:
     style.configure(
         "Vertical.TScrollbar",
         troughcolor=theme.background,
-        background=theme.border,
+        background=theme.scrollbar_thumb,
         bordercolor=theme.background,
         borderwidth=0,
         relief="flat",
-        arrowsize=0,
+        arrowsize=16,
     )
-    style.map("Vertical.TScrollbar", background=[("active", theme.accent)])
+    style.map(
+        "Vertical.TScrollbar",
+        background=[("active", theme.accent), ("pressed", theme.accent)],
+    )
 
 
 def _configure_combobox_popdown(container: tkinter.Misc, theme: Theme) -> None:

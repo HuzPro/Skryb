@@ -77,6 +77,20 @@ class TestApplyTheme:
             DARK_THEME.selection_background
         )
 
+    def test_should_hide_the_dotted_focus_ring(self, container):
+        apply_theme(container, DARK_THEME)
+
+        assert ttk.Style(container).lookup(".", "focuscolor") == (
+            DARK_THEME.background
+        )
+
+    def test_should_colour_the_scrollbar_thumb(self, container):
+        apply_theme(container, DARK_THEME)
+
+        assert ttk.Style(container).lookup("Vertical.TScrollbar", "background") == (
+            DARK_THEME.scrollbar_thumb
+        )
+
     def test_should_recolour_descendant_canvas(self, container):
         canvas = tkinter.Canvas(container)
 

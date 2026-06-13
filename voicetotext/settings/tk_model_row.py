@@ -34,7 +34,9 @@ class TkModelRow(ttk.Frame):
     """
 
     def __init__(self, parent: tkinter.Misc, view: ModelView) -> None:
-        super().__init__(parent)
+        # Inner padding so the name and the action button are not flush
+        # against the card edges; the selection tint fills it too.
+        super().__init__(parent, padding=(12, 8, 12, 8))
         self._name = view.name
         self._installed = view.installed
         self._description = view.description
