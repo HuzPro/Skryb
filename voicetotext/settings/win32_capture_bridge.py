@@ -1,21 +1,20 @@
-from PySide6.QtCore import QObject, Signal
-
 from voicetotext.hotkeys import keys
 from voicetotext.hotkeys.win32_keyboard_hook import Win32KeyboardHook
+from voicetotext.settings.signal import Signal
 
 
-class Win32CaptureBridge(QObject):
+class Win32CaptureBridge:
     """Suppressing key-capture bridge used while recording a hotkey.
 
     Installs a native low-level keyboard hook that swallows every key (so
     OS shortcuts cannot fire mid-recording) and emits the canonical name of
-    each pressed key onto the GUI thread via a Qt signal.
+    each pressed key through a callback-list :class:`Signal`. The emission
+    runs on the hook's worker thread; the consuming widget marshals it onto
+    the GUI thread.
     """
 
-    key_pressed = Signal(str)
-
-    def __init__(self, parent: QObject | None = None) -> None:
-        super().__init__(parent)
+    def __init__(self) -> None:
+        self.key_pressed = Signal()
         self._hook = Win32KeyboardHook(self._handle_key)
 
     def start(self) -> None:
