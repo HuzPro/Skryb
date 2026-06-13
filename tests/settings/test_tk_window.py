@@ -345,6 +345,14 @@ class TestLifecycle:
         assert service.unsubscribe_state_changes.called
         assert service.unsubscribe_model_deleted.called
 
+    def test_should_report_open_initially(self, window):
+        assert window.is_open() is True
+
+    def test_should_report_not_open_after_close(self, window):
+        window.close()
+
+        assert window.is_open() is False
+
     def test_should_destroy_window_after_close_when_loop_pumped(
         self, tk_root, window,
     ):

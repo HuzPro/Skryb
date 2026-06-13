@@ -9,6 +9,7 @@ from voicetotext.__main__ import (
     _apply_torch_env_overrides,
     _configured_model_installed,
     _show_error,
+    _try_show_error_dialog,
     main,
 )
 
@@ -133,23 +134,17 @@ class TestDoctorCli:
 class TestShowError:
     def test_should_write_message_to_stderr(self):
         captured = io.StringIO()
-        mock_widgets = MagicMock()
 
         with (
             patch("sys.stderr", captured),
-            patch.dict(sys.modules, {"PySide6.QtWidgets": mock_widgets}),
+            patch("voicetotext.__main__._try_show_error_dialog"),
         ):
             _show_error("something broke")
 
         assert "something broke" in captured.getvalue()
 
-    def test_should_write_to_stderr_even_when_qt_unavailable(self):
-        captured = io.StringIO()
-
-        with (
-            patch("sys.stderr", captured),
-            patch.dict(sys.modules, {"PySide6.QtWidgets": None}),
-        ):
-            _show_error("import failed")
-
-        assert "import failed" in captured.getvalue()
+    def test_dialog_should_swallow_errors_when_tk_unavailable(self):
+        # Best-effort: a failure constructing the Tk dialog must not
+        # propagate out of the crash-reporting path.
+        with patch("tkinter.Tk", side_effect=RuntimeError("no display")):
+            _try_show_error_dialog("import failed")

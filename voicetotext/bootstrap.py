@@ -1,7 +1,9 @@
+import functools
 import logging
 import sys
 import threading
 import time
+import tkinter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -33,7 +35,7 @@ from voicetotext.output.gui_thread_output_decorator import (
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
-from voicetotext.output.qt_gui_thread_dispatcher import QtGuiThreadDispatcher
+from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -47,10 +49,8 @@ from voicetotext.settings.engine_hot_swap import (
     NullEngineHotSwap,
 )
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.settings.qt_download_bridge import QtDownloadBridge
 from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
-from voicetotext.settings.qt_engine_bridge import QtEngineBridge
-from voicetotext.settings.qt_window import QtSettingsWindow
+from voicetotext.settings.tk_window import TkSettingsWindow
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine import TranscriptionEngine
@@ -79,7 +79,7 @@ from voicetotext.transcription.placeholder_engine import PlaceholderEngine
 from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
-from voicetotext.tray.qt_tray_adapter import build_qt_tray_adapter
+from voicetotext.tray.win32_tray_adapter import build_win32_tray_adapter
 
 
 _logger = logging.getLogger(__name__)
@@ -120,26 +120,6 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     _logger.info("Migrating transcription language %r -> 'en'.", current)
     config.set("transcription.language", "en")
     config.save()
-
-
-def _make_destroyed_handler(
-    window_ref: dict[str, QtSettingsWindow | None],
-    window: QtSettingsWindow,
-) -> Callable[..., None]:
-    """Build a ``destroyed``-signal handler guarded by window identity.
-
-    Qt emits ``destroyed`` from any Python-GC path, including stale refs
-    whose replacement is already live in ``current``. Unconditionally
-    nulling ``current`` would orphan that replacement. Identity-check
-    the destroyed window first — the default-arg ``w=window`` capture
-    pins the Python wrapper so ``is`` still works after C++ destruction.
-    """
-
-    def _on_destroyed(*_args: object, w: QtSettingsWindow = window) -> None:
-        if window_ref.get("current") is w:
-            window_ref["current"] = None
-
-    return _on_destroyed
 
 
 def _build_output(
@@ -533,6 +513,7 @@ def build_first_run_settings_service(
 def build_app(
     config: JsonConfigAdapter,
     paths: AppPaths,
+    root: tkinter.Misc,
     event_bus: SimpleEventBus | None = None,
     download_manager: DownloadManager | None = None,
 ) -> SystemTrayApp:
@@ -575,10 +556,10 @@ def build_app(
 
     # The GUI thread is the only thread that owns a window and a
     # message pump, so Win32 clipboard / SendInput calls have to run
-    # there. Build the dispatcher once on the main thread (its
-    # QObject affinity is the GUI thread) and inject it everywhere
-    # output handlers are constructed.
-    gui_dispatcher = QtGuiThreadDispatcher()
+    # there. The dispatcher's queue is drained by a poller on the Tk
+    # ``root`` (the main thread), and it is injected everywhere output
+    # handlers are constructed.
+    gui_dispatcher = TkGuiThreadDispatcher(root)
     output = _build_output(_resolve_output_mode(config), gui_dispatcher)
 
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
@@ -626,24 +607,17 @@ def build_app(
         hardware=hardware,
     )
 
-    settings_window_ref: dict[str, QtSettingsWindow | None] = {"current": None}
+    settings_window_ref: dict[str, TkSettingsWindow | None] = {"current": None}
 
     def open_settings() -> None:
         existing = settings_window_ref["current"]
-        if existing is not None:
-            if existing.isVisible():
-                existing.raise_()
-                existing.activateWindow()
-                return
-            # Hidden-but-alive window: null current up front so the
-            # guarded destroyed handler becomes a no-op, then close to
-            # fire closeEvent (unsubscribing bridges) + deleteLater
-            # (via WA_DeleteOnClose on QtSettingsWindow).
-            settings_window_ref["current"] = None
-            existing.close()
-        capture_bridge = Win32CaptureBridge()
-        window = QtSettingsWindow(
-            service=settings_service,
+        if existing is not None and existing.is_open():
+            existing.show()
+            return
+        window = TkSettingsWindow(
+            root,
+            settings_service,
+            capture_bridge=Win32CaptureBridge(),
             first_run=False,
             on_save=lambda changes: apply_settings(
                 changes, config, record_and_transcribe_use_case, app,
@@ -652,9 +626,8 @@ def build_app(
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
             ),
-            capture_bridge=capture_bridge,
+            schedule=gui_dispatcher.dispatch,
         )
-        window.destroyed.connect(_make_destroyed_handler(settings_window_ref, window))
         settings_window_ref["current"] = window
         window.show()
 
@@ -663,7 +636,9 @@ def build_app(
         state_machine=state_machine,
         event_bus=event_bus,
         hotkey_listener=listener,
-        tray_factory=build_qt_tray_adapter,
+        tray_factory=functools.partial(
+            build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
+        ),
         on_open_settings=open_settings,
         download_manager=download_manager,
     )

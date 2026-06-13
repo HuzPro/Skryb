@@ -183,6 +183,10 @@ class TkSettingsWindow(tkinter.Toplevel):
         self.lift()
         self.focus_force()
 
+    def is_open(self) -> bool:
+        """True while the window is alive and not in the process of closing."""
+        return bool(self.winfo_exists()) and not self._closing
+
     # ------------------------------------------------------------------
     # Save flow
     # ------------------------------------------------------------------
