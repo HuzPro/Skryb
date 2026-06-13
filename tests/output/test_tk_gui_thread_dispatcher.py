@@ -19,8 +19,11 @@ from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 _DISPATCHER_LOGGER = "voicetotext.output.tk_gui_thread_dispatcher"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def root():
+    # Module-scoped: a single Tk root per file. Repeatedly creating and
+    # destroying Tk() in a process that also runs the Qt suite corrupts
+    # tkinter's tcl/tk library path; one long-lived root sidesteps it.
     root = tkinter.Tk()
     root.withdraw()
     yield root
@@ -29,7 +32,9 @@ def root():
 
 @pytest.fixture
 def dispatcher(root):
-    return TkGuiThreadDispatcher(root)
+    dispatcher = TkGuiThreadDispatcher(root)
+    yield dispatcher
+    dispatcher.cancel()
 
 
 def _pump_until(root, predicate, timeout=2.0):

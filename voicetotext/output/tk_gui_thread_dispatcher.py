@@ -23,10 +23,16 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
     def __init__(self, root: tkinter.Misc) -> None:
         self._root = root
         self._queue: queue.Queue[Callable[[], None]] = queue.Queue()
-        self._root.after(_DRAIN_INTERVAL_MS, self._drain)
+        self._after_id = self._root.after(_DRAIN_INTERVAL_MS, self._drain)
 
     def dispatch(self, action: Callable[[], None]) -> None:
         self._queue.put(action)
+
+    def cancel(self) -> None:
+        """Stop the drain poller (idempotent). Used on shutdown/teardown."""
+        if self._after_id is not None:
+            self._root.after_cancel(self._after_id)
+            self._after_id = None
 
     def _drain(self) -> None:
         while True:
@@ -35,7 +41,7 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
             except queue.Empty:
                 break
             self._invoke(action)
-        self._root.after(_DRAIN_INTERVAL_MS, self._drain)
+        self._after_id = self._root.after(_DRAIN_INTERVAL_MS, self._drain)
 
     def _invoke(self, action: Callable[[], None]) -> None:
         try:
