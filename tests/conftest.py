@@ -114,6 +114,28 @@ def fake_hotkey_listener() -> FakeHotkeyListener:
     return FakeHotkeyListener()
 
 
+@pytest.fixture(scope="session")
+def tk_root():
+    """One withdrawn Tk root shared by every Tk widget test in the session.
+
+    Repeatedly creating and destroying ``tkinter.Tk()`` in a process that
+    also imports PySide6 corrupts Tcl's library path (``invalid command
+    name "tcl_findLibrary"`` on the second-or-later root). A single
+    session-scoped root is created once and never recreated, sidestepping
+    it; the workaround becomes unnecessary once Qt is removed. Skips
+    cleanly where Tk cannot initialise (headless CI with no display).
+    """
+    import tkinter
+
+    try:
+        root = tkinter.Tk()
+    except tkinter.TclError as exc:  # pragma: no cover - headless guard
+        pytest.skip(f"Tk unavailable: {exc}")
+    root.withdraw()
+    yield root
+    root.destroy()
+
+
 @pytest.fixture()
 def app_caplog(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
     """``caplog`` wired to see the non-propagating ``voicetotext`` logger tree.

@@ -1,7 +1,6 @@
-from dataclasses import dataclass
-
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QSize, Qt
 
+from voicetotext.settings.download_progress import DownloadProgressSnapshot
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.transcription_mode import TranscriptionMode
@@ -9,17 +8,10 @@ from voicetotext.settings.transcription_mode import TranscriptionMode
 
 _ROW_HEIGHT = 72
 
-
-@dataclass(frozen=True)
-class DownloadProgressSnapshot:
-    """Per-row download state exposed to the delegate."""
-
-    state: str
-    bytes_done: int
-    bytes_total: int
-    speed_bps: float
-    eta_seconds: float
-    error_message: str | None
+# Re-exported for callers that still import the snapshot from this module
+# (`qt_model_row`, `qt_window`). The canonical definition is Qt-free in
+# ``download_progress`` so the Tk views can share it.
+__all__ = ["DownloadProgressSnapshot", "QtModelListModel"]
 
 
 class QtModelListModel(QAbstractListModel):

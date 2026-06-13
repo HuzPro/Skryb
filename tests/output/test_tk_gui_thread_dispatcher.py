@@ -8,7 +8,6 @@ failing action is logged and swallowed without stopping the drain.
 import logging
 import threading
 import time
-import tkinter
 
 import pytest
 
@@ -19,15 +18,12 @@ from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 _DISPATCHER_LOGGER = "voicetotext.output.tk_gui_thread_dispatcher"
 
 
-@pytest.fixture(scope="module")
-def root():
-    # Module-scoped: a single Tk root per file. Repeatedly creating and
+@pytest.fixture
+def root(tk_root):
+    # Reuse the session-scoped root from conftest. Repeatedly creating and
     # destroying Tk() in a process that also runs the Qt suite corrupts
     # tkinter's tcl/tk library path; one long-lived root sidesteps it.
-    root = tkinter.Tk()
-    root.withdraw()
-    yield root
-    root.destroy()
+    return tk_root
 
 
 @pytest.fixture
