@@ -37,6 +37,7 @@ from voicetotext.output.qt_gui_thread_dispatcher import QtGuiThreadDispatcher
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
+from voicetotext.output.win32_key_sender import Win32KeySender
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
@@ -146,11 +147,16 @@ def _build_output(
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
+    key_sender = Win32KeySender()
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
         OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
-        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
+        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(
+            sleeper=sleeper, writer=writer, key_sender=key_sender,
+        ),
         OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
-            inner=PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
+            inner=PasteAndClipboardAdapter(
+                sleeper=sleeper, writer=writer, key_sender=key_sender,
+            ),
             preserver=Win32ClipboardPreserver(sleeper=sleeper),
             sleeper=sleeper,
         ),
