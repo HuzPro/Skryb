@@ -40,7 +40,6 @@ _logger = logging.getLogger(__name__)
 _LANGUAGE = "en"
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "transformers": 5,
-    "faster_whisper": 5,
     "granite_speech": 4,
     "nano_parakeet": 1,
 }
@@ -128,10 +127,9 @@ def _build_spec(combo: BenchmarkCombo, models_dir: Path) -> EngineSpec:
     from voicetotext.transcription.model_info import ALL_MODELS
 
     info = ALL_MODELS[combo.model_name]
-    repo_id = info.ct2_repo_id if combo.engine_id == "faster_whisper" else info.repo_id
     return EngineSpec(
         model_name=combo.model_name,
-        repo_id=repo_id,
+        repo_id=info.repo_id,
         device=combo.device,
         language=_LANGUAGE,
         beam_size=_DEFAULT_BEAM_SIZE_BY_ENGINE[combo.engine_id],

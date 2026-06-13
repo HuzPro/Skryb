@@ -56,42 +56,28 @@ def _provider_config(model_size: str = "base", engine: str = "auto"):
     return config
 
 
-def _install_snapshot(models_dir, repo_id: str, sha: str = "abc123") -> None:
-    repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
-    snapshot = repo_dir / "snapshots" / sha
-    snapshot.mkdir(parents=True)
-    (snapshot / "config.json").write_text("{}")
-    (snapshot / "model.safetensors").write_text("")
-    refs_main = repo_dir / "refs" / "main"
-    refs_main.parent.mkdir(parents=True, exist_ok=True)
-    refs_main.write_text(sha)
-
-
 class TestActiveEngineProvider:
     """The provider the composite ModelManager polls must resolve the active
-    engine the same way the loader does — biased toward whichever engine has
-    loadable files on disk — so the UI install state agrees with the loader.
+    engine for the configured model the same way the loader does, so the UI
+    install state agrees with the loader. Every model now has a single
+    compatible engine, so resolution is driven by the configured model.
     """
 
-    def test_should_resolve_to_engine_whose_files_are_on_disk(self, tmp_path):
-        # base supports both engines; only the transformers cache is present,
-        # so the provider must pick transformers (what loads), not the
-        # higher-ranked-but-absent faster_whisper.
-        _install_snapshot(tmp_path, "openai/whisper-base")
+    def test_should_resolve_whisper_model_to_transformers(self, tmp_path):
         provider = _make_active_engine_provider(
-            _provider_config(), _ROCM_PROFILE, build_engine_registry(), tmp_path,
+            _provider_config(model_size="base"), _ROCM_PROFILE,
+            build_engine_registry(), tmp_path,
         )
 
         assert provider() == "transformers"
 
-    def test_should_fall_back_to_top_ranked_engine_when_nothing_on_disk(
-        self, tmp_path,
-    ):
+    def test_should_resolve_parakeet_model_to_nano_parakeet(self, tmp_path):
         provider = _make_active_engine_provider(
-            _provider_config(), _ROCM_PROFILE, build_engine_registry(), tmp_path,
+            _provider_config(model_size="parakeet-tdt-0.6b-v3"), _ROCM_PROFILE,
+            build_engine_registry(), tmp_path,
         )
 
-        assert provider() == "faster_whisper"
+        assert provider() == "nano_parakeet"
 
 
 class TestLoadEngineWithFallback:
@@ -333,7 +319,7 @@ class TestLoadEngineAndAttachFailureSurface:
         config.get.return_value = "large-v3-turbo"
         broken = MagicMock()
         broken.load_model.side_effect = EngineDependencyMissingError(
-            "Faster-Whisper not installed: pip install faster-whisper"
+            "nano-parakeet not installed: pip install nano-parakeet"
         )
         # ``_load_engine_with_fallback`` only catches RuntimeError/OSError
         # for CPU fallback; EngineDependencyMissingError propagates
@@ -350,7 +336,7 @@ class TestLoadEngineAndAttachFailureSurface:
         )
 
         assert len(received) == 1
-        assert "Faster-Whisper not installed" in received[0].error
+        assert "nano-parakeet not installed" in received[0].error
         assert received[0].model_name == "large-v3-turbo"
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
@@ -425,10 +411,10 @@ class TestWarmupSafelyErrorClassification:
     def test_should_reraise_engine_dependency_missing_during_warmup(self):
         engine = MagicMock()
         engine.warmup.side_effect = EngineDependencyMissingError(
-            "Faster-Whisper not installed: pip install faster-whisper"
+            "nano-parakeet not installed: pip install nano-parakeet"
         )
 
-        with pytest.raises(EngineWarmupError, match="faster-whisper"):
+        with pytest.raises(EngineWarmupError, match="nano-parakeet"):
             _warmup_safely(engine)
 
     def test_should_reraise_import_error_during_warmup(self):

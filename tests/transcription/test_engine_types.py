@@ -42,15 +42,15 @@ class TestEngineDescriptor:
 class TestEngineCandidate:
     def test_should_create_with_required_fields(self):
         candidate = EngineCandidate(
-            engine_id="faster_whisper",
-            display_name="faster-whisper (CTranslate2)",
+            engine_id="nano_parakeet",
+            display_name="nano-parakeet (PyTorch)",
             score=100,
             is_recommended=True,
             reason="Recommended for your AMD ROCm GPU (gfx1200)",
         )
 
-        assert candidate.engine_id == "faster_whisper"
-        assert candidate.display_name == "faster-whisper (CTranslate2)"
+        assert candidate.engine_id == "nano_parakeet"
+        assert candidate.display_name == "nano-parakeet (PyTorch)"
         assert candidate.score == 100
         assert candidate.is_recommended is True
         assert candidate.reason.startswith("Recommended")

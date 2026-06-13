@@ -435,13 +435,12 @@ def _make_active_engine_provider(
     Resolves the active engine the SAME way the loader does — biased
     toward whichever engine actually has loadable files on disk (see
     ``create_engine_for_active_model``). The composite routes
-    ``is_installed`` to this active child, so without the on-disk bias the
-    provider always returned the top-ranked engine (``faster_whisper`` for
-    Whisper under ``auto``) and a model present only under another engine's
-    repo — e.g. ``large-v3-turbo`` under the transformers cache — looked
-    uninstalled in the UI even though the loader could open it. Tying both
-    to the same resolution keeps the install state and the loader in
-    agreement.
+    ``is_installed`` to this active child, so without the on-disk bias a
+    model present only under another engine's repo — e.g. a Parakeet
+    model under the nano-parakeet cache while the saved engine is a
+    Whisper backend — looked uninstalled in the UI even though the
+    loader could open it. Tying both to the same resolution keeps the
+    install state and the loader in agreement.
     """
     def provider() -> EngineId:
         model_name = config.get("transcription.model_size", "base")

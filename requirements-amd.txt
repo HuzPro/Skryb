@@ -35,5 +35,5 @@ torchaudio==2.9.1+rocm7.2.1
 torchvision==0.24.1+rocm7.2.1
 
 # Rest of the app dependencies (transformers, sounddevice, PySide6, etc.,
-# plus optional engines faster-whisper + nano-parakeet).
+# plus the optional nano-parakeet engine).
 -r requirements-all.txt

@@ -435,8 +435,8 @@ class TestErrorNotification:
 
 class TestEngineLoadFailureNotification:
     """When the background engine load fails, the user must see the
-    actionable reason (e.g. "Faster-Whisper not installed: pip install
-    faster-whisper") rather than a silently stuck LOADING icon or an
+    actionable reason (e.g. "nano-parakeet not installed: pip install
+    nano-parakeet") rather than a silently stuck LOADING icon or an
     empty clipboard on the next hotkey press.
     """
 
@@ -457,14 +457,14 @@ class TestEngineLoadFailureNotification:
         app._event_bus.publish(
             EngineLoadFailedEvent(
                 model_name="large-v3-turbo",
-                error="Faster-Whisper not installed: pip install faster-whisper",
+                error="nano-parakeet not installed: pip install nano-parakeet",
             )
         )
 
         icon.notify.assert_called_once()
         args = icon.notify.call_args.args
         assert args[0] == "VoiceToText"
-        assert "Faster-Whisper not installed" in args[1]
+        assert "nano-parakeet not installed" in args[1]
 
     def test_should_flip_icon_to_error_when_engine_load_fails(self):
         # Tray balloons can be silenced by Focus Assist or DND; the

@@ -1,10 +1,10 @@
 """Build the list of (model, engine, device) benchmark combinations.
 
-Per user constraint: GPU-only — no CPU benchmarks for any model.
-faster-whisper on AMD ROCm cuda will fail (CTranslate2 doesn't support
-ROCm), but that failure is captured in the JSON as ``status='error'``
-rather than skipped, so the report still reflects what's possible on
-this hardware.
+Per user constraint: GPU-only — no CPU benchmarks for any model. Each
+combo pairs a model with every engine in its ``compatible_engines``;
+any engine that cannot run on this hardware is captured in the JSON as
+``status='error'`` rather than skipped, so the report still reflects
+what's possible on this hardware.
 
 The list is computed once at module load. Importing :mod:`model_info`
 is safe — it pulls only ABC/Literal definitions, no torch or HF.

@@ -59,7 +59,7 @@ class TestEngineRegistry:
         )
 
         with pytest.raises(KeyError):
-            registry.build("faster_whisper", _spec())
+            registry.build("nano_parakeet", _spec())
 
     def test_should_return_descriptor_by_id(self):
         registry = EngineRegistry(
@@ -81,8 +81,9 @@ class TestEngineRegistry:
 class TestEngineSpec:
     def test_should_carry_engine_specific_repo_id(self):
         spec = EngineSpec(
-            model_name="base", repo_id="Systran/faster-whisper-base",
+            model_name="parakeet-tdt-0.6b-v3",
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
             device="cuda", language="en", beam_size=5, model_dir=Path("/m"),
         )
 
-        assert spec.repo_id == "Systran/faster-whisper-base"
+        assert spec.repo_id == "nvidia/parakeet-tdt-0.6b-v3"

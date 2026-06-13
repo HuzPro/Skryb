@@ -43,7 +43,7 @@ class TestPackageMissing:
 
     def test_should_classify_top_level_module_not_found_as_missing(self) -> None:
         """The canonical ``ModuleNotFoundError: No module named 'X'`` case."""
-        underlying = ModuleNotFoundError("No module named 'faster_whisper'")
+        underlying = ModuleNotFoundError("No module named 'nano_parakeet'")
 
         with patch(
             "voicetotext.transcription.backend_imports."
@@ -51,12 +51,12 @@ class TestPackageMissing:
             return_value=None,
         ):
             error = make_engine_dependency_error(
-                package_name="faster_whisper",
-                install_hint="Faster-Whisper not installed: pip install faster-whisper",
+                package_name="nano_parakeet",
+                install_hint="nano-parakeet not installed: pip install nano-parakeet",
                 underlying=underlying,
             )
 
-        assert "Faster-Whisper not installed" in str(error)
+        assert "nano-parakeet not installed" in str(error)
 
 
 class TestPackageInstalledButBroken:

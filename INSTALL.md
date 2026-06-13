@@ -14,7 +14,7 @@
 | `requirements-nvidia.txt`    | NVIDIA GPU (Windows or Linux). Installs PyTorch CUDA build. |
 | `requirements-cpu.txt`       | No GPU (or smaller download). Installs CPU-only PyTorch. |
 | `requirements-all.txt`       | You already have PyTorch installed and just want the rest of the deps. |
-| `requirements.txt`           | Same as `requirements-all.txt` minus `faster-whisper` and `nano-parakeet`. |
+| `requirements.txt`           | Same as `requirements-all.txt` minus the optional `nano-parakeet` engine. |
 
 The GPU files use `--find-links` (AMD's index is a flat HTML directory) or `--extra-index-url` (PyTorch's CUDA index is a PEP 503 index) to pull the right wheel without disturbing PyPI lookups for everything else.
 

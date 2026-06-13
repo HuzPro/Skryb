@@ -9,7 +9,6 @@ from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
 
-_CT2_WEIGHTS_FILENAME = "model.bin"
 _TRANSFORMERS_CONFIG_FILENAME = "config.json"
 
 
@@ -17,9 +16,9 @@ def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
     """Whether *repo_dir* holds a snapshot a ``local_files_only`` load can use.
 
     HuggingFace's ``snapshot_download(local_files_only=True)`` — the call
-    every engine's loader makes under the hood (faster-whisper, the
-    transformers Whisper adapter, and nano-parakeet via its patched
-    ``hf_hub_download``) — resolves the default ``main`` revision through
+    every engine's loader makes under the hood (the transformers Whisper
+    adapter, and nano-parakeet via its patched ``hf_hub_download``) —
+    resolves the default ``main`` revision through
     ``refs/main`` and then reads ``snapshots/<sha>``. So a snapshot is
     only *loadable* when ``refs/main`` exists AND the snapshot directory it
     names holds a complete model.
@@ -92,7 +91,6 @@ class HuggingFaceModelManager(ModelManager):
     def _snapshot_has_complete_model(snapshot: Path) -> bool:
         return (
             HuggingFaceModelManager._is_nemo_layout(snapshot)
-            or HuggingFaceModelManager._is_ct2_layout(snapshot)
             or HuggingFaceModelManager._is_transformers_layout(snapshot)
         )
 
@@ -102,15 +100,6 @@ class HuggingFaceModelManager(ModelManager):
         # complete model — nano-parakeet doesn't need config.json or
         # safetensors weights.
         return any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file())
-
-    @staticmethod
-    def _is_ct2_layout(snapshot: Path) -> bool:
-        # CTranslate2 layout (Systran/faster-whisper-*): ``config.json`` +
-        # ``model.bin``. Loaded directly by ``ctranslate2.models.Whisper``.
-        return (
-            (snapshot / _TRANSFORMERS_CONFIG_FILENAME).exists()
-            and (snapshot / _CT2_WEIGHTS_FILENAME).exists()
-        )
 
     @staticmethod
     def _is_transformers_layout(snapshot: Path) -> bool:

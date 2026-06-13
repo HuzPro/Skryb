@@ -18,11 +18,7 @@ from pathlib import Path
 from tests.performance._combos import BenchmarkCombo
 
 
-# NB: do NOT include ``*.bin`` here even though
-# ``voicetotext/downloads/hf_repo_resolver._IGNORE_PATTERNS`` does.
-# CTranslate2 (faster-whisper) stores its quantized weights in
-# ``model.bin`` — the project's resolver pattern is wrong for CT2
-# repos and would leave them weightless on disk. For the openai/whisper
+# NB: ``*.bin`` is intentionally NOT ignored here. For the openai/whisper
 # repos we may end up with both ``model.safetensors`` and the redundant
 # ``pytorch_model.bin``; that's harmless duplication for benchmarks.
 _HF_IGNORE_PATTERNS = (
@@ -45,8 +41,7 @@ def ensure_models_downloaded(
     """Download any (engine, repo) pair not already complete on disk.
 
     Idempotent — repos whose snapshot already has weights are skipped.
-    Granite, Parakeet, and openai-whisper repos go through ``repo_id``;
-    faster-whisper goes through ``ct2_repo_id``.
+    Every engine resolves its repo through ``ModelInfo.repo_id``.
     """
     from huggingface_hub import snapshot_download
     from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
@@ -55,8 +50,7 @@ def ensure_models_downloaded(
     needed: set[tuple[str, str]] = set()
     for combo in combos:
         info = ALL_MODELS[combo.model_name]
-        repo_id = _repo_id_for_engine(combo.engine_id, info)
-        needed.add((combo.engine_id, repo_id))
+        needed.add((combo.engine_id, info.repo_id))
 
     for engine_id, repo_id in sorted(needed):
         if _repo_complete(models_dir, repo_id):
@@ -82,12 +76,6 @@ def ensure_models_downloaded(
                 f"({type(exc).__name__}: {exc}); combo will be recorded "
                 f"as an error during benchmark"
             )
-
-
-def _repo_id_for_engine(engine_id: str, info) -> str:
-    if engine_id == "faster_whisper":
-        return info.ct2_repo_id
-    return info.repo_id
 
 
 def _repo_complete(models_dir: Path, repo_id: str) -> bool:

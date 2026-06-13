@@ -13,7 +13,6 @@ from voicetotext.transcription.engine_factory import (
     resolve_engine_id,
 )
 from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.faster_whisper_adapter import FasterWhisperAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     PARAKEET_MODELS,
@@ -60,19 +59,23 @@ _ROCM_PROFILE = HardwareProfile(
 _CPU_PROFILE = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
 
 
+# A synthetic model compatible with TWO engines, used to exercise the
+# ranking and installed-preference logic that no real (now single-engine)
+# model can. nano_parakeet outranks transformers via the priority map.
+_DUAL_ENGINE_MODEL = ModelInfo(
+    name="dual", size_mb=1, description="test",
+    repo_id="example/dual",
+    compatible_engines=("transformers", "nano_parakeet"),
+    engine_priorities={"nano_parakeet": 100, "transformers": 50},
+)
+
+
 class TestBuildEngineRegistry:
     def test_should_register_transformers_descriptor(self):
         registry = build_engine_registry()
 
         ids = {d.engine_id for d in registry.all_descriptors()}
         assert "transformers" in ids
-
-    def test_should_register_faster_whisper_descriptor(self):
-        registry = build_engine_registry()
-
-        ids = {d.engine_id for d in registry.all_descriptors()}
-        assert "faster_whisper" in ids
-
 
     def test_should_register_nano_parakeet_descriptor(self):
         registry = build_engine_registry()
@@ -106,7 +109,7 @@ class TestResolveEngineId:
             config, WHISPER_MODELS["base"], _ROCM_PROFILE, registry,
         )
 
-        assert engine_id == "faster_whisper"
+        assert engine_id == "transformers"
 
     def test_should_raise_when_no_engine_compatible(self):
         config = _config(engine="auto")
@@ -120,29 +123,33 @@ class TestResolveEngineId:
             resolve_engine_id(config, incompatible, _ROCM_PROFILE, registry)
 
     def test_should_prefer_installed_engine_over_higher_ranked_uninstalled(self):
+        # transformers (priority 50) is installed; nano_parakeet (100)
+        # outranks it but is not on disk. The installed one must win.
         config = _config(engine="auto")
         registry = build_engine_registry()
 
         engine_id = resolve_engine_id(
-            config, WHISPER_MODELS["base"], _ROCM_PROFILE, registry,
+            config, _DUAL_ENGINE_MODEL, _ROCM_PROFILE, registry,
             installed_engines=frozenset(["transformers"]),
         )
 
         assert engine_id == "transformers"
 
     def test_should_keep_top_ranked_when_no_engines_installed(self):
+        # Nothing on disk, so the highest-ranked compatible engine
+        # (nano_parakeet at 100, over transformers at 50) is chosen.
         config = _config(engine="auto")
         registry = build_engine_registry()
 
         engine_id = resolve_engine_id(
-            config, WHISPER_MODELS["base"], _ROCM_PROFILE, registry,
+            config, _DUAL_ENGINE_MODEL, _ROCM_PROFILE, registry,
             installed_engines=frozenset(),
         )
 
-        assert engine_id == "faster_whisper"
+        assert engine_id == "nano_parakeet"
 
     def test_should_ignore_installed_engines_when_engine_is_explicit(self):
-        config = _config(engine="faster_whisper")
+        config = _config(engine="nano_parakeet")
         registry = build_engine_registry()
 
         engine_id = resolve_engine_id(
@@ -150,7 +157,7 @@ class TestResolveEngineId:
             installed_engines=frozenset(["transformers"]),
         )
 
-        assert engine_id == "faster_whisper"
+        assert engine_id == "nano_parakeet"
 
 
 def _fake_snapshot(models_dir: Path, repo_id: str) -> None:
@@ -189,26 +196,11 @@ class TestEnginesWithModelOnDisk:
 
         assert result == frozenset(["transformers"])
 
-    def test_should_detect_faster_whisper_model(self, tmp_path):
-        _fake_snapshot(tmp_path, "Systran/faster-whisper-base")
-
-        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
-
-        assert result == frozenset(["faster_whisper"])
-
-    def test_should_detect_both_engines(self, tmp_path):
-        _fake_snapshot(tmp_path, "openai/whisper-base")
-        _fake_snapshot(tmp_path, "Systran/faster-whisper-base")
-
-        result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
-
-        assert result == frozenset(["transformers", "faster_whisper"])
-
     def test_should_ignore_partial_snapshot_without_refs_main(self, tmp_path):
         # A cancelled download leaves snapshot files but no refs/main. The
         # loader (local_files_only) cannot open it, so it must not count as
         # an engine-on-disk and bias selection toward a broken cache.
-        _partial_snapshot(tmp_path, "Systran/faster-whisper-base")
+        _partial_snapshot(tmp_path, "openai/whisper-base")
 
         result = engines_with_model_on_disk(WHISPER_MODELS["base"], tmp_path)
 
@@ -228,18 +220,6 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, TransformersWhisperAdapter)
 
-    def test_should_build_faster_whisper_adapter_when_engine_is_faster_whisper(
-        self, tmp_path,
-    ):
-        config = _config(engine="faster_whisper", device="cpu")
-        registry = build_engine_registry()
-
-        engine = create_engine_for_active_model(
-            config, _paths(tmp_path), registry, _CPU_PROFILE,
-        )
-
-        assert isinstance(engine, FasterWhisperAdapter)
-
     def test_device_override_should_force_cpu(self, tmp_path):
         config = _config(engine="transformers", device="cuda")
         registry = build_engine_registry()
@@ -250,16 +230,6 @@ class TestCreateEngineForActiveModel:
         )
 
         assert engine._device == "cpu"
-
-    def test_should_route_ct2_repo_id_to_faster_whisper_adapter(self, tmp_path):
-        config = _config(engine="faster_whisper", device="cpu")
-        registry = build_engine_registry()
-
-        engine = create_engine_for_active_model(
-            config, _paths(tmp_path), registry, _CPU_PROFILE,
-        )
-
-        assert engine._repo_id == "Systran/faster-whisper-base"
 
     def test_should_prefer_installed_engine_in_auto_mode(self, tmp_path):
         _fake_snapshot(tmp_path, "openai/whisper-base")
@@ -453,37 +423,23 @@ class TestBuildCompositeModelManager:
         names = {m.name for m in manager.list_models()}
         assert names == set(ALL_MODELS.keys())
 
-    def test_should_not_register_turbo_in_faster_whisper_child(self, tmp_path):
-        # turbo has no ct2_repo_id, so _ct2_models excludes it: the
-        # faster-whisper child must never advertise a turbo download (the
-        # old Systran turbo repo 401'd).
-        manager = build_composite_model_manager(
-            tmp_path, MagicMock(), active_engine_provider=lambda: "faster_whisper",
-        )
-
-        # The aggregate catalogue still lists turbo (via the transformers
-        # child), but the faster-whisper child does not own it.
-        assert manager.has_model("large-v3-turbo") is True
-        fw_child = manager._by_engine["faster_whisper"]
-        assert fw_child.has_model("large-v3-turbo") is False
-
 
 class TestInstallStateMatchesLoadableEngine:
     """Regression for the large-v3 / large-v3-turbo Download-vs-Delete
     confusion: the install state must reflect the engine that will actually
-    load the model, not a top-ranked engine whose cache is empty.
+    load the model, not the active engine whose cache may be empty.
     """
 
     def test_should_report_turbo_installed_from_transformers_snapshot(
         self, tmp_path,
     ):
         # turbo lives only under the openai (transformers) cache. Even when
-        # faster_whisper is the active/top-ranked engine, the composite must
-        # report turbo installed because transformers is what loads it.
+        # another engine is active, the composite must report turbo
+        # installed because transformers is what loads it.
         _fake_snapshot(tmp_path, "openai/whisper-large-v3-turbo")
         manager = build_composite_model_manager(
             tmp_path, MagicMock(),
-            active_engine_provider=lambda: "faster_whisper",
+            active_engine_provider=lambda: "nano_parakeet",
         )
 
         assert manager.is_installed("large-v3-turbo") is True

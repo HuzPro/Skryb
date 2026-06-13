@@ -93,9 +93,9 @@ class TestEngineCandidatesFor:
 
         candidates = service.engine_candidates_for("base")
 
-        assert len(candidates) == 2
+        assert len(candidates) == 1
         assert candidates[0].is_recommended is True
-        assert candidates[0].engine_id == "faster_whisper"
+        assert candidates[0].engine_id == "transformers"
 
     def test_should_return_empty_when_model_unknown(self):
         from voicetotext.transcription.engine_factory import build_engine_registry
@@ -401,7 +401,7 @@ class TestApplyDraft:
             model_size="base",
             language="en",
             device="auto",
-            engine="faster_whisper",  # changed from "transformers"
+            engine="nano_parakeet",  # changed from "transformers"
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,

@@ -179,34 +179,6 @@ class TestHuggingFaceModelManagerIsInstalled:
 
         assert manager.is_installed("parakeet-tdt-0.6b-v3") is True
 
-    def test_should_report_installed_when_snapshot_contains_ct2_model_bin(
-        self, tmp_path,
-    ):
-        # Systran/faster-whisper-* CT2 repos ship as ``model.bin`` +
-        # ``config.json``. The install check must recognise that as a
-        # complete model — without it, the manager reports the model as
-        # missing even after a successful download.
-        from voicetotext.transcription.model_info import ModelInfo
-
-        ct2_models = {
-            "tiny-ct2": ModelInfo(
-                name="tiny-ct2",
-                size_mb=75,
-                description="CT2 tiny",
-                repo_id="Systran/faster-whisper-tiny",
-                compatible_engines=("faster_whisper",),
-            ),
-        }
-        model_dir = tmp_path / "models--Systran--faster-whisper-tiny"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "model.bin").touch()
-        _write_refs_main(model_dir)
-        manager = _make_manager(tmp_path, models=ct2_models)
-
-        assert manager.is_installed("tiny-ct2") is True
-
 
 class TestHuggingFaceModelManagerGetModelPath:
     def test_should_return_none_when_not_installed(self, tmp_path):
