@@ -78,11 +78,6 @@ class TestModelInfoEntity:
 
         assert info.ct2_repo_id == ""
 
-    def test_compare_batch_repo_id_defaults_to_empty(self):
-        info = ModelInfo(name="base", size_mb=142, description="test")
-
-        assert info.compare_batch_repo_id == ""
-
     def test_should_store_explicit_ct2_repo_id(self):
         info = ModelInfo(
             name="base", size_mb=142, description="test",
@@ -181,30 +176,15 @@ class TestAllModels:
 
 
 class TestNemotronStreamingModels:
-    def test_should_contain_streaming_and_compare_models(self):
+    def test_should_contain_only_the_streaming_model(self):
         assert set(NEMOTRON_STREAMING_MODELS.keys()) == {
-            "nemotron-speech-streaming-en-0.6b", "nemotron-streaming-compare",
+            "nemotron-speech-streaming-en-0.6b",
         }
 
-    def test_plain_streaming_model_declares_no_batch_comparison(self):
-        info = NEMOTRON_STREAMING_MODELS["nemotron-speech-streaming-en-0.6b"]
-
-        assert info.compare_batch_repo_id == ""
-
-    def test_compare_model_declares_parakeet_tdt_as_batch_reference(self):
-        info = get_model_info("nemotron-streaming-compare")
-
-        assert info.compare_batch_repo_id == "nvidia/parakeet-tdt-0.6b-v3"
-
-    def test_compare_model_is_nemotron_streaming_only(self):
-        info = get_model_info("nemotron-streaming-compare")
+    def test_streaming_model_is_nemotron_streaming_only(self):
+        info = get_model_info("nemotron-speech-streaming-en-0.6b")
 
         assert info.compatible_engines == ("nemotron_streaming",)
-
-    def test_compare_model_description_flags_it_as_temporary_testing(self):
-        description = get_model_info("nemotron-streaming-compare").description.upper()
-
-        assert "TEMPORARY" in description or "TESTING" in description
 
 
 class TestGraniteModels:

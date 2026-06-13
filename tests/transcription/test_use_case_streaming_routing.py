@@ -29,12 +29,10 @@ class _StubController:
 
     def __init__(
         self, has_engine: bool = True, complete_error=None, complete_result=None,
-        reports_own_transcript: bool = False,
     ) -> None:
         self._has_engine = has_engine
         self._complete_error = complete_error
         self._complete_result = complete_result
-        self._reports_own_transcript = reports_own_transcript
         self.start_calls = 0
         self.stop_calls = 0
         self.set_engine_calls: list = []
@@ -43,9 +41,6 @@ class _StubController:
 
     def has_engine(self) -> bool:
         return self._has_engine
-
-    def reports_own_transcript(self) -> bool:
-        return self._reports_own_transcript
 
     def is_active(self) -> bool:
         return self._active
@@ -184,9 +179,7 @@ class TestStreamingRouting:
         assert completed[0].transcription_seconds == 1.23
         assert state_machine.state is AppState.IDLE
 
-    def test_should_log_generic_transcript_when_engine_does_not_self_report(
-        self, app_caplog,
-    ):
+    def test_should_log_the_streamed_transcript_on_completion(self, app_caplog):
         result = TranscriptionResult(
             text="hello world", language="en",
             language_probability=0.0, transcription_seconds=1.23,
@@ -199,28 +192,6 @@ class TestStreamingRouting:
 
         assert "Streaming transcription in" in app_caplog.text
         assert "hello world" in app_caplog.text
-
-    def test_should_suppress_generic_transcript_when_engine_self_reports(
-        self, app_caplog,
-    ):
-        # Compare mode logs the transcript side by side with the batch
-        # reference, so the use case must not print the generic line too.
-        result = TranscriptionResult(
-            text="hello world", language="en",
-            language_probability=0.0, transcription_seconds=1.23,
-        )
-        controller = _StubController(
-            complete_result=result, reports_own_transcript=True,
-        )
-        use_case, recorder, batch, state_machine, bus = _make(controller)
-        completed: list = []
-        bus.subscribe(TranscriptionCompletedEvent, completed.append)
-
-        use_case.on_hotkey_activated()
-        use_case.on_hotkey_activated()
-
-        assert "Streaming transcription in" not in app_caplog.text
-        assert completed[0].text == "hello world"  # transcript still flows via event
 
     def test_should_recover_streaming_state_when_worker_fails_mid_run(self):
         # The worker can fail mid-run (e.g. a decode error) and call
@@ -302,9 +273,6 @@ class _ScriptedStreamingEngine:
 
     def is_model_loaded(self) -> bool:
         return True
-
-    def reports_own_transcript(self) -> bool:
-        return False
 
     def start_session(self):
         return self._session

@@ -64,6 +64,7 @@ class _TrackingService:
         self.allows_device_selection = MagicMock(
             side_effect=lambda n: n in {"tiny", "base"}
         )
+        self.supports_streaming_hardware = MagicMock(return_value=True)
         self.engine_candidates_for = MagicMock(return_value=())
 
     def subscribe_engine(self, listener: object) -> None:

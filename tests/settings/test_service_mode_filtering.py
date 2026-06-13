@@ -2,9 +2,14 @@ from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
 from voicetotext.transcription.engine_factory import build_engine_registry
+from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.model_info import ALL_MODELS
 
 from tests.settings.test_service import _build_service
+
+
+def _gpu(kind: str) -> HardwareProfile:
+    return HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
 
 
 def _draft(mode: TranscriptionMode) -> SettingsDraft:
@@ -74,7 +79,6 @@ class TestServiceModeFiltering:
         assert names == {
             "parakeet-tdt-0.6b-v3",
             "nemotron-speech-streaming-en-0.6b",
-            "nemotron-streaming-compare",
         }
 
     def test_should_report_streaming_capability_per_model(self):
@@ -82,3 +86,37 @@ class TestServiceModeFiltering:
 
         assert service.model_supports_streaming("parakeet-tdt-0.6b-v3") is True
         assert service.model_supports_streaming("base") is False
+
+    def test_should_report_batch_capability_per_model(self):
+        service, *_ = _build_service(registry=build_engine_registry())
+
+        assert service.model_supports_batch("base") is True
+        assert service.model_supports_batch("parakeet-tdt-0.6b-v3") is True
+        assert (
+            service.model_supports_batch("nemotron-speech-streaming-en-0.6b")
+            is False
+        )
+
+
+class TestStreamingHardwareGate:
+    """Streaming is GPU-only, so the service reports whether the box can run it."""
+
+    def test_should_support_streaming_on_an_nvidia_gpu(self):
+        service, *_ = _build_service(hardware=_gpu("nvidia_cuda"))
+
+        assert service.supports_streaming_hardware() is True
+
+    def test_should_support_streaming_on_an_amd_gpu(self):
+        service, *_ = _build_service(hardware=_gpu("amd_rocm"))
+
+        assert service.supports_streaming_hardware() is True
+
+    def test_should_not_support_streaming_on_a_cpu_only_box(self):
+        service, *_ = _build_service(hardware=_gpu("cpu"))
+
+        assert service.supports_streaming_hardware() is False
+
+    def test_should_not_support_streaming_when_hardware_is_unknown(self):
+        service, *_ = _build_service()  # hardware=None
+
+        assert service.supports_streaming_hardware() is False

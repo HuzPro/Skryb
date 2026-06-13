@@ -45,6 +45,8 @@ def service():
     svc.available_devices.return_value = ["auto", "cuda", "cpu"]
     svc.allows_device_selection.side_effect = lambda n: n in {"tiny", "base"}
     svc.model_supports_streaming.side_effect = lambda n: n == _PARAKEET
+    svc.model_supports_batch.return_value = True
+    svc.supports_streaming_hardware.return_value = True
     svc.engine_candidates_for.return_value = ()
     return svc
 
@@ -64,37 +66,45 @@ def _model_names(window: QtSettingsWindow) -> list[str]:
     ]
 
 
-class TestModeTab:
-    def test_should_show_mode_in_the_sidebar(self, window):
+class TestModeSelection:
+    """Mode lives on the Transcription page, not in a separate sidebar tab."""
+
+    def test_should_not_show_a_mode_tab_in_the_sidebar(self, window):
         labels = [
             window._sidebar.item(i).text()
             for i in range(window._sidebar.count())
         ]
 
-        assert labels == ["Transcription", "Mode", "Hotkeys", "Output"]
-
-    def test_should_display_mode_page_on_that_row(self, window):
-        window._sidebar.setCurrentRow(1)
-
-        assert window._pages.currentWidget() is window.mode_page()
+        assert labels == ["Transcription", "Hotkeys", "Output"]
 
     def test_should_include_mode_in_collected_draft(self, window):
-        window.mode_page().set_mode(TranscriptionMode.STREAMING)
+        window.transcription_page().apply_mode(TranscriptionMode.STREAMING)
 
         assert window.collect_draft().transcription_mode is (
             TranscriptionMode.STREAMING
         )
 
-    def test_should_set_mode_page_from_initial_draft(self, qtbot, service):
+    def test_should_set_mode_selector_from_initial_draft(self, qtbot, service):
         service.current_draft.return_value = _draft(TranscriptionMode.STREAMING)
+        service.selected_model.return_value = _PARAKEET
 
         window = QtSettingsWindow(service)
         qtbot.addWidget(window)
 
-        assert window.mode_page().current_mode() is TranscriptionMode.STREAMING
+        assert window.transcription_page().current_mode() is (
+            TranscriptionMode.STREAMING
+        )
 
     def test_should_refilter_model_list_when_user_toggles_streaming(self, window):
-        button = window.mode_page()._buttons[TranscriptionMode.STREAMING]
-        button.setChecked(True)
+        selector = window.transcription_page().mode_selector()
+        selector._buttons[TranscriptionMode.STREAMING].setChecked(True)
 
         assert _model_names(window) == [_PARAKEET]
+
+    def test_should_announce_auto_switched_model_in_the_status_bar(self, window):
+        selector = window.transcription_page().mode_selector()
+        selector._buttons[TranscriptionMode.STREAMING].setChecked(True)
+
+        status = window.status_label().text()
+        assert _PARAKEET in status
+        assert "base" in status

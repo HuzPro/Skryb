@@ -2,8 +2,8 @@ from enum import Enum
 
 
 _DISPLAY_LABELS: dict[str, str] = {
-    "batch": "Batch (record, then transcribe)",
-    "streaming": "Streaming (live, GPU-only)",
+    "batch": "Batch",
+    "streaming": "Streaming",
 }
 
 

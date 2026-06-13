@@ -475,6 +475,17 @@ class TestMigrateRemovedModels:
         )
         config.save.assert_called_once()
 
+    def test_should_rewrite_removed_compare_model_to_plain_streaming(self):
+        config = MagicMock()
+        config.get.return_value = "nemotron-streaming-compare"
+
+        migrate_removed_models(config)
+
+        config.set.assert_called_once_with(
+            "transcription.model_size", "nemotron-speech-streaming-en-0.6b"
+        )
+        config.save.assert_called_once()
+
     def test_should_leave_other_models_alone(self):
         config = MagicMock()
         config.get.return_value = "small"
@@ -764,29 +775,14 @@ class TestMakeDestroyedHandler:
 
 
 class TestBuildStreamingEngineRouting:
-    def _streaming_model(self, compare_batch_repo_id: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            compatible_engines=("nemotron_streaming",),
-            repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
-            compare_batch_repo_id=compare_batch_repo_id,
-        )
-
-    def test_should_wrap_compare_model_with_batch_comparison(self, tmp_path):
-        from voicetotext.transcription.streaming.comparing_streaming_engine import (
-            ComparingStreamingEngine,
-        )
-        model_info = self._streaming_model("nvidia/parakeet-tdt-0.6b-v3")
-        paths = SimpleNamespace(models_dir=tmp_path)
-
-        engine = _build_streaming_engine_for(model_info, paths)
-
-        assert isinstance(engine, ComparingStreamingEngine)
-
-    def test_should_return_plain_cache_aware_engine_when_no_comparison(self, tmp_path):
+    def test_should_build_cache_aware_engine_for_nemotron_models(self, tmp_path):
         from voicetotext.transcription.streaming.cache_aware.engine import (
             CacheAwareStreamingEngine,
         )
-        model_info = self._streaming_model("")
+        model_info = SimpleNamespace(
+            compatible_engines=("nemotron_streaming",),
+            repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
+        )
         paths = SimpleNamespace(models_dir=tmp_path)
 
         engine = _build_streaming_engine_for(model_info, paths)

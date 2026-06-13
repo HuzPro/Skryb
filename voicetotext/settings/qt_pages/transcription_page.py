@@ -15,6 +15,7 @@ _logger = logging.getLogger(__name__)
 
 from voicetotext.settings.qt_model_list_model import QtModelListModel
 from voicetotext.settings.qt_model_row import ModelRowWidget
+from voicetotext.settings.qt_pages.mode_selector import ModeSelector
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
@@ -28,8 +29,17 @@ _AUTO_DEVICE = "auto"
 _GPU_DEVICE = "cuda"
 _DEVICE_LABELS: dict[str, str] = {_GPU_DEVICE: "GPU"}
 
-# Fallback streaming model if the service lists none (shouldn't happen).
-_STREAMING_MODEL = "parakeet-tdt-0.6b-v3"
+# Last-resort defaults if the service lists no models for a mode
+# (shouldn't happen).
+_FALLBACK_MODELS: dict[TranscriptionMode, str] = {
+    TranscriptionMode.BATCH: "base",
+    TranscriptionMode.STREAMING: "parakeet-tdt-0.6b-v3",
+}
+
+# Shown on the disabled Streaming toggle on a box with no compatible GPU.
+_NO_GPU_STREAMING_REASON = (
+    "Streaming needs a CUDA or ROCm GPU, and none was detected."
+)
 
 
 def _device_label(device: str) -> str:
@@ -38,8 +48,10 @@ def _device_label(device: str) -> str:
 
 
 class TranscriptionPage(QWidget):
-    """Page for picking the active Whisper model, language, device, and engine.
+    """Page for picking the mode, model, language, device, and engine.
 
+    The batch/streaming :class:`ModeSelector` sits directly above the
+    model list it filters, so toggling it visibly narrows the list.
     Uses a :class:`QListView` + :class:`QtModelListModel` so the model
     catalog renders as native item views (deferred to a delegate in the
     main window). Exposes imperative setters/getters so the enclosing
@@ -53,6 +65,7 @@ class TranscriptionPage(QWidget):
 
     download_error = Signal(str, str)  # (model_name, error_message)
     delete_error = Signal(str, str)  # (model_name, error_message)
+    model_auto_switched = Signal(str, str)  # (replaced_model, new_model)
 
     def __init__(
         self, service: SettingsService, parent: QWidget | None = None
@@ -69,8 +82,17 @@ class TranscriptionPage(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
+        layout.addWidget(self._make_heading("Mode"))
+        self._mode_selector = ModeSelector()
+        self._mode_selector.set_mode(self._mode)
+        if not self._service.supports_streaming_hardware():
+            self._mode_selector.disable_streaming(_NO_GPU_STREAMING_REASON)
+        self._mode_selector.mode_changed.connect(self.apply_mode)
+        layout.addWidget(self._mode_selector)
+
         layout.addWidget(self._make_heading("Models"))
         self._list_model = QtModelListModel(self._service, self)
+        self._list_model.set_mode(self._mode)
         self._list_view = QListView()
         self._list_view.setObjectName("model-list")
         self._list_view.setModel(self._list_model)
@@ -237,6 +259,9 @@ class TranscriptionPage(QWidget):
     def list_view(self) -> QListView:
         return self._list_view
 
+    def mode_selector(self) -> ModeSelector:
+        return self._mode_selector
+
     def current_model(self) -> str:
         return self._list_model.selected_model_name()
 
@@ -245,30 +270,46 @@ class TranscriptionPage(QWidget):
         self._sync_view_selection(name)
         self._refresh_device_enabled(name)
 
-    def apply_mode(self, mode: TranscriptionMode) -> None:
-        """React to a batch/streaming toggle from the Mode tab.
+    def current_mode(self) -> TranscriptionMode:
+        return self._mode_selector.current_mode()
 
-        Re-filters the model list to the new mode, auto-selects the
-        streaming model if the current one can't stream, and re-locks the
+    def apply_mode(self, mode: TranscriptionMode) -> None:
+        """React to a batch/streaming toggle.
+
+        Re-filters the model list to the new mode, auto-selects a
+        compatible model if the current one can't run in the new mode
+        (announced via :attr:`model_auto_switched`), and re-locks the
         device picker (streaming pins it to the GPU).
         """
         self._mode = mode
+        self._mode_selector.set_mode(mode)
         self._list_model.set_mode(mode)
-        if mode is TranscriptionMode.STREAMING and not (
-            self._service.model_supports_streaming(self.current_model())
-        ):
-            self.set_model(self._default_streaming_model())
+        self._switch_model_if_incompatible(mode)
         self._refresh_device_enabled(self.current_model())
 
-    def _default_streaming_model(self) -> str:
-        """Pick a streaming model to auto-select: prefer an installed one."""
-        models = self._service.list_models(TranscriptionMode.STREAMING)
+    def _switch_model_if_incompatible(self, mode: TranscriptionMode) -> None:
+        current = self.current_model()
+        if self._model_fits_mode(current, mode):
+            return
+        replacement = self._default_model_for(mode)
+        self.set_model(replacement)
+        self._populate_engine_combo(replacement)
+        self.model_auto_switched.emit(current, replacement)
+
+    def _model_fits_mode(self, name: str, mode: TranscriptionMode) -> bool:
+        if mode is TranscriptionMode.STREAMING:
+            return self._service.model_supports_streaming(name)
+        return self._service.model_supports_batch(name)
+
+    def _default_model_for(self, mode: TranscriptionMode) -> str:
+        """Pick a model to auto-select for *mode*: prefer an installed one."""
+        models = self._service.list_models(mode)
         installed = [m for m in models if m.installed]
         if installed:
             return installed[0].name
         if models:
             return models[0].name
-        return _STREAMING_MODEL
+        return _FALLBACK_MODELS[mode]
 
     def current_language(self) -> str:
         return self._language_combo.currentText()

@@ -252,10 +252,6 @@ class RecordAndTranscribeUseCase:
         if result.is_empty:
             self._announce_empty_transcription(result)
             return
-        if self._streaming is not None and self._streaming.reports_own_transcript():
-            # Compare mode logs the transcript side by side with the batch
-            # reference; the generic line would print it a second time.
-            return
         _logger.info(
             "Streaming transcription in %.2fs: '%s'",
             result.transcription_seconds,

@@ -153,6 +153,11 @@ class SettingsService:
         info = ALL_MODELS.get(model_name)
         return info is not None and self._is_streaming_model(info)
 
+    def model_supports_batch(self, model_name: str) -> bool:
+        """Whether *model_name* can be driven by a batch engine."""
+        info = ALL_MODELS.get(model_name)
+        return info is not None and self._is_batch_model(info)
+
     def _is_streaming_model(self, info: ModelInfo) -> bool:
         if self._registry is None:
             return False
@@ -278,6 +283,15 @@ class SettingsService:
         if self._hardware is None or self._hardware.kind == "cpu":
             return ["auto", "cpu"]
         return ["auto", "cuda", "cpu"]
+
+    def supports_streaming_hardware(self) -> bool:
+        """Whether the detected hardware can run the GPU-only streaming engine.
+
+        Streaming requires a CUDA or ROCm GPU; a CPU-only box (or one whose
+        hardware hasn't been probed yet) cannot load a streaming model, so the
+        UI uses this to keep the Streaming mode from being selected there.
+        """
+        return self._hardware is not None and self._hardware.kind != "cpu"
 
     def allows_device_selection(self, model_name: str) -> bool:
         """Whether the device picker should be enabled for *model_name*.

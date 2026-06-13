@@ -28,7 +28,6 @@ from voicetotext.settings.qt_engine_bridge import QtEngineBridge
 from voicetotext.settings.qt_hotkey_capture import CaptureBridge
 from voicetotext.settings.qt_model_list_model import DownloadProgressSnapshot
 from voicetotext.settings.qt_pages.hotkeys_page import HotkeysPage
-from voicetotext.settings.qt_pages.mode_page import ModePage
 from voicetotext.settings.qt_pages.output_page import OutputPage
 from voicetotext.settings.qt_pages.transcription_page import TranscriptionPage
 from voicetotext.settings.qt_state_bridge import QtStateBridge
@@ -129,15 +128,15 @@ class QtSettingsWindow(QMainWindow):
         self._transcription_page = TranscriptionPage(self._service)
         self._transcription_page.download_error.connect(self._on_download_error)
         self._transcription_page.delete_error.connect(self._on_delete_error)
-        self._mode_page = ModePage()
-        self._mode_page.mode_changed.connect(self._transcription_page.apply_mode)
+        self._transcription_page.model_auto_switched.connect(
+            self._on_model_auto_switched
+        )
         self._hotkeys_page = HotkeysPage(capture_bridge=self._capture_bridge)
         self._hotkeys_page.recording_state_changed.connect(
             self._on_recording_state_changed
         )
         self._output_page = OutputPage()
         self._pages.addWidget(self._transcription_page)
-        self._pages.addWidget(self._mode_page)
         self._pages.addWidget(self._hotkeys_page)
         self._pages.addWidget(self._output_page)
         body_layout.addWidget(self._pages, stretch=1)
@@ -153,7 +152,7 @@ class QtSettingsWindow(QMainWindow):
         sidebar = QListWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(168)
-        sidebar.addItems(["Transcription", "Mode", "Hotkeys", "Output"])
+        sidebar.addItems(["Transcription", "Hotkeys", "Output"])
         sidebar.currentRowChanged.connect(self._on_sidebar_changed)
         return sidebar
 
@@ -181,7 +180,6 @@ class QtSettingsWindow(QMainWindow):
         self._hotkeys_page.set_combination(draft.hotkey_combination)
         self._hotkeys_page.set_mode(draft.hotkey_mode)
         self._output_page.set_mode(draft.output_mode)
-        self._mode_page.set_mode(draft.transcription_mode)
 
     def _on_sidebar_changed(self, row: int) -> None:
         if 0 <= row < self._pages.count():
@@ -200,7 +198,7 @@ class QtSettingsWindow(QMainWindow):
             hotkey_combination=self._hotkeys_page.current_combination(),
             hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
-            transcription_mode=self._mode_page.current_mode(),
+            transcription_mode=self._transcription_page.current_mode(),
         )
 
     def _on_save_clicked(self) -> None:
@@ -344,6 +342,13 @@ class QtSettingsWindow(QMainWindow):
             f"Cannot delete '{name}': {error}", error=True,
         )
 
+    def _on_model_auto_switched(self, replaced: str, new_model: str) -> None:
+        """Tell the user the mode toggle changed their model for them."""
+        self._show_status(
+            f"Model switched to '{new_model}' because '{replaced}' does "
+            "not support this mode.",
+        )
+
     def on_model_deleted(self, event: ModelDeletedEvent) -> None:
         """Refresh the row of the just-deleted model.
 
@@ -390,9 +395,6 @@ class QtSettingsWindow(QMainWindow):
 
     def transcription_page(self) -> TranscriptionPage:
         return self._transcription_page
-
-    def mode_page(self) -> ModePage:
-        return self._mode_page
 
     def hotkeys_page(self) -> HotkeysPage:
         return self._hotkeys_page

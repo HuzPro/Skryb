@@ -23,10 +23,6 @@ class ModelInfo:
     ct2_repo_id: str = ""
     compatible_engines: tuple[EngineId, ...] = ("transformers",)
     engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
-    # When set, a streaming model also loads this batch repo as an A/B
-    # reference: at finalize the live transcript is logged next to the batch
-    # one for comparison. Empty for every normal model.
-    compare_batch_repo_id: str = ""
 
     @property
     def display_size(self) -> str:
@@ -108,9 +104,6 @@ _NEMOTRON_STREAMING_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType
 )
 
 
-_PARAKEET_BATCH_REPO = "nvidia/parakeet-tdt-0.6b-v3"
-
-
 NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
     "nemotron-speech-streaming-en-0.6b": ModelInfo(
         name="nemotron-speech-streaming-en-0.6b",
@@ -119,22 +112,6 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
         repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
         compatible_engines=("nemotron_streaming",),
         engine_priorities=_NEMOTRON_STREAMING_ENGINE_PRIORITIES,
-    ),
-    # Temporary A/B testing mode: same live streaming as above, but each
-    # dictation also runs parakeet-tdt batch over the full audio and prints
-    # both transcripts to the terminal. Requires parakeet-tdt-0.6b-v3 on disk.
-    "nemotron-streaming-compare": ModelInfo(
-        name="nemotron-streaming-compare",
-        size_mb=2470,
-        description=(
-            "TEMPORARY TESTING MODE: live cache-aware streaming, plus a "
-            "parakeet-tdt batch transcript printed to the terminal each "
-            "dictation for comparison. Requires parakeet-tdt-0.6b-v3 downloaded."
-        ),
-        repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
-        compatible_engines=("nemotron_streaming",),
-        engine_priorities=_NEMOTRON_STREAMING_ENGINE_PRIORITIES,
-        compare_batch_repo_id=_PARAKEET_BATCH_REPO,
     ),
 }
 
@@ -189,6 +166,7 @@ def allows_device_selection(name: str) -> bool:
 _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "medium": "large-v3-turbo",
     "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
+    "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
 }
 
 

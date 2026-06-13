@@ -64,11 +64,6 @@ class _FakeStreamingEngine(StreamingTranscriptionEngine):
         self.disposed = True
 
 
-class _SelfReportingEngine(_FakeStreamingEngine):
-    def reports_own_transcript(self) -> bool:
-        return True
-
-
 def _controller(session=None):
     recorder = FakeAudioRecorder()
     out = FakeTextOutputHandler()
@@ -200,21 +195,3 @@ class TestEngineSlot:
 
         with pytest.raises(TranscriptionError, match="no streaming engine"):
             controller.start(lambda _r, _e: None)
-
-
-class TestSelfReportDelegation:
-    def test_no_engine_does_not_report_own_transcript(self):
-        controller, recorder, out = _controller()
-
-        assert controller.reports_own_transcript() is False
-
-    def test_plain_engine_does_not_report_own_transcript(self):
-        controller, recorder, out = _controller(_FakeSession(["x"], "x"))
-
-        assert controller.reports_own_transcript() is False
-
-    def test_reports_own_transcript_when_the_engine_self_reports(self):
-        controller, recorder, out = _controller()
-        controller.set_engine(_SelfReportingEngine(_FakeSession(["x"], "x")))
-
-        assert controller.reports_own_transcript() is True
