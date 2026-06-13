@@ -124,6 +124,21 @@ class TestTkModelRowUpdateDownload:
         assert "bad gateway" in row.description_label().cget("text")
 
 
+class TestTkModelRowSelection:
+    def test_should_apply_selected_styles_when_selected(self, row):
+        row.set_selected(True)
+
+        assert row.cget("style") == "Selected.TFrame"
+        assert row.name_label().cget("style") == "Selected.TLabel"
+
+    def test_should_revert_to_default_styles_when_deselected(self, row):
+        row.set_selected(True)
+        row.set_selected(False)
+
+        assert row.cget("style") == "TFrame"
+        assert row.name_label().cget("style") == "TLabel"
+
+
 class TestTkModelRowCallbacks:
     def test_should_emit_download_requested_when_clicked_uninstalled(self, row):
         received: list[str] = []

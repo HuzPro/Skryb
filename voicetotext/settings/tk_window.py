@@ -25,6 +25,7 @@ from voicetotext.settings.tk_pages.output_page import TkOutputPage
 from voicetotext.settings.tk_pages.transcription_page import TkTranscriptionPage
 from voicetotext.settings.tk_state_bridge import TkStateBridge
 from voicetotext.settings.theme import Theme, apply_theme, theme_for
+from voicetotext.settings.win32_titlebar import set_titlebar_dark
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 ChangeSetCallback = Callable[[ChangeSet], None]
@@ -71,6 +72,9 @@ class TkSettingsWindow(tkinter.Toplevel):
         color_scheme: ColorScheme | None = None,
     ) -> None:
         super().__init__(master)
+        # Hide immediately so the half-built, not-yet-themed window never
+        # flashes on screen; ``show`` reveals it once it is dark-themed.
+        self.withdraw()
         self._service = service
         self._first_run = first_run
         self._on_save = on_save
@@ -85,7 +89,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._theme: Theme = theme_for(color_scheme)
 
         self.title("VoiceToText Setup" if first_run else "VoiceToText Settings")
-        self.geometry("760x620")
+        self.geometry("980x800")
+        self.minsize(860, 640)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         self._engine_bridge = TkEngineBridge(schedule, self)
@@ -94,6 +99,7 @@ class TkSettingsWindow(tkinter.Toplevel):
 
         self._build_ui()
         apply_theme(self, self._theme)
+        set_titlebar_dark(self, dark=self._theme.is_dark)
 
         self._service.subscribe_engine(self._engine_bridge)
         self._service.subscribe_state_changes(self._state_bridge)
@@ -102,7 +108,6 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._download_bridge.on_model_deleted,
         )
         self._refresh_save_enabled()
-        self.withdraw()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -185,6 +190,9 @@ class TkSettingsWindow(tkinter.Toplevel):
 
     def show(self) -> None:
         """Reveal and focus the window (also the single-instance focus path)."""
+        # Set the dark caption BEFORE mapping: the title bar is painted when
+        # the window maps, so the attribute must already be in place.
+        set_titlebar_dark(self, dark=self._theme.is_dark)
         self.deiconify()
         self.lift()
         self.focus_force()

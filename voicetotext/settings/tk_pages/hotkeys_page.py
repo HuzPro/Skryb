@@ -3,6 +3,7 @@ from collections.abc import Callable
 from tkinter import ttk
 
 from voicetotext.settings.signal import Signal
+from voicetotext.settings.theme import HEADING_STYLE
 from voicetotext.settings.tk_hotkey_capture import (
     CaptureBridge,
     TkHotkeyCapture,
@@ -48,7 +49,9 @@ class TkHotkeysPage(ttk.Frame):
     def _build(
         self, capture_bridge: CaptureBridge, schedule: ScheduleOnGuiThread,
     ) -> None:
-        ttk.Label(self, text="Hotkey Combination").pack(anchor="w")
+        ttk.Label(self, text="Hotkey Combination", style=HEADING_STYLE).pack(
+            anchor="w",
+        )
 
         self._capture = TkHotkeyCapture(self, capture_bridge, schedule)
         self._capture.combination_changed.connect(self._on_combination_changed)
@@ -60,7 +63,9 @@ class TkHotkeysPage(ttk.Frame):
             anchor="w", pady=(2, 0),
         )
 
-        ttk.Label(self, text="Activation Mode").pack(anchor="w", pady=(12, 0))
+        ttk.Label(self, text="Activation Mode", style=HEADING_STYLE).pack(
+            anchor="w", pady=(12, 0),
+        )
         self._add_mode_radio(
             _TOGGLE_MODE, "Toggle (press to start, press again to stop)",
         )

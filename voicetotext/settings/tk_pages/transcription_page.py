@@ -4,6 +4,7 @@ from tkinter import ttk
 
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.signal import Signal
+from voicetotext.settings.theme import HEADING_STYLE
 from voicetotext.settings.tk_model_list import TkModelList
 from voicetotext.settings.tk_pages.mode_selector import TkModeSelector
 from voicetotext.settings.transcription_mode import TranscriptionMode
@@ -62,7 +63,7 @@ class TkTranscriptionPage(ttk.Frame):
         draft = self._service.current_draft()
         self._mode = draft.transcription_mode
 
-        ttk.Label(self, text="Mode").pack(anchor="w")
+        ttk.Label(self, text="Mode", style=HEADING_STYLE).pack(anchor="w")
         self._mode_selector = TkModeSelector(self)
         self._mode_selector.set_mode(self._mode)
         if not self._service.supports_streaming_hardware():
@@ -70,7 +71,7 @@ class TkTranscriptionPage(ttk.Frame):
         self._mode_selector.mode_changed.connect(self.apply_mode)
         self._mode_selector.pack(fill="x", pady=(0, 8))
 
-        ttk.Label(self, text="Models").pack(anchor="w")
+        ttk.Label(self, text="Models", style=HEADING_STYLE).pack(anchor="w")
         self._model_list = TkModelList(
             self,
             self._service,
@@ -83,7 +84,9 @@ class TkTranscriptionPage(ttk.Frame):
         self._model_list.pack(fill="both", expand=True, pady=(0, 8))
         self._model_list.set_selected(draft.model_size)
 
-        ttk.Label(self, text="Settings").pack(anchor="w")
+        ttk.Label(self, text="Settings", style=HEADING_STYLE).pack(
+            anchor="w", pady=(8, 0),
+        )
         self._build_form(draft)
 
     def _build_form(self, draft: object) -> None:

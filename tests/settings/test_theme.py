@@ -67,8 +67,15 @@ class TestApplyTheme:
 
         apply_theme(container, DARK_THEME)
 
-        assert listbox.cget("bg") == DARK_THEME.surface
+        assert listbox.cget("bg") == DARK_THEME.background
         assert listbox.cget("fg") == DARK_THEME.foreground
+
+    def test_should_define_filled_selection_style(self, container):
+        apply_theme(container, DARK_THEME)
+
+        assert ttk.Style(container).lookup("Selected.TFrame", "background") == (
+            DARK_THEME.selection_background
+        )
 
     def test_should_recolour_descendant_canvas(self, container):
         canvas = tkinter.Canvas(container)

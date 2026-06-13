@@ -12,7 +12,11 @@ import pytest
 
 from voicetotext.settings.download_progress import DownloadProgressSnapshot
 from voicetotext.settings.model_view import ModelView
-from voicetotext.settings.tk_model_list import TkModelList
+from voicetotext.settings.tk_model_list import (
+    TkModelList,
+    _scroll_region_height,
+    _should_show_scrollbar,
+)
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
 
@@ -145,6 +149,29 @@ class TestTkModelListMode:
         model_list.set_mode(TranscriptionMode.STREAMING)
 
         assert model_list.row_names() == ["parakeet-tdt-0.6b-v3"]
+
+
+class TestScrollHelpers:
+    def test_should_show_scrollbar_when_content_overflows(self):
+        assert _should_show_scrollbar(200, 100) is True
+
+    def test_should_hide_scrollbar_when_content_fits(self):
+        assert _should_show_scrollbar(80, 100) is False
+        assert _should_show_scrollbar(100, 100) is False
+
+    def test_scroll_region_is_never_shorter_than_viewport(self):
+        assert _scroll_region_height(80, 100) == 100
+        assert _scroll_region_height(200, 100) == 200
+
+
+class TestTkModelListSelectionStyle:
+    def test_selected_row_uses_the_filled_selection_style(self, fixture):
+        model_list, _, _ = fixture
+
+        model_list.select_model("tiny")
+
+        assert model_list.row_for("tiny").cget("style") == "Selected.TFrame"
+        assert model_list.row_for("small").cget("style") == "TFrame"
 
 
 class TestTkModelListActions:

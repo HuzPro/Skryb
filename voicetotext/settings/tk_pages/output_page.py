@@ -2,6 +2,7 @@ import tkinter
 from tkinter import ttk
 
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.settings.theme import HEADING_STYLE
 
 
 class TkOutputPage(ttk.Frame):
@@ -22,7 +23,7 @@ class TkOutputPage(ttk.Frame):
         self.set_mode(OutputMode.DIRECT_PASTE)
 
     def _build(self) -> None:
-        heading = ttk.Label(self, text="Output Mode")
+        heading = ttk.Label(self, text="Output Mode", style=HEADING_STYLE)
         heading.pack(anchor="w", pady=(0, 8))
         for mode in OutputMode:
             button = ttk.Radiobutton(

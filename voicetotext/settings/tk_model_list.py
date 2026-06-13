@@ -18,15 +18,29 @@ def _ignore(_name: str) -> None:
     pass
 
 
+def _should_show_scrollbar(content_height: int, viewport_height: int) -> bool:
+    """The scrollbar is needed only when the rows overflow the viewport."""
+    return content_height > viewport_height
+
+
+def _scroll_region_height(content_height: int, viewport_height: int) -> int:
+    """Scroll region never shorter than the viewport.
+
+    A region shorter than the viewport lets the canvas scroll into empty
+    space above the content (dragging the thumb up pushes the rows down).
+    Clamping to the viewport height makes "nothing to scroll" actually
+    mean nothing moves.
+    """
+    return max(content_height, viewport_height)
+
+
 class TkModelList(ttk.Frame):
     """Scrollable model catalog: a ``Canvas`` of per-model :class:`TkModelRow`.
 
     A plain controller that owns the row widgets, the per-name download
-    snapshots, and the selection, replacing Qt's ``QAbstractListModel`` +
-    ``setIndexWidget`` plumbing. Action callbacks (download/cancel/delete)
-    are injected once and re-bound to every row, including those rebuilt
-    on a mode change. :attr:`selection_changed` fires when the user picks
-    an installed row.
+    snapshots, and the selection. The vertical scrollbar auto-hides when
+    the rows fit, and relayout work is coalesced through ``after_idle`` so
+    dragging the window edge does not thrash the canvas.
     """
 
     def __init__(
@@ -58,29 +72,64 @@ class TkModelList(ttk.Frame):
 
     def _build_scroll_area(self) -> None:
         self._canvas = tkinter.Canvas(self, highlightthickness=0, borderwidth=0)
-        scrollbar = ttk.Scrollbar(
+        self._scrollbar = ttk.Scrollbar(
             self, orient="vertical", command=self._canvas.yview,
         )
-        self._canvas.configure(yscrollcommand=scrollbar.set)
+        self._canvas.configure(yscrollcommand=self._scrollbar.set)
         self._canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # The scrollbar is packed on demand by ``_relayout``.
+        self._scrollbar_visible = False
+        self._last_width = -1
+        self._relayout_pending = False
 
         self._inner = ttk.Frame(self._canvas)
         self._inner_id = self._canvas.create_window(
             (0, 0), window=self._inner, anchor="nw",
         )
-        self._inner.bind("<Configure>", self._on_inner_configure)
-        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        self._inner.bind("<Configure>", self._schedule_relayout)
+        self._canvas.bind("<Configure>", self._schedule_relayout)
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
 
-    def _on_inner_configure(self, _event: tkinter.Event) -> None:
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+    def _schedule_relayout(self, _event: tkinter.Event | None = None) -> None:
+        # Coalesce the storm of <Configure> events a resize drag produces
+        # into a single layout pass per idle cycle.
+        if self._relayout_pending:
+            return
+        self._relayout_pending = True
+        self.after_idle(self._relayout)
 
-    def _on_canvas_configure(self, event: tkinter.Event) -> None:
-        self._canvas.itemconfigure(self._inner_id, width=event.width)
+    def _relayout(self) -> None:
+        self._relayout_pending = False
+        if not self._canvas.winfo_exists():
+            return
+        width = self._canvas.winfo_width()
+        if width != self._last_width:
+            self._canvas.itemconfigure(self._inner_id, width=width)
+            self._last_width = width
+        content_height = self._inner.winfo_reqheight()
+        viewport_height = self._canvas.winfo_height()
+        self._canvas.configure(
+            scrollregion=(
+                0, 0, 0, _scroll_region_height(content_height, viewport_height),
+            ),
+        )
+        self._set_scrollbar_visible(
+            _should_show_scrollbar(content_height, viewport_height),
+        )
+
+    def _set_scrollbar_visible(self, visible: bool) -> None:
+        if visible == self._scrollbar_visible:
+            return
+        self._scrollbar_visible = visible
+        if visible:
+            self._scrollbar.pack(side="right", fill="y")
+        else:
+            self._scrollbar.pack_forget()
+            self._canvas.yview_moveto(0)
 
     def _on_mousewheel(self, event: tkinter.Event) -> None:
-        self._canvas.yview_scroll(-int(event.delta / _WHEEL_NOTCH), "units")
+        if self._scrollbar_visible:
+            self._canvas.yview_scroll(-int(event.delta / _WHEEL_NOTCH), "units")
 
     # ------------------------------------------------------------------
     # Row construction
@@ -94,7 +143,8 @@ class TkModelList(ttk.Frame):
         self._selected = self._service.selected_model()
         for view in self._views:
             self._add_row(view)
-        self._apply_selection_visual()
+        self._apply_selection()
+        self._schedule_relayout()
 
     def _add_row(self, view: ModelView) -> None:
         row = TkModelRow(self._inner, view)
@@ -135,7 +185,7 @@ class TkModelList(ttk.Frame):
         if name == self._selected:
             return
         self._selected = name
-        self._apply_selection_visual()
+        self._apply_selection()
 
     def select_model(self, name: str) -> None:
         view = self._view_for(name)
@@ -151,6 +201,7 @@ class TkModelList(ttk.Frame):
         row = self._rows.get(name)
         if row is not None:
             row.update_download(snapshot)
+            self._schedule_relayout()
 
     def download_snapshot(self, name: str) -> DownloadProgressSnapshot | None:
         return self._downloads.get(name)
@@ -160,6 +211,7 @@ class TkModelList(ttk.Frame):
         row = self._rows.get(name)
         if row is not None:
             row.update_download(None)
+            self._schedule_relayout()
 
     def update_install_state(self, name: str) -> None:
         fresh = {v.name: v for v in self._service.list_models()}.get(name)
@@ -189,9 +241,6 @@ class TkModelList(ttk.Frame):
                 return view
         return None
 
-    def _apply_selection_visual(self) -> None:
+    def _apply_selection(self) -> None:
         for name, row in self._rows.items():
-            if name == self._selected:
-                row.configure(relief="solid", borderwidth=1)
-            else:
-                row.configure(relief="flat", borderwidth=0)
+            row.set_selected(name == self._selected)

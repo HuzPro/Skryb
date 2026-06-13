@@ -4,16 +4,27 @@ from tkinter import ttk
 
 from voicetotext.core.color_scheme import ColorScheme
 
+_FONT_FAMILY = "Segoe UI"
+_BODY_FONT = (_FONT_FAMILY, 10)
+_HEADING_FONT = (_FONT_FAMILY, 11, "bold")
+
+# ttk style names the views opt into for non-default appearance.
+HEADING_STYLE = "Heading.TLabel"
+SELECTED_FRAME_STYLE = "Selected.TFrame"
+SELECTED_LABEL_STYLE = "Selected.TLabel"
+ROW_FRAME_STYLE = "TFrame"
+ROW_LABEL_STYLE = "TLabel"
+
 
 @dataclass(frozen=True)
 class Theme:
     """A flat colour palette for the settings window.
 
     ``surface`` is for input fields and scrollable backgrounds;
-    ``accent`` matches the tray icon's per-state blue. ``status_*`` are
-    the footer message colours (the neutral one must stay readable on
-    ``background``, which a single hard-coded grey could not across both
-    schemes).
+    ``selection_background`` fills the chosen model row; ``accent`` matches
+    the tray icon's per-state blue. ``status_*`` are the footer message
+    colours (the neutral one must stay readable on ``background``, which a
+    single hard-coded grey could not across both schemes).
     """
 
     name: str
@@ -22,10 +33,15 @@ class Theme:
     foreground: str
     select_background: str
     select_foreground: str
+    selection_background: str
     accent: str
     border: str
     status_neutral: str
     status_error: str
+
+    @property
+    def is_dark(self) -> bool:
+        return self.name == "dark"
 
 
 LIGHT_THEME = Theme(
@@ -35,21 +51,23 @@ LIGHT_THEME = Theme(
     foreground="#1c1c1c",
     select_background="#cfe3ff",
     select_foreground="#10243d",
+    selection_background="#d6e6ff",
     accent="#1f6feb",
-    border="#c4c4c4",
-    status_neutral="#333333",
+    border="#d0d0d0",
+    status_neutral="#444444",
     status_error="#c0392b",
 )
 
 DARK_THEME = Theme(
     name="dark",
-    background="#2b2b2b",
+    background="#252526",
     surface="#3c3f41",
     foreground="#e6e6e6",
     select_background="#2f5b8f",
     select_foreground="#ffffff",
+    selection_background="#2d4a6b",
     accent="#6fa8ff",
-    border="#555555",
+    border="#3f3f46",
     status_neutral="#cccccc",
     status_error="#ff6b6b",
 )
@@ -68,12 +86,12 @@ def apply_theme(container: tkinter.Misc, theme: Theme) -> None:
     """Recolour the settings UI under *container* for *theme*.
 
     Switches ttk to the recolourable ``clam`` theme (the native Windows
-    themes ignore colour options), configures every ttk widget style the
-    settings window uses, points the combobox dropdown list at the theme
-    via the option database, and recolours the plain-Tk widgets
-    (``Listbox``/``Canvas``) that ttk styling does not reach. ``container``
-    must be a plain-Tk container (``Toplevel``/``Tk``/``tk.Frame``); ttk
-    frames reject the ``bg`` option.
+    themes ignore colour options), configures flat modern styles for every
+    ttk widget the settings window uses, points the combobox dropdown list
+    at the theme via the option database, and recolours the plain-Tk
+    widgets (``Listbox``/``Canvas``) that ttk styling does not reach.
+    ``container`` must be a plain-Tk container (``Toplevel``/``Tk``/
+    ``tk.Frame``); ttk frames reject the ``bg`` option.
     """
     style = ttk.Style(container)
     style.theme_use("clam")
@@ -90,17 +108,32 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         foreground=theme.foreground,
         fieldbackground=theme.surface,
         bordercolor=theme.border,
+        lightcolor=theme.surface,
+        darkcolor=theme.surface,
         troughcolor=theme.surface,
         arrowcolor=theme.foreground,
         insertcolor=theme.foreground,
         selectbackground=theme.select_background,
         selectforeground=theme.select_foreground,
+        font=_BODY_FONT,
     )
-    # ``bordercolor`` on TFrame paints the selected model row's solid
-    # border (the only frames with a non-zero borderwidth) in the accent.
-    style.configure("TFrame", background=theme.background, bordercolor=theme.accent)
+    style.configure("TFrame", background=theme.background)
     style.configure(
         "TLabel", background=theme.background, foreground=theme.foreground,
+    )
+    style.configure(
+        HEADING_STYLE,
+        background=theme.background,
+        foreground=theme.foreground,
+        font=_HEADING_FONT,
+    )
+    # Filled row selection (replaces the old border): tint the row frame
+    # and its labels together so the whole card reads as selected.
+    style.configure(SELECTED_FRAME_STYLE, background=theme.selection_background)
+    style.configure(
+        SELECTED_LABEL_STYLE,
+        background=theme.selection_background,
+        foreground=theme.foreground,
     )
     style.configure(
         "TRadiobutton", background=theme.background, foreground=theme.foreground,
@@ -109,23 +142,16 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         "TRadiobutton",
         background=[("active", theme.background)],
         foreground=[("disabled", theme.border)],
+        indicatorcolor=[("selected", theme.accent)],
     )
-    style.configure(
-        "TButton", background=theme.surface, foreground=theme.foreground,
-    )
-    style.map(
-        "TButton",
-        background=[
-            ("active", theme.select_background),
-            ("disabled", theme.background),
-        ],
-        foreground=[("disabled", theme.border)],
-    )
+    _configure_flat_button(style, theme)
     style.configure(
         "TEntry",
         fieldbackground=theme.surface,
         foreground=theme.foreground,
         insertcolor=theme.foreground,
+        borderwidth=1,
+        relief="flat",
     )
     style.configure(
         "TCombobox",
@@ -133,6 +159,8 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         foreground=theme.foreground,
         arrowcolor=theme.foreground,
         background=theme.surface,
+        borderwidth=1,
+        relief="flat",
     )
     style.map(
         "TCombobox",
@@ -148,15 +176,63 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         "TProgressbar",
         background=theme.accent,
         troughcolor=theme.surface,
+        bordercolor=theme.surface,
+        lightcolor=theme.accent,
+        darkcolor=theme.accent,
+    )
+    _configure_slim_scrollbar(style, theme)
+
+
+def _configure_flat_button(style: ttk.Style, theme: Theme) -> None:
+    style.configure(
+        "TButton",
+        background=theme.surface,
+        foreground=theme.foreground,
         bordercolor=theme.border,
+        relief="flat",
+        borderwidth=0,
+        focusthickness=0,
+        padding=(12, 6),
+    )
+    style.map(
+        "TButton",
+        background=[
+            ("pressed", theme.select_background),
+            ("active", theme.select_background),
+            ("disabled", theme.background),
+        ],
+        foreground=[("disabled", theme.border)],
+        relief=[("pressed", "flat"), ("active", "flat")],
+    )
+
+
+def _configure_slim_scrollbar(style: ttk.Style, theme: Theme) -> None:
+    # Drop the up/down arrow buttons for a thin modern bar: just a trough
+    # and an expanding thumb.
+    style.layout(
+        "Vertical.TScrollbar",
+        [
+            (
+                "Vertical.Scrollbar.trough",
+                {
+                    "sticky": "ns",
+                    "children": [
+                        ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
+                    ],
+                },
+            ),
+        ],
     )
     style.configure(
         "Vertical.TScrollbar",
-        background=theme.surface,
         troughcolor=theme.background,
-        arrowcolor=theme.foreground,
-        bordercolor=theme.border,
+        background=theme.border,
+        bordercolor=theme.background,
+        borderwidth=0,
+        relief="flat",
+        arrowsize=0,
     )
+    style.map("Vertical.TScrollbar", background=[("active", theme.accent)])
 
 
 def _configure_combobox_popdown(container: tkinter.Misc, theme: Theme) -> None:
@@ -170,18 +246,21 @@ def _configure_combobox_popdown(container: tkinter.Misc, theme: Theme) -> None:
     container.option_add(
         "*TCombobox*Listbox.selectForeground", theme.select_foreground,
     )
+    container.option_add("*TCombobox*Listbox.font", _BODY_FONT)
 
 
 def _recolour_plain_widgets(widget: tkinter.Misc, theme: Theme) -> None:
     for child in widget.winfo_children():
         if isinstance(child, tkinter.Listbox):
             child.configure(
-                bg=theme.surface,
+                bg=theme.background,
                 fg=theme.foreground,
                 selectbackground=theme.select_background,
                 selectforeground=theme.select_foreground,
                 highlightthickness=0,
                 borderwidth=0,
+                activestyle="none",
+                font=_BODY_FONT,
             )
         elif isinstance(child, tkinter.Canvas):
             child.configure(bg=theme.background, highlightthickness=0)

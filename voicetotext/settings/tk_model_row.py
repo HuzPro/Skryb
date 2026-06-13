@@ -7,6 +7,12 @@ from voicetotext.settings.download_progress import (
 )
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.signal import Signal
+from voicetotext.settings.theme import (
+    ROW_FRAME_STYLE,
+    ROW_LABEL_STYLE,
+    SELECTED_FRAME_STYLE,
+    SELECTED_LABEL_STYLE,
+)
 
 
 _DOWNLOADING_STATES = frozenset({"queued", "downloading", "paused"})
@@ -41,17 +47,17 @@ class TkModelRow(ttk.Frame):
         self.update_view(view)
 
     def _build(self) -> None:
-        header = ttk.Frame(self)
-        header.pack(fill="x")
+        self._header = ttk.Frame(self)
+        self._header.pack(fill="x")
 
-        self._name_label = ttk.Label(header, text=self._name)
+        self._name_label = ttk.Label(self._header, text=self._name)
         self._name_label.pack(side="left")
 
-        self._size_label = ttk.Label(header, text="")
+        self._size_label = ttk.Label(self._header, text="")
         self._size_label.pack(side="left", padx=(8, 0))
 
         self._action_button = ttk.Button(
-            header, text="", width=10, command=self._on_action_clicked,
+            self._header, text="", width=10, command=self._on_action_clicked,
         )
         self._action_button.pack(side="right")
 
@@ -86,6 +92,17 @@ class TkModelRow(ttk.Frame):
             self._show_failed(snapshot)
             return
         self._show_progress_for(snapshot)
+
+    def set_selected(self, selected: bool) -> None:
+        """Tint the whole row (frame, header, labels) to show selection."""
+        frame_style = SELECTED_FRAME_STYLE if selected else ROW_FRAME_STYLE
+        label_style = SELECTED_LABEL_STYLE if selected else ROW_LABEL_STYLE
+        self.configure(style=frame_style)
+        self._header.configure(style=frame_style)
+        for label in (
+            self._name_label, self._size_label, self._description_label,
+        ):
+            label.configure(style=label_style)
 
     # ------------------------------------------------------------------
     # Test accessors
