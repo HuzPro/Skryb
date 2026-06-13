@@ -1,13 +1,21 @@
-from enum import Enum
-
 from PIL import Image, ImageDraw
 
+from voicetotext.core.color_scheme import (
+    ColorScheme,
+    color_scheme_from_registry,
+    detect_color_scheme,
+)
 from voicetotext.core.state_machine import AppState
 
-
-class ColorScheme(Enum):
-    LIGHT = "light"
-    DARK = "dark"
+# Re-exported so existing tray callers/tests keep importing the scheme and
+# detector from here; the canonical home is ``core.color_scheme``.
+__all__ = [
+    "ColorScheme",
+    "color_scheme_from_registry",
+    "detect_color_scheme",
+    "create_icon_image",
+    "render_image_for_scheme",
+]
 
 
 # Per-scheme palettes. The light palette uses darker hues so the circle
@@ -54,24 +62,3 @@ def render_image_for_scheme(
     margin = large / 8.0
     draw.ellipse((margin, margin, large - margin, large - margin), fill=color)
     return image.resize((size, size), Image.LANCZOS)
-
-
-def detect_color_scheme() -> ColorScheme:
-    """Read the Windows light/dark setting, defaulting to light on error."""
-    import winreg
-
-    return color_scheme_from_registry(winreg)
-
-
-def color_scheme_from_registry(winreg: object) -> ColorScheme:
-    try:
-        return _read_color_scheme(winreg)
-    except OSError:
-        return ColorScheme.LIGHT
-
-
-def _read_color_scheme(winreg: object) -> ColorScheme:
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-        uses_light, _ = winreg.QueryValueEx(key, "SystemUsesLightTheme")
-    return ColorScheme.LIGHT if uses_light else ColorScheme.DARK

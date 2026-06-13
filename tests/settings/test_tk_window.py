@@ -10,10 +10,12 @@ from voicetotext.core.events import (
     EngineLoadStartedEvent,
     ModelDeletedEvent,
 )
+from voicetotext.core.color_scheme import ColorScheme
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.signal import Signal
+from voicetotext.settings.theme import DARK_THEME, LIGHT_THEME
 from voicetotext.settings.tk_download_bridge import TkDownloadBridge
 from voicetotext.settings.tk_engine_bridge import TkEngineBridge
 from voicetotext.settings.tk_state_bridge import TkStateBridge
@@ -360,6 +362,36 @@ class TestLifecycle:
         tk_root.update_idletasks()
 
         assert not window.winfo_exists()
+
+
+class TestTheme:
+    def test_should_apply_dark_palette_when_scheme_is_dark(self, tk_root, service):
+        window = _make_window(tk_root, service, color_scheme=ColorScheme.DARK)
+
+        assert window.cget("bg") == DARK_THEME.background
+
+        if window.winfo_exists():
+            window.destroy()
+
+    def test_should_apply_light_palette_when_scheme_is_light(self, tk_root, service):
+        window = _make_window(tk_root, service, color_scheme=ColorScheme.LIGHT)
+
+        assert window.cget("bg") == LIGHT_THEME.background
+
+        if window.winfo_exists():
+            window.destroy()
+
+    def test_status_error_should_use_theme_error_colour(self, tk_root, service):
+        window = _make_window(tk_root, service, color_scheme=ColorScheme.DARK)
+
+        window._show_status("boom", error=True)
+
+        assert str(window.status_label().cget("foreground")) == (
+            DARK_THEME.status_error
+        )
+
+        if window.winfo_exists():
+            window.destroy()
 
 
 class TestMode:

@@ -2,6 +2,7 @@ import tkinter
 from collections.abc import Callable
 from tkinter import ttk
 
+from voicetotext.core.color_scheme import ColorScheme, detect_color_scheme
 from voicetotext.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
@@ -23,14 +24,13 @@ from voicetotext.settings.tk_pages.hotkeys_page import TkHotkeysPage
 from voicetotext.settings.tk_pages.output_page import TkOutputPage
 from voicetotext.settings.tk_pages.transcription_page import TkTranscriptionPage
 from voicetotext.settings.tk_state_bridge import TkStateBridge
+from voicetotext.settings.theme import Theme, apply_theme, theme_for
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 ChangeSetCallback = Callable[[ChangeSet], None]
 CaptureStateCallback = Callable[[bool], None]
 
 _SECTIONS = ["Transcription", "Hotkeys", "Output"]
-_STATUS_ERROR_COLOR = "#d33b3b"
-_STATUS_NEUTRAL_COLOR = "#333333"
 
 
 def _run_now(action: Callable[[], None]) -> None:
@@ -68,6 +68,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         on_save: ChangeSetCallback = _ignore_changes,
         on_capture_state_changed: CaptureStateCallback = _ignore_capture,
         schedule: ScheduleOnGuiThread = _run_now,
+        color_scheme: ColorScheme | None = None,
     ) -> None:
         super().__init__(master)
         self._service = service
@@ -78,6 +79,10 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._capture_bridge = capture_bridge
         self._pending_changes: ChangeSet | None = None
         self._closing = False
+        # ``None`` means follow the OS light/dark setting at open time.
+        if color_scheme is None:
+            color_scheme = detect_color_scheme()
+        self._theme: Theme = theme_for(color_scheme)
 
         self.title("VoiceToText Setup" if first_run else "VoiceToText Settings")
         self.geometry("760x620")
@@ -88,6 +93,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._download_bridge = TkDownloadBridge(schedule, self)
 
         self._build_ui()
+        apply_theme(self, self._theme)
 
         self._service.subscribe_engine(self._engine_bridge)
         self._service.subscribe_state_changes(self._state_bridge)
@@ -154,7 +160,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         footer.pack(side="bottom", fill="x", padx=12, pady=8)
 
         self._status_label = ttk.Label(
-            footer, text="", foreground=_STATUS_NEUTRAL_COLOR,
+            footer, text="", foreground=self._theme.status_neutral,
         )
         self._status_label.pack(side="left", fill="x", expand=True)
 
@@ -252,7 +258,9 @@ class TkSettingsWindow(tkinter.Toplevel):
     def _show_status(self, message: str, error: bool = False) -> None:
         self._status_label.configure(
             text=message,
-            foreground=_STATUS_ERROR_COLOR if error else _STATUS_NEUTRAL_COLOR,
+            foreground=(
+                self._theme.status_error if error else self._theme.status_neutral
+            ),
         )
 
     # ------------------------------------------------------------------
