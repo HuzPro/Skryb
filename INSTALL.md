@@ -34,6 +34,14 @@ python -m voicetotext
 
 First run opens a setup window where you pick a model and download it.
 
+## Streaming dictation (experimental)
+
+Streaming mode types text live as you speak, instead of recording first and transcribing on stop.
+
+- **GPU-only.** A CUDA or ROCm GPU is required; the streaming models are rejected at load on CPU. On a box with no detected GPU the Settings UI disables the Streaming toggle. It is still experimental on AMD ROCm.
+- **Needs the Parakeet extra.** Install via `requirements-all.txt` / `-amd.txt` / `-nvidia.txt` — these include `nano-parakeet` (which pulls `sentencepiece`). The bare `requirements.txt` omits it and streaming will not load.
+- **Models:** `parakeet-tdt-0.6b-v3` (windowed) and `nemotron-speech-streaming-en-0.6b` (cache-aware, lowest latency). Choose **Streaming** on the Transcription page, then download a streaming model.
+
 ## Notes per platform
 
 ### Windows AMD (RDNA3 / RDNA4)

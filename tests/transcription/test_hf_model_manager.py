@@ -60,6 +60,13 @@ class TestHuggingFaceModelManagerHasModel:
         assert manager.has_model("base") is False
 
 
+def _write_refs_main(model_dir: Path, sha: str = "abc123") -> None:
+    """Write the ``refs/main`` pointer a local_files_only load resolves through."""
+    refs_main = model_dir / "refs" / "main"
+    refs_main.parent.mkdir(parents=True, exist_ok=True)
+    refs_main.write_text(sha)
+
+
 class TestHuggingFaceModelManagerIsInstalled:
     def test_should_return_false_when_model_not_downloaded(self, tmp_path):
         manager = _make_manager(tmp_path)
@@ -67,10 +74,12 @@ class TestHuggingFaceModelManagerIsInstalled:
         assert manager.is_installed("base") is False
 
     def test_should_return_true_when_snapshot_has_config_and_weights(self, tmp_path):
-        snapshot = tmp_path / "models--openai--whisper-base" / "snapshots" / "abc123"
+        model_dir = tmp_path / "models--openai--whisper-base"
+        snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "model.safetensors").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path)
 
         assert manager.is_installed("base") is True
@@ -82,23 +91,52 @@ class TestHuggingFaceModelManagerIsInstalled:
         assert manager.is_installed("base") is False
 
     def test_should_return_false_when_weights_file_missing(self, tmp_path):
-        snapshot = (
-            tmp_path / "models--openai--whisper-base" / "snapshots" / "abc123"
-        )
+        model_dir = tmp_path / "models--openai--whisper-base"
+        snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "tokenizer.json").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path)
 
         assert manager.is_installed("base") is False
 
-    def test_should_return_true_when_safetensors_present(self, tmp_path):
+    def test_should_return_false_when_snapshot_complete_but_refs_main_missing(
+        self, tmp_path,
+    ):
+        # A cancelled download writes the files but not refs/main (which the
+        # job writes last). huggingface_hub's local_files_only load resolves
+        # `main` through refs/main, so without it the model is unloadable
+        # and must NOT report installed — the root cause of the "swap to
+        # base fails with LocalEntryNotFoundError" report.
         snapshot = (
             tmp_path / "models--openai--whisper-base" / "snapshots" / "abc123"
         )
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "model.safetensors").touch()
+        manager = _make_manager(tmp_path)
+
+        assert manager.is_installed("base") is False
+
+    def test_should_return_false_when_refs_main_points_at_absent_snapshot(
+        self, tmp_path,
+    ):
+        # refs/main names a revision whose snapshot dir was never written.
+        model_dir = tmp_path / "models--openai--whisper-base"
+        model_dir.mkdir(parents=True)
+        _write_refs_main(model_dir, "deadbeef")
+        manager = _make_manager(tmp_path)
+
+        assert manager.is_installed("base") is False
+
+    def test_should_return_true_when_safetensors_present(self, tmp_path):
+        model_dir = tmp_path / "models--openai--whisper-base"
+        snapshot = model_dir / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").touch()
+        (snapshot / "model.safetensors").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path)
 
         assert manager.is_installed("base") is True
@@ -113,18 +151,15 @@ class TestHuggingFaceModelManagerIsInstalled:
         # the index-file layout as a complete model.
         from voicetotext.transcription.model_info import GRANITE_MODELS
 
-        snapshot = (
-            tmp_path
-            / "models--ibm-granite--granite-speech-4.1-2b"
-            / "snapshots"
-            / "abc123"
-        )
+        model_dir = tmp_path / "models--ibm-granite--granite-speech-4.1-2b"
+        snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "model.safetensors.index.json").touch()
         (snapshot / "model-00001-of-00003.safetensors").touch()
         (snapshot / "model-00002-of-00003.safetensors").touch()
         (snapshot / "model-00003-of-00003.safetensors").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path, models=GRANITE_MODELS)
 
         assert manager.is_installed("granite-speech-4.1-2b") is True
@@ -135,14 +170,11 @@ class TestHuggingFaceModelManagerIsInstalled:
         # must recognise that as a complete model.
         from voicetotext.transcription.model_info import PARAKEET_MODELS
 
-        snapshot = (
-            tmp_path
-            / "models--nvidia--parakeet-tdt-0.6b-v3"
-            / "snapshots"
-            / "abc123"
-        )
+        model_dir = tmp_path / "models--nvidia--parakeet-tdt-0.6b-v3"
+        snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
         (snapshot / "parakeet-tdt-0.6b-v3.nemo").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
 
         assert manager.is_installed("parakeet-tdt-0.6b-v3") is True
@@ -165,15 +197,12 @@ class TestHuggingFaceModelManagerIsInstalled:
                 compatible_engines=("faster_whisper",),
             ),
         }
-        snapshot = (
-            tmp_path
-            / "models--Systran--faster-whisper-tiny"
-            / "snapshots"
-            / "abc123"
-        )
+        model_dir = tmp_path / "models--Systran--faster-whisper-tiny"
+        snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "model.bin").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path, models=ct2_models)
 
         assert manager.is_installed("tiny-ct2") is True
@@ -191,6 +220,7 @@ class TestHuggingFaceModelManagerGetModelPath:
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "model.safetensors").touch()
+        _write_refs_main(model_dir)
         manager = _make_manager(tmp_path)
 
         assert manager.get_model_path("base") == model_dir

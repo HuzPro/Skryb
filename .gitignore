@@ -15,6 +15,7 @@ env/
 config.json
 *.ggml
 *.bin
+*.ckpt
 models/
 .claude
 CLAUDE.md
@@ -26,3 +27,6 @@ tests/fixtures/audio/*.flac
 
 # Performance benchmark results — accumulating local history, machine-specific
 tests/performance/.results/
+
+# Local spike/scratch output (extracted checkpoints, weight-key dumps, reports)
+scripts/_spike_out/

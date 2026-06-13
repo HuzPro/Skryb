@@ -2,6 +2,8 @@ import ctypes
 import ctypes.wintypes as _wt
 
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
+from voicetotext.output.sleeper import Sleeper
+from voicetotext.output.win32_clipboard_open import open_clipboard_with_retry
 
 
 _user32 = ctypes.windll.user32
@@ -35,12 +37,15 @@ _kernel32.GlobalUnlock.restype = _wt.BOOL
 
 class Win32ClipboardWriter:
 
+    def __init__(self, sleeper: Sleeper) -> None:
+        self._sleeper = sleeper
+
     def set_text(self, text: str) -> None:
-        _write_text_to_clipboard(text)
+        _write_text_to_clipboard(text, self._sleeper)
 
 
-def _write_text_to_clipboard(text: str) -> None:
-    if not _user32.OpenClipboard(None):
+def _write_text_to_clipboard(text: str, sleeper: Sleeper) -> None:
+    if not open_clipboard_with_retry(_user32, sleeper):
         raise ClipboardWriteError("Could not open clipboard for write.")
     try:
         _user32.EmptyClipboard()

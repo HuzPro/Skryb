@@ -139,6 +139,62 @@ class TestSoundDeviceAdapterEmptyRecording:
         assert result is None
 
 
+class TestSoundDeviceAdapterLiveFrames:
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_forward_mono_one_dimensional_frame_to_on_frame(self, mock_sd):
+        # The recorder contract promises "float32, mono" frames. sounddevice
+        # delivers (frames, 1); the adapter must flatten to (frames,) so the
+        # streaming model's torch.stft does not reflect-pad a size-1 axis.
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        received: list[np.ndarray] = []
+
+        adapter.start_recording(on_frame=received.append)
+        _feed(
+            mock_sd,
+            np.ones((1024, 1), dtype=np.float32),
+            np.zeros((512, 1), dtype=np.float32),
+        )
+
+        assert len(received) == 2
+        assert received[0].shape == (1024,)
+        assert received[1].shape == (512,)
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_still_assemble_segment_when_on_frame_set(self, mock_sd):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+
+        adapter.start_recording(on_frame=lambda chunk: None)
+        _feed(mock_sd, np.ones((1024, 1), dtype=np.float32))
+        result = adapter.stop_recording()
+
+        assert result is not None
+        assert result.sample_count == 1024
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_pass_a_copy_to_on_frame(self, mock_sd):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        received: list[np.ndarray] = []
+        adapter.start_recording(on_frame=received.append)
+
+        chunk = np.ones((4, 1), dtype=np.float32)
+        _feed(mock_sd, chunk)
+        chunk[0, 0] = 9.0  # mutate the source after the callback ran
+
+        assert received[0][0] == 1.0  # on_frame got an independent (1-D) copy
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_clear_on_frame_after_stop(self, mock_sd):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        received: list[np.ndarray] = []
+        adapter.start_recording(on_frame=received.append)
+        adapter.stop_recording()
+
+        callback = mock_sd.InputStream.call_args.kwargs["callback"]
+        callback(np.ones((4, 1), dtype=np.float32), 4, None, None)
+
+        assert received == []
+
+
 class TestSoundDeviceAdapterDispose:
     @patch("voicetotext.recording.sounddevice_adapter.sd")
     def test_should_stop_recording_on_dispose_if_active(self, mock_sd):

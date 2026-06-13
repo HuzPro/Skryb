@@ -6,8 +6,15 @@ need a specific pre-programmed state should configure the fake inside
 the test body so the setup is visible.
 """
 
+import logging
 import os
 import sys
+
+# Mirror ``voicetotext.__main__._apply_torch_env_overrides``: the ROCm
+# AOTriton attention path must be enabled before torch is imported, or
+# loading a real model on an AMD GPU can hard-crash the interpreter
+# during a streaming/warmup pass. Harmless on CPU/CUDA boxes.
+os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 import pytest
 
@@ -79,6 +86,24 @@ def fake_preserver() -> FakeClipboardPreserver:
 @pytest.fixture()
 def fake_hotkey_listener() -> FakeHotkeyListener:
     return FakeHotkeyListener()
+
+
+@pytest.fixture()
+def app_caplog(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
+    """``caplog`` wired to see the non-propagating ``voicetotext`` logger tree.
+
+    :mod:`voicetotext.core.debug_logger` sets ``propagate = False`` on the
+    ``voicetotext`` logger at import, so its records never reach the root
+    logger pytest captures from. Attaching caplog's handler to that logger and
+    lifting its level lets tests assert on the app's own log output.
+    """
+    logger = logging.getLogger("voicetotext")
+    logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="voicetotext")
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
 
 
 _captured_exit_status = 0

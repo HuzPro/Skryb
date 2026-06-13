@@ -1,4 +1,5 @@
 import threading
+from collections.abc import Callable
 
 import numpy as np
 import sounddevice as sd
@@ -15,13 +16,17 @@ class SoundDeviceAdapter(AudioRecorder):
         self._stream: sd.InputStream | None = None
         self._chunks: list[np.ndarray] = []
         self._is_recording: bool = False
+        self._on_frame: Callable[[np.ndarray], None] | None = None
         self._lock = threading.Lock()
 
-    def start_recording(self) -> None:
+    def start_recording(
+        self, on_frame: Callable[[np.ndarray], None] | None = None,
+    ) -> None:
         with self._lock:
             if self._is_recording:
                 raise AudioRecorderError("already recording")
             self._chunks = []
+            self._on_frame = on_frame
             self._stream = sd.InputStream(
                 samplerate=self._sample_rate,
                 channels=1,
@@ -40,6 +45,7 @@ class SoundDeviceAdapter(AudioRecorder):
             self._stream.close()
             self._stream = None
             self._is_recording = False
+            self._on_frame = None
             chunks = self._chunks
             self._chunks = []
         if not chunks:
@@ -52,6 +58,7 @@ class SoundDeviceAdapter(AudioRecorder):
 
     def dispose(self) -> None:
         with self._lock:
+            self._on_frame = None
             if self._is_recording:
                 self._stream.stop()
                 self._stream.close()
@@ -66,4 +73,14 @@ class SoundDeviceAdapter(AudioRecorder):
         time_info: object,
         status: sd.CallbackFlags,
     ) -> None:
-        self._chunks.append(indata.copy())
+        # sounddevice delivers (frames, channels); for our mono stream that
+        # is (frames, 1). Flatten to a 1-D (frames,) mono buffer so every
+        # consumer gets the "float32, mono" frame the recorder contract
+        # promises. The batch path already flattened at stop; the streaming
+        # path fed the raw 2-D frame straight into the model, where
+        # ``torch.stft`` reflect-padded the size-1 trailing axis and crashed.
+        chunk = indata.reshape(-1).copy()
+        self._chunks.append(chunk)
+        on_frame = self._on_frame
+        if on_frame is not None:
+            on_frame(chunk)

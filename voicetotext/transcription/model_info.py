@@ -58,12 +58,17 @@ WHISPER_MODELS: dict[str, ModelInfo] = {
         compatible_engines=("transformers", "faster_whisper"),
         engine_priorities=_WHISPER_ENGINE_PRIORITIES,
     ),
+    # large-v3-turbo is transformers-only: Systran never published a
+    # `faster-whisper-large-v3-turbo` CT2 repo (the old ct2_repo_id 401'd
+    # on HuggingFace), and the only working CT2 mirror is community-hosted.
+    # Rather than depend on an unofficial repo, turbo runs through the
+    # transformers engine (PyTorch, every backend) — leaving no ct2_repo_id
+    # keeps it out of the faster-whisper child entirely.
     "large-v3-turbo": ModelInfo(
         name="large-v3-turbo", size_mb=1620,
         description="Recommended: nearly large-v3 quality, 6-8x faster",
         repo_id="openai/whisper-large-v3-turbo",
-        ct2_repo_id="Systran/faster-whisper-large-v3-turbo",
-        compatible_engines=("transformers", "faster_whisper"),
+        compatible_engines=("transformers",),
         engine_priorities=_WHISPER_ENGINE_PRIORITIES,
     ),
     "large-v3": ModelInfo(
@@ -94,6 +99,23 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_NEMOTRON_STREAMING_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"nemotron_streaming": 100},
+)
+
+
+NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
+    "nemotron-speech-streaming-en-0.6b": ModelInfo(
+        name="nemotron-speech-streaming-en-0.6b",
+        size_mb=2470,
+        description="NVIDIA cache-aware streaming (English, low-latency, GPU)",
+        repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
+        compatible_engines=("nemotron_streaming",),
+        engine_priorities=_NEMOTRON_STREAMING_ENGINE_PRIORITIES,
+    ),
+}
+
+
 _GRANITE_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"granite_speech": 100},
 )
@@ -112,7 +134,8 @@ GRANITE_MODELS: dict[str, ModelInfo] = {
 
 
 ALL_MODELS: dict[str, ModelInfo] = {
-    **WHISPER_MODELS, **PARAKEET_MODELS, **GRANITE_MODELS,
+    **WHISPER_MODELS, **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS,
+    **GRANITE_MODELS,
 }
 
 
@@ -143,6 +166,7 @@ def allows_device_selection(name: str) -> bool:
 _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "medium": "large-v3-turbo",
     "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
+    "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
 }
 
 

@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
 from voicetotext.core.debug_logger import setup_debug_logger
@@ -36,7 +37,9 @@ from voicetotext.output.qt_gui_thread_dispatcher import QtGuiThreadDispatcher
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
+from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
+from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import (
     EngineHotSwapCoordinator,
@@ -54,11 +57,22 @@ from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
     build_engine_registry,
     create_engine_for_active_model,
+    engines_with_model_on_disk,
     resolve_engine_id,
+)
+from voicetotext.transcription.engine_install import (
+    EngineInstaller,
+    make_engine_installer,
 )
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
-from voicetotext.transcription.model_info import get_model_info
+from voicetotext.transcription.model_info import ModelInfo, get_model_info
+from voicetotext.transcription.streaming.streaming_engine import (
+    StreamingTranscriptionEngine,
+)
+from voicetotext.transcription.streaming.live_streaming_controller import (
+    LiveStreamingController,
+)
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription.placeholder_engine import PlaceholderEngine
 from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
@@ -131,13 +145,13 @@ def _build_output(
     mode: OutputMode, gui_dispatcher: GuiThreadDispatcher,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
-    writer = Win32ClipboardWriter()
+    writer = Win32ClipboardWriter(sleeper=sleeper)
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
         OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
         OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
         OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
             inner=PasteAndClipboardAdapter(sleeper=sleeper, writer=writer),
-            preserver=Win32ClipboardPreserver(),
+            preserver=Win32ClipboardPreserver(sleeper=sleeper),
             sleeper=sleeper,
         ),
     }
@@ -218,6 +232,79 @@ def _load_engine_on_cpu(
     return engine
 
 
+_STREAMING_DEVICE = "cuda"
+
+
+def _load_streaming_engine(
+    config: JsonConfigAdapter, paths: AppPaths,
+) -> StreamingTranscriptionEngine:
+    """Build, load, and warm the GPU-only streaming engine for the active model."""
+    model_info = get_model_info(
+        config.get("transcription.model_size", "base")
+    )
+    engine = _build_streaming_engine_for(model_info, paths)
+    engine.load_model()
+    _warmup_safely(engine)
+    return engine
+
+
+def _build_streaming_engine_for(
+    model_info: ModelInfo, paths: AppPaths,
+) -> StreamingTranscriptionEngine:
+    """Route to the streaming engine class declared by the model.
+
+    ``nemotron_streaming`` models use the clean-room cache-aware engine; all
+    other streaming models use the windowed nano-parakeet engine.
+    """
+    if "nemotron_streaming" in model_info.compatible_engines:
+        return _build_cache_aware_streaming_engine(model_info, paths)
+    from voicetotext.transcription.streaming.parakeet_streaming_engine import (
+        StreamingNanoParakeetEngine,
+    )
+
+    return StreamingNanoParakeetEngine(
+        repo_id=model_info.repo_id,
+        model_dir=paths.models_dir,
+        device=_STREAMING_DEVICE,
+    )
+
+
+def _build_cache_aware_streaming_engine(
+    model_info: ModelInfo, paths: AppPaths,
+) -> StreamingTranscriptionEngine:
+    from voicetotext.transcription.streaming.cache_aware.engine import (
+        CacheAwareStreamingEngine,
+    )
+
+    return CacheAwareStreamingEngine(
+        repo_id=model_info.repo_id,
+        model_dir=paths.models_dir,
+        device=_STREAMING_DEVICE,
+    )
+
+
+def _load_active_engine_installer(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
+) -> EngineInstaller:
+    """Load the engine for the active mode and return its installer.
+
+    Streaming is GPU-only and never falls back to CPU; batch keeps the
+    CPU fallback inside ``_load_engine_with_fallback``.
+    """
+    if config.get("transcription.mode", "batch") == "streaming":
+        engine = _load_streaming_engine(config, paths)
+        return make_engine_installer(
+            engine, lambda use_case, loaded: use_case.set_streaming_engine(loaded),
+        )
+    engine = _load_engine_with_fallback(config, paths, registry, hardware)
+    return make_engine_installer(
+        engine, lambda use_case, loaded: use_case.set_engine(loaded),
+    )
+
+
 def _load_engine_and_attach(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -230,28 +317,54 @@ def _load_engine_and_attach(
 ) -> None:
     """Background-thread entry point for engine load + state attach.
 
-    Loads the engine (with CPU fallback inside
-    ``_load_engine_with_fallback``), then swaps it into the use case
-    and flips the state machine ``LOADING → IDLE``. Failures publish
-    :class:`EngineLoadFailedEvent` (so the tray can show an actionable
-    notification) and transition to ``ERROR``. Exceptions never
-    escape — daemon threads silently drop them otherwise.
+    Loads the mode-appropriate engine and installs it into the use case,
+    then flips ``LOADING → IDLE``. Failures publish
+    :class:`EngineLoadFailedEvent` and recover to ``IDLE`` (via ``ERROR``)
+    so the app stays swappable — see :func:`_recover_from_failed_load`.
+    Exceptions never escape — daemon threads silently drop them.
     """
     try:
-        engine = _load_engine_with_fallback(config, paths, registry, hardware)
-    except Exception as exc:
-        _logger.exception("Engine load failed: %s", exc)
-        event_bus.publish(
-            EngineLoadFailedEvent(
-                model_name=str(config.get("transcription.model_size", "base")),
-                error=str(exc),
-            )
+        installer = _load_active_engine_installer(
+            config, paths, registry, hardware,
         )
-        state_machine.transition_to(AppState.ERROR)
+        installer(use_case)
+    except Exception as exc:
+        _recover_from_failed_load(exc, config, state_machine, event_bus)
         return
-    use_case.set_engine(engine)
     state_machine.transition_to(AppState.IDLE)
     _logger.info("Engine ready.")
+
+
+def _recover_from_failed_load(
+    exc: Exception,
+    config: JsonConfigAdapter,
+    state_machine: AppStateMachine,
+    event_bus: EventBus,
+) -> None:
+    """Surface a failed initial load, then return to a swappable IDLE state.
+
+    ``RecordAndTranscribeUseCase._require_swappable_state`` only permits
+    ``IDLE``/``LOADING``, so leaving the machine in ``ERROR`` would make
+    every later model swap raise ``EngineSwapError`` and lock the app until
+    restart (the reported "Can only swap engine when idle or loading"). The
+    machine passes *through* ``ERROR`` — the tray paints its sticky error
+    icon on :class:`EngineLoadFailedEvent` and holds it across the
+    subsequent ``ERROR → IDLE`` change — then settles on ``IDLE`` so the
+    user can pick or re-download a working model. Going via ``ERROR``
+    (rather than straight ``LOADING → IDLE``) also avoids replaying a hotkey
+    that was queued during the failed load into the still-placeholder
+    engine, since that replay only fires on a direct ``LOADING → IDLE``
+    transition.
+    """
+    _logger.exception("Engine load failed: %s", exc)
+    event_bus.publish(
+        EngineLoadFailedEvent(
+            model_name=str(config.get("transcription.model_size", "base")),
+            error=str(exc),
+        )
+    )
+    state_machine.transition_to(AppState.ERROR)
+    state_machine.transition_to(AppState.IDLE)
 
 
 def _spawn_engine_load_thread(
@@ -315,12 +428,30 @@ def _make_active_engine_provider(
     config: JsonConfigAdapter,
     hardware: HardwareProfile,
     registry: EngineRegistry,
+    models_dir: Path,
 ) -> Callable[[], EngineId]:
-    """Return a callable the composite ModelManager can poll on each op."""
+    """Return a callable the composite ModelManager polls on each op.
+
+    Resolves the active engine the SAME way the loader does — biased
+    toward whichever engine actually has loadable files on disk (see
+    ``create_engine_for_active_model``). The composite routes
+    ``is_installed`` to this active child, so without the on-disk bias the
+    provider always returned the top-ranked engine (``faster_whisper`` for
+    Whisper under ``auto``) and a model present only under another engine's
+    repo — e.g. ``large-v3-turbo`` under the transformers cache — looked
+    uninstalled in the UI even though the loader could open it. Tying both
+    to the same resolution keeps the install state and the loader in
+    agreement.
+    """
     def provider() -> EngineId:
         model_name = config.get("transcription.model_size", "base")
         model_info = get_model_info(model_name)
-        return resolve_engine_id(config, model_info, hardware, registry)
+        return resolve_engine_id(
+            config, model_info, hardware, registry,
+            installed_engines=engines_with_model_on_disk(
+                model_info, models_dir,
+            ),
+        )
     return provider
 
 
@@ -343,7 +474,7 @@ def _build_settings_service(
     hot_swap = EngineHotSwapCoordinator(
         use_case=use_case,
         event_bus=event_bus,
-        loader=lambda: _load_engine_with_fallback(config, paths, registry, hardware),
+        loader=lambda: _load_active_engine_installer(config, paths, registry, hardware),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
     )
@@ -416,6 +547,14 @@ def build_app(
     if download_manager is None:
         download_manager = DownloadManager(event_bus=event_bus)
 
+    # Short audio cues: record start/stop (both batch and streaming) and a
+    # distinct chime when the engine becomes ready to transcribe. The event
+    # bus retains the subscriptions, so the beepers outlive this function
+    # without an explicit reference.
+    cue_player = SoundDeviceCuePlayer()
+    CueBeeper(event_bus, cue_player)
+    EngineReadyBeeper(event_bus, cue_player)
+
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
 
     hardware = TorchHardwareDetector().detect()
@@ -444,6 +583,7 @@ def build_app(
     # construction — give it a placeholder that raises if anything
     # actually tries to transcribe through it. Background thread will
     # swap in the real engine and flip the state machine to IDLE.
+    streaming_controller = LiveStreamingController(recorder, output)
     record_and_transcribe_use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
         engine=PlaceholderEngine(),
@@ -454,11 +594,17 @@ def build_app(
         max_recording_seconds=config.get(
             "recording.max_duration_seconds", 600.0,
         ),
+        streaming_controller=streaming_controller,
+        is_streaming_mode=lambda: (
+            config.get("transcription.mode", "batch") == "streaming"
+        ),
     )
 
     listener = _build_hotkey_listener(config, record_and_transcribe_use_case)
 
-    active_engine_provider = _make_active_engine_provider(config, hardware, registry)
+    active_engine_provider = _make_active_engine_provider(
+        config, hardware, registry, paths.models_dir,
+    )
     model_manager = build_composite_model_manager(
         paths.models_dir, download_manager, active_engine_provider,
     )

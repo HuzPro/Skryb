@@ -13,6 +13,43 @@ _CT2_WEIGHTS_FILENAME = "model.bin"
 _TRANSFORMERS_CONFIG_FILENAME = "config.json"
 
 
+def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
+    """Whether *repo_dir* holds a snapshot a ``local_files_only`` load can use.
+
+    HuggingFace's ``snapshot_download(local_files_only=True)`` — the call
+    every engine's loader makes under the hood (faster-whisper, the
+    transformers Whisper adapter, and nano-parakeet via its patched
+    ``hf_hub_download``) — resolves the default ``main`` revision through
+    ``refs/main`` and then reads ``snapshots/<sha>``. So a snapshot is
+    only *loadable* when ``refs/main`` exists AND the snapshot directory it
+    names holds a complete model.
+
+    :class:`~voicetotext.downloads.model_download_job.ModelDownloadJob`
+    writes ``refs/main`` last, after every file lands, so a partial or
+    cancelled download has files on disk but no ``refs/main`` — and is
+    therefore correctly reported as not installed. This is the single
+    source of truth shared by :meth:`HuggingFaceModelManager.is_installed`
+    and :func:`engine_factory.engines_with_model_on_disk`, so the install
+    state shown in the UI can never disagree with what the loader can open.
+    """
+    commit_sha = _resolved_main_revision(repo_dir)
+    if commit_sha is None:
+        return False
+    snapshot = repo_dir / "snapshots" / commit_sha
+    return (
+        snapshot.is_dir()
+        and HuggingFaceModelManager._snapshot_has_complete_model(snapshot)
+    )
+
+
+def _resolved_main_revision(repo_dir: Path) -> str | None:
+    refs_main = repo_dir / "refs" / "main"
+    if not refs_main.exists():
+        return None
+    commit_sha = refs_main.read_text().strip()
+    return commit_sha or None
+
+
 class HuggingFaceModelManager(ModelManager):
     """ModelManager backed by the chunked DownloadManager and HfRepoResolver.
 
@@ -49,13 +86,7 @@ class HuggingFaceModelManager(ModelManager):
     def is_installed(self, name: str) -> bool:
         if name not in self._models:
             return False
-        snapshots_dir = self._model_cache_dir(name) / "snapshots"
-        if not snapshots_dir.exists():
-            return False
-        return any(
-            self._snapshot_has_complete_model(snapshot)
-            for snapshot in snapshots_dir.iterdir()
-        )
+        return repo_has_loadable_snapshot(self._model_cache_dir(name))
 
     @staticmethod
     def _snapshot_has_complete_model(snapshot: Path) -> bool:

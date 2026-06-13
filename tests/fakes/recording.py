@@ -1,3 +1,7 @@
+from collections.abc import Callable
+
+import numpy as np
+
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.recorder import AudioRecorder
 
@@ -15,6 +19,7 @@ class FakeAudioRecorder(AudioRecorder):
         self.start_calls: int = 0
         self.stop_calls: int = 0
         self.dispose_called: bool = False
+        self.captured_on_frame: Callable[[np.ndarray], None] | None = None
         self._is_recording: bool = False
         self._next_segment: AudioSegment | None = None
         self._start_error: Exception | None = None
@@ -29,8 +34,11 @@ class FakeAudioRecorder(AudioRecorder):
     def will_fail_stop(self, error: Exception) -> None:
         self._stop_error = error
 
-    def start_recording(self) -> None:
+    def start_recording(
+        self, on_frame: Callable[[np.ndarray], None] | None = None,
+    ) -> None:
         self.start_calls += 1
+        self.captured_on_frame = on_frame
         if self._start_error is not None:
             raise self._start_error
         self._is_recording = True

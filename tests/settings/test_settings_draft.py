@@ -2,6 +2,7 @@ import pytest
 
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
+from voicetotext.settings.transcription_mode import TranscriptionMode
 
 
 def _make_draft(**overrides) -> SettingsDraft:
@@ -102,6 +103,15 @@ class TestChangeSetFromDrafts:
         changes = ChangeSet.between(original, updated)
 
         assert changes.hotkey_changed is True
+
+    def test_should_flag_engine_reload_required_when_transcription_mode_differs(self):
+        original = _make_draft(transcription_mode=TranscriptionMode.BATCH)
+        updated = _make_draft(transcription_mode=TranscriptionMode.STREAMING)
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.engine_reload_required is True
+        assert changes.mode_changed is True
 
     def test_should_flag_output_change_when_mode_differs(self):
         original = _make_draft(output_mode=OutputMode.DIRECT_PASTE)

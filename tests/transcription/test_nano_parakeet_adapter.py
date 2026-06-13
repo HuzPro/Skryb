@@ -33,7 +33,8 @@ def _mocked_modules() -> dict:
 
 class TestNanoParakeetAdapterLoadModel:
     @patch.dict("sys.modules", _mocked_modules())
-    def test_should_load_model_via_from_pretrained(self) -> None:
+    def test_should_load_model_via_from_pretrained_with_fp32_on_cpu(self) -> None:
+        # CPU requests fp32: bf16 weights crash the fp32 joint matmul on CPU.
         import torch
         from nano_parakeet import from_pretrained
 
@@ -52,7 +53,7 @@ class TestNanoParakeetAdapterLoadModel:
         from_pretrained.assert_called_once_with(
             model_name="nvidia/parakeet-tdt-0.6b-v2",
             device="cpu",
-            dtype=torch.bfloat16,
+            dtype=torch.float32,
         )
         assert adapter.is_model_loaded() is True
 

@@ -36,6 +36,7 @@ def _build_service(
     state_machine: AppStateMachine | None = None,
     registry=None,
     hardware=None,
+    models=None,
 ):
     config_data = {
         "transcription.model_size": "base",
@@ -48,7 +49,7 @@ def _build_service(
     config_data.update(config_overrides or {})
 
     config = FakeConfig(config_data)
-    manager = FakeModelManager(installed=installed or {})
+    manager = FakeModelManager(installed=installed or {}, models=models)
     bus = SimpleEventBus()
     cache = ModelInstallationCache(manager, bus)
     downloads = DownloadCoordinator(manager)

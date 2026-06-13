@@ -76,11 +76,28 @@ class TestCompositeModelManagerListing:
 
 
 class TestCompositeModelManagerInstallation:
-    def test_should_report_not_installed_when_only_inactive_engine_has_model(self):
+    def test_should_report_installed_when_any_owning_child_has_model(self):
+        # The loader can open the model via the engine whose files are
+        # present, so install state is engine-agnostic: a model on disk
+        # under the (non-active) transformers cache is still installed.
         info = _info("large-v3-turbo")
         composite = _make_composite(
             transformers=_FakeManager(
                 models=[info], installed={"large-v3-turbo": True},
+            ),
+            faster_whisper=_FakeManager(
+                models=[info], installed={"large-v3-turbo": False},
+            ),
+            active="faster_whisper",
+        )
+
+        assert composite.is_installed("large-v3-turbo") is True
+
+    def test_should_report_not_installed_when_no_owning_child_has_files(self):
+        info = _info("large-v3-turbo")
+        composite = _make_composite(
+            transformers=_FakeManager(
+                models=[info], installed={"large-v3-turbo": False},
             ),
             faster_whisper=_FakeManager(
                 models=[info], installed={"large-v3-turbo": False},

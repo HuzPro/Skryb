@@ -33,6 +33,38 @@ def rank_engines(
     return _to_candidates(ordered, hardware)
 
 
+def model_supports_streaming(
+    model: ModelInfo,
+    descriptors: Sequence[EngineDescriptor],
+) -> bool:
+    """Whether any engine that can drive *model* supports streaming.
+
+    The descriptor's ``supports_streaming`` flag is the single source of
+    truth, so adding a second streaming model later is one descriptor
+    flip — no edits here.
+    """
+    return any(
+        d.supports_streaming and d.engine_id in model.compatible_engines
+        for d in descriptors
+    )
+
+
+def model_supports_batch(
+    model: ModelInfo,
+    descriptors: Sequence[EngineDescriptor],
+) -> bool:
+    """Whether any engine that can drive *model* does batch transcription.
+
+    A model is batch-capable unless every compatible engine is
+    ``streaming_only`` (e.g. the cache-aware streaming engine), which lets the
+    batch model picker hide streaming-only models.
+    """
+    compatible = [d for d in descriptors if d.engine_id in model.compatible_engines]
+    if not compatible:
+        return True  # unknown engine (e.g. tests) — don't hide it
+    return any(not d.streaming_only for d in compatible)
+
+
 def _filter_compatible(
     model: ModelInfo,
     hardware: HardwareProfile,

@@ -1,11 +1,14 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from voicetotext.bootstrap import (
     _build_output,
+    _build_streaming_engine_for,
     _load_engine_and_attach,
     _load_engine_with_fallback,
+    _make_active_engine_provider,
     _make_destroyed_handler,
     _warmup_safely,
     apply_settings,
@@ -13,7 +16,7 @@ from voicetotext.bootstrap import (
     migrate_output_mode,
 )
 from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import EngineLoadFailedEvent
+from voicetotext.core.events import EngineLoadFailedEvent, StateChangedEvent
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
@@ -29,11 +32,66 @@ from voicetotext.output.gui_thread_output_decorator import (
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.settings.settings_draft import ChangeSet
+from voicetotext.transcription.engine_factory import build_engine_registry
+from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.model_info import migrate_removed_models
 
 
 _HARDWARE = MagicMock()
 _REGISTRY = MagicMock()
+
+_ROCM_PROFILE = HardwareProfile(
+    kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
+)
+
+
+def _provider_config(model_size: str = "base", engine: str = "auto"):
+    config = MagicMock()
+    values = {
+        "transcription.model_size": model_size,
+        "transcription.engine": engine,
+        "transcription.device": "auto",
+    }
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+    return config
+
+
+def _install_snapshot(models_dir, repo_id: str, sha: str = "abc123") -> None:
+    repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
+    snapshot = repo_dir / "snapshots" / sha
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}")
+    (snapshot / "model.safetensors").write_text("")
+    refs_main = repo_dir / "refs" / "main"
+    refs_main.parent.mkdir(parents=True, exist_ok=True)
+    refs_main.write_text(sha)
+
+
+class TestActiveEngineProvider:
+    """The provider the composite ModelManager polls must resolve the active
+    engine the same way the loader does — biased toward whichever engine has
+    loadable files on disk — so the UI install state agrees with the loader.
+    """
+
+    def test_should_resolve_to_engine_whose_files_are_on_disk(self, tmp_path):
+        # base supports both engines; only the transformers cache is present,
+        # so the provider must pick transformers (what loads), not the
+        # higher-ranked-but-absent faster_whisper.
+        _install_snapshot(tmp_path, "openai/whisper-base")
+        provider = _make_active_engine_provider(
+            _provider_config(), _ROCM_PROFILE, build_engine_registry(), tmp_path,
+        )
+
+        assert provider() == "transformers"
+
+    def test_should_fall_back_to_top_ranked_engine_when_nothing_on_disk(
+        self, tmp_path,
+    ):
+        provider = _make_active_engine_provider(
+            _provider_config(), _ROCM_PROFILE, build_engine_registry(), tmp_path,
+        )
+
+        assert provider() == "faster_whisper"
 
 
 class TestLoadEngineWithFallback:
@@ -174,9 +232,10 @@ class TestLoadEngineWithFallback:
 
 class TestLoadEngineAndAttach:
     """The background-load worker swaps the placeholder for the real
-    engine and transitions ``LOADING → IDLE`` on success, or
-    ``LOADING → ERROR`` on failure. Tests run the worker on the
-    calling thread — bootstrap spawns the thread separately."""
+    engine and transitions ``LOADING → IDLE`` on success. On failure it
+    publishes the failure and recovers to ``IDLE`` (via ``ERROR``) so the
+    app stays swappable rather than locking up. Tests run the worker on
+    the calling thread — bootstrap spawns the thread separately."""
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_attach_loaded_engine_to_use_case(self, mock_create):
@@ -211,9 +270,15 @@ class TestLoadEngineAndAttach:
         assert state_machine.state == AppState.IDLE
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
-    def test_should_transition_to_error_on_load_failure(self, mock_create):
+    def test_should_recover_to_idle_after_load_failure(self, mock_create):
+        # A failed initial load must not strand the app in ERROR: the swap
+        # guard only permits IDLE/LOADING, so ERROR would reject every later
+        # swap. The worker passes through ERROR (for the tray) then settles
+        # on IDLE so the user can pick another model without restarting.
         bus = SimpleEventBus()
         state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        visited: list[str] = []
+        bus.subscribe(StateChangedEvent, lambda e: visited.append(e.new_state))
         broken = MagicMock()
         broken.load_model.side_effect = RuntimeError("VRAM exhausted")
         mock_create.side_effect = [broken, broken]
@@ -226,7 +291,8 @@ class TestLoadEngineAndAttach:
             event_bus=bus,
         )
 
-        assert state_machine.state == AppState.ERROR
+        assert state_machine.state == AppState.IDLE
+        assert visited == [AppState.ERROR.value, AppState.IDLE.value]
         use_case.set_engine.assert_not_called()
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
@@ -288,9 +354,11 @@ class TestLoadEngineAndAttachFailureSurface:
         assert received[0].model_name == "large-v3-turbo"
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
-    def test_should_publish_event_before_transitioning_to_error(
+    def test_should_publish_event_before_entering_error_then_recover(
         self, mock_create,
     ):
+        # The failure event must reach the tray before the icon flips, and
+        # the machine must end IDLE having passed through ERROR.
         bus = SimpleEventBus()
         state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
         config = MagicMock()
@@ -298,8 +366,13 @@ class TestLoadEngineAndAttachFailureSurface:
         broken = MagicMock()
         broken.load_model.side_effect = RuntimeError("VRAM exhausted")
         mock_create.side_effect = [broken, broken]
-        received: list[EngineLoadFailedEvent] = []
-        bus.subscribe(EngineLoadFailedEvent, received.append)
+        timeline: list[str] = []
+        bus.subscribe(
+            EngineLoadFailedEvent, lambda e: timeline.append("failed"),
+        )
+        bus.subscribe(
+            StateChangedEvent, lambda e: timeline.append(e.new_state),
+        )
 
         _load_engine_and_attach(
             config, MagicMock(), _REGISTRY, _HARDWARE,
@@ -308,8 +381,10 @@ class TestLoadEngineAndAttachFailureSurface:
             event_bus=bus,
         )
 
-        assert len(received) == 1
-        assert state_machine.state == AppState.ERROR
+        assert timeline == [
+            "failed", AppState.ERROR.value, AppState.IDLE.value,
+        ]
+        assert state_machine.state == AppState.IDLE
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_not_publish_event_on_successful_load(self, mock_create):
@@ -397,6 +472,17 @@ class TestMigrateRemovedModels:
 
         config.set.assert_called_once_with(
             "transcription.model_size", "large-v3-turbo"
+        )
+        config.save.assert_called_once()
+
+    def test_should_rewrite_removed_compare_model_to_plain_streaming(self):
+        config = MagicMock()
+        config.get.return_value = "nemotron-streaming-compare"
+
+        migrate_removed_models(config)
+
+        config.set.assert_called_once_with(
+            "transcription.model_size", "nemotron-speech-streaming-en-0.6b"
         )
         config.save.assert_called_once()
 
@@ -686,3 +772,19 @@ class TestMakeDestroyedHandler:
         handler(window)  # Qt's destroyed emits the QObject
 
         assert ref["current"] is None
+
+
+class TestBuildStreamingEngineRouting:
+    def test_should_build_cache_aware_engine_for_nemotron_models(self, tmp_path):
+        from voicetotext.transcription.streaming.cache_aware.engine import (
+            CacheAwareStreamingEngine,
+        )
+        model_info = SimpleNamespace(
+            compatible_engines=("nemotron_streaming",),
+            repo_id="nvidia/nemotron-speech-streaming-en-0.6b",
+        )
+        paths = SimpleNamespace(models_dir=tmp_path)
+
+        engine = _build_streaming_engine_for(model_info, paths)
+
+        assert isinstance(engine, CacheAwareStreamingEngine)

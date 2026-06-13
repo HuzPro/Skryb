@@ -77,6 +77,17 @@ def _current_eta(active: _ActiveJob) -> float | None:
     return remaining / speed
 
 
+def _is_in_flight(state: DownloadState) -> bool:
+    """Whether a job is actively queued or running (not re-enqueuable).
+
+    Any other state — PAUSED, FAILED, CANCELLED, COMPLETED — is terminal
+    or idle, so a fresh ``enqueue`` of the same id must start a new run
+    rather than no-op. Only an in-flight job is protected from a duplicate
+    submit.
+    """
+    return state in (DownloadState.QUEUED, DownloadState.DOWNLOADING)
+
+
 class DownloadManager:
     """Bounded thread pool that runs :class:`ModelDownloadJob` instances and
     publishes their lifecycle on the shared :class:`EventBus`.
@@ -100,18 +111,17 @@ class DownloadManager:
 
     def enqueue(self, job: ModelDownloadJob) -> DownloadHandle:
         with self._lock:
-            if job.job_id in self._jobs:
-                existing = self._jobs[job.job_id]
-                if existing.state in (DownloadState.PAUSED, DownloadState.FAILED):
-                    self._reset_for_resume(existing, job)
-                else:
-                    return DownloadHandle(job.job_id, self)
-            else:
-                active = _ActiveJob(job=job, bytes_total=job.total_bytes)
-                self._jobs[job.job_id] = active
-            self._jobs[job.job_id].future = self._pool.submit(
-                self._run_job, self._jobs[job.job_id]
-            )
+            existing = self._jobs.get(job.job_id)
+            if existing is not None and _is_in_flight(existing.state):
+                return DownloadHandle(job.job_id, self)
+            # Terminal/idle (or never-seen) job: start a fresh run. Replacing
+            # the _ActiveJob — rather than mutating it — zeroes the progress
+            # counters and hands out new cancel/pause Events, so a re-download
+            # after cancel/complete/fail starts clean and a still-running
+            # orphan worker can only mutate the object we just dropped.
+            active = _ActiveJob(job=job, bytes_total=job.total_bytes)
+            self._jobs[job.job_id] = active
+            active.future = self._pool.submit(self._run_job, active)
         return DownloadHandle(job.job_id, self)
 
     def pause(self, job_id: str) -> None:
@@ -201,12 +211,6 @@ class DownloadManager:
 
         self._transition(active, DownloadState.COMPLETED)
         self._event_bus.publish(DownloadCompletedEvent(job_id=active.job.job_id))
-
-    def _reset_for_resume(self, active: _ActiveJob, new_job: ModelDownloadJob) -> None:
-        active.job = new_job
-        active.cancel_event = threading.Event()
-        active.pause_event = threading.Event()
-        active.state = DownloadState.QUEUED
 
     def _on_progress(self, active: _ActiveJob, done: int, total: int) -> None:
         with self._lock:

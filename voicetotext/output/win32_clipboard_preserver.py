@@ -4,6 +4,8 @@ import logging
 from typing import Iterator
 
 from voicetotext.output.clipboard_preserver import ClipboardPreserver
+from voicetotext.output.sleeper import Sleeper
+from voicetotext.output.win32_clipboard_open import open_clipboard_with_retry
 
 
 _logger = logging.getLogger(__name__)
@@ -85,11 +87,11 @@ _kernel32.GlobalAlloc.argtypes = [_wt.UINT, ctypes.c_size_t]
 _kernel32.GlobalAlloc.restype = _wt.HGLOBAL
 
 
-def _try_open_clipboard(action: str) -> bool:
-    if not _user32.OpenClipboard(None):
-        _logger.warning("Could not open clipboard for %s.", action)
-        return False
-    return True
+def _try_open_clipboard(action: str, sleeper: Sleeper) -> bool:
+    if open_clipboard_with_retry(_user32, sleeper):
+        return True
+    _logger.warning("Could not open clipboard for %s.", action)
+    return False
 
 
 def _iter_clipboard_formats() -> Iterator[int]:
@@ -129,12 +131,13 @@ def _allocate_and_copy(data: bytes) -> int | None:
 
 class Win32ClipboardPreserver(ClipboardPreserver):
 
-    def __init__(self) -> None:
+    def __init__(self, sleeper: Sleeper) -> None:
+        self._sleeper = sleeper
         self._snapshot: list[tuple[int, bytes]] = []
 
     def save(self) -> None:
         self._snapshot.clear()
-        if not _try_open_clipboard("save"):
+        if not _try_open_clipboard("save", self._sleeper):
             return
         try:
             for fmt in _iter_clipboard_formats():
@@ -153,7 +156,7 @@ class Win32ClipboardPreserver(ClipboardPreserver):
     def restore(self) -> None:
         if not self._snapshot:
             return
-        if not _try_open_clipboard("restore"):
+        if not _try_open_clipboard("restore", self._sleeper):
             return
         try:
             _user32.EmptyClipboard()

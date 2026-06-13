@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.fakes import InstantSleeper
 from voicetotext.output.clipboard_preserver import ClipboardPreserver
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 
@@ -158,7 +159,7 @@ class TestSaveAndRestoreRoundTrip:
         self, fake_clipboard: _FakeWin32Clipboard
     ):
         fake_clipboard.contents = {1: b"hello world"}
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
         fake_clipboard.contents = {1: b"transcription text"}
@@ -174,7 +175,7 @@ class TestSaveAndRestoreRoundTrip:
             13: b"unicode text encoded",
             49161: b"<html>rich</html>",
         }
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
         fake_clipboard.contents = {1: b"garbage"}
@@ -189,7 +190,7 @@ class TestSaveAndRestoreRoundTrip:
     def test_second_save_overwrites_first(
         self, fake_clipboard: _FakeWin32Clipboard
     ):
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         fake_clipboard.contents = {1: b"first"}
         preserver.save()
@@ -207,7 +208,7 @@ class TestSaveEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard
     ):
         fake_clipboard.contents = {}
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
 
@@ -225,7 +226,7 @@ class TestSaveEdgeCases:
             2: b"\x00" * 16,  # CF_BITMAP — must be skipped
             13: b"safe text",  # CF_UNICODETEXT — must still be preserved
         }
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
         fake_clipboard.contents = {1: b"replaced"}
@@ -246,7 +247,7 @@ class TestSaveEdgeCases:
             0x80: b"x", 0x82: b"x", 0x83: b"x", 0x8E: b"x",
             13: b"safe text",
         }
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
         fake_clipboard.contents = {}
@@ -265,7 +266,7 @@ class TestSaveEdgeCases:
             0xC123: b"some-app-format",
             13: b"plain unicode text",
         }
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
         fake_clipboard.contents = {}
@@ -281,7 +282,7 @@ class TestSaveEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard, log_capture
     ):
         fake_clipboard.open_clipboard_should_succeed = False
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.save()
 
@@ -293,7 +294,7 @@ class TestRestoreEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard
     ):
         fake_clipboard.contents = {1: b"untouched"}
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         preserver.restore()
 
@@ -303,7 +304,7 @@ class TestRestoreEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard
     ):
         fake_clipboard.contents = {}
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
         preserver.save()
 
         fake_clipboard.contents = {1: b"new"}
@@ -315,7 +316,7 @@ class TestRestoreEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard, log_capture
     ):
         fake_clipboard.contents = {1: b"saved"}
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
         preserver.save()
 
         fake_clipboard.open_clipboard_should_succeed = False
@@ -327,7 +328,7 @@ class TestRestoreEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard, log_capture
     ):
         fake_clipboard.contents = {1: b"saved data"}
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
         preserver.save()
 
         fake_clipboard.contents = {}
@@ -342,7 +343,7 @@ class TestInterfaceConformance:
     def test_should_implement_clipboard_preserver_interface(
         self, fake_clipboard: _FakeWin32Clipboard
     ):
-        preserver = Win32ClipboardPreserver()
+        preserver = Win32ClipboardPreserver(InstantSleeper())
 
         assert isinstance(preserver, ClipboardPreserver)
 

@@ -8,6 +8,7 @@ clipboard, what exception is raised) rather than call sequences.
 
 import pytest
 
+from tests.fakes import InstantSleeper
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.output.clipboard_writer import ClipboardWriter
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -114,7 +115,7 @@ class TestWin32ClipboardWriterSetsText:
     def test_should_write_text_to_clipboard_as_unicodetext(
         self, fake_clipboard: _FakeWin32Clipboard
     ) -> None:
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         writer.set_text("hello")
 
@@ -124,7 +125,7 @@ class TestWin32ClipboardWriterSetsText:
     def test_should_write_empty_string_without_crashing(
         self, fake_clipboard: _FakeWin32Clipboard
     ) -> None:
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         writer.set_text("")
 
@@ -133,7 +134,7 @@ class TestWin32ClipboardWriterSetsText:
     def test_should_write_unicode_text_correctly(
         self, fake_clipboard: _FakeWin32Clipboard
     ) -> None:
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         writer.set_text("café ✓")
 
@@ -145,7 +146,7 @@ class TestWin32ClipboardWriterFailures:
         self, fake_clipboard: _FakeWin32Clipboard
     ) -> None:
         fake_clipboard.open_should_fail = True
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         with pytest.raises(ClipboardWriteError):
             writer.set_text("text")
@@ -154,7 +155,7 @@ class TestWin32ClipboardWriterFailures:
         self, fake_clipboard: _FakeWin32Clipboard
     ) -> None:
         fake_clipboard.global_alloc_should_fail = True
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         with pytest.raises(ClipboardWriteError):
             writer.set_text("text")
@@ -167,7 +168,7 @@ class TestWin32ClipboardWriterFailures:
         # leading to memmove(NULL, ...) and a silent process-killing segfault.
         # Win32ClipboardWriter must raise ClipboardWriteError instead.
         fake_clipboard.global_lock_should_fail = True
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         with pytest.raises(ClipboardWriteError):
             writer.set_text("text")
@@ -176,7 +177,7 @@ class TestWin32ClipboardWriterFailures:
         self, fake_clipboard: _FakeWin32Clipboard
     ) -> None:
         fake_clipboard.set_clipboard_data_should_fail = True
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         with pytest.raises(ClipboardWriteError):
             writer.set_text("text")
@@ -184,6 +185,6 @@ class TestWin32ClipboardWriterFailures:
 
 class TestWin32ClipboardWriterIsAClipboardWriter:
     def test_should_satisfy_clipboard_writer_protocol(self) -> None:
-        writer = Win32ClipboardWriter()
+        writer = Win32ClipboardWriter(InstantSleeper())
 
         assert isinstance(writer, ClipboardWriter)

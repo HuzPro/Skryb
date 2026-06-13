@@ -128,6 +128,9 @@ class QtSettingsWindow(QMainWindow):
         self._transcription_page = TranscriptionPage(self._service)
         self._transcription_page.download_error.connect(self._on_download_error)
         self._transcription_page.delete_error.connect(self._on_delete_error)
+        self._transcription_page.model_auto_switched.connect(
+            self._on_model_auto_switched
+        )
         self._hotkeys_page = HotkeysPage(capture_bridge=self._capture_bridge)
         self._hotkeys_page.recording_state_changed.connect(
             self._on_recording_state_changed
@@ -195,6 +198,7 @@ class QtSettingsWindow(QMainWindow):
             hotkey_combination=self._hotkeys_page.current_combination(),
             hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
+            transcription_mode=self._transcription_page.current_mode(),
         )
 
     def _on_save_clicked(self) -> None:
@@ -336,6 +340,13 @@ class QtSettingsWindow(QMainWindow):
         """Surface synchronous delete errors (e.g., active-model guard)."""
         self._show_status(
             f"Cannot delete '{name}': {error}", error=True,
+        )
+
+    def _on_model_auto_switched(self, replaced: str, new_model: str) -> None:
+        """Tell the user the mode toggle changed their model for them."""
+        self._show_status(
+            f"Model switched to '{new_model}' because '{replaced}' does "
+            "not support this mode.",
         )
 
     def on_model_deleted(self, event: ModelDeletedEvent) -> None:

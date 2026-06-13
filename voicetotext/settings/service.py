@@ -21,11 +21,17 @@ from voicetotext.settings.engine_hot_swap import EngineHotSwap
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
+from voicetotext.settings.transcription_mode import TranscriptionMode
 from voicetotext.transcription.engine_registry import EngineRegistry
-from voicetotext.transcription.engine_selector import rank_engines
+from voicetotext.transcription.engine_selector import (
+    model_supports_batch as _model_supports_batch,
+    model_supports_streaming as _model_supports_streaming,
+    rank_engines,
+)
 from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    ModelInfo,
     allows_device_selection as _allows_device_selection,
 )
 from voicetotext.transcription.model_manager import ModelManager
@@ -120,11 +126,47 @@ class SettingsService:
     # Model queries
     # ------------------------------------------------------------------
 
-    def list_models(self) -> list[ModelView]:
+    def list_models(
+        self, mode: TranscriptionMode | None = None,
+    ) -> list[ModelView]:
+        """List models, filtered to streaming-capable ones in streaming mode.
+
+        *mode* lets the UI preview a not-yet-saved toggle; when omitted the
+        persisted ``transcription.mode`` is used.
+        """
+        effective_mode = mode if mode is not None else self.transcription_mode()
+        infos = self._model_manager.list_models()
+        if effective_mode is TranscriptionMode.STREAMING:
+            infos = [info for info in infos if self._is_streaming_model(info)]
+        else:
+            infos = [info for info in infos if self._is_batch_model(info)]
         return [
             ModelView.from_info(info, installed=self._install_cache.is_installed(info.name))
-            for info in self._model_manager.list_models()
+            for info in infos
         ]
+
+    def transcription_mode(self) -> TranscriptionMode:
+        return TranscriptionMode.migrate(self._config.get("transcription.mode"))
+
+    def model_supports_streaming(self, model_name: str) -> bool:
+        """Whether *model_name* can be driven by a streaming engine."""
+        info = ALL_MODELS.get(model_name)
+        return info is not None and self._is_streaming_model(info)
+
+    def model_supports_batch(self, model_name: str) -> bool:
+        """Whether *model_name* can be driven by a batch engine."""
+        info = ALL_MODELS.get(model_name)
+        return info is not None and self._is_batch_model(info)
+
+    def _is_streaming_model(self, info: ModelInfo) -> bool:
+        if self._registry is None:
+            return False
+        return _model_supports_streaming(info, self._registry.all_descriptors())
+
+    def _is_batch_model(self, info: ModelInfo) -> bool:
+        if self._registry is None:
+            return True
+        return _model_supports_batch(info, self._registry.all_descriptors())
 
     def any_model_installed(self) -> bool:
         return any(
@@ -177,6 +219,9 @@ class SettingsService:
             hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
             hotkey_mode=self._config.get("hotkey.mode", "toggle"),
             output_mode=OutputMode.migrate(self._config.get("output.mode")),
+            transcription_mode=TranscriptionMode.migrate(
+                self._config.get("transcription.mode")
+            ),
         )
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
@@ -188,6 +233,7 @@ class SettingsService:
         self._config.set("hotkey.combination", draft.hotkey_combination)
         self._config.set("hotkey.mode", draft.hotkey_mode)
         self._config.set("output.mode", draft.output_mode.value)
+        self._config.set("transcription.mode", draft.transcription_mode.value)
         self._config.save()
         self._invalidate_cache_on_engine_change(original, draft)
         return ChangeSet.between(original, draft)
@@ -237,6 +283,15 @@ class SettingsService:
         if self._hardware is None or self._hardware.kind == "cpu":
             return ["auto", "cpu"]
         return ["auto", "cuda", "cpu"]
+
+    def supports_streaming_hardware(self) -> bool:
+        """Whether the detected hardware can run the GPU-only streaming engine.
+
+        Streaming requires a CUDA or ROCm GPU; a CPU-only box (or one whose
+        hardware hasn't been probed yet) cannot load a streaming model, so the
+        UI uses this to keep the Streaming mode from being selected there.
+        """
+        return self._hardware is not None and self._hardware.kind != "cpu"
 
     def allows_device_selection(self, model_name: str) -> bool:
         """Whether the device picker should be enabled for *model_name*.
