@@ -18,12 +18,6 @@ jobs:
   test:
     name: Tests (Ubuntu, CPU)
     runs-on: ubuntu-latest
-    env:
-      # Qt has no real display in CI; the offscreen plugin avoids the xcb
-      # stack. xvfb-run still wraps the test step as a safety net for the
-      # Qt widget tests (the native Win32 hotkey modules are Windows-only
-      # and excluded from collection on Linux).
-      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v5
 
@@ -34,17 +28,16 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       # System libraries the suite pulls in at import time on Linux:
-      #   libportaudio2   -> sounddevice (recording adapter)
-      #   libsndfile1     -> soundfile (audio test dep)
-      #   xvfb + xauth    -> virtual X display safety net for the Qt tests
-      #   EGL/GL/xkb/dbus -> PySide6's offscreen platform plugin
+      #   libportaudio2 -> sounddevice (recording adapter)
+      #   libsndfile1   -> soundfile (audio test dep)
+      #   xvfb + xauth  -> virtual X display for the Tkinter widget tests
+      #                    (the native Win32 modules are excluded on Linux)
       - name: Install system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libportaudio2 libsndfile1 \
-            xvfb xauth \
-            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libglib2.0-0
+            xvfb xauth
 
       # CPU PyTorch from the dedicated index (skips the large CUDA wheels),
       # then the project with its test deps and the parakeet engine (the

@@ -119,12 +119,11 @@ def fake_hotkey_listener() -> FakeHotkeyListener:
 def tk_root():
     """One withdrawn Tk root shared by every Tk widget test in the session.
 
-    Repeatedly creating and destroying ``tkinter.Tk()`` in a process that
-    also imports PySide6 corrupts Tcl's library path (``invalid command
-    name "tcl_findLibrary"`` on the second-or-later root). A single
-    session-scoped root is created once and never recreated, sidestepping
-    it; the workaround becomes unnecessary once Qt is removed. Skips
-    cleanly where Tk cannot initialise (headless CI with no display).
+    A single session-scoped root avoids repeatedly creating and
+    destroying ``tkinter.Tk()``, which keeps per-module setup cheap and
+    sidesteps the Tcl library-path corruption that recreated roots can
+    hit. Skips cleanly where Tk cannot initialise (headless CI with no
+    display).
     """
     import tkinter
 

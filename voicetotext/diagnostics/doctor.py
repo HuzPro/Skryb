@@ -18,7 +18,6 @@ _BACKEND_INSTALL_HINTS: dict[str, str] = {
     "nano_parakeet": "pip install nano-parakeet",
     "huggingface_hub": "pip install huggingface-hub",
     "sounddevice": "pip install sounddevice",
-    "PySide6": "pip install PySide6",
 }
 
 

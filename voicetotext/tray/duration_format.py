@@ -2,8 +2,8 @@ def format_duration(seconds: float) -> str:
     """Render seconds as ``M:SS`` (under 1h) or ``H:MM:SS`` (over).
 
     Used by both the recording-cap notification (``tray.app``) and the
-    live elapsed-time tooltip (``tray.qt_tray_adapter``) so the two
-    surfaces agree on formatting. Always rounds down — the elapsed
+    live elapsed-time tooltip (``tray.win32_tray_adapter``) so the two
+    surfaces agree on formatting. Always rounds down: the elapsed
     timer should never claim more time has passed than actually has.
     """
     total = int(seconds)

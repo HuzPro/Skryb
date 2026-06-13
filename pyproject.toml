@@ -32,7 +32,10 @@ dependencies = [
     "torchaudio>=2.2.0",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
-    "PySide6>=6.6.0",
+    # Tkinter (stdlib) drives the GUI; Pillow only renders the tray icon
+    # circle. Both are permissive (PSF / MIT), unlike the LGPL PySide6
+    # they replaced.
+    "Pillow>=10.0.0",
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
 ]
@@ -45,7 +48,6 @@ dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",
     "pytest-cov>=4.1.0",
-    "pytest-qt>=4.2.0",
     "pyinstaller>=6.0.0",
     "soundfile>=0.12.0",
     "scipy>=1.10.0",

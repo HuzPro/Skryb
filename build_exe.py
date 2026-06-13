@@ -13,7 +13,7 @@ def main() -> None:
             "--name",
             "VoiceToText",
             "--collect-all",
-            "PySide6",
+            "PIL",
             "--collect-all",
             "transformers",
             "--collect-all",
