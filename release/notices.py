@@ -6,7 +6,9 @@ payload and is run there afterwards (``python -m release.notices
 <path>``), reproducing the license texts of the environment that was
 actually installed so the distribution discharges those attribution
 duties. The licensing audit flagged this as the one legal to-do for
-shipping VoiceToText as a proprietary product.
+shipping VoiceToText installers, and it keeps that duty discharged for
+any downstream fork - including proprietary ones, which the app's
+Apache-2.0 license deliberately permits.
 
 Selection, license-id summarisation, and document rendering are pure
 functions (unit-tested). Reading the actual license files from the

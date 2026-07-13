@@ -1,11 +1,15 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+# setuptools >= 77 understands the PEP 639 SPDX `license` string below.
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "voicetotext"
 version = "0.1.0"
 description = "Local voice-to-text with HuggingFace Whisper (PyTorch) — CUDA/ROCm/CPU"
+license = "Apache-2.0"
+license-files = ["LICENSE.txt", "NOTICE"]
+authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     # `transformers` is capped below 5.9 because 5.9.0 added an

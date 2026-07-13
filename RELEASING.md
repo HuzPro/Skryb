@@ -62,13 +62,18 @@ install.
 
 ## Licensing
 
+VoiceToText is open source under the Apache License 2.0 (`LICENSE.txt`,
+copyright statement in `NOTICE`). Every runtime dependency is permissive
+(MIT/BSD/Apache/PSF; no LGPL/GPL), so forks may build proprietary,
+closed-source derivatives - that combination is deliberate.
+
 Because PyTorch and the other Python packages are downloaded from their
 official indices at install time, the installer does not redistribute them,
 so it carries no obligation to ship their license texts (the same reasoning
 that applies to the runtime-downloaded models). It still ships:
 
-- `LICENSE.txt` - the proprietary product license (set the real copyright
-  holder).
-- `NOTICE.txt` - covers the bundled CPython runtime (PSF license).
+- `LICENSE.txt` - the Apache License 2.0 covering VoiceToText itself.
+- `NOTICE.txt` - covers the bundled CPython runtime (PSF license) and
+  states the app's own license and copyright.
 - `THIRD-PARTY-NOTICES.txt` - generated post-install from the actual
   installed environment by `release/notices.py`.

@@ -15,6 +15,7 @@ import pytest
 from release.errors import InstallerBuildError
 from release.installer import (
     _require_standalone_runtime,
+    _stage_wheel_source,
     build_iscc_args,
     cmd_shim_text,
     iss_defines,
@@ -92,3 +93,30 @@ class TestRuntimeNotice:
         assert "Python Software Foundation" in notice
         assert "THIRD-PARTY-NOTICES" in notice
         assert "LICENSE" in notice
+
+    def test_states_the_app_is_apache_licensed_not_proprietary(self):
+        notice = notice_text("0.2.0")
+
+        assert "Apache License" in notice
+        assert "Huzaifa Tatari" in notice
+        assert "proprietary" not in notice.lower()
+
+
+class TestStageWheelSource:
+    def test_stages_package_metadata_and_license_files(self, tmp_path):
+        # pyproject.toml declares `license-files = ["LICENSE.txt", "NOTICE"]`,
+        # so the staged wheel source must carry them or the build fails.
+        repo = tmp_path / "repo"
+        (repo / "voicetotext").mkdir(parents=True)
+        (repo / "voicetotext" / "__init__.py").write_text("", encoding="utf-8")
+        for name in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
+            (repo / name).write_text(name, encoding="utf-8")
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+
+        source = _stage_wheel_source(repo, scratch)
+
+        assert (source / "pyproject.toml").is_file()
+        assert (source / "LICENSE.txt").is_file()
+        assert (source / "NOTICE").is_file()
+        assert (source / "voicetotext" / "__init__.py").is_file()

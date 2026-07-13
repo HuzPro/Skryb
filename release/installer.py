@@ -96,7 +96,8 @@ def notice_text(version: str) -> str:
             "consolidated summary is written to THIRD-PARTY-NOTICES.txt",
             "during installation.",
             "",
-            f"{APP_NAME} itself is proprietary; see LICENSE.txt.",
+            f"{APP_NAME} is open source, licensed under the Apache License,",
+            "Version 2.0; see LICENSE.txt. Copyright 2026 Huzaifa Tatari.",
             "",
         ]
     )
@@ -185,9 +186,12 @@ def _stage_wheel_source(repo_root: Path, scratch: Path) -> Path:
     # Build from a clean copy of just the project metadata and package, so
     # an in-repo venv or a stale build/ directory cannot pollute the wheel
     # (setuptools' scratch dir is also "build/") or slow the build down.
+    # LICENSE.txt and NOTICE are declared in `license-files`, so setuptools
+    # requires them next to pyproject.toml and embeds them in the wheel.
     source = scratch / "src"
     source.mkdir()
-    shutil.copyfile(repo_root / "pyproject.toml", source / "pyproject.toml")
+    for metadata_file in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
+        shutil.copyfile(repo_root / metadata_file, source / metadata_file)
     shutil.copytree(
         repo_root / "voicetotext",
         source / "voicetotext",
