@@ -48,7 +48,6 @@ dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",
     "pytest-cov>=4.1.0",
-    "pyinstaller>=6.0.0",
     "soundfile>=0.12.0",
     "scipy>=1.10.0",
 ]
@@ -81,5 +80,8 @@ filterwarnings = [
     "ignore:.*attention on Current AMD GPU is still experimental.*:UserWarning",
 ]
 
+# Only the application package ships in the wheel. Without an explicit
+# include, find() crawls the whole tree (venv, tests, release) and the
+# wheel build errors on the flat layout.
 [tool.setuptools.packages.find]
-where = ["."]
+include = ["voicetotext*"]

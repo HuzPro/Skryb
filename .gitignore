@@ -13,6 +13,12 @@ htmlcov/
 venv/
 env/
 config.json
+# Generated per build into the bundle; never committed at the repo root.
+THIRD-PARTY-NOTICES.txt
+# Standalone CPython fetched for local installer builds.
+/cpython/
+/_cpython/
+/*.tar.gz
 *.ggml
 *.bin
 *.ckpt
