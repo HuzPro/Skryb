@@ -93,7 +93,9 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
 
         sender.send_ctrl_v()
 
-        assert 0 < sleeper.total_requested <= 1.0
+        # Summing 100 x 0.01 drifts a few ULP above 1.0 on Python < 3.12
+        # (3.12's sum() compensates); allow that float noise, not more.
+        assert 0 < sleeper.total_requested <= 1.0 + 1e-9
 
     def test_should_log_warning_when_wait_times_out(self, caplog):
         sender, *_ = _build_sender(answers=[True])
