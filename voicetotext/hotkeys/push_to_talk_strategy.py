@@ -1,17 +1,15 @@
 from collections.abc import Callable
 
-from pynput.keyboard import Key, KeyCode
-
-from voicetotext.hotkeys.key_parser import canonicalize_key
+from voicetotext.hotkeys.keys import HotkeyKey
 from voicetotext.hotkeys.strategy import HotkeyStrategy
 
 
 class PushToTalkStrategy(HotkeyStrategy):
 
-    def __init__(self, keys: tuple[Key | KeyCode, ...]) -> None:
-        self._target_sequence = tuple(canonicalize_key(k) for k in keys)
+    def __init__(self, keys: tuple[HotkeyKey, ...]) -> None:
+        self._target_sequence = tuple(keys)
         self._seq_index: int = 0
-        self._held_keys: set[Key | KeyCode] = set()
+        self._held_keys: set[HotkeyKey] = set()
         self._is_active: bool = False
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
@@ -24,8 +22,7 @@ class PushToTalkStrategy(HotkeyStrategy):
         self._on_activate = on_activate
         self._on_deactivate = on_deactivate
 
-    def on_key_press(self, key: Key | KeyCode) -> None:
-        key = canonicalize_key(key)
+    def on_key_press(self, key: HotkeyKey) -> None:
         if self._is_active:
             return
         if (
@@ -42,8 +39,7 @@ class PushToTalkStrategy(HotkeyStrategy):
             self._seq_index = 0
             self._held_keys.clear()
 
-    def on_key_release(self, key: Key | KeyCode) -> None:
-        key = canonicalize_key(key)
+    def on_key_release(self, key: HotkeyKey) -> None:
         self._held_keys.discard(key)
         if self._is_active:
             self._is_active = False

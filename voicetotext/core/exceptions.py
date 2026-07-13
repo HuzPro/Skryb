@@ -15,8 +15,8 @@ class EngineDependencyMissingError(TranscriptionError):
 
     Raised by adapter ``load_model()`` implementations when the lazy
     backend import fails. The message must be actionable — it is
-    surfaced verbatim to the user via the tray (e.g. ``"Faster-Whisper
-    not installed: pip install faster-whisper"``).
+    surfaced verbatim to the user via the tray (e.g. ``"nano-parakeet
+    not installed: pip install nano-parakeet"``).
     """
     pass
 

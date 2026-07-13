@@ -1,5 +1,6 @@
 import os
 import sys
+import tkinter
 import traceback
 
 from voicetotext.core.config import ConfigurationStore
@@ -77,19 +78,16 @@ def _print_doctor_report() -> None:
 
 
 def _run() -> None:
-    import sys as _sys
-
-    from PySide6.QtWidgets import QApplication
-
     paths = AppPaths()
     paths.ensure_dirs()
     _apply_hf_cache_env_overrides(paths)
 
-    # Single QApplication for the whole process. The tray must outlive
-    # any transient window (settings/first-run), so disable Qt's default
-    # "quit when last window closes" behaviour.
-    qapp = QApplication.instance() or QApplication(_sys.argv)
-    qapp.setQuitOnLastWindowClosed(False)
+    # One Tk root for the whole process, created up front and hidden.
+    # ``root.mainloop()`` (entered later via the tray adapter) is the
+    # single primary loop on the main thread; the tray's message-only
+    # window and every transient settings window live on this root.
+    root = tkinter.Tk()
+    root.withdraw()
 
     config = JsonConfigAdapter(paths.config_path)
     config.load()
@@ -101,7 +99,7 @@ def _run() -> None:
     model_manager = create_model_manager(paths.models_dir, download_manager)
 
     if paths.is_first_run() or not _configured_model_installed(config, model_manager):
-        _run_first_time_setup(config, model_manager, event_bus)
+        _run_first_time_setup(config, model_manager, event_bus, root)
 
     if not _configured_model_installed(config, model_manager):
         # User closed first-run without installing a model — nothing
@@ -111,7 +109,8 @@ def _run() -> None:
     from voicetotext.bootstrap import build_app
 
     app = build_app(
-        config, paths, event_bus=event_bus, download_manager=download_manager
+        config, paths, root,
+        event_bus=event_bus, download_manager=download_manager,
     )
     app.run()
 
@@ -127,11 +126,12 @@ def _run_first_time_setup(
     config: JsonConfigAdapter,
     model_manager: ModelManager,
     event_bus: SimpleEventBus,
+    root: tkinter.Misc,
 ) -> None:
-    from PySide6.QtCore import QEventLoop
-
     from voicetotext.bootstrap import build_first_run_settings_service
-    from voicetotext.settings.qt_window import QtSettingsWindow
+    from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
+    from voicetotext.settings.tk_window import TkSettingsWindow
+    from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
 
     service = build_first_run_settings_service(
         config=config,
@@ -139,15 +139,21 @@ def _run_first_time_setup(
         model_manager=model_manager,
     )
 
-    # Block until the first-run window closes — whether via Save (which
-    # calls close()) or the OS close button. QEventLoop keeps the main
-    # event pump running without calling QApplication.exec(), which the
-    # tray uses later.
-    loop = QEventLoop()
-    window = QtSettingsWindow(service=service, first_run=True)
-    window.destroyed.connect(loop.quit)
+    # Block until the first-run window closes (Save or the OS close
+    # button). ``wait_window`` keeps the main event pump running without
+    # entering the tray's later ``mainloop``. A short-lived dispatcher
+    # marshals download events fired during setup onto this pump.
+    dispatcher = TkGuiThreadDispatcher(root)
+    window = TkSettingsWindow(
+        root,
+        service,
+        capture_bridge=Win32CaptureBridge(),
+        first_run=True,
+        schedule=dispatcher.dispatch,
+    )
     window.show()
-    loop.exec()
+    root.wait_window(window)
+    dispatcher.cancel()
 
     config.save()
 
@@ -159,12 +165,12 @@ def _show_error(message: str) -> None:
 
 def _try_show_error_dialog(message: str) -> None:
     try:
-        import sys as _sys
+        from tkinter import messagebox
 
-        from PySide6.QtWidgets import QApplication, QMessageBox
-
-        app = QApplication.instance() or QApplication(_sys.argv)
-        QMessageBox.critical(None, "VoiceToText Error", message)
+        root = tkinter.Tk()
+        root.withdraw()
+        messagebox.showerror("VoiceToText Error", message)
+        root.destroy()
     except Exception:
         pass
 

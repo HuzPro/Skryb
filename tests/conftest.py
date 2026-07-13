@@ -35,18 +35,13 @@ from voicetotext.core.state_machine import AppStateMachine
 
 # Desktop/Windows-only test modules, dropped from collection off-Windows
 # because they fail to *import* there (collection runs before marker
-# deselection, so a marker alone cannot save them). Three causes:
-#   * ``ctypes.windll`` — the ``win32_clipboard_*`` modules, and
-#     ``voicetotext.bootstrap`` (which imports them at module top, so any
-#     test that imports bootstrap is affected), touch this Windows-only
-#     attribute.
+# deselection, so a marker alone cannot save them). Two causes:
+#   * ``ctypes.windll`` — the ``win32_clipboard_*`` / ``win32_key_sender``
+#     modules, and ``voicetotext.bootstrap`` (which imports them at module
+#     top, so any test that imports bootstrap is affected), touch this
+#     Windows-only attribute.
 #   * ``APPDATA`` — ``tests/performance/conftest.py`` reads this
 #     Windows-only environment variable at import time.
-#   * ``pyautogui`` — the paste adapter imports it at module top; on
-#     Linux it pulls in pyscreeze, whose import leaks a file handle that
-#     ``filterwarnings = error`` then turns into a spurious failure.
-# Windows runs every module here; on Linux the paste adapter is unusable
-# headless anyway (it drives a real desktop).
 collect_ignore: list[str] = []
 if sys.platform != "win32":
     collect_ignore = [
@@ -56,7 +51,11 @@ if sys.platform != "win32":
         "output/test_win32_clipboard_open.py",
         "output/test_win32_clipboard_preserver.py",
         "output/test_win32_clipboard_writer.py",
-        "output/test_paste_and_clipboard_adapter.py",
+        "output/test_win32_key_sender.py",
+        "hotkeys/test_win32_keyboard_hook.py",
+        "hotkeys/test_win32_hook_adapter.py",
+        "settings/test_win32_capture_bridge.py",
+        "tray/test_win32_tray_adapter.py",
         "performance",
     ]
 
@@ -114,6 +113,27 @@ def fake_preserver() -> FakeClipboardPreserver:
 @pytest.fixture()
 def fake_hotkey_listener() -> FakeHotkeyListener:
     return FakeHotkeyListener()
+
+
+@pytest.fixture(scope="session")
+def tk_root():
+    """One withdrawn Tk root shared by every Tk widget test in the session.
+
+    A single session-scoped root avoids repeatedly creating and
+    destroying ``tkinter.Tk()``, which keeps per-module setup cheap and
+    sidesteps the Tcl library-path corruption that recreated roots can
+    hit. Skips cleanly where Tk cannot initialise (headless CI with no
+    display).
+    """
+    import tkinter
+
+    try:
+        root = tkinter.Tk()
+    except tkinter.TclError as exc:  # pragma: no cover - headless guard
+        pytest.skip(f"Tk unavailable: {exc}")
+    root.withdraw()
+    yield root
+    root.destroy()
 
 
 @pytest.fixture()

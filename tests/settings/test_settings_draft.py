@@ -79,7 +79,7 @@ class TestChangeSetFromDrafts:
 
     def test_should_flag_engine_reload_required_when_engine_differs(self):
         original = _make_draft(engine="auto")
-        updated = _make_draft(engine="faster_whisper")
+        updated = _make_draft(engine="nano_parakeet")
 
         changes = ChangeSet.between(original, updated)
 

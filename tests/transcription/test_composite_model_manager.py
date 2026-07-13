@@ -49,13 +49,13 @@ class _FakeManager(ModelManager):
 def _make_composite(
     *,
     transformers: _FakeManager | None = None,
-    faster_whisper: _FakeManager | None = None,
+    nano_parakeet: _FakeManager | None = None,
     active: str = "transformers",
 ) -> CompositeModelManager:
     return CompositeModelManager(
         by_engine={
             "transformers": transformers or _FakeManager(),
-            "faster_whisper": faster_whisper or _FakeManager(),
+            "nano_parakeet": nano_parakeet or _FakeManager(),
         },
         active_engine_provider=lambda: active,  # type: ignore[arg-type]
     )
@@ -66,7 +66,7 @@ class TestCompositeModelManagerListing:
         info = _info("base")
         composite = _make_composite(
             transformers=_FakeManager(models=[info]),
-            faster_whisper=_FakeManager(models=[info]),
+            nano_parakeet=_FakeManager(models=[info]),
         )
 
         models = composite.list_models()
@@ -85,10 +85,10 @@ class TestCompositeModelManagerInstallation:
             transformers=_FakeManager(
                 models=[info], installed={"large-v3-turbo": True},
             ),
-            faster_whisper=_FakeManager(
+            nano_parakeet=_FakeManager(
                 models=[info], installed={"large-v3-turbo": False},
             ),
-            active="faster_whisper",
+            active="nano_parakeet",
         )
 
         assert composite.is_installed("large-v3-turbo") is True
@@ -99,10 +99,10 @@ class TestCompositeModelManagerInstallation:
             transformers=_FakeManager(
                 models=[info], installed={"large-v3-turbo": False},
             ),
-            faster_whisper=_FakeManager(
+            nano_parakeet=_FakeManager(
                 models=[info], installed={"large-v3-turbo": False},
             ),
-            active="faster_whisper",
+            active="nano_parakeet",
         )
 
         assert composite.is_installed("large-v3-turbo") is False
@@ -113,10 +113,10 @@ class TestCompositeModelManagerInstallation:
             transformers=_FakeManager(
                 models=[info], installed={"large-v3-turbo": False},
             ),
-            faster_whisper=_FakeManager(
+            nano_parakeet=_FakeManager(
                 models=[info], installed={"large-v3-turbo": True},
             ),
-            active="faster_whisper",
+            active="nano_parakeet",
         )
 
         assert composite.is_installed("large-v3-turbo") is True
@@ -147,31 +147,31 @@ class TestCompositeModelManagerInstallation:
 class TestCompositeModelManagerRouting:
     def test_should_route_download_to_active_engine_child(self):
         transformers = _FakeManager()
-        faster_whisper = _FakeManager()
+        nano_parakeet = _FakeManager()
         composite = _make_composite(
             transformers=transformers,
-            faster_whisper=faster_whisper,
-            active="faster_whisper",
+            nano_parakeet=nano_parakeet,
+            active="nano_parakeet",
         )
 
         composite.download("base")
 
-        assert faster_whisper.download_calls == ["base"]
+        assert nano_parakeet.download_calls == ["base"]
         assert transformers.download_calls == []
 
     def test_should_route_delete_to_active_engine_child(self):
         transformers = _FakeManager()
-        faster_whisper = _FakeManager()
+        nano_parakeet = _FakeManager()
         composite = _make_composite(
             transformers=transformers,
-            faster_whisper=faster_whisper,
+            nano_parakeet=nano_parakeet,
             active="transformers",
         )
 
         composite.delete("base")
 
         assert transformers.delete_calls == ["base"]
-        assert faster_whisper.delete_calls == []
+        assert nano_parakeet.delete_calls == []
 
     def test_should_return_get_model_path_from_active_engine_child(self, tmp_path):
         active_path = tmp_path / "models--openai--whisper-base"
@@ -230,7 +230,7 @@ class TestCompositeModelManagerOwnerRouting:
         composite = CompositeModelManager(
             by_engine={
                 "transformers": active,
-                "faster_whisper": also_owner,
+                "nano_parakeet": also_owner,
             },
             active_engine_provider=lambda: "transformers",
         )

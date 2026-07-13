@@ -20,7 +20,6 @@ class ModelInfo:
     size_mb: int
     description: str
     repo_id: str = ""
-    ct2_repo_id: str = ""
     compatible_engines: tuple[EngineId, ...] = ("transformers",)
     engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
 
@@ -31,53 +30,37 @@ class ModelInfo:
         return f"{self.size_mb} MB"
 
 
-_WHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"faster_whisper": 100, "transformers": 50},
-)
-
-
+# Every Whisper model runs through the transformers engine (PyTorch, every
+# backend). They carry no ``engine_priorities``: with a single compatible
+# engine the selector falls back to the descriptor's ``base_priority``, so
+# an explicit map would be dead config.
 WHISPER_MODELS: dict[str, ModelInfo] = {
     "tiny": ModelInfo(
         name="tiny", size_mb=151, description="Fastest, least accurate",
         repo_id="openai/whisper-tiny",
-        ct2_repo_id="Systran/faster-whisper-tiny",
-        compatible_engines=("transformers", "faster_whisper"),
-        engine_priorities=_WHISPER_ENGINE_PRIORITIES,
+        compatible_engines=("transformers",),
     ),
     "base": ModelInfo(
         name="base", size_mb=290, description="Good balance",
         repo_id="openai/whisper-base",
-        ct2_repo_id="Systran/faster-whisper-base",
-        compatible_engines=("transformers", "faster_whisper"),
-        engine_priorities=_WHISPER_ENGINE_PRIORITIES,
+        compatible_engines=("transformers",),
     ),
     "small": ModelInfo(
         name="small", size_mb=967, description="More accurate, slower",
         repo_id="openai/whisper-small",
-        ct2_repo_id="Systran/faster-whisper-small",
-        compatible_engines=("transformers", "faster_whisper"),
-        engine_priorities=_WHISPER_ENGINE_PRIORITIES,
+        compatible_engines=("transformers",),
     ),
-    # large-v3-turbo is transformers-only: Systran never published a
-    # `faster-whisper-large-v3-turbo` CT2 repo (the old ct2_repo_id 401'd
-    # on HuggingFace), and the only working CT2 mirror is community-hosted.
-    # Rather than depend on an unofficial repo, turbo runs through the
-    # transformers engine (PyTorch, every backend) — leaving no ct2_repo_id
-    # keeps it out of the faster-whisper child entirely.
     "large-v3-turbo": ModelInfo(
         name="large-v3-turbo", size_mb=1620,
         description="Recommended: nearly large-v3 quality, 6-8x faster",
         repo_id="openai/whisper-large-v3-turbo",
         compatible_engines=("transformers",),
-        engine_priorities=_WHISPER_ENGINE_PRIORITIES,
     ),
     "large-v3": ModelInfo(
         name="large-v3", size_mb=3090,
         description="Max accuracy for rare languages and noisy audio",
         repo_id="openai/whisper-large-v3",
-        ct2_repo_id="Systran/faster-whisper-large-v3",
-        compatible_engines=("transformers", "faster_whisper"),
-        engine_priorities=_WHISPER_ENGINE_PRIORITIES,
+        compatible_engines=("transformers",),
     ),
 }
 
@@ -139,6 +122,18 @@ ALL_MODELS: dict[str, ModelInfo] = {
 }
 
 
+# Models kept defined for the engine layer but withheld from the
+# user-facing catalog (e.g. their load is currently unstable). They cannot
+# be selected; an existing config pinned to one is migrated off it (see
+# ``_REMOVED_MODEL_REPLACEMENTS``). Re-enable by removing the entry here.
+HIDDEN_MODELS: frozenset[str] = frozenset({"granite-speech-4.1-2b"})
+
+
+def is_catalog_model(name: str) -> bool:
+    """Whether *name* should appear in the user-facing model catalog."""
+    return name in ALL_MODELS and name not in HIDDEN_MODELS
+
+
 def get_model_info(name: str) -> ModelInfo:
     info = ALL_MODELS.get(name)
     if info is None:
@@ -167,6 +162,9 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "medium": "large-v3-turbo",
     "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
+    # Withdrawn from the catalog (unstable load); move quality-seeking
+    # users to the recommended high-accuracy batch model.
+    "granite-speech-4.1-2b": "large-v3-turbo",
 }
 
 
@@ -182,16 +180,32 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
     config.save()
 
 
-def migrate_engine_field(config: ConfigurationStore) -> None:
-    """Add ``transcription.engine`` to legacy configs that pre-date #9.
+_REMOVED_ENGINES: frozenset[str] = frozenset({"faster_whisper"})
 
-    Defaults to ``"auto"`` so the engine selector picks the recommended
-    engine for the user's hardware on next startup. Existing explicit
-    values (e.g. set via the settings UI) are left alone.
+
+def migrate_engine_field(config: ConfigurationStore) -> None:
+    """Normalize ``transcription.engine`` for configs from older builds.
+
+    Legacy configs that pre-date #9 have no ``transcription.engine`` key;
+    they get ``"auto"`` so the selector picks the recommended engine for
+    the user's hardware. Configs that pinned the now-removed
+    ``faster_whisper`` engine are reset to ``"auto"`` so startup does not
+    fail building a nonexistent engine. Any other explicit value (e.g.
+    set via the settings UI) is left alone.
     """
-    if config.get("transcription.engine") is not None:
+    current = config.get("transcription.engine")
+    if current is None:
+        _logger.info("Adding 'transcription.engine'='auto' to legacy config.")
+        _save_engine(config, "auto")
         return
-    _logger.info("Adding 'transcription.engine'='auto' to legacy config.")
-    config.set("transcription.engine", "auto")
+    if current in _REMOVED_ENGINES:
+        _logger.warning(
+            "Engine '%s' has been removed; switching to 'auto'.", current,
+        )
+        _save_engine(config, "auto")
+
+
+def _save_engine(config: ConfigurationStore, value: str) -> None:
+    config.set("transcription.engine", value)
     config.save()
 

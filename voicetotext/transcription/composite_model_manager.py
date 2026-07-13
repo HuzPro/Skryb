@@ -14,11 +14,11 @@ class CompositeModelManager(ModelManager):
     """Composite (GoF) over per-engine :class:`ModelManager` children.
 
     Each engine has its own on-disk cache (``models--openai--whisper-*``
-    for transformers, ``models--Systran--faster-whisper-*`` for
-    faster-whisper / CTranslate2), so the composite delegates routing
-    decisions to the *active* engine — the one currently selected in
-    the user's config — for actions whose target storage matters
-    (download, delete, get_model_path).
+    for transformers, ``models--nvidia--parakeet-*`` for nano-parakeet,
+    etc.), so the composite delegates routing decisions to the *active*
+    engine — the one currently selected in the user's config — for
+    actions whose target storage matters (download, delete,
+    get_model_path).
 
     Listing aggregates across children so the UI shows the union
     catalogue. ``is_installed`` means *loadable by some compatible
@@ -80,14 +80,13 @@ class CompositeModelManager(ModelManager):
     def _owning_child(self, name: str) -> ModelManager:
         """Return the child that owns *name*.
 
-        Prefers the active child when it owns the model (so a user with
-        a Whisper variant compatible with both transformers and
-        faster-whisper still gets routed to the engine they configured).
-        Falls through to the first non-active child that owns the
-        model — this is the path Parakeet downloads take when the saved
-        engine is currently a Whisper backend. Falls back to the active
-        child for unknown models so the existing error surface (KeyError
-        from the child's models dict) is preserved.
+        Prefers the active child when it owns the model, so routing
+        stays with the engine the user configured. Falls through to the
+        first non-active child that owns the model — this is the path
+        Parakeet downloads take when the saved engine is currently a
+        Whisper backend. Falls back to the active child for unknown
+        models so the existing error surface (KeyError from the child's
+        models dict) is preserved.
         """
         active = self._active_child()
         if active.has_model(name):

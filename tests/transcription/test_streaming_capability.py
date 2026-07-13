@@ -8,7 +8,7 @@ from voicetotext.transcription.engine_types import (
     EngineDescriptor,
     HardwareProfile,
 )
-from voicetotext.transcription.model_info import get_model_info
+from voicetotext.transcription.model_info import ModelInfo, get_model_info
 
 
 def _descriptors() -> list[EngineDescriptor]:
@@ -44,7 +44,6 @@ class TestRegistryStreamingDescriptors:
         by_id = {d.engine_id: d for d in _descriptors()}
 
         assert by_id["transformers"].supports_streaming is False
-        assert by_id["faster_whisper"].supports_streaming is False
         assert by_id["granite_speech"].supports_streaming is False
 
 
@@ -101,13 +100,35 @@ class TestModelSupportsBatch:
 
 
 class TestSelectorUnaffectedByStreamingFlag:
-    def test_should_still_recommend_faster_whisper_for_whisper_on_rocm(self):
-        hardware = HardwareProfile(
+    def test_streaming_flag_should_not_change_ranking_order(self):
+        # rank_engines must order purely by priority and hardware, never by
+        # the descriptor's supports_streaming flag. Two descriptor sets that
+        # differ ONLY in that flag must rank a dual-engine model identically.
+        rocm = HardwareProfile(
             kind="amd_rocm", device_name="AMD", gfx_arch="gfx1200",
         )
-
-        candidates = rank_engines(
-            get_model_info("base"), hardware, _descriptors(),
+        model = ModelInfo(
+            name="dual", size_mb=1, description="test", repo_id="example/dual",
+            compatible_engines=("transformers", "nano_parakeet"),
+            engine_priorities={"nano_parakeet": 100, "transformers": 50},
         )
 
-        assert candidates[0].engine_id == "faster_whisper"
+        def descriptors(streaming: bool) -> list[EngineDescriptor]:
+            return [
+                EngineDescriptor(
+                    engine_id="transformers", display_name="t",
+                    supported_hardware=("amd_rocm",), base_priority=50,
+                ),
+                EngineDescriptor(
+                    engine_id="nano_parakeet", display_name="p",
+                    supported_hardware=("amd_rocm",), base_priority=90,
+                    supports_streaming=streaming,
+                ),
+            ]
+
+        order_with = [c.engine_id for c in rank_engines(model, rocm, descriptors(True))]
+        order_without = [
+            c.engine_id for c in rank_engines(model, rocm, descriptors(False))
+        ]
+
+        assert order_with == order_without == ["nano_parakeet", "transformers"]

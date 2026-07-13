@@ -72,11 +72,11 @@ class TestEngineLoadFailedEvent:
 
     def test_should_carry_model_name_and_error(self):
         event = EngineLoadFailedEvent(
-            model_name="large-v3-turbo", error="Faster-Whisper not installed",
+            model_name="large-v3-turbo", error="nano-parakeet not installed",
         )
 
         assert event.model_name == "large-v3-turbo"
-        assert event.error == "Faster-Whisper not installed"
+        assert event.error == "nano-parakeet not installed"
 
 
 class TestErrorOccurredEvent:

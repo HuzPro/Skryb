@@ -1,11 +1,15 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+# setuptools >= 77 understands the PEP 639 SPDX `license` string below.
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "voicetotext"
 version = "0.1.0"
 description = "Local voice-to-text with HuggingFace Whisper (PyTorch) — CUDA/ROCm/CPU"
+license = "Apache-2.0"
+license-files = ["LICENSE.txt", "NOTICE"]
+authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     # `transformers` is capped below 5.9 because 5.9.0 added an
@@ -32,17 +36,15 @@ dependencies = [
     "torchaudio>=2.2.0",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
-    "pynput>=1.7.6",
-    "pyautogui>=0.9.54",
-    "PySide6>=6.6.0",
+    # Tkinter (stdlib) drives the GUI; Pillow only renders the tray icon
+    # circle. Both are permissive (PSF / MIT), unlike the LGPL PySide6
+    # they replaced.
+    "Pillow>=10.0.0",
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
-faster-whisper = [
-    "faster-whisper>=1.0.0",
-]
 parakeet = [
     "nano-parakeet>=0.2.1",
 ]
@@ -50,8 +52,6 @@ dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",
     "pytest-cov>=4.1.0",
-    "pytest-qt>=4.2.0",
-    "pyinstaller>=6.0.0",
     "soundfile>=0.12.0",
     "scipy>=1.10.0",
 ]
@@ -84,5 +84,8 @@ filterwarnings = [
     "ignore:.*attention on Current AMD GPU is still experimental.*:UserWarning",
 ]
 
+# Only the application package ships in the wheel. Without an explicit
+# include, find() crawls the whole tree (venv, tests, release) and the
+# wheel build errors on the flat layout.
 [tool.setuptools.packages.find]
-where = ["."]
+include = ["voicetotext*"]

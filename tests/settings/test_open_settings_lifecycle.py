@@ -1,28 +1,31 @@
 """Regression tests for the ``open_settings`` lifecycle.
 
-These guard the fix for the crash
-
-    ``RuntimeError: Signal source has been deleted``
-
-that happened when a Python-GC-destroyed settings window left its
-bridges subscribed to :class:`SettingsService` and the next worker-
-thread fanout tried to call into the dead QObject wrapper.
-
-The tests work at the :class:`QtSettingsWindow` seam — closing a
-window must leave the service's listener lists empty, and opening a
-fresh window must reinstate exactly one listener on each seam. A
-bootstrap-level end-to-end test would require the full composition
-root, so the guard on the ``destroyed`` handler is covered by
-``TestMakeDestroyedHandler`` in ``tests/test_bootstrap.py``.
+These guard against a settings window leaving its bridges subscribed to
+:class:`SettingsService` after it closes, which would let the next
+worker-thread fanout call into a torn-down window. The tests work at the
+:class:`TkSettingsWindow` seam: closing a window must leave the service's
+listener lists empty, and opening a fresh window must reinstate exactly
+one listener on each seam.
 """
 from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtCore import Qt
 
 from voicetotext.output.output_mode import OutputMode
-from voicetotext.settings.qt_window import QtSettingsWindow
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
+from voicetotext.settings.signal import Signal
+from voicetotext.settings.tk_window import TkSettingsWindow
+
+
+class FakeCaptureBridge:
+    def __init__(self) -> None:
+        self.key_pressed = Signal()
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
 
 
 def _draft() -> SettingsDraft:
@@ -113,61 +116,66 @@ def service() -> _TrackingService:
     return _TrackingService()
 
 
+def _make_window(tk_root, service) -> TkSettingsWindow:
+    return TkSettingsWindow(
+        tk_root, service, capture_bridge=FakeCaptureBridge(),
+    )
+
+
+def _destroy(window) -> None:
+    if window.winfo_exists():
+        window.destroy()
+
+
 class TestOpenSettingsLifecycle:
-    def test_should_subscribe_one_listener_per_seam_on_open(
-        self, qtbot, service
-    ):
-        window = QtSettingsWindow(service)
-        qtbot.addWidget(window)
+    def test_should_subscribe_one_listener_per_seam_on_open(self, tk_root, service):
+        window = _make_window(tk_root, service)
 
         assert service.engine_listener_count() == 1
         assert service.state_listener_count() == 1
         assert service.download_listener_count() == 1
         assert service.model_deleted_handler_count() == 1
 
-    def test_should_drop_listeners_on_close(self, qtbot, service):
-        window = QtSettingsWindow(service)
-        qtbot.addWidget(window)
+        _destroy(window)
 
-        with qtbot.waitSignal(window.destroyed, timeout=1000):
-            window.close()
+    def test_should_drop_listeners_on_close(self, tk_root, service):
+        window = _make_window(tk_root, service)
+
+        window.close()
 
         assert service.engine_listener_count() == 0
         assert service.state_listener_count() == 0
         assert service.download_listener_count() == 0
         assert service.model_deleted_handler_count() == 0
+
+        _destroy(window)
 
     def test_should_not_leak_listeners_across_open_close_reopen(
-        self, qtbot, service
+        self, tk_root, service,
     ):
-        window1 = QtSettingsWindow(service)
-        qtbot.addWidget(window1)
-        with qtbot.waitSignal(window1.destroyed, timeout=1000):
-            window1.close()
+        window1 = _make_window(tk_root, service)
+        window1.close()
+        _destroy(window1)
 
-        window2 = QtSettingsWindow(service)
-        qtbot.addWidget(window2)
+        window2 = _make_window(tk_root, service)
 
         assert service.engine_listener_count() == 1
         assert service.state_listener_count() == 1
         assert service.download_listener_count() == 1
         assert service.model_deleted_handler_count() == 1
 
-    def test_should_keep_exactly_one_listener_after_save_triggered_close(
-        self, qtbot, service
-    ):
-        service.apply_draft.return_value = ChangeSet(
-            engine_reload_required=False,
-            hotkey_changed=False,
-            output_changed=False,
-        )
-        window = QtSettingsWindow(service)
-        qtbot.addWidget(window)
+        _destroy(window2)
 
-        with qtbot.waitSignal(window.destroyed, timeout=1000):
-            qtbot.mouseClick(window.save_button(), Qt.LeftButton)
+    def test_should_keep_no_listeners_after_save_triggered_close(
+        self, tk_root, service,
+    ):
+        window = _make_window(tk_root, service)
+
+        window.save_button().invoke()
 
         assert service.engine_listener_count() == 0
         assert service.state_listener_count() == 0
         assert service.download_listener_count() == 0
         assert service.model_deleted_handler_count() == 0
+
+        _destroy(window)

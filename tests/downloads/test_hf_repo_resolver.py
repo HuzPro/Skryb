@@ -57,7 +57,9 @@ class TestHfRepoResolverListFiles:
 
 
 class TestHfRepoResolverIgnorePatterns:
-    def test_should_exclude_pytorch_bin_but_include_ct2_model_bin(self):
+    def test_should_exclude_framework_specific_weights_but_keep_the_rest(self):
+        # Only the explicit blocklist (pytorch pickle, TF, Flax) is dropped;
+        # everything else — including a bare ``model.bin`` — passes through.
         api = MagicMock()
         api.repo_info.return_value = _fake_repo_info(
             sha="sha",
@@ -75,28 +77,6 @@ class TestHfRepoResolverIgnorePatterns:
 
         names = [f.filename for f in files]
         assert names == ["config.json", "model.safetensors", "model.bin"]
-
-    def test_should_include_model_bin_when_resolving_systran_faster_whisper_repo(self):
-        api = MagicMock()
-        api.repo_info.return_value = _fake_repo_info(
-            sha="sha",
-            files=[
-                _fake_sibling("config.json", 100),
-                _fake_sibling("model.bin", 200),
-                _fake_sibling("tokenizer.json", 300),
-                _fake_sibling("vocabulary.txt", 400),
-            ],
-        )
-
-        _, files = HfRepoResolver(api=api).resolve("Systran/faster-whisper-tiny")
-
-        names = [f.filename for f in files]
-        assert names == [
-            "config.json", "model.bin", "tokenizer.json", "vocabulary.txt",
-        ]
-        assert any(
-            f.filename == "model.bin" and f.size == 200 for f in files
-        )
 
     def test_should_exclude_readme_and_gitattributes(self):
         api = MagicMock()

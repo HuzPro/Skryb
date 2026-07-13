@@ -41,10 +41,10 @@ os.environ.setdefault("HF_HUB_CACHE", str(_paths.models_dir))
 # the Hub emits a noisy UserWarning. Suppress at source so it never
 # turns into an error under pyproject's ``filterwarnings = ["error"]``.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-# The benchmark cycles through PyTorch (Intel ``libiomp5md``) and
-# CTranslate2/faster-whisper (LLVM ``libomp140``) in the same process.
-# Intel's runtime aborts on duplicate OpenMP init by default; the
-# documented workaround for testing scenarios is ``KMP_DUPLICATE_LIB_OK``.
+# The benchmark cycles several engines through the same process, any of
+# which may pull a second OpenMP runtime alongside PyTorch's. Intel's
+# runtime aborts on duplicate OpenMP init by default; the documented
+# workaround for testing scenarios is ``KMP_DUPLICATE_LIB_OK``.
 # Production never hits this because it picks one engine and sticks
 # with it for the process lifetime.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")

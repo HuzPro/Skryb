@@ -1,12 +1,17 @@
 """Hotkey activation modes — toggle vs push-to-talk — and their
 interaction with in-flight transcription."""
 
-from pynput.keyboard import Key, KeyCode
-
 from tests.acceptance.app_fixture import VoiceToTextApp
 from voicetotext.core.state_machine import AppState
+from voicetotext.hotkeys import keys
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
+
+
+_CTRL = keys.HotkeyKey(keys.VK_LCONTROL)
+_ALT = keys.HotkeyKey(keys.VK_LMENU)
+_M = keys.from_char("m")
+_W = keys.from_char("w")
 
 
 class TestPushToTalk:
@@ -64,29 +69,29 @@ class TestExactSequenceMatching:
         self, voice_to_text_app: VoiceToTextApp
     ):
         voice_to_text_app.user_speaks("exact order")
-        strategy = ToggleStrategy(keys=(Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")))
+        strategy = ToggleStrategy(keys=(_CTRL, _ALT, _M))
         strategy.set_callbacks(
             voice_to_text_app.press_hotkey, voice_to_text_app.press_hotkey
         )
 
-        strategy.on_key_press(Key.ctrl_l)
-        strategy.on_key_press(Key.alt_l)
-        strategy.on_key_press(KeyCode.from_char("m"))
+        strategy.on_key_press(_CTRL)
+        strategy.on_key_press(_ALT)
+        strategy.on_key_press(_M)
 
         assert voice_to_text_app.state == AppState.RECORDING
 
     def test_toggle_does_not_activate_when_extra_key_interleaved(
         self, voice_to_text_app: VoiceToTextApp
     ):
-        strategy = ToggleStrategy(keys=(Key.ctrl_l, Key.alt_l, KeyCode.from_char("m")))
+        strategy = ToggleStrategy(keys=(_CTRL, _ALT, _M))
         strategy.set_callbacks(
             voice_to_text_app.press_hotkey, voice_to_text_app.press_hotkey
         )
 
-        strategy.on_key_press(Key.ctrl_l)
-        strategy.on_key_press(KeyCode.from_char("w"))
-        strategy.on_key_press(Key.alt_l)
-        strategy.on_key_press(KeyCode.from_char("m"))
+        strategy.on_key_press(_CTRL)
+        strategy.on_key_press(_W)
+        strategy.on_key_press(_ALT)
+        strategy.on_key_press(_M)
 
         assert voice_to_text_app.state == AppState.IDLE
 
@@ -94,15 +99,15 @@ class TestExactSequenceMatching:
         self, voice_to_text_app: VoiceToTextApp
     ):
         voice_to_text_app.user_speaks("held sequence")
-        strategy = PushToTalkStrategy(keys=(Key.ctrl_l, KeyCode.from_char("m")))
+        strategy = PushToTalkStrategy(keys=(_CTRL, _M))
         strategy.set_callbacks(
             voice_to_text_app.press_hotkey, voice_to_text_app.release_hotkey
         )
 
-        strategy.on_key_press(Key.ctrl_l)
-        strategy.on_key_press(KeyCode.from_char("m"))
+        strategy.on_key_press(_CTRL)
+        strategy.on_key_press(_M)
         assert voice_to_text_app.state == AppState.RECORDING
 
-        strategy.on_key_release(KeyCode.from_char("m"))
+        strategy.on_key_release(_M)
         assert voice_to_text_app.typed_text == "held sequence"
         assert voice_to_text_app.state == AppState.IDLE

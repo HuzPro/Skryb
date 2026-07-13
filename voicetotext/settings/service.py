@@ -33,6 +33,7 @@ from voicetotext.transcription.model_info import (
     ALL_MODELS,
     ModelInfo,
     allows_device_selection as _allows_device_selection,
+    is_catalog_model as _is_catalog_model,
 )
 from voicetotext.transcription.model_manager import ModelManager
 
@@ -135,7 +136,10 @@ class SettingsService:
         persisted ``transcription.mode`` is used.
         """
         effective_mode = mode if mode is not None else self.transcription_mode()
-        infos = self._model_manager.list_models()
+        infos = [
+            info for info in self._model_manager.list_models()
+            if _is_catalog_model(info.name)
+        ]
         if effective_mode is TranscriptionMode.STREAMING:
             infos = [info for info in infos if self._is_streaming_model(info)]
         else:

@@ -15,11 +15,9 @@ import sys
 
 _BACKEND_INSTALL_HINTS: dict[str, str] = {
     "transformers": "pip install transformers",
-    "faster_whisper": "pip install faster-whisper",
     "nano_parakeet": "pip install nano-parakeet",
     "huggingface_hub": "pip install huggingface-hub",
     "sounddevice": "pip install sounddevice",
-    "PySide6": "pip install PySide6",
 }
 
 
@@ -80,7 +78,6 @@ def _probe_engine_backends() -> list[str]:
     lines = ["[Engine backends]"]
     for module_name in (
         "transformers",
-        "faster_whisper",
         "nano_parakeet",
         "huggingface_hub",
     ):

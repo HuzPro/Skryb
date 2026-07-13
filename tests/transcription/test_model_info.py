@@ -54,10 +54,10 @@ class TestModelInfoEntity:
     def test_should_store_explicit_compatible_engines(self):
         info = ModelInfo(
             name="base", size_mb=142, description="test",
-            compatible_engines=("transformers", "faster_whisper"),
+            compatible_engines=("transformers", "nano_parakeet"),
         )
 
-        assert info.compatible_engines == ("transformers", "faster_whisper")
+        assert info.compatible_engines == ("transformers", "nano_parakeet")
 
     def test_engine_priorities_default_to_empty_mapping(self):
         info = ModelInfo(name="base", size_mb=142, description="test")
@@ -67,24 +67,11 @@ class TestModelInfoEntity:
     def test_should_store_explicit_engine_priorities(self):
         info = ModelInfo(
             name="base", size_mb=142, description="test",
-            engine_priorities={"faster_whisper": 100, "transformers": 50},
+            engine_priorities={"nano_parakeet": 100, "transformers": 50},
         )
 
-        assert info.engine_priorities["faster_whisper"] == 100
+        assert info.engine_priorities["nano_parakeet"] == 100
         assert info.engine_priorities["transformers"] == 50
-
-    def test_ct2_repo_id_defaults_to_empty(self):
-        info = ModelInfo(name="base", size_mb=142, description="test")
-
-        assert info.ct2_repo_id == ""
-
-    def test_should_store_explicit_ct2_repo_id(self):
-        info = ModelInfo(
-            name="base", size_mb=142, description="test",
-            ct2_repo_id="Systran/faster-whisper-base",
-        )
-
-        assert info.ct2_repo_id == "Systran/faster-whisper-base"
 
 
 class TestWhisperModels:
@@ -97,39 +84,12 @@ class TestWhisperModels:
         for model in WHISPER_MODELS.values():
             assert model.repo_id.startswith("openai/whisper-")
 
-    def test_ct2_repo_ids_are_official_systran_when_present(self):
-        # A CT2 repo id, when set, must point at the official Systran
-        # mirror. large-v3-turbo deliberately has none (Systran never
-        # published a turbo CT2 repo — the old id 401'd), so it is skipped.
+    def test_all_whisper_models_are_transformers_only(self):
+        # Every Whisper model runs solely through the transformers engine
+        # (PyTorch, every backend). The faster-whisper / CTranslate2 engine
+        # was removed for licensing reasons.
         for model in WHISPER_MODELS.values():
-            if model.ct2_repo_id:
-                assert model.ct2_repo_id.startswith("Systran/faster-whisper-")
-
-    def test_faster_whisper_compatibility_matches_ct2_repo_presence(self):
-        # Every Whisper model runs on transformers; faster-whisper is
-        # offered only when there is a real CT2 repo to load from.
-        for model in WHISPER_MODELS.values():
-            assert "transformers" in model.compatible_engines
-            assert ("faster_whisper" in model.compatible_engines) == bool(
-                model.ct2_repo_id
-            )
-
-    def test_large_v3_turbo_is_transformers_only(self):
-        # Systran has no faster-whisper-large-v3-turbo CT2 repo and the only
-        # working mirror is community-hosted, so turbo runs through the
-        # transformers engine alone (no ct2_repo_id, no faster_whisper).
-        turbo = WHISPER_MODELS["large-v3-turbo"]
-
-        assert turbo.ct2_repo_id == ""
-        assert turbo.compatible_engines == ("transformers",)
-
-    def test_faster_whisper_should_outrank_transformers_when_both_offered(self):
-        for model in WHISPER_MODELS.values():
-            if "faster_whisper" in model.compatible_engines:
-                assert (
-                    model.engine_priorities["faster_whisper"]
-                    > model.engine_priorities["transformers"]
-                )
+            assert model.compatible_engines == ("transformers",)
 
 
 class TestParakeetModels:
@@ -145,10 +105,6 @@ class TestParakeetModels:
     def test_all_models_should_be_compatible_with_nano_parakeet_only(self):
         for model in PARAKEET_MODELS.values():
             assert model.compatible_engines == ("nano_parakeet",)
-
-    def test_all_models_should_have_no_ct2_repo_id(self):
-        for model in PARAKEET_MODELS.values():
-            assert model.ct2_repo_id == ""
 
 
 class TestAllModels:
@@ -196,10 +152,6 @@ class TestGraniteModels:
         for model in GRANITE_MODELS.values():
             assert model.compatible_engines == ("granite_speech",)
 
-    def test_all_models_should_have_no_ct2_repo_id(self):
-        for model in GRANITE_MODELS.values():
-            assert model.ct2_repo_id == ""
-
 
 class TestGetModelInfo:
     def test_should_return_whisper_model_by_name(self):
@@ -246,11 +198,20 @@ class TestMigrateEngineField:
     def test_should_leave_engine_unchanged_when_explicitly_set(self, tmp_path):
         config = JsonConfigAdapter(tmp_path / "config.json")
         config.load()
+        config.set("transcription.engine", "nano_parakeet")
+
+        migrate_engine_field(config)
+
+        assert config.get("transcription.engine") == "nano_parakeet"
+
+    def test_should_rewrite_removed_faster_whisper_engine_to_auto(self, tmp_path):
+        config = JsonConfigAdapter(tmp_path / "config.json")
+        config.load()
         config.set("transcription.engine", "faster_whisper")
 
         migrate_engine_field(config)
 
-        assert config.get("transcription.engine") == "faster_whisper"
+        assert config.get("transcription.engine") == "auto"
 
     def test_should_persist_migration_to_disk(self, tmp_path):
         path = tmp_path / "config.json"

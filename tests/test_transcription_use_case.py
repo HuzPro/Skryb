@@ -675,7 +675,7 @@ class TestEmptyRecording:
 class TestDispatchesThroughActionDispatcher:
     """The use case must never touch the recorder or engine directly from
     the hotkey callback — everything goes through the ActionDispatcher so
-    pynput's callback thread is never blocked by slow work."""
+    the keyboard hook's callback thread is never blocked by slow work."""
 
     def test_should_dispatch_activate_handler_rather_than_calling_recorder_directly(self):
         dispatcher = DeferredActionDispatcher()

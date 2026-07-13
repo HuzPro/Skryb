@@ -36,13 +36,6 @@ _TRANSFORMERS_DESCRIPTOR = EngineDescriptor(
     base_priority=50,
 )
 
-_FASTER_WHISPER_DESCRIPTOR = EngineDescriptor(
-    engine_id="faster_whisper",
-    display_name="faster-whisper (CTranslate2)",
-    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
-    base_priority=80,
-)
-
 _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     engine_id="nano_parakeet",
     display_name="nano-parakeet (PyTorch)",
@@ -71,13 +64,12 @@ _NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
 # Per-engine beam_size defaults applied when the user has not set
 # ``transcription.beam_size``. Granite ships IBM's tech-report recipe
 # (``num_beams=4``); the whisper-family decoders converged on 5 as
-# their HF/CTranslate2 default. Keeping these here — not on the
+# their HF default. Keeping these here — not on the
 # adapters — means the config layer owns the "what does unset mean"
 # question, and the adapters keep their own sane defaults intact for
 # direct instantiation.
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "transformers": 5,
-    "faster_whisper": 5,
     "granite_speech": 4,
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
@@ -90,14 +82,12 @@ def build_engine_registry() -> EngineRegistry:
     return EngineRegistry(
         descriptors=[
             _TRANSFORMERS_DESCRIPTOR,
-            _FASTER_WHISPER_DESCRIPTOR,
             _NANO_PARAKEET_DESCRIPTOR,
             _GRANITE_SPEECH_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
         ],
         builders={
             "transformers": _build_transformers_engine,
-            "faster_whisper": _build_faster_whisper_engine,
             "nano_parakeet": _build_nano_parakeet_engine,
             "granite_speech": _build_granite_speech_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
@@ -125,21 +115,6 @@ def _build_transformers_engine(spec: EngineSpec) -> TranscriptionEngine:
         language=spec.language,
         beam_size=spec.beam_size,
         download_root=str(spec.model_dir),
-    )
-
-
-def _build_faster_whisper_engine(spec: EngineSpec) -> TranscriptionEngine:
-    from voicetotext.transcription.faster_whisper_adapter import (
-        FasterWhisperAdapter,
-    )
-
-    return FasterWhisperAdapter(
-        model_name=spec.model_name,
-        repo_id=spec.repo_id,
-        device=spec.device,
-        language=spec.language,
-        beam_size=spec.beam_size,
-        model_dir=spec.model_dir,
     )
 
 
@@ -216,19 +191,15 @@ def engines_with_model_on_disk(
 
 
 def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
-    pairs: list[tuple[EngineId, str]] = []
-    if model_info.repo_id:
-        if "transformers" in model_info.compatible_engines:
-            pairs.append(("transformers", model_info.repo_id))
-        if "nano_parakeet" in model_info.compatible_engines:
-            pairs.append(("nano_parakeet", model_info.repo_id))
-        if "granite_speech" in model_info.compatible_engines:
-            pairs.append(("granite_speech", model_info.repo_id))
-        if "nemotron_streaming" in model_info.compatible_engines:
-            pairs.append(("nemotron_streaming", model_info.repo_id))
-    if model_info.ct2_repo_id:
-        pairs.append(("faster_whisper", model_info.ct2_repo_id))
-    return pairs
+    # Every engine now loads from the same ``repo_id``; the per-engine
+    # routing collapsed once faster-whisper (the only engine that used a
+    # separate ``ct2_repo_id``) was removed.
+    if not model_info.repo_id:
+        return []
+    return [
+        (engine_id, model_info.repo_id)
+        for engine_id in model_info.compatible_engines
+    ]
 
 
 def create_engine_for_active_model(
@@ -248,7 +219,7 @@ def create_engine_for_active_model(
     )
     spec = EngineSpec(
         model_name=model_name,
-        repo_id=_repo_id_for(model_info, engine_id),
+        repo_id=model_info.repo_id,
         device=device_override or _resolve_device(config, hardware),
         language=config.get("transcription.language", "en"),
         beam_size=_resolve_beam_size(config, engine_id),
@@ -264,12 +235,6 @@ def _resolve_beam_size(
     if explicit is None:
         return _DEFAULT_BEAM_SIZE_BY_ENGINE.get(engine_id, _FALLBACK_BEAM_SIZE)
     return explicit  # type: ignore[return-value]
-
-
-def _repo_id_for(model_info: ModelInfo, engine_id: EngineId) -> str:
-    if engine_id == "faster_whisper":
-        return model_info.ct2_repo_id
-    return model_info.repo_id  # transformers and nano_parakeet both use repo_id
 
 
 def _resolve_device(
@@ -297,12 +262,12 @@ def build_composite_model_manager(
     download_manager: DownloadManager,
     active_engine_provider: Callable[[], EngineId],
 ) -> ModelManager:
-    """Build a Composite ModelManager covering both engine caches.
+    """Build a Composite ModelManager covering every engine cache.
 
     Each engine has its own HF repo namespace (``openai/whisper-*`` for
-    transformers, ``Systran/faster-whisper-*`` for CTranslate2) and
+    transformers, ``nvidia/parakeet-*`` for nano-parakeet, etc.) and
     therefore its own ``models--*`` directory under the shared models
-    root. Listing aggregates across both; download/delete routes to
+    root. Listing aggregates across them; download/delete routes to
     the engine returned by ``active_engine_provider``.
     """
     import requests
@@ -324,7 +289,6 @@ def build_composite_model_manager(
     transformers_models = {
         name: info for name, info in WHISPER_MODELS.items() if info.repo_id
     }
-    faster_whisper_models = _ct2_models()
     parakeet_models = {
         name: info for name, info in PARAKEET_MODELS.items() if info.repo_id
     }
@@ -341,13 +305,6 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=transformers_models,
-    )
-    faster_whisper_manager = HuggingFaceModelManager(
-        models_dir=models_dir,
-        download_manager=download_manager,
-        resolver=resolver,
-        file_downloader=file_downloader,
-        models=faster_whisper_models,
     )
     nano_parakeet_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -374,32 +331,9 @@ def build_composite_model_manager(
     return CompositeModelManager(
         by_engine={
             "transformers": transformers_manager,
-            "faster_whisper": faster_whisper_manager,
             "nano_parakeet": nano_parakeet_manager,
             "granite_speech": granite_speech_manager,
             "nemotron_streaming": nemotron_streaming_manager,
         },
         active_engine_provider=active_engine_provider,
     )
-
-
-def _ct2_models() -> dict[str, ModelInfo]:
-    """Mirror ``WHISPER_MODELS`` but swap ``repo_id`` for ``ct2_repo_id``.
-
-    HuggingFaceModelManager looks up models by ``repo_id``, so a
-    faster-whisper child needs entries pointing at the Systran mirror
-    instead of the openai original.
-    """
-    return {
-        name: ModelInfo(
-            name=info.name,
-            size_mb=info.size_mb,
-            description=info.description,
-            repo_id=info.ct2_repo_id,
-            ct2_repo_id=info.ct2_repo_id,
-            compatible_engines=info.compatible_engines,
-            engine_priorities=info.engine_priorities,
-        )
-        for name, info in WHISPER_MODELS.items()
-        if info.ct2_repo_id
-    }

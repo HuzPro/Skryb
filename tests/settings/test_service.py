@@ -93,9 +93,9 @@ class TestEngineCandidatesFor:
 
         candidates = service.engine_candidates_for("base")
 
-        assert len(candidates) == 2
+        assert len(candidates) == 1
         assert candidates[0].is_recommended is True
-        assert candidates[0].engine_id == "faster_whisper"
+        assert candidates[0].engine_id == "transformers"
 
     def test_should_return_empty_when_model_unknown(self):
         from voicetotext.transcription.engine_factory import build_engine_registry
@@ -401,7 +401,7 @@ class TestApplyDraft:
             model_size="base",
             language="en",
             device="auto",
-            engine="faster_whisper",  # changed from "transformers"
+            engine="nano_parakeet",  # changed from "transformers"
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
@@ -635,3 +635,21 @@ class TestStateChangeSubscription:
         bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
 
         assert listener.events == []
+
+
+class TestCatalogHiding:
+    """Hidden models (e.g. unstable loads) are kept defined for the engine
+    layer but withheld from the user-facing catalog so they cannot be
+    selected and loaded."""
+
+    def test_should_hide_unavailable_models_from_list_models(self):
+        from voicetotext.transcription.model_info import (
+            GRANITE_MODELS,
+            WHISPER_MODELS,
+        )
+
+        service, *_ = _build_service(models={**WHISPER_MODELS, **GRANITE_MODELS})
+
+        names = [view.name for view in service.list_models()]
+        assert "granite-speech-4.1-2b" not in names
+        assert "base" in names
