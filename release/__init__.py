@@ -8,6 +8,6 @@ imports the app or PyTorch, so the build logic stays fast to test and
 free of GPU/runtime concerns.
 """
 
-# The product name. Used for the PyInstaller bundle, the download
-# archive, and the version resource. Single source of truth.
+# The product name. Used for the installer filename, the Inno Setup
+# app metadata, and the notices document. Single source of truth.
 APP_NAME = "VoiceToText"
