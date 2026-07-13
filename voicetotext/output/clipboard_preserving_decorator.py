@@ -11,8 +11,11 @@ _logger = logging.getLogger(__name__)
 # the clipboard asynchronously via its message loop.  We must wait before
 # restoring the original clipboard contents.  This is a best-effort
 # heuristic — there is no Windows API to detect when a target app has
-# finished processing a paste.
-_PASTE_CONSUME_DELAY_SECONDS = 0.05
+# finished processing a paste.  50ms was observed losing the race against
+# a busy target app, which then pasted the restored OLD clipboard instead
+# of the transcription.  The delay only defers when the user's previous
+# clipboard returns; it does not delay the paste itself.
+_PASTE_CONSUME_DELAY_SECONDS = 0.25
 
 
 class ClipboardPreservingDecorator(TextOutputHandler):

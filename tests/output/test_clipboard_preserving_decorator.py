@@ -179,6 +179,18 @@ class TestClipboardPreservingDecoratorOutput:
 
         assert call_order == ["save", "restore"]
 
+    def test_should_give_target_at_least_a_quarter_second_to_consume_the_paste(self):
+        # The target app reads the clipboard asynchronously after the
+        # injected Ctrl+V. Restoring the snapshot too early makes slow
+        # targets paste the OLD clipboard contents instead of the
+        # transcription. 50ms was observed losing that race in the wild.
+        decorator, _, _, sleeper = _build_decorator()
+
+        decorator.output("text")
+
+        (delay,), _ = sleeper.sleep.call_args
+        assert delay >= 0.25
+
     def test_should_delegate_sleep_to_injected_sleeper(self):
         decorator, _, _, sleeper = _build_decorator()
 
