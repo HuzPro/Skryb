@@ -6,7 +6,7 @@ from voicetotext.core.action_dispatcher import ActionDispatcher
 class InlineActionDispatcher(ActionDispatcher):
     """Runs every dispatched action immediately on the calling thread.
 
-    Lets orchestration tests exercise the full code path synchronously —
+    Lets orchestration tests exercise the full code path synchronously -
     no sleeps, no timeouts, no _wait_for_* plumbing.  Also records every
     dispatched action for inspection.
     """
@@ -23,7 +23,7 @@ class DeferredActionDispatcher(ActionDispatcher):
     """Queues dispatched actions without running them until drained.
 
     Useful for tests that need to observe intermediate state between
-    the moment an action is scheduled and the moment it runs — e.g. to
+    the moment an action is scheduled and the moment it runs - e.g. to
     check that state has been set to ``TRANSCRIBING`` before the actual
     transcription work executes.
     """

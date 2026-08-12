@@ -41,7 +41,7 @@ class SoundDeviceCuePlayer(RecordingCuePlayer, ReadyCuePlayer):
     def _play(self, samples: np.ndarray) -> None:
         try:
             self._emit(samples)
-        except Exception:  # noqa: BLE001 — a cue must never break recording
+        except Exception:  # noqa: BLE001 - a cue must never break recording
             _logger.debug("recording cue playback failed", exc_info=True)
 
     def _emit(self, samples: np.ndarray) -> None:

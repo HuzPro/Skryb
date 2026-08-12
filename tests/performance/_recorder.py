@@ -5,7 +5,7 @@ audio)`` tuple has an independent version counter that increments every
 time it gets benchmarked, regardless of whether the run succeeded or
 failed. Old entries are never deleted; the file accumulates forever.
 
-Persistence is atomic — writes go to ``<path>.tmp`` first, then
+Persistence is atomic - writes go to ``<path>.tmp`` first, then
 ``Path.replace`` swaps them in. A KeyboardInterrupt mid-write therefore
 either leaves the previous file intact or replaces it completely; the
 file is never half-written.
@@ -126,7 +126,7 @@ class PerformanceRecorder:
             return
         if data.get("schema_version") != _SCHEMA_VERSION:
             _logger.warning(
-                "schema_version mismatch — expected %s, got %s; attempting to read anyway",
+                "schema_version mismatch - expected %s, got %s; attempting to read anyway",
                 _SCHEMA_VERSION,
                 data.get("schema_version"),
             )

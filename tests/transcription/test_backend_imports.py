@@ -5,8 +5,8 @@ backend surfaces as :class:`EngineDependencyMissingError` instead of a
 raw ``ImportError``. But the message must accurately distinguish
 between two distinct failure modes:
 
-* The package is **not installed** — pip install fixes it.
-* The package **is** installed but a submodule import fails — usually
+* The package is **not installed** - pip install fixes it.
+* The package **is** installed but a submodule import fails - usually
   an ABI mismatch with torch (e.g. AMD Windows ROCm torch lacks
   ``torch._C._distributed_c10d``, which transformers 5.x imports
   unconditionally). Telling the user "pip install transformers" here

@@ -66,7 +66,7 @@ class RecordAndTranscribeUseCase:
         # engine was still loading? On ``LOADING → IDLE`` we replay
         # exactly one activation so the user's first hotkey is honoured
         # rather than swallowed. Multiple presses during LOADING
-        # coalesce to a single replay — the user's intent is "start
+        # coalesce to a single replay - the user's intent is "start
         # the moment you're ready", not "start N times".
         self._queued_activation = False
         # ``threading.Timer`` is one-shot: scheduled at recording start
@@ -86,7 +86,7 @@ class RecordAndTranscribeUseCase:
             state = self._state_machine.state
             if state == AppState.LOADING:
                 self._queued_activation = True
-                _logger.info("Hotkey queued — engine still loading.")
+                _logger.info("Hotkey queued - engine still loading.")
                 return
             if state == AppState.IDLE:
                 self._begin_capture()
@@ -103,7 +103,7 @@ class RecordAndTranscribeUseCase:
             if not self._queued_activation:
                 return
             self._queued_activation = False
-        _logger.info("Engine ready — firing queued hotkey.")
+        _logger.info("Engine ready - firing queued hotkey.")
         self._dispatcher.dispatch(self._handle_activate)
 
     def _handle_deactivate(self) -> None:
@@ -191,7 +191,7 @@ class RecordAndTranscribeUseCase:
     def _start_streaming(self) -> None:
         try:
             self._streaming.start(self._on_stream_complete)
-        except Exception as exc:  # noqa: BLE001 — surface to the user
+        except Exception as exc:  # noqa: BLE001 - surface to the user
             _logger.error("Failed to start streaming: %s", exc)
             self._event_bus.publish(ErrorOccurredEvent(error=str(exc)))
             return
@@ -213,8 +213,8 @@ class RecordAndTranscribeUseCase:
     def _finish_streaming(self) -> None:
         # Tear down the per-run streaming bookkeeping. Idempotent on
         # purpose: the user-stop path runs it, and ``_on_stream_complete``
-        # runs it again so a mid-run worker failure — which never passes
-        # through ``_stop_streaming`` — cannot leave ``_streaming_active``
+        # runs it again so a mid-run worker failure - which never passes
+        # through ``_stop_streaming`` - cannot leave ``_streaming_active``
         # latched (which would misroute the next stop) or a cap timer
         # pending (which would auto-stop the next run).
         self._cancel_cap_timer()

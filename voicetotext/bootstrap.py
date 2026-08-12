@@ -113,7 +113,7 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     Older configs used ``None`` (or the sentinel ``"auto"``) to request
     Whisper's auto-detect path.  That path fails on audio shorter than
     30 seconds because of how transformers 5.x routes short-form vs.
-    long-form generation — and short recordings are the whole use case
+    long-form generation - and short recordings are the whole use case
     of this app.  Pinning the language to a specific value (default
     ``"en"``) sidesteps the bug and is more reliable anyway, since
     language detection on sub-30-second utterances is unreliable by
@@ -190,7 +190,7 @@ def _load_engine_with_fallback(
 ) -> TranscriptionEngine:
     """Try the active engine on its preferred device, falling back to CPU.
 
-    Never silently switches engines on failure — the user picked the
+    Never silently switches engines on failure - the user picked the
     engine explicitly (or via ``transcription.engine="auto"`` at config
     time), and a runtime swap to a different engine would download
     different model files. CPU-fallback within the same engine is the
@@ -319,8 +319,8 @@ def _load_engine_and_attach(
     Loads the mode-appropriate engine and installs it into the use case,
     then flips ``LOADING → IDLE``. Failures publish
     :class:`EngineLoadFailedEvent` and recover to ``IDLE`` (via ``ERROR``)
-    so the app stays swappable — see :func:`_recover_from_failed_load`.
-    Exceptions never escape — daemon threads silently drop them.
+    so the app stays swappable - see :func:`_recover_from_failed_load`.
+    Exceptions never escape - daemon threads silently drop them.
     """
     try:
         installer = _load_active_engine_installer(
@@ -346,9 +346,9 @@ def _recover_from_failed_load(
     ``IDLE``/``LOADING``, so leaving the machine in ``ERROR`` would make
     every later model swap raise ``EngineSwapError`` and lock the app until
     restart (the reported "Can only swap engine when idle or loading"). The
-    machine passes *through* ``ERROR`` — the tray paints its sticky error
+    machine passes *through* ``ERROR`` - the tray paints its sticky error
     icon on :class:`EngineLoadFailedEvent` and holds it across the
-    subsequent ``ERROR → IDLE`` change — then settles on ``IDLE`` so the
+    subsequent ``ERROR → IDLE`` change - then settles on ``IDLE`` so the
     user can pick or re-download a working model. Going via ``ERROR``
     (rather than straight ``LOADING → IDLE``) also avoids replaying a hotkey
     that was queued during the failed load into the still-placeholder
@@ -396,7 +396,7 @@ def _warmup_safely(engine: TranscriptionEngine) -> None:
     Transient failures (e.g. ``RuntimeError`` from a backend's first
     kernel compile on silent audio) are swallowed so the first real
     transcription just pays the cold-start cost. Unrecoverable failures
-    — missing backend, missing model file, dead device — are re-raised
+    - missing backend, missing model file, dead device - are re-raised
     as :class:`EngineWarmupError` so the bootstrap layer can publish
     :class:`EngineLoadFailedEvent` and surface an actionable message
     to the tray instead of leaving a half-broken engine attached.
@@ -431,13 +431,13 @@ def _make_active_engine_provider(
 ) -> Callable[[], EngineId]:
     """Return a callable the composite ModelManager polls on each op.
 
-    Resolves the active engine the SAME way the loader does — biased
+    Resolves the active engine the SAME way the loader does - biased
     toward whichever engine actually has loadable files on disk (see
     ``create_engine_for_active_model``). The composite routes
     ``is_installed`` to this active child, so without the on-disk bias a
-    model present only under another engine's repo — e.g. a Parakeet
+    model present only under another engine's repo - e.g. a Parakeet
     model under the nano-parakeet cache while the saved engine is a
-    Whisper backend — looked uninstalled in the UI even though the
+    Whisper backend - looked uninstalled in the UI even though the
     loader could open it. Tying both to the same resolution keeps the
     install state and the loader in agreement.
     """
@@ -505,7 +505,7 @@ def build_first_run_settings_service(
     """Build a SettingsService for the first-run setup window.
 
     No engine is loaded yet (the user hasn't picked a model), so the
-    service uses a :class:`NullEngineHotSwap` — the first-run window
+    service uses a :class:`NullEngineHotSwap` - the first-run window
     never triggers a hot-swap because ``build_app`` will load the
     initial engine after setup completes.
     """
@@ -579,7 +579,7 @@ def build_app(
 
     # The real engine load happens on a background thread so the tray
     # appears immediately. The use case needs an engine reference for
-    # construction — give it a placeholder that raises if anything
+    # construction - give it a placeholder that raises if anything
     # actually tries to transcribe through it. Background thread will
     # swap in the real engine and flip the state machine to IDLE.
     streaming_controller = LiveStreamingController(recorder, output)

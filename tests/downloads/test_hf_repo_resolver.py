@@ -59,7 +59,7 @@ class TestHfRepoResolverListFiles:
 class TestHfRepoResolverIgnorePatterns:
     def test_should_exclude_framework_specific_weights_but_keep_the_rest(self):
         # Only the explicit blocklist (pytorch pickle, TF, Flax) is dropped;
-        # everything else — including a bare ``model.bin`` — passes through.
+        # everything else - including a bare ``model.bin`` - passes through.
         api = MagicMock()
         api.repo_info.return_value = _fake_repo_info(
             sha="sha",

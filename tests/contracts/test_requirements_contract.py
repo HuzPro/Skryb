@@ -13,8 +13,8 @@ Speech engine's transformers feature extractor calls
 `torchaudio.transforms.MelSpectrogram`. It was originally declared
 only in the AMD files, so an NVIDIA user hit a runtime
 "install torchaudio" error because `requirements-nvidia.txt` shipped
-`torch` alone. This contract fails the build if any one-shot file —
-or the canonical `pyproject.toml` dependency list — drops a required
+`torch` alone. This contract fails the build if any one-shot file -
+or the canonical `pyproject.toml` dependency list - drops a required
 torch package again.
 """
 
@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Torch-family packages every one-shot install must provide. `torch`
 # is the engine backbone; `torchaudio` is required by the Granite
-# Speech feature extractor. `torchvision` is deliberately NOT listed —
+# Speech feature extractor. `torchvision` is deliberately NOT listed -
 # no engine imports it, so it stays out of the required set even though
 # AMD's ROCm trio happens to ship it.
 _REQUIRED_TORCH_PACKAGES = frozenset({"torch", "torchaudio"})

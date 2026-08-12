@@ -32,7 +32,7 @@ class ModelInstallationCache:
             if name in self._cache:
                 return self._cache[name]
 
-        # Fetch without holding the lock — ModelManager.is_installed() hits
+        # Fetch without holding the lock - ModelManager.is_installed() hits
         # the filesystem and we don't want to serialize all reads on that.
         result = self._model_manager.is_installed(name)
 
@@ -56,7 +56,7 @@ class ModelInstallationCache:
         """Drop every cached entry.
 
         Engine swaps change the meaning of ``is_installed`` for the
-        whole catalogue — each engine has its own on-disk layout, so a
+        whole catalogue - each engine has its own on-disk layout, so a
         cached ``True`` from the old engine is meaningless for the new
         one. ``invalidate(name)`` is per-model; this is the broadcast
         version called from the settings service when the active engine

@@ -10,7 +10,7 @@ in through this harness and never touch the wired components directly.
 Unlike the in-process ``VoiceToTextApp`` in ``tests/acceptance``, this
 harness uses **real threading** (``ThreadedActionDispatcher``) and a
 **real transcription engine** so that the adapter's post-dispose
-behaviour — raising ``TranscriptionError("Model not loaded")`` — is
+behaviour - raising ``TranscriptionError("Model not loaded")`` - is
 observable.  That behaviour is essential for reproducing the
 record-during-hot-swap race, which fake engines silently mask.
 """
@@ -52,7 +52,7 @@ class BlockingLoader:
     loader signals :attr:`started` and then blocks on :attr:`release`
     until the test explicitly releases it.  This gives the test a
     deterministic window in which to observe and drive intermediate
-    state — no sleeps, no races, no flakiness.
+    state - no sleeps, no races, no flakiness.
     """
 
     def __init__(self, result: TranscriptionEngine) -> None:
@@ -114,7 +114,7 @@ class HotSwapIntegrationApp:
         )
 
     # ------------------------------------------------------------------
-    # Given — programme the world the user sees
+    # Given - programme the world the user sees
     # ------------------------------------------------------------------
 
     def load_tiny_model_for_real(self) -> None:
@@ -167,7 +167,7 @@ class HotSwapIntegrationApp:
         )
 
     # ------------------------------------------------------------------
-    # When — the user's actions
+    # When - the user's actions
     # ------------------------------------------------------------------
 
     def user_presses_hotkey(self) -> None:
@@ -213,7 +213,7 @@ class HotSwapIntegrationApp:
         self._transcription_outcome.clear()
 
     # ------------------------------------------------------------------
-    # Then — observable outcomes
+    # Then - observable outcomes
     # ------------------------------------------------------------------
 
     @property
@@ -253,7 +253,7 @@ class HotSwapIntegrationApp:
         self._blocking_loader = None
         import gc
         gc.collect()
-        # Catch OSError too — on Windows, re-importing torch during
+        # Catch OSError too - on Windows, re-importing torch during
         # shutdown can fail with WinError 1455 ("paging file too small")
         # if the host is low on swap, which would otherwise mask the
         # test's own exit code with a harness traceback.

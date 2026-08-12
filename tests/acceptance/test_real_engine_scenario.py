@@ -4,8 +4,8 @@ This test is the Dave-Farley ATDD layer: it reads as a business
 scenario, uses the same ``VoiceToTextApp`` DSL as the rest of the
 acceptance suite, and swaps in real components only where it matters
 (the transcription engine and the recorded audio).  The rest of the
-pipeline — state machine, event bus, hotkey wiring, clipboard
-preservation, output decorator — stays the same as in production.
+pipeline - state machine, event bus, hotkey wiring, clipboard
+preservation, output decorator - stays the same as in production.
 
 Skipped by default: gated behind ``VOICETOTEXT_RUN_REAL_MODEL_TESTS``
 because importing torch and loading Whisper weights on Windows can
@@ -35,7 +35,7 @@ _REAL_MODEL_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
     not os.environ.get(_REAL_MODEL_OPT_IN),
     reason=(
         "Real-engine acceptance test gated behind "
-        f"{_REAL_MODEL_OPT_IN}=1 — opting in imports torch and loads "
+        f"{_REAL_MODEL_OPT_IN}=1 - opting in imports torch and loads "
         "Whisper weights, which can balloon the Windows pagefile to "
         "fill the disk."
     ),

@@ -12,7 +12,7 @@ class GuiThreadOutputDecorator(TextOutputHandler):
     thread responsible only for inference and hands the actual paste
     to the GUI thread via the injected :class:`GuiThreadDispatcher`.
 
-    The use case is unchanged — it still talks to a
+    The use case is unchanged - it still talks to a
     :class:`TextOutputHandler` and is none the wiser about threading.
     """
 

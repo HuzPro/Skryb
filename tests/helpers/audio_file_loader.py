@@ -5,7 +5,7 @@ This is a thin test-only bridge between ``soundfile`` and the
 if a "transcribe a file" feature ever lands, promote this module to
 ``voicetotext/recording/`` behind an ``AudioFileLoader`` Protocol.
 
-The loader always returns mono float32 samples at 16 kHz — the rate
+The loader always returns mono float32 samples at 16 kHz - the rate
 expected by ``WhisperProcessor``, which refuses other rates.
 """
 

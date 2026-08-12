@@ -26,7 +26,7 @@ class _Session(Protocol):
 class RequestsHttpClient:
     """:class:`HttpClient` implementation backed by a ``requests.Session``.
 
-    Owns a single session so HTTP/1.1 keep-alive is reused across chunks —
+    Owns a single session so HTTP/1.1 keep-alive is reused across chunks -
     this is what actually makes multi-chunk downloads fast against HF.
     """
 

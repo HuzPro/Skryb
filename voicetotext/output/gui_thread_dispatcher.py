@@ -6,7 +6,7 @@ class GuiThreadDispatcher(ABC):
     """Port for marshaling a callable onto the GUI thread.
 
     Win32 clipboard and ``SendInput``-style calls misbehave from
-    non-UI threads — most visibly, in our case, by silently crashing
+    non-UI threads - most visibly, in our case, by silently crashing
     the process after :class:`NanoParakeetAdapter`'s GPU work has
     perturbed the worker thread's HIP runtime state. The use case
     runs on a daemon worker thread (via :class:`ThreadedActionDispatcher`)

@@ -1,7 +1,7 @@
 """Tests for :class:`SoundDeviceAdapter`.
 
-The adapter is driven through its public port — ``start_recording``,
-``stop_recording``, ``is_recording``, ``dispose`` — and chunks are
+The adapter is driven through its public port - ``start_recording``,
+``stop_recording``, ``is_recording``, ``dispose`` - and chunks are
 fed via the same callback that ``sd.InputStream`` would invoke in
 production.  No private-attribute poking.
 """
@@ -19,7 +19,7 @@ from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 
 def _feed(mock_sd, *chunks: np.ndarray) -> None:
     """Fire the callback that the adapter registered with ``sd.InputStream``
-    with each of the given chunks — the same path ``sounddevice`` uses
+    with each of the given chunks - the same path ``sounddevice`` uses
     in production when audio data arrives from the device."""
     callback = mock_sd.InputStream.call_args.kwargs["callback"]
     for chunk in chunks:

@@ -359,7 +359,7 @@ class TestCreateEngineForActiveModel:
         # Speech. When the user has not explicitly set
         # ``transcription.beam_size``, the factory must defer to the
         # per-engine recommendation rather than the whisper default
-        # of 5 — otherwise every default-config user pays a ~25%
+        # of 5 - otherwise every default-config user pays a ~25%
         # decoder latency tax on Granite.
         config = _config(
             model_size="granite-speech-4.1-2b",

@@ -53,7 +53,7 @@ def _load_checkpoint(ckpt_path: Path, map_location: str) -> object:
     for weights_only in (True, False):
         try:
             return _torch_load(ckpt_path, map_location, weights_only)
-        except Exception:  # noqa: BLE001 — try the next load strategy
+        except Exception:  # noqa: BLE001 - try the next load strategy
             continue
     raise RuntimeError(f"could not torch.load {ckpt_path}")
 

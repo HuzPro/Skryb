@@ -1,13 +1,13 @@
 """Regression: the cache-aware session must emit token IDS from encoder frames.
 
-The session had two methods named ``_decode`` — the RNN-T greedy loop
+The session had two methods named ``_decode`` - the RNN-T greedy loop
 (frames -> token ids) and the SentencePiece call (token ids -> text). The second
 shadowed the first, so ``_run_chunk`` handed a multi-element encoder TENSOR to
 ``sp.DecodeIds`` and crashed with "Boolean value of Tensor ... is ambiguous".
 
 These tests drive the real session through ``feed``/``finalize`` over a fake
 model whose encoder has zero layers (chunk frames pass straight to the decoder)
-and whose fake SentencePiece refuses anything but ``list[int]`` — exactly the
+and whose fake SentencePiece refuses anything but ``list[int]`` - exactly the
 contract real sentencepiece enforces.
 """
 from __future__ import annotations

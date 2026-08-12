@@ -53,7 +53,7 @@ class TestWin32ModifierKeyStateReaderAnyModifierDown:
         assert Win32ModifierKeyStateReader().any_modifier_down() is True
 
     def test_should_ignore_non_modifier_keys(self, held_keys):
-        held_keys.add(0x4D)  # VK 'M' — the typical hotkey trigger key
+        held_keys.add(0x4D)  # VK 'M' - the typical hotkey trigger key
 
         assert Win32ModifierKeyStateReader().any_modifier_down() is False
 
@@ -61,7 +61,7 @@ class TestWin32ModifierKeyStateReaderAnyModifierDown:
         self, held_keys, monkeypatch,
     ):
         # GetAsyncKeyState's bit 0 means "pressed since last call", not
-        # "currently down" — it must not keep the paste waiting.
+        # "currently down" - it must not keep the paste waiting.
         monkeypatch.setattr(
             module._user32, "GetAsyncKeyState", lambda vk: 0x0001,
         )

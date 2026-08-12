@@ -4,7 +4,7 @@ Renders a human-readable report describing the Python environment,
 PyTorch state, optional engine backends, audio device defaults, and
 HuggingFace cache path. Every probe is wrapped so a single broken
 module degrades to a ``MISSING`` / ``ERROR`` line rather than crashing
-the whole report — the friend can run this on a misbehaving machine
+the whole report - the friend can run this on a misbehaving machine
 and share the output without needing extra diagnostic skill.
 """
 

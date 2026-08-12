@@ -15,9 +15,9 @@ _TRANSFORMERS_CONFIG_FILENAME = "config.json"
 def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
     """Whether *repo_dir* holds a snapshot a ``local_files_only`` load can use.
 
-    HuggingFace's ``snapshot_download(local_files_only=True)`` — the call
+    HuggingFace's ``snapshot_download(local_files_only=True)`` - the call
     every engine's loader makes under the hood (the transformers Whisper
-    adapter, and nano-parakeet via its patched ``hf_hub_download``) —
+    adapter, and nano-parakeet via its patched ``hf_hub_download``) -
     resolves the default ``main`` revision through
     ``refs/main`` and then reads ``snapshots/<sha>``. So a snapshot is
     only *loadable* when ``refs/main`` exists AND the snapshot directory it
@@ -25,7 +25,7 @@ def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
 
     :class:`~voicetotext.downloads.model_download_job.ModelDownloadJob`
     writes ``refs/main`` last, after every file lands, so a partial or
-    cancelled download has files on disk but no ``refs/main`` — and is
+    cancelled download has files on disk but no ``refs/main`` - and is
     therefore correctly reported as not installed. This is the single
     source of truth shared by :meth:`HuggingFaceModelManager.is_installed`
     and :func:`engine_factory.engines_with_model_on_disk`, so the install
@@ -97,7 +97,7 @@ class HuggingFaceModelManager(ModelManager):
     @staticmethod
     def _is_nemo_layout(snapshot: Path) -> bool:
         # NeMo single-file layout (Parakeet): a `.nemo` file alone is a
-        # complete model — nano-parakeet doesn't need config.json or
+        # complete model - nano-parakeet doesn't need config.json or
         # safetensors weights.
         return any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file())
 
