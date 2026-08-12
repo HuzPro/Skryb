@@ -41,7 +41,7 @@ def model_supports_streaming(
 
     The descriptor's ``supports_streaming`` flag is the single source of
     truth, so adding a second streaming model later is one descriptor
-    flip — no edits here.
+    flip - no edits here.
     """
     return any(
         d.supports_streaming and d.engine_id in model.compatible_engines
@@ -61,7 +61,7 @@ def model_supports_batch(
     """
     compatible = [d for d in descriptors if d.engine_id in model.compatible_engines]
     if not compatible:
-        return True  # unknown engine (e.g. tests) — don't hide it
+        return True  # unknown engine (e.g. tests) - don't hide it
     return any(not d.streaming_only for d in compatible)
 
 

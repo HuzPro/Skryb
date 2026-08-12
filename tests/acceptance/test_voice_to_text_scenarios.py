@@ -1,4 +1,4 @@
-"""Core voice-to-text flow — the user presses a hotkey, speaks, and
+"""Core voice-to-text flow - the user presses a hotkey, speaks, and
 their words are typed into the focused window."""
 
 from tests.acceptance.app_fixture import VoiceToTextApp

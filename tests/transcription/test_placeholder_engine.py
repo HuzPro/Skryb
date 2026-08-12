@@ -30,7 +30,7 @@ class TestPlaceholderEngineContract:
 
 class TestPlaceholderEngineBehaviour:
     def test_should_report_not_loaded(self) -> None:
-        # The placeholder is never "loaded" — it exists purely to give
+        # The placeholder is never "loaded" - it exists purely to give
         # the use case a non-None engine reference while the real one
         # is still being constructed on a background thread.
         assert PlaceholderEngine().is_model_loaded() is False
@@ -52,7 +52,7 @@ class TestPlaceholderEngineBehaviour:
 
     def test_should_no_op_on_warmup(self) -> None:
         # The default ``warmup`` calls ``transcribe`` which would
-        # raise — placeholder must short-circuit so bootstrap can
+        # raise - placeholder must short-circuit so bootstrap can
         # safely warm the use case's engine regardless of which one
         # is currently attached.
         PlaceholderEngine().warmup()

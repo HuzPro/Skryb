@@ -17,7 +17,7 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
     the Tk root drains the queue and runs each action on the main (GUI)
     thread, where Win32 clipboard / SendInput calls are safe. ``after``
     callbacks are not assumed thread-safe, so producers only touch the
-    queue — never the widget tree.
+    queue - never the widget tree.
     """
 
     def __init__(self, root: tkinter.Misc) -> None:

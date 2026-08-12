@@ -1,6 +1,6 @@
 # One-shot install for machines with no GPU (or for users who want a
 # small CPU-only install). Pulls CPU torch + torchaudio from PyTorch's
-# dedicated CPU wheel index — about half the download size of the
+# dedicated CPU wheel index - about half the download size of the
 # default torch wheel, which bundles CUDA libraries even on CPU-only
 # machines.
 --extra-index-url https://download.pytorch.org/whl/cpu

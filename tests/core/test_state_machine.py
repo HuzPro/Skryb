@@ -16,7 +16,7 @@ class TestAppStateMachineInitialState:
 
     def test_should_accept_loading_as_initial_state(self):
         # ``LOADING`` is the entry state when the engine is being
-        # constructed on a background thread at app startup — the
+        # constructed on a background thread at app startup - the
         # state machine must support beginning there rather than
         # transitioning from ``IDLE``.
         bus = SimpleEventBus()

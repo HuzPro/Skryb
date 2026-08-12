@@ -2,7 +2,7 @@
 
 Everything is driven through the public ``load_model`` / ``transcribe`` /
 ``dispose`` port with ``transformers`` and ``torch`` patched at the
-module boundary — these are legitimate seams, not internal details.
+module boundary - these are legitimate seams, not internal details.
 A single helper hides the mock-setup boilerplate so each test reads
 as a behavioural specification.
 """

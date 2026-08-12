@@ -11,7 +11,7 @@ _KEYEVENTF_KEYUP = 0x0002
 _VK_CONTROL = 0x11
 _VK_V = 0x56
 
-# ``dwExtraInfo`` is an ULONG_PTR — it MUST be pointer-sized or SendInput
+# ``dwExtraInfo`` is an ULONG_PTR - it MUST be pointer-sized or SendInput
 # silently injects nothing on 64-bit Windows. ``c_size_t`` matches a
 # pointer's width on both 32- and 64-bit builds.
 _ULONG_PTR = ctypes.c_size_t

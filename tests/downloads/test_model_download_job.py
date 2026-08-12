@@ -14,7 +14,7 @@ from voicetotext.downloads.model_download_job import (
 
 @dataclass
 class _FakeDownloader:
-    """Stand-in for ChunkedFileDownloader — writes a file synchronously."""
+    """Stand-in for ChunkedFileDownloader - writes a file synchronously."""
 
     payloads: dict[str, bytes]
     calls: list = None

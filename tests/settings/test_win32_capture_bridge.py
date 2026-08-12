@@ -1,4 +1,4 @@
-"""Tests for ``Win32CaptureBridge`` — the suppressing key-capture bridge
+"""Tests for ``Win32CaptureBridge`` - the suppressing key-capture bridge
 used during hotkey recording.
 
 The bridge installs a native low-level keyboard hook with suppression so

@@ -1,4 +1,4 @@
-# Base + optional engines — does NOT include `torch`.
+# Base + optional engines - does NOT include `torch`.
 # Install PyTorch separately. See INSTALL.md.
 -r requirements.txt
 nano-parakeet>=0.2.1

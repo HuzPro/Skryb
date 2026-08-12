@@ -43,7 +43,7 @@ _SILENCE_WINDOW_SECONDS = 0.1
 
 # Inference recipe from the Granite Speech tech report (arXiv
 # 2505.08699). The IBM team documented that the model card's quickstart
-# (greedy, no penalty) is not the production recipe — without these
+# (greedy, no penalty) is not the production recipe - without these
 # guards the model collapses into a repetition loop on audio outside
 # its training distribution. ``num_beams=4`` is IBM's recommendation;
 # users can override via ``transcription.beam_size`` in config to
@@ -132,7 +132,7 @@ class _GeneratedOnlyRepetitionPenalty:
 
     Transformers' built-in ``RepetitionPenaltyLogitsProcessor`` also
     penalises prompt tokens. For Granite Speech, the prompt contains
-    the expanded audio placeholder tokens — penalising those treats
+    the expanded audio placeholder tokens - penalising those treats
     legitimate audio context as "already used" and degrades quality.
     The IBM team confirmed this in the public granite-speech-3.3-8b
     discussion; we apply the penalty only to the generated slice.
@@ -164,7 +164,7 @@ class _GeneratedOnlyRepetitionPenalty:
 class GraniteSpeechAdapter(TranscriptionEngine):
     """Granite Speech 4.1 engine backed by transformers' Auto-classes.
 
-    Granite is an autoregressive multimodal LLM — it does ASR via
+    Granite is an autoregressive multimodal LLM - it does ASR via
     ``model.generate()`` over a chat-template prompt that contains the
     ``<|audio|>`` token. The base 4.1-2b variant is only trained on
     ≤60 s utterances, so long audio is split into ≤55 s chunks at

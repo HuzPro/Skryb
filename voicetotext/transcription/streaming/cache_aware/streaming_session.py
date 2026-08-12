@@ -82,7 +82,7 @@ def words_committed_text(tokens: list[int], sp: object) -> str:
 
     The model emits a word as subword tokens across chunks ('▁iss' then 'ue'),
     so a live snapshot must exclude the current word until the next word starts
-    (a new '▁' piece) — otherwise the word-count output writer types it
+    (a new '▁' piece) - otherwise the word-count output writer types it
     half-finished ('issue' -> 'iss'). At finalize the caller decodes ALL tokens.
     """
     last_word_start = 0

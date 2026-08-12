@@ -32,7 +32,7 @@ class FakeTranscriptionEngine(TranscriptionEngine):
         if self._next_result is None:
             raise AssertionError(
                 "FakeTranscriptionEngine.transcribe called without a "
-                "programmed result — call .will_return(...) first."
+                "programmed result - call .will_return(...) first."
             )
         return self._next_result
 

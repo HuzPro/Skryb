@@ -5,7 +5,7 @@
 ``EngineHotSwapCoordinator`` with hand-rolled fakes at every port
 boundary.  Its methods read as business actions; its properties as
 observable outcomes.  Acceptance tests should never reach past it
-into the components it composes — everything they need is exposed
+into the components it composes - everything they need is exposed
 as a first-class DSL step.
 """
 
@@ -89,7 +89,7 @@ class VoiceToTextApp:
         )
 
     # ------------------------------------------------------------------
-    # Given — programme the world the user sees
+    # Given - programme the world the user sees
     # ------------------------------------------------------------------
 
     def user_speaks(self, text: str) -> None:
@@ -140,7 +140,7 @@ class VoiceToTextApp:
 
         Tests that call this must also call
         :func:`tests.helpers.gpu.require_cuda` so they skip cleanly on
-        machines without a GPU.  Call before any ``press_hotkey`` —
+        machines without a GPU.  Call before any ``press_hotkey`` -
         the use case reads ``engine`` at transcribe time via
         :meth:`set_engine`.  The replaced engine is disposed; the new
         one is disposed at :meth:`dispose`.
@@ -162,7 +162,7 @@ class VoiceToTextApp:
         self._engine = real_engine
 
     # ------------------------------------------------------------------
-    # When — the user's actions
+    # When - the user's actions
     # ------------------------------------------------------------------
 
     def press_hotkey(self) -> None:
@@ -175,7 +175,7 @@ class VoiceToTextApp:
         self._hot_swap.start_swap(model_name)
 
     # ------------------------------------------------------------------
-    # Then — observable outcomes
+    # Then - observable outcomes
     # ------------------------------------------------------------------
 
     @property

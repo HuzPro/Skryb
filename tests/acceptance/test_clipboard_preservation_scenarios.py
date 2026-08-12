@@ -1,4 +1,4 @@
-"""Clipboard preservation — the user's clipboard contents survive
+"""Clipboard preservation - the user's clipboard contents survive
 the transcription paste."""
 
 from tests.acceptance.app_fixture import VoiceToTextApp

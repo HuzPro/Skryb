@@ -58,7 +58,7 @@ class TestGuiThreadOutputDecorator:
 
     def test_should_not_call_inner_directly_on_calling_thread(self) -> None:
         # If the dispatcher defers the action, the inner must not have
-        # been called yet — proving the decorator hands off via the
+        # been called yet - proving the decorator hands off via the
         # dispatcher rather than invoking inline.
         inner = _RecordingInner()
         dispatcher = _DeferredDispatcher()

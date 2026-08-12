@@ -1,6 +1,6 @@
 """Unit specs for the cache-aware model's tensor logic.
 
-These run on CPU with random init and tiny inputs — no real checkpoint, no GPU,
+These run on CPU with random init and tiny inputs - no real checkpoint, no GPU,
 no vendor-specific runtime. They pin the dimension/length arithmetic that is
 otherwise only exercised when the real 2.4GB model is loaded on a GPU: the
 8x causal subsampling, the chunked-limited attention mask, the RNN-T joint's
@@ -98,7 +98,7 @@ class _PassthroughDecoder:
 
 
 class _AlternatingJoint:
-    """Emits one non-blank then a blank, alternately — one token per frame."""
+    """Emits one non-blank then a blank, alternately - one token per frame."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -112,7 +112,7 @@ class _AlternatingJoint:
 
 
 class _AlwaysNonBlankJoint:
-    """Never emits blank — forces the per-frame emission cap to engage."""
+    """Never emits blank - forces the per-frame emission cap to engage."""
 
     def __call__(self, enc_frame: torch.Tensor, pred_out: torch.Tensor) -> torch.Tensor:
         logits = torch.full((1, 1, 1, BLANK_ID + 1), -1.0)

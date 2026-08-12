@@ -1,6 +1,6 @@
 """Tests for ``parse_hotkey_combo``.
 
-Parsing is pure — no OS state — so tests drive it through the public
+Parsing is pure - no OS state - so tests drive it through the public
 function and assert on the resulting ``HotkeyKey`` tuple (compared by vk).
 """
 

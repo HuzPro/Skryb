@@ -143,7 +143,7 @@ class _ParakeetStreamingSession(StreamingTranscriptionSession):
 class StreamingNanoParakeetEngine(StreamingTranscriptionEngine):
     """GPU-only streaming engine that reuses the downloaded Parakeet model.
 
-    ``model_factory`` exists for tests — production leaves it ``None`` and
+    ``model_factory`` exists for tests - production leaves it ``None`` and
     the engine loads via :class:`ParakeetModelLoader`, sharing nano-parakeet's
     in-memory model cache with the batch adapter.
     """

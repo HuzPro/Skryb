@@ -20,7 +20,7 @@ class _FakeResult:
 class _RampFakeModel:
     """Stand-in Parakeet for a ramp signal (``data[i] == i``).
 
-    Emits one word per whole absolute second — word ``wK`` spans the
+    Emits one word per whole absolute second - word ``wK`` spans the
     absolute interval ``[K, K+1)`` seconds. Because it reads the absolute
     position from the ramp values, its output stays stable as the window
     grows *and* after the session trims committed audio, so the streaming
@@ -98,7 +98,7 @@ class TestParakeetStreamingSession:
 
     def test_should_not_crash_when_hypothesis_shrinks_after_commit(self):
         # Commit "a","b", then the model returns a shorter list while the
-        # window is over the trim threshold — committed_count > len(ends).
+        # window is over the trim threshold - committed_count > len(ends).
         model = _ScriptedModel([["a", "b"], ["a", "b"], ["a"], ["a"]])
         session = _ParakeetStreamingSession(
             model, max_window_seconds=1.0, cadence_seconds=0.5,

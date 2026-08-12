@@ -10,7 +10,7 @@ class Win32HookAdapter(HotkeyListener):
     """Global hotkey listener backed by a native Win32 keyboard hook.
 
     Translates each raw virtual-key event into a :class:`HotkeyKey` and
-    delegates to the strategy. It never suppresses keys — a global hotkey
+    delegates to the strategy. It never suppresses keys - a global hotkey
     must not swallow the user's keystrokes.
     """
 

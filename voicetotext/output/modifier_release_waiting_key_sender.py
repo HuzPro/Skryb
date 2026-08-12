@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 # is usually still physically held when the synthetic Ctrl+V goes out
 # ~150ms later. The target application then sees Ctrl+Shift+Alt+V and
 # drops the paste. Poll until the user's fingers are off the modifiers,
-# but never stall the pipeline longer than the timeout — a stuck or
+# but never stall the pipeline longer than the timeout - a stuck or
 # remapped key must not swallow the transcription entirely.
 _POLL_INTERVAL_SECONDS = 0.01
 _MAX_WAIT_SECONDS = 1.0

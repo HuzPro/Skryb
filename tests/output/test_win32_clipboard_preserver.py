@@ -3,7 +3,7 @@
 The test strategy is behavioural: we stand up a fake Win32 clipboard
 (an in-memory ``dict[int, bytes]`` mapping format id → data) and
 verify save/restore round-trips.  We do *not* assert on exact ctypes
-call orders — that's implementation detail.
+call orders - that's implementation detail.
 
 One dedicated section guards the ctypes signature declarations.
 Those are a real integration concern: on 64-bit Python, missing
@@ -37,7 +37,7 @@ class _FakeWin32Clipboard:
     Mimics the public behaviour of the subset of ``user32`` and
     ``kernel32`` that :class:`Win32ClipboardPreserver` uses.  Data is
     stored as ``format_id -> bytes``.  ``GlobalLock`` returns the
-    handle itself as the "pointer" — since the fake's
+    handle itself as the "pointer" - since the fake's
     ``string_at``/``memmove`` replacements look up the handle
     directly, there is no real pointer arithmetic to model.
     """
@@ -150,7 +150,7 @@ def log_capture(caplog: pytest.LogCaptureFixture):
 
 
 # ---------------------------------------------------------------------------
-# Behavioural tests — save/restore round-trip
+# Behavioural tests - save/restore round-trip
 # ---------------------------------------------------------------------------
 
 
@@ -219,12 +219,12 @@ class TestSaveEdgeCases:
         self, fake_clipboard: _FakeWin32Clipboard
     ):
         # CF_BITMAP (2) returns an HBITMAP, NOT an HGLOBAL, so calling
-        # GlobalSize/GlobalLock on it is undefined behaviour — at best
+        # GlobalSize/GlobalLock on it is undefined behaviour - at best
         # returns garbage, at worst segfaults the process during
         # _string_at(ptr, garbage_size). Skip it entirely.
         fake_clipboard.contents = {
-            2: b"\x00" * 16,  # CF_BITMAP — must be skipped
-            13: b"safe text",  # CF_UNICODETEXT — must still be preserved
+            2: b"\x00" * 16,  # CF_BITMAP - must be skipped
+            13: b"safe text",  # CF_UNICODETEXT - must still be preserved
         }
         preserver = Win32ClipboardPreserver(InstantSleeper())
 
@@ -260,7 +260,7 @@ class TestSaveEdgeCases:
     ):
         # Registered formats (>= 0xC000) are HGLOBAL by Win32 convention
         # and are how apps put HTML/RTF/file-list custom data on the
-        # clipboard — must continue to round-trip.
+        # clipboard - must continue to round-trip.
         fake_clipboard.contents = {
             0xC001: b"<html>preserved</html>",
             0xC123: b"some-app-format",

@@ -1,7 +1,7 @@
 """Real Whisper transcribing real audio files.
 
 Every test in this module runs once per Whisper model installed in the
-user's HuggingFace cache — the ``real_whisper_engine`` fixture in
+user's HuggingFace cache - the ``real_whisper_engine`` fixture in
 ``conftest.py`` drives the parametrization.  When no models are
 installed the fixture simply has no parameters and every test in this
 module is skipped.

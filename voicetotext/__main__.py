@@ -46,7 +46,7 @@ def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
     ``ChunkedFileDownloader`` writes to ``paths.models_dir``, but
     third-party libraries that use ``hf_hub_download()`` (notably
     ``nano_parakeet``) call it with no ``cache_dir`` argument and fall
-    back to the global default — which would otherwise be
+    back to the global default - which would otherwise be
     ``~/.cache/huggingface/hub``. Pointing the global default at our
     models dir keeps a single source of truth for cached model files.
 
@@ -102,7 +102,7 @@ def _run() -> None:
         _run_first_time_setup(config, model_manager, event_bus, root)
 
     if not _configured_model_installed(config, model_manager):
-        # User closed first-run without installing a model — nothing
+        # User closed first-run without installing a model - nothing
         # to load, so bail cleanly before build_app tries the engine.
         return
 

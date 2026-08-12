@@ -15,7 +15,7 @@ class ParakeetModelLoader:
     Shared by the batch adapter and the streaming engine so the
     ``hf_hub_download`` redirect and the bf16 dtype choice live in exactly
     one place. nano-parakeet caches by ``(repo, device, dtype)``, so asking
-    for the same tuple twice returns the same in-memory model — the batch
+    for the same tuple twice returns the same in-memory model - the batch
     and streaming engines never pay for two loads.
     """
 
@@ -88,7 +88,7 @@ class ParakeetModelLoader:
 
         nano-parakeet calls ``hf_hub_download(repo_id, filename)`` with no
         ``cache_dir``, so it falls through to ``~/.cache/huggingface/hub``.
-        The app's downloader writes to ``self._model_dir`` — without the
+        The app's downloader writes to ``self._model_dir`` - without the
         redirect an already-downloaded model is invisible. The caller has
         already verified the files are on disk, so ``local_files_only``
         short-circuits the upstream HEAD round trip.

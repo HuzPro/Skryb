@@ -104,10 +104,10 @@ class TransformersWhisperAdapter(TranscriptionEngine):
 
     def _model_load_kwargs(self, base: dict[str, object]) -> dict[str, object]:
         # HF 5.x honors config.json ``torch_dtype`` (fp16 for large-v3-turbo),
-        # which breaks CPU Linear/Conv layers — force fp32 on CPU.
+        # which breaks CPU Linear/Conv layers - force fp32 on CPU.
         # Explicit ``attn_implementation="sdpa"`` opts into the SDPA
         # path (Flash / mem-efficient on GPU, scaled-dot-product on
-        # CPU) rather than relying on transformers' default — 20–30%
+        # CPU) rather than relying on transformers' default - 20–30%
         # faster on every backend we ship.
         kwargs = {**base, "attn_implementation": "sdpa"}
         if self._device != "cpu":

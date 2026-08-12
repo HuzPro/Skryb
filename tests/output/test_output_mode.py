@@ -22,7 +22,7 @@ class TestOutputModeMigrate:
 
 
 class TestOutputModePersistedValuesContract:
-    """The enum values are what lands in config.json — changing them is a
+    """The enum values are what lands in config.json - changing them is a
     persisted-format break. These tests pin the contract."""
 
     def test_direct_paste_value_is_direct_paste(self):

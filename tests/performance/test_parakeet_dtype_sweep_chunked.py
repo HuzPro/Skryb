@@ -7,7 +7,7 @@ for this run: splitting long audio into 60 s segments before calling
 ``transcribe()`` should cap peak VRAM at the cost of a few extra
 encoder dispatches.
 
-Short audio (1.58 s) is left unchunked — it's already shorter than the
+Short audio (1.58 s) is left unchunked - it's already shorter than the
 chunk size, so chunking is a no-op there.
 
 Outputs land in

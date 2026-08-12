@@ -25,7 +25,7 @@ _logger = logging.getLogger(__name__)
 
 _STATE_LABELS = {
     AppState.LOADING: "Loading model...",
-    AppState.IDLE: "Idle — ready",
+    AppState.IDLE: "Idle - ready",
     AppState.RECORDING: "Recording...",
     AppState.TRANSCRIBING: "Transcribing...",
     AppState.ERROR: "Error",
@@ -91,7 +91,7 @@ class SystemTrayApp:
         # IDLE. The OS notification balloon can be silenced by Focus
         # Assist, hidden trays, or DND, so the icon is the only
         # guaranteed second channel. Cleared when the user activates
-        # a new recording — that's the implicit acknowledgement.
+        # a new recording - that's the implicit acknowledgement.
         self._error_sticky = False
 
         self._event_bus.subscribe(StateChangedEvent, self._handle_state_changed)
@@ -149,7 +149,7 @@ class SystemTrayApp:
         # keyboard hook; when that happens the timer kills the
         # process anyway, so the user never sees a "ghost" voicetotext
         # process after clicking Quit. Cleanup itself runs inline on
-        # the GUI thread — QSystemTrayIcon mutations require it and
+        # the GUI thread - QSystemTrayIcon mutations require it and
         # the previous daemon-thread design was silently hanging on
         # ``self._tray.hide()`` on some Windows versions, leaving the
         # join blocked indefinitely.
@@ -214,7 +214,7 @@ class SystemTrayApp:
     def _handle_transcription_empty(self, event: TranscriptionEmptyEvent) -> None:
         if self._icon is None:
             return
-        # Soft signal — the engine ran successfully, it just produced
+        # Soft signal - the engine ran successfully, it just produced
         # no text (silent audio, unsupported language). No sticky
         # ERROR icon; just inform the user so they know why the
         # clipboard is empty.
@@ -227,7 +227,7 @@ class SystemTrayApp:
         if new_state == AppState.RECORDING:
             self._error_sticky = False
         # The elapsed-time provider tracks the domain state, not the
-        # icon presentation — install/clear it regardless of whether
+        # icon presentation - install/clear it regardless of whether
         # the error sticky is suppressing the icon update.
         self._update_elapsed_tracking(
             old_state=AppState(event.old_state),
