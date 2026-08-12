@@ -7,7 +7,7 @@ Qt plugin segfaults on Windows (a native contamination unrelated to the
 streaming logic), exactly the reason the performance suite shells out too.
 
 Opt-in (``VOICETOTEXT_RUN_REAL_MODEL_TESTS``), GPU-only, skipped when the
-Parakeet model isn't downloaded. Assertions are lenient — streaming
+Parakeet model isn't downloaded. Assertions are lenient - streaming
 revises its tail, so we pin behaviours any working run satisfies.
 """
 

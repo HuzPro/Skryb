@@ -48,7 +48,7 @@ class TestWordsCommittedText:
 class TestTypedEqualsFinal:
     def test_live_typed_text_equals_final_through_the_writer(self):
         # Simulate per-chunk token growth driving the real output writer, then
-        # the finalize flush — the typed text must equal the final transcript.
+        # the finalize flush - the typed text must equal the final transcript.
         sp = FakeSp(_PIECES)
         out = FakeTextOutputHandler()
         writer = StreamingOutputWriter(out)

@@ -1,4 +1,4 @@
-"""Hotkey activation modes — toggle vs push-to-talk — and their
+"""Hotkey activation modes - toggle vs push-to-talk - and their
 interaction with in-flight transcription."""
 
 from tests.acceptance.app_fixture import VoiceToTextApp

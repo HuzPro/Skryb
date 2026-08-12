@@ -38,7 +38,7 @@ class TestDownloadCoordinatorStart:
         coord = _make_coordinator(manager)
 
         coord.start("base")
-        coord.start("base")  # resume scenario — re-enqueue
+        coord.start("base")  # resume scenario - re-enqueue
         coord.cancel("base")
 
         first.cancel.assert_not_called()
@@ -95,6 +95,6 @@ class TestDownloadCoordinatorCancel:
         coord.cancel("base")
 
         handle.cancel.assert_called_once()
-        # After cancel, the handle should be gone — second cancel is a LookupError.
+        # After cancel, the handle should be gone - second cancel is a LookupError.
         with pytest.raises(LookupError):
             coord.cancel("base")

@@ -6,7 +6,7 @@ from voicetotext.transcription.model_manager import ModelManager
 
 
 class _FakeDownloadHandle:
-    """Minimal DownloadHandle stub — no-op pause/resume/cancel."""
+    """Minimal DownloadHandle stub - no-op pause/resume/cancel."""
 
     def pause(self) -> None: ...
     def resume(self) -> None: ...
@@ -17,7 +17,7 @@ class FakeModelManager(ModelManager):
     """In-memory :class:`ModelManager` with configurable installed state.
 
     Records every ``download`` and ``delete`` call so tests can assert
-    on them.  Returns a trivial no-op download handle — tests that
+    on them.  Returns a trivial no-op download handle - tests that
     need to assert on download progress should use the download
     coordinator layer, not the manager.
     """

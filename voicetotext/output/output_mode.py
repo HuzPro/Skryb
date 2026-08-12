@@ -2,7 +2,7 @@ from enum import Enum
 
 
 # Legacy names that must be rewritten to a current canonical value when
-# a user config file from an earlier release is loaded. Kept minimal —
+# a user config file from an earlier release is loaded. Kept minimal -
 # only rename, do not delete or silently repurpose.
 _LEGACY_RENAMES: dict[str, str] = {
     "auto_paste": "paste_and_clipboard",
@@ -20,7 +20,7 @@ class OutputMode(Enum):
     """How transcribed text is delivered to the focused window.
 
     Enum values are the strings that land in ``config.json``. Changing
-    a value is a persisted-format break — add a rename to
+    a value is a persisted-format break - add a rename to
     :data:`_LEGACY_RENAMES` and keep the value intact instead.
     """
 

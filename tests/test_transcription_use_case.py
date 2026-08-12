@@ -203,7 +203,7 @@ class TestTranscriptionLogging:
     engine returns so the user can see how long every model/engine
     took, not just how long the recording was. The value comes from
     ``TranscriptionResult.transcription_seconds`` so it is engine-
-    agnostic — every adapter sets it via ``time.monotonic()`` around
+    agnostic - every adapter sets it via ``time.monotonic()`` around
     inference.
     """
 
@@ -403,7 +403,7 @@ class TestHotSwapEngine:
 class TestLoadingStateBehaviour:
     """While the engine is loading on a background thread, the use case
     holds a :class:`PlaceholderEngine` and must (a) accept the real
-    engine via ``set_engine`` and (b) ignore hotkey presses safely —
+    engine via ``set_engine`` and (b) ignore hotkey presses safely -
     queueing one for replay so the user's "press hotkey the moment
     the app starts" expectation works once the engine is ready.
     """
@@ -523,7 +523,7 @@ class TestRecordingDurationCap:
         use_case.on_hotkey_activated()
 
         # Pull the callback the use case handed to ``Timer`` and fire
-        # it directly — equivalent to the real timer thread firing.
+        # it directly - equivalent to the real timer thread firing.
         _interval, callback = MockTimer.call_args.args
         callback()
 
@@ -674,7 +674,7 @@ class TestEmptyRecording:
 
 class TestDispatchesThroughActionDispatcher:
     """The use case must never touch the recorder or engine directly from
-    the hotkey callback — everything goes through the ActionDispatcher so
+    the hotkey callback - everything goes through the ActionDispatcher so
     the keyboard hook's callback thread is never blocked by slow work."""
 
     def test_should_dispatch_activate_handler_rather_than_calling_recorder_directly(self):
@@ -707,7 +707,7 @@ class TestDispatchesThroughActionDispatcher:
         use_case.on_hotkey_activated()
         dispatcher.drain_next()  # runs _handle_activate → _stop_and_transcribe → dispatches _do_transcription
 
-        # Transcription is queued but has not run yet — state is TRANSCRIBING.
+        # Transcription is queued but has not run yet - state is TRANSCRIBING.
         assert state_machine.state == AppState.TRANSCRIBING
         engine.transcribe.assert_not_called()
         assert len(dispatcher.pending) == 1

@@ -138,7 +138,7 @@ class TestLoadEngineWithFallback:
     def test_should_warm_engine_up_after_successful_load(self, mock_create):
         # Warmup runs one inference pass right after ``load_model`` so
         # ROCm/CUDA kernels are compiled before the user's first hotkey
-        # press — without it, the first transcription pays a one-off
+        # press - without it, the first transcription pays a one-off
         # multi-second penalty even after the model is fully resident
         # in VRAM.
         engine = MagicMock()
@@ -159,7 +159,7 @@ class TestLoadEngineWithFallback:
     def test_should_swallow_warmup_failures_without_dropping_engine(
         self, mock_create,
     ):
-        # Warmup is a latency optimisation — if it fails (e.g. a backend
+        # Warmup is a latency optimisation - if it fails (e.g. a backend
         # quirk on silent audio), the engine is still usable and the
         # first real transcription just pays the cold-start penalty.
         # The app must continue, not flip to CPU fallback or crash.
@@ -208,7 +208,7 @@ class TestLoadEngineWithFallback:
         _load_engine_with_fallback(config, paths, _REGISTRY, _HARDWARE)
 
         # Both calls go through the SAME factory function, which routes
-        # to the SAME engine_id from config — only device_override differs.
+        # to the SAME engine_id from config - only device_override differs.
         first_call, second_call = mock_create.call_args_list
         assert first_call.args == (config, paths, _REGISTRY, _HARDWARE)
         assert second_call.args == (config, paths, _REGISTRY, _HARDWARE)
@@ -220,7 +220,7 @@ class TestLoadEngineAndAttach:
     engine and transitions ``LOADING → IDLE`` on success. On failure it
     publishes the failure and recovers to ``IDLE`` (via ``ERROR``) so the
     app stays swappable rather than locking up. Tests run the worker on
-    the calling thread — bootstrap spawns the thread separately."""
+    the calling thread - bootstrap spawns the thread separately."""
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_attach_loaded_engine_to_use_case(self, mock_create):

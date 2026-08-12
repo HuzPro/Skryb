@@ -82,7 +82,7 @@ class Win32KeyboardHook:
     ``start`` blocks on a readiness event until the worker has published its
     thread id AND created its message queue (via ``SetWindowsHookExW``), so
     ``stop`` can never race ahead and drop the ``WM_QUIT`` that frees the
-    thread. The hook proc is pinned on the instance — a ``WINFUNCTYPE`` the
+    thread. The hook proc is pinned on the instance - a ``WINFUNCTYPE`` the
     GC collects mid-flight would crash the interpreter.
     """
 

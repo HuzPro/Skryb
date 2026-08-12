@@ -23,15 +23,13 @@ THIRD-PARTY-NOTICES.txt
 *.bin
 *.ckpt
 models/
-.claude
-CLAUDE.md
 
 # Test audio fixtures (large binaries, not needed in git)
 tests/fixtures/audio/*.mp3
 tests/fixtures/audio/*.wav
 tests/fixtures/audio/*.flac
 
-# Performance benchmark results — accumulating local history, machine-specific
+# Performance benchmark results - accumulating local history, machine-specific
 tests/performance/.results/
 
 # Local spike/scratch output (extracted checkpoints, weight-key dumps, reports)

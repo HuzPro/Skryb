@@ -22,7 +22,7 @@ class _HeadResult:
 
 
 class _FakeHttpClient:
-    """Stub for the HTTP client — we don't exercise requests directly here."""
+    """Stub for the HTTP client - we don't exercise requests directly here."""
 
     def __init__(self, head: _HeadResult, bodies: dict[tuple[int, int], bytes]) -> None:
         self.head_response = head

@@ -1,7 +1,7 @@
 """Tests for :class:`NanoParakeetAdapter`.
 
 ``nano_parakeet`` is patched at the module boundary via
-``sys.modules`` — the same seam strategy used by the transformers
+``sys.modules`` - the same seam strategy used by the transformers
 adapter tests.
 """
 
@@ -113,7 +113,7 @@ class TestNanoParakeetAdapterLoadModel:
         self,
     ) -> None:
         # nano_parakeet calls ``hf_hub_download`` from inside its
-        # ``from_pretrained`` — we patch the module-level function so
+        # ``from_pretrained`` - we patch the module-level function so
         # those internal calls land in our app's models dir, with
         # ``local_files_only`` short-circuiting the upstream freshness
         # HEAD request. The patch is active only for the duration of

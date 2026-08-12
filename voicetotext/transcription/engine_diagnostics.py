@@ -12,7 +12,7 @@ import sys
 def vram_snapshot() -> str:
     """Return a short ``allocated/reserved`` VRAM string, or a sentinel.
 
-    Pure read — never raises, never blocks. Returns
+    Pure read - never raises, never blocks. Returns
     ``torch-not-imported`` if torch has not yet been loaded by the
     process, so calling this from a test that mocks torch in
     ``sys.modules`` never triggers a slow real import.
@@ -28,7 +28,7 @@ def vram_snapshot() -> str:
         allocated = torch.cuda.memory_allocated() / mb
         reserved = torch.cuda.memory_reserved() / mb
         return f"allocated={allocated:.0f}MB reserved={reserved:.0f}MB"
-    except Exception as exc:  # pragma: no cover — diagnostic only
+    except Exception as exc:  # pragma: no cover - diagnostic only
         return f"snapshot-failed({exc})"
 
 
@@ -38,7 +38,7 @@ def count_live_adapters() -> int:
     Used by the hot-swap coordinator to verify the previous adapter was
     actually released after a swap. Returns ``-1`` on any failure and
     never raises into the caller. Counts every ``TranscriptionEngine``
-    subclass — adding a new engine does not require updating this fn.
+    subclass - adding a new engine does not require updating this fn.
     """
     try:
         from voicetotext.transcription.engine import TranscriptionEngine
@@ -46,5 +46,5 @@ def count_live_adapters() -> int:
         return sum(
             1 for obj in gc.get_objects() if isinstance(obj, TranscriptionEngine)
         )
-    except Exception:  # pragma: no cover — diagnostic only
+    except Exception:  # pragma: no cover - diagnostic only
         return -1

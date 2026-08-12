@@ -41,7 +41,7 @@ class TranscriptionFailedEvent(DomainEvent):
 
 @dataclass(frozen=True)
 class TranscriptionEmptyEvent(DomainEvent):
-    """Engine returned no text — surfaces "no speech detected" to the UI.
+    """Engine returned no text - surfaces "no speech detected" to the UI.
 
     Without this event the use case silently dropped empty results,
     leaving the user with an empty clipboard and no indication of

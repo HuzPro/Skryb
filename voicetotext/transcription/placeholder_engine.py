@@ -9,7 +9,7 @@ class PlaceholderEngine(TranscriptionEngine):
 
     Bootstrap moves the real engine load off the main thread so the
     tray comes up immediately. The use case still needs a non-None
-    ``TranscriptionEngine`` reference at construction time — this is
+    ``TranscriptionEngine`` reference at construction time - this is
     that reference. The use case also blocks recording attempts while
     the state machine is in ``LOADING``, so ``transcribe`` should
     never actually be invoked; raising rather than returning empty
@@ -31,6 +31,6 @@ class PlaceholderEngine(TranscriptionEngine):
         return None
 
     def warmup(self) -> None:
-        # Override the base default which calls ``transcribe`` — that
+        # Override the base default which calls ``transcribe`` - that
         # would raise. The placeholder has nothing to warm up.
         return None

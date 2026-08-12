@@ -3,7 +3,7 @@
 The doctor exists so a user whose transcription silently fails can run
 one command and get back a multi-line report listing which engine
 backends are installed, what PyTorch sees, and where the HuggingFace
-cache lives. The whole point is that it must never crash — every probe
+cache lives. The whole point is that it must never crash - every probe
 is wrapped so a missing or broken module degrades to an
 "ERROR" / "MISSING" line, not a stack trace.
 """

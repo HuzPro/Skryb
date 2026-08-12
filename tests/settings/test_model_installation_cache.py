@@ -11,7 +11,7 @@ from voicetotext.transcription.model_manager import ModelManager
 
 
 class _FakeModelManager(ModelManager):
-    """In-memory ModelManager stub — counts is_installed() calls."""
+    """In-memory ModelManager stub - counts is_installed() calls."""
 
     def __init__(self, installed: dict[str, bool] | None = None):
         self._installed = dict(installed or {})

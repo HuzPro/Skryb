@@ -1,4 +1,4 @@
-"""Engine hot-swap — swapping the transcription model at runtime."""
+"""Engine hot-swap - swapping the transcription model at runtime."""
 
 from tests.acceptance.app_fixture import VoiceToTextApp
 from tests.builders import a_transcription_result

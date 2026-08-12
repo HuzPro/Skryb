@@ -107,7 +107,7 @@ class TestHuggingFaceModelManagerIsInstalled:
         # A cancelled download writes the files but not refs/main (which the
         # job writes last). huggingface_hub's local_files_only load resolves
         # `main` through refs/main, so without it the model is unloadable
-        # and must NOT report installed — the root cause of the "swap to
+        # and must NOT report installed - the root cause of the "swap to
         # base fails with LocalEntryNotFoundError" report.
         snapshot = (
             tmp_path / "models--openai--whisper-base" / "snapshots" / "abc123"
@@ -166,7 +166,7 @@ class TestHuggingFaceModelManagerIsInstalled:
 
     def test_should_return_true_for_nemo_only_snapshot(self, tmp_path):
         # Parakeet ships as a single .nemo file. nano-parakeet doesn't need
-        # config.json or safetensors — just the .nemo. The install check
+        # config.json or safetensors - just the .nemo. The install check
         # must recognise that as a complete model.
         from voicetotext.transcription.model_info import PARAKEET_MODELS
 

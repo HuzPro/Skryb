@@ -1,8 +1,8 @@
 """Performance-benchmark fixtures, hooks, and gating.
 
 This conftest sets ``HF_HUB_CACHE`` to the app's models directory at
-module-load time — BEFORE any HuggingFace import runs inside the
-project tree — so that ``snapshot_download`` (in ``_pre_download``) and
+module-load time - BEFORE any HuggingFace import runs inside the
+project tree - so that ``snapshot_download`` (in ``_pre_download``) and
 each adapter's ``from_pretrained(..., local_files_only=True)`` both
 agree on where weights live.
 
@@ -49,7 +49,7 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 # with it for the process lifetime.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-# Late imports — these go through huggingface_hub / torch under the hood
+# Late imports - these go through huggingface_hub / torch under the hood
 # and must see HF_HUB_CACHE.
 from voicetotext.transcription.engine_registry import EngineRegistry  # noqa: E402
 from voicetotext.transcription.engine_types import HardwareProfile  # noqa: E402
@@ -88,7 +88,7 @@ def pytest_collection_modifyitems(
 def perf_context(request: pytest.FixtureRequest) -> Iterator[PerformanceContext]:
     if hasattr(request.config, "workerinput"):
         raise RuntimeError(
-            "performance benchmarks cannot run under pytest-xdist — "
+            "performance benchmarks cannot run under pytest-xdist - "
             "VRAM measurements and engine state would corrupt across workers"
         )
 

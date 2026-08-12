@@ -8,8 +8,8 @@ from voicetotext.transcription.result import TranscriptionResult
 
 _WARMUP_SAMPLE_RATE = 16000
 # 2 s of silence is enough to traverse the full encoder → decoder
-# pipeline on every adapter we ship — feature extraction, GPU
-# transfer, kernel compilation, and at least one decoder step — while
+# pipeline on every adapter we ship - feature extraction, GPU
+# transfer, kernel compilation, and at least one decoder step - while
 # staying short enough that the cost is invisible to the user.
 _WARMUP_DURATION_SECONDS = 2.0
 

@@ -14,7 +14,7 @@ class EngineDependencyMissingError(TranscriptionError):
     """The Python package backing an engine is not installed.
 
     Raised by adapter ``load_model()`` implementations when the lazy
-    backend import fails. The message must be actionable — it is
+    backend import fails. The message must be actionable - it is
     surfaced verbatim to the user via the tray (e.g. ``"nano-parakeet
     not installed: pip install nano-parakeet"``).
     """

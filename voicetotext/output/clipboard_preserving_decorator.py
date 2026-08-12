@@ -10,7 +10,7 @@ _logger = logging.getLogger(__name__)
 # After the wrapped adapter simulates Ctrl+V, the target application reads
 # the clipboard asynchronously via its message loop.  We must wait before
 # restoring the original clipboard contents.  This is a best-effort
-# heuristic — there is no Windows API to detect when a target app has
+# heuristic - there is no Windows API to detect when a target app has
 # finished processing a paste.  50ms was observed losing the race against
 # a busy target app, which then pasted the restored OLD clipboard instead
 # of the transcription.  The delay only defers when the user's previous
