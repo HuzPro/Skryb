@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voicetotext"
 version = "0.1.0"
-description = "Local voice-to-text with HuggingFace Whisper (PyTorch) — CUDA/ROCm/CPU"
+description = "Local voice-to-text with HuggingFace Whisper (PyTorch) - CUDA/ROCm/CPU"
+readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE.txt", "NOTICE"]
 authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
