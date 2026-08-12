@@ -1,13 +1,13 @@
 """Build the list of (model, engine, device) benchmark combinations.
 
-Per user constraint: GPU-only — no CPU benchmarks for any model. Each
+Per user constraint: GPU-only - no CPU benchmarks for any model. Each
 combo pairs a model with every engine in its ``compatible_engines``;
 any engine that cannot run on this hardware is captured in the JSON as
 ``status='error'`` rather than skipped, so the report still reflects
 what's possible on this hardware.
 
 The list is computed once at module load. Importing :mod:`model_info`
-is safe — it pulls only ABC/Literal definitions, no torch or HF.
+is safe - it pulls only ABC/Literal definitions, no torch or HF.
 """
 
 from dataclasses import dataclass
@@ -20,7 +20,7 @@ from voicetotext.transcription.model_info import ALL_MODELS
 class BenchmarkCombo:
     model_name: str
     engine_id: EngineId
-    device: str  # always "cuda" — see module docstring
+    device: str  # always "cuda" - see module docstring
 
     @property
     def test_id(self) -> str:

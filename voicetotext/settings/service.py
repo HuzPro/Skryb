@@ -83,7 +83,7 @@ class SettingsService:
     event fan-out to :class:`DownloadEventListener` and
     :class:`EngineEventListener` subscribers.
 
-    The UI depends on this class alone — no imports from
+    The UI depends on this class alone - no imports from
     :mod:`voicetotext.core`, :mod:`voicetotext.transcription`, or
     :mod:`voicetotext.downloads` are needed in ``voicetotext/settings/``
     beyond this file and its collaborators.
@@ -247,7 +247,7 @@ class SettingsService:
     ) -> None:
         """Drop cached ``is_installed`` results when the engine changed.
 
-        Cache keys are model names — engine-agnostic — but the truth
+        Cache keys are model names - engine-agnostic - but the truth
         they cache (``CompositeModelManager.is_installed``) now routes
         to the active engine's repo. A stale ``True`` from before the
         swap would tell the loader a model is ready when its files live
@@ -267,7 +267,7 @@ class SettingsService:
         """Return engines that can drive *model_name* on this hardware.
 
         Empty when registry/hardware aren't wired (first-run path).
-        Otherwise a ranked tuple — the first entry has
+        Otherwise a ranked tuple - the first entry has
         ``is_recommended=True`` and the reason string says why.
         """
         if self._registry is None or self._hardware is None:

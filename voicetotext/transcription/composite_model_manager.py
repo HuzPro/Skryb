@@ -16,7 +16,7 @@ class CompositeModelManager(ModelManager):
     Each engine has its own on-disk cache (``models--openai--whisper-*``
     for transformers, ``models--nvidia--parakeet-*`` for nano-parakeet,
     etc.), so the composite delegates routing decisions to the *active*
-    engine — the one currently selected in the user's config — for
+    engine - the one currently selected in the user's config - for
     actions whose target storage matters (download, delete,
     get_model_path).
 
@@ -25,8 +25,8 @@ class CompositeModelManager(ModelManager):
     engine*: the loader (``create_engine_for_active_model``) picks
     whichever engine has files on disk, so a model present under any
     owning child's cache is installed. Reporting this engine-agnostically
-    keeps every install check — the settings UI, the first-run gate, and
-    the startup auto-load decision — consistent regardless of which engine
+    keeps every install check - the settings UI, the first-run gate, and
+    the startup auto-load decision - consistent regardless of which engine
     the active config currently names. Routing that mutates a specific
     engine's storage (download, delete, get_model_path) still goes to the
     *owning* child, preferring the active engine.
@@ -57,7 +57,7 @@ class CompositeModelManager(ModelManager):
         # Installed == loadable by SOME compatible engine. The loader picks
         # whichever engine has files on disk, so checking only the active
         # child would report a model present under another engine's cache
-        # as missing — the root of the large-v3/turbo Download-vs-Delete
+        # as missing - the root of the large-v3/turbo Download-vs-Delete
         # confusion and the "last model not auto-loaded on startup" report.
         return any(
             child.is_installed(name)
@@ -82,7 +82,7 @@ class CompositeModelManager(ModelManager):
 
         Prefers the active child when it owns the model, so routing
         stays with the engine the user configured. Falls through to the
-        first non-active child that owns the model — this is the path
+        first non-active child that owns the model - this is the path
         Parakeet downloads take when the saved engine is currently a
         Whisper backend. Falls back to the active child for unknown
         models so the existing error surface (KeyError from the child's

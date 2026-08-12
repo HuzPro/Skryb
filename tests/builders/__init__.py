@@ -1,7 +1,7 @@
 """Fluent Test Data Builders for VoiceToText domain objects.
 
 Each builder exposes a module-level constructor that reads as a
-noun-phrase — ``an_audio_segment()``, ``a_transcription_result()`` —
+noun-phrase - ``an_audio_segment()``, ``a_transcription_result()`` -
 so test setup reads as a specification of the data, not a bag of
 raw keyword arguments.
 """

@@ -91,7 +91,7 @@ class TestStateChangeForwarding:
 
     def test_should_label_loading_state_for_user_facing_display(self):
         # Without a label, the tray would render "Unknown" while the
-        # engine is loading on a background thread — confusing to a
+        # engine is loading on a background thread - confusing to a
         # user expecting "the app is starting".
         icon = MagicMock()
 
@@ -148,7 +148,7 @@ class TestPauseResumeListener:
 
 class TestFormatDuration:
     """``format_duration`` powers both the recording-cap notification
-    and the live elapsed-time tooltip — its output ends up directly
+    and the live elapsed-time tooltip - its output ends up directly
     in user-facing surfaces, so the formatting rules are tested in
     isolation rather than via the consumers.
     """
@@ -161,7 +161,7 @@ class TestFormatDuration:
 
     def test_should_round_sub_second_values_down(self):
         # Live tooltip should never claim more time than has actually
-        # elapsed — floor rather than round.
+        # elapsed - floor rather than round.
         assert format_duration(0.9) == "0:00"
         assert format_duration(1.999) == "0:01"
 
@@ -180,7 +180,7 @@ class TestFormatDuration:
         assert format_duration(3661) == "1:01:01"
 
     def test_should_treat_negative_values_as_zero(self):
-        # Defensive — clock skew between recording-start timestamp
+        # Defensive - clock skew between recording-start timestamp
         # and tooltip-tick reads should not produce gibberish.
         assert format_duration(-5) == "0:00"
 
@@ -511,7 +511,7 @@ class TestTranscriptionEmptyNotification:
         assert "speech" in message or "empty" in message
 
     def test_should_not_flip_icon_to_error_on_empty_transcription(self):
-        # Empty audio / no speech is not a hard error — the engine
+        # Empty audio / no speech is not a hard error - the engine
         # ran successfully, it just had nothing to transcribe. The
         # icon must NOT enter the sticky ERROR state for this.
         app, icon = self._build_app_with_icon()
@@ -528,7 +528,7 @@ class TestTranscriptionEmptyNotification:
 class TestErrorIconStickiness:
     """The tray balloon notification can be silently suppressed by
     Focus Assist, Do Not Disturb, or a hidden notification area. A
-    second, persistent visual channel — the tray icon itself — must
+    second, persistent visual channel - the tray icon itself - must
     keep the ERROR state visible until the user acknowledges it by
     starting a new recording.
     """
@@ -549,7 +549,7 @@ class TestErrorIconStickiness:
         # ``_start_recording`` failures, clipboard write errors)
         # publish ``ErrorOccurredEvent`` without ever transitioning
         # the state machine to ERROR. The tray must still flip the
-        # icon — relying on the balloon alone is unreliable.
+        # icon - relying on the balloon alone is unreliable.
         app, icon = self._build_app_with_icon()
         icon.update_state.reset_mock()
 
@@ -601,7 +601,7 @@ class TestErrorIconStickiness:
     def test_should_still_update_elapsed_provider_while_sticky(self):
         # The icon is decoupled from the state machine while sticky,
         # but the elapsed-time provider must still install on entry
-        # to RECORDING and clear on exit — those drive the live
+        # to RECORDING and clear on exit - those drive the live
         # tooltip, which is a separate channel from the icon colour.
         app, icon = self._build_app_with_icon()
         app._event_bus.publish(ErrorOccurredEvent(error="boom"))

@@ -1,6 +1,6 @@
 """Project-wide pytest fixtures and marker registration.
 
-Fixtures here are intentionally thin — each one returns a freshly
+Fixtures here are intentionally thin - each one returns a freshly
 instantiated hand-rolled fake from :mod:`tests.fakes`.  Tests that
 need a specific pre-programmed state should configure the fake inside
 the test body so the setup is visible.
@@ -36,11 +36,11 @@ from voicetotext.core.state_machine import AppStateMachine
 # Desktop/Windows-only test modules, dropped from collection off-Windows
 # because they fail to *import* there (collection runs before marker
 # deselection, so a marker alone cannot save them). Two causes:
-#   * ``ctypes.windll`` — the ``win32_clipboard_*`` / ``win32_key_sender``
+#   * ``ctypes.windll`` - the ``win32_clipboard_*`` / ``win32_key_sender``
 #     modules, and ``voicetotext.bootstrap`` (which imports them at module
 #     top, so any test that imports bootstrap is affected), touch this
 #     Windows-only attribute.
-#   * ``APPDATA`` — ``tests/performance/conftest.py`` reads this
+#   * ``APPDATA`` - ``tests/performance/conftest.py`` reads this
 #     Windows-only environment variable at import time.
 collect_ignore: list[str] = []
 if sys.platform != "win32":
@@ -169,8 +169,8 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
     Whisper's tokenizer pulls in ``sentencepiece`` (and torch loads its
     own native libraries) whose destructors segfault during
-    ``Py_FinalizeEx`` — on Windows (``_sentencepiece.cp312-win_amd64.pyd``)
-    and on Linux alike — turning an all-green run into a 139 exit. This
+    ``Py_FinalizeEx`` - on Windows (``_sentencepiece.cp312-win_amd64.pyd``)
+    and on Linux alike - turning an all-green run into a 139 exit. This
     hook fires after the terminal summary is printed and after pytest-cov
     has written its data, so we flush and exit with the real status
     immediately, before the broken finalizers run.

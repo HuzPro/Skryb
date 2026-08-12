@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voicetotext"
 version = "0.1.0"
-description = "Local voice-to-text with HuggingFace Whisper (PyTorch) — CUDA/ROCm/CPU"
+description = "Local voice-to-text with HuggingFace Whisper (PyTorch) - CUDA/ROCm/CPU"
+readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE.txt", "NOTICE"]
 authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
@@ -22,7 +23,7 @@ dependencies = [
     # Whisper and Granite Speech 4.1-2b.
     "transformers>=4.52.1,<5.9",
     # `accelerate` is a soft dependency of transformers required as soon
-    # as `from_pretrained(device_map=...)` is called — the Granite
+    # as `from_pretrained(device_map=...)` is called - the Granite
     # Speech adapter relies on it for direct-to-GPU model loading. >=1.1
     # matches what transformers 5.8.1 itself declares as its minimum.
     "accelerate>=1.1.0",
@@ -61,7 +62,7 @@ voicetotext = "voicetotext.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `slow` is deselected by default — it covers tests that load real
+# `slow` is deselected by default - it covers tests that load real
 # multi-GB Whisper models or spawn subprocesses that import torch, which
 # can exhaust the Windows pagefile and balloon the OS swap file. Opt in
 # explicitly with `pytest -m slow` when you actually want those.

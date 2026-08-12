@@ -3,7 +3,7 @@
 Sweeps beam counts 1..5 against a fixed-length synthetic audio
 sample to quantify the accuracy/speed tradeoff exposed by Tier 3's
 ``transcription.beam_size`` config knob. Users can pick a value that
-matches their priorities — IBM's tech report recommends 4 for
+matches their priorities - IBM's tech report recommends 4 for
 quality; this measurement says how much wall-clock you pay for it.
 
 Run:
@@ -16,7 +16,7 @@ get.
 """
 import os
 
-# Mirror :func:`voicetotext.__main__._apply_torch_env_overrides` — the
+# Mirror :func:`voicetotext.__main__._apply_torch_env_overrides` - the
 # AOTriton flag has to be set before any ``import torch`` upstack.
 os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
@@ -77,7 +77,7 @@ def _bench_one_beam_count(adapter, audio, num_beams: int) -> list[float]:
     # model resident in VRAM. ``num_beams`` is read at generate-time
     # so the change takes effect on the next transcribe; the first
     # transcribe at each new beam dimension pays a one-off kernel-
-    # compile cost — the dedicated warmup absorbs it.
+    # compile cost - the dedicated warmup absorbs it.
     adapter._num_beams = num_beams
     print(f"\n--- num_beams={num_beams} ---")
     print("  warmup...")

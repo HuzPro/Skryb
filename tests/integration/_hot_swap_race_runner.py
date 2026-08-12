@@ -5,7 +5,7 @@ invoked as a subprocess from
 :mod:`tests.integration.test_recording_during_hot_swap`.  Running the
 real :class:`TransformersWhisperAdapter` inside the main pytest
 process leaves sentencepiece C++ state alive into interpreter
-finalization and segfaults on Windows at shutdown — so we isolate
+finalization and segfaults on Windows at shutdown - so we isolate
 the whole thing in a child process that calls :func:`os._exit` after
 printing a machine-readable result, bypassing normal teardown.
 
@@ -15,7 +15,7 @@ Exit codes
         transcription succeeds using the still-loaded tiny engine).
 ``2``   The tiny Whisper model is not available in the local cache;
         the pytest wrapper turns this into ``pytest.skip``.
-``3``   The invariant was violated — the second transcription failed
+``3``   The invariant was violated - the second transcription failed
         with ``"Model not loaded"`` or any other error.  The pytest
         wrapper turns this into a test failure and surfaces stdout.
 ``4``   The test harness itself raised unexpectedly (timeout, wiring
@@ -53,7 +53,7 @@ def _run() -> int:
 
         app.microphone_will_capture_silence_of(seconds=0.5)
 
-        # Baseline — the real tiny model transcribes silent audio.
+        # Baseline - the real tiny model transcribes silent audio.
         app.user_presses_hotkey()
         app.user_releases_hotkey()
         app.wait_for_next_transcription_outcome(timeout=60)
@@ -121,7 +121,7 @@ def main() -> None:
             )
         )
         code = _EXIT_HARNESS_ERROR
-    # Bypass normal Python shutdown — sentencepiece's teardown
+    # Bypass normal Python shutdown - sentencepiece's teardown
     # segfaults on Windows after CUDA inference has run.  os._exit
     # lets the parent pytest process see our chosen exit code
     # without the crash.

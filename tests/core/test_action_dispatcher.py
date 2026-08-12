@@ -2,7 +2,7 @@
 
 The dispatcher runs each action on a daemon thread. Without an explicit
 top-level catch, an unhandled exception inside the action prints to
-stderr via Python's default ``threading.excepthook`` — easy to miss
+stderr via Python's default ``threading.excepthook`` - easy to miss
 when stderr is the terminal and the user is reading it casually.
 Wrapping with try/except + ``logger.exception`` ensures the failure
 also lands in the persistent debug log.

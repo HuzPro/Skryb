@@ -64,8 +64,8 @@ _NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
 # Per-engine beam_size defaults applied when the user has not set
 # ``transcription.beam_size``. Granite ships IBM's tech-report recipe
 # (``num_beams=4``); the whisper-family decoders converged on 5 as
-# their HF default. Keeping these here — not on the
-# adapters — means the config layer owns the "what does unset mean"
+# their HF default. Keeping these here - not on the
+# adapters - means the config layer owns the "what does unset mean"
 # question, and the adapters keep their own sane defaults intact for
 # direct instantiation.
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {

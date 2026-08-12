@@ -21,7 +21,7 @@ _GMEM_MOVEABLE = 0x0002
 # Standard clipboard formats that the Win32 docs guarantee use an
 # ``HGLOBAL``-backed handle, which is what ``GlobalSize`` / ``GlobalLock``
 # / ``_string_at`` operate on. Any other format may hand us an
-# ``HBITMAP`` / ``HENHMETAFILE`` / ``HPALETTE`` / etc. — calling
+# ``HBITMAP`` / ``HENHMETAFILE`` / ``HPALETTE`` / etc. - calling
 # ``GlobalSize`` on those is undefined and can return garbage sizes that
 # segfault ``_string_at`` and take the whole process with them. We use
 # an *allowlist* and skip everything else.
@@ -52,7 +52,7 @@ def _is_hglobal_backed(fmt: int) -> bool:
         or fmt >= _REGISTERED_FORMAT_MIN
     )
 
-# Install ctypes signatures. REQUIRED on 64-bit Python — without these,
+# Install ctypes signatures. REQUIRED on 64-bit Python - without these,
 # HANDLE (8-byte pointer) return values are truncated to c_int (4 bytes),
 # silently corrupting clipboard handles and cascading into OverflowError
 # when the bogus values flow into _string_at during save().

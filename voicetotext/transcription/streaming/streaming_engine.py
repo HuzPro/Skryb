@@ -27,7 +27,7 @@ class StreamingUpdate:
 
 
 class StreamingTranscriptionSession(ABC):
-    """One live transcription in progress — fed audio chunk by chunk."""
+    """One live transcription in progress - fed audio chunk by chunk."""
 
     @abstractmethod
     def feed(self, chunk: np.ndarray) -> StreamingUpdate:
@@ -39,7 +39,7 @@ class StreamingTranscriptionSession(ABC):
 
 
 class StreamingTranscriptionEngine(ABC):
-    """Factory for streaming sessions — owns the loaded model."""
+    """Factory for streaming sessions - owns the loaded model."""
 
     @abstractmethod
     def load_model(self) -> None: ...

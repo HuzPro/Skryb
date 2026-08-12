@@ -20,7 +20,7 @@ _AMPLITUDE = 0.2
 # distinguishable by ear.
 START_FREQUENCY_HZ = 880.0
 STOP_FREQUENCY_HZ = 587.33
-# A two-note ascending chime for "engine ready / you can dictate now" — longer
+# A two-note ascending chime for "engine ready / you can dictate now" - longer
 # and clearly different from the single start/stop boops.
 READY_LOW_FREQUENCY_HZ = 659.25   # E5
 READY_HIGH_FREQUENCY_HZ = 987.77  # B5

@@ -29,7 +29,7 @@ class LiveStreamingController:
 
     The recorder's audio callback only enqueues frames; a dedicated worker
     thread runs the GPU decode and pastes committed deltas, so the audio
-    thread is never blocked. It owns only the mechanics — the use case
+    thread is never blocked. It owns only the mechanics - the use case
     keeps ownership of state transitions and events, and is told when a
     run finishes via the ``on_complete`` callback.
     """
@@ -98,7 +98,7 @@ class LiveStreamingController:
         error: Exception | None = None
         try:
             result = self._consume_until_sentinel()
-        except Exception as exc:  # noqa: BLE001 — surfaced via on_complete
+        except Exception as exc:  # noqa: BLE001 - surfaced via on_complete
             _logger.exception("streaming worker failed")
             error = exc
             self._stop_recorder_quietly()
@@ -120,7 +120,7 @@ class LiveStreamingController:
     def _stop_recorder_quietly(self) -> None:
         try:
             self._recorder.stop_recording()
-        except Exception:  # noqa: BLE001 — best-effort mic teardown on failure
+        except Exception:  # noqa: BLE001 - best-effort mic teardown on failure
             _logger.debug("recorder stop during cleanup failed", exc_info=True)
 
     def _reset(self) -> None:

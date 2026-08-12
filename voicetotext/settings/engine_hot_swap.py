@@ -26,7 +26,7 @@ _logger = logging.getLogger(__name__)
 
 # The loader builds + loads the next engine and returns an installer that
 # attaches it to the use case (set_engine for batch, set_streaming_engine
-# for streaming) — so this coordinator never needs to know the type.
+# for streaming) - so this coordinator never needs to know the type.
 EngineLoader = Callable[[], EngineInstaller]
 
 

@@ -27,8 +27,8 @@ _VK_9 = 0x39
 class HotkeyKey:
     """A single key identified by its virtual-key code.
 
-    Equality and hashing use ``vk`` ALONE — ``name`` is a display label
-    excluded from comparison — so a key delivered by the OS hook compares
+    Equality and hashing use ``vk`` ALONE - ``name`` is a display label
+    excluded from comparison - so a key delivered by the OS hook compares
     equal to a parsed target regardless of how the target was labelled.
     """
 

@@ -30,7 +30,7 @@ from nano_parakeet.model import (
 class StreamingLogMelPreprocessor(nn.Module):
     """Log-mel features WITHOUT per-utterance normalization.
 
-    The streaming model's preprocessor config is ``normalize: NA`` — it was
+    The streaming model's preprocessor config is ``normalize: NA`` - it was
     trained on raw log-mel, not the per-utterance mean/std-normalized features
     nano_parakeet's offline preprocessor produces. Skipping normalization both
     matches training (better accuracy) and makes the features fully causal, so
@@ -68,7 +68,7 @@ class StreamingLogMelPreprocessor(nn.Module):
             )
         power = torch.view_as_real(stft).pow(2).sum(-1)
         mel = torch.matmul(self.fb.to(power.dtype), power)
-        return torch.log(mel + self.log_zero_guard)  # [1, n_mels, T'] — no norm
+        return torch.log(mel + self.log_zero_guard)  # [1, n_mels, T'] - no norm
 
 N_MELS = 128
 D_MODEL = 1024
@@ -206,7 +206,7 @@ def chunked_limited_mask(
     Frames are grouped into non-overlapping chunks of ``chunk_size`` (= right
     context + 1). Every frame in a chunk attends to the whole chunk (its
     ``right`` lookahead) plus ``left`` frames before the chunk start, so all
-    frames in a chunk share one context window — matching how the model was
+    frames in a chunk share one context window - matching how the model was
     trained (and how the cache-aware streaming pass will batch frames).
     """
     idx = torch.arange(n_frames, device=device)

@@ -5,7 +5,7 @@ from voicetotext.output.sleeper import Sleeper
 
 # OpenClipboard fails when another window currently holds the clipboard
 # open. That is common during streaming dictation, where a delta is pasted
-# every cadence while the user keeps typing elsewhere — the two race for the
+# every cadence while the user keeps typing elsewhere - the two race for the
 # single global clipboard. The owner releases within a millisecond or two,
 # so a short bounded retry turns a spurious "could not open clipboard"
 # failure into a brief wait. The total budget is kept small (~20 ms) because

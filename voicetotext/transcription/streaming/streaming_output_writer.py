@@ -10,7 +10,7 @@ class StreamingOutputWriter:
     never retracts, and finalize only appends), so this writer tracks how
     many words it has already pasted and emits only the new trailing words.
 
-    Tracking *words* — not a raw string prefix — is deliberate. The
+    Tracking *words* - not a raw string prefix - is deliberate. The
     full-utterance decode at finalize can re-punctuate a word that was
     already committed and pasted (e.g. ``"Testing"`` becomes ``"Testing."``
     once the model hears the trailing pause). A naive string-prefix check

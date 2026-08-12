@@ -9,7 +9,7 @@ Sequence per combo:
     1. Build engine via the registry
     2. Time ``load_model()``
     3. Time ``warmup()`` (one silent-audio inference)
-    4. Reset CUDA peak stats (cuda only) — happens AFTER warmup so the
+    4. Reset CUDA peak stats (cuda only) - happens AFTER warmup so the
        peak reflects timed-run allocations only
     5. N timed runs of ``transcribe(audio)`` via ``time.monotonic()``
        outside the adapter, so the metric is uniform across adapters
@@ -171,7 +171,7 @@ def _teardown(engine, device: str) -> None:
         try:
             engine.dispose()
         except Exception:
-            _logger.exception("dispose() raised — continuing teardown")
+            _logger.exception("dispose() raised - continuing teardown")
     del engine
     gc.collect()
     if device == "cuda":
@@ -180,4 +180,4 @@ def _teardown(engine, device: str) -> None:
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
         except Exception:
-            _logger.exception("post-dispose cuda cleanup raised — continuing")
+            _logger.exception("post-dispose cuda cleanup raised - continuing")

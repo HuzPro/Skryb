@@ -1,7 +1,7 @@
 """Tests for :class:`GraniteSpeechAdapter`.
 
 ``transformers`` and ``torch`` are patched at the module boundary via
-``sys.modules`` — the same seam strategy used by the nano-parakeet
+``sys.modules`` - the same seam strategy used by the nano-parakeet
 adapter tests.
 
 ``torch`` is imported eagerly at the module level so its C-extension
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import torch as _torch_eager_import  # noqa: F401 — see module docstring
+import torch as _torch_eager_import  # noqa: F401 - see module docstring
 
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
@@ -147,7 +147,7 @@ class TestGraniteSpeechAdapterLoadModel:
     def test_should_default_to_bfloat16_dtype(self) -> None:
         # bfloat16 is Granite Speech 4.1's native training dtype. Unlike
         # nano-parakeet (which forces fp32 to dodge a kernel mismatch on
-        # ROCm), Granite's bf16 path is well-trodden — keep the model
+        # ROCm), Granite's bf16 path is well-trodden - keep the model
         # card's recommended dtype.
         import torch
         from transformers import AutoModelForSpeechSeq2Seq
@@ -332,7 +332,7 @@ class TestGraniteSpeechAdapterTranscribe:
 class TestGraniteSpeechAdapterMaxNewTokensBudget:
     """Output-token budget must scale with audio duration.
 
-    A fixed budget silently truncates long recordings — a 121 s
+    A fixed budget silently truncates long recordings - a 121 s
     recording previously stopped mid-sentence at the 200-token cap
     even though the audio was captured fully.
     """
@@ -482,7 +482,7 @@ class TestGeneratedOnlyRepetitionPenalty:
         self,
     ) -> None:
         # For negative logits, multiplying by penalty pushes them further
-        # negative — equivalent semantics to dividing positive logits.
+        # negative - equivalent semantics to dividing positive logits.
         # Mirrors Transformers' built-in behaviour, just scoped.
         import torch
 
@@ -505,7 +505,7 @@ class TestGeneratedOnlyRepetitionPenalty:
 class TestGraniteSpeechAdapterConfigurableBeamCount:
     """IBM's tech-report recipe sets ``num_beams=4`` for accuracy.
     Users who prefer the ~Nx speedup from greedy decoding can lower
-    it via the existing ``transcription.beam_size`` config key —
+    it via the existing ``transcription.beam_size`` config key -
     the adapter must honour whatever the engine factory passes in
     rather than hard-coding 4.
     """
@@ -689,7 +689,7 @@ class TestGraniteSpeechAdapterChunking:
         processor, _, _ = _wire_successful_transcribe()
         # One decoded text per chunk. 120 s of audio splits into at
         # least two chunks, and the helper rotates through this list as
-        # successive ``batch_decode`` calls fire — so as long as the
+        # successive ``batch_decode`` calls fire - so as long as the
         # adapter joins with a single space, the prefix of the final
         # text is deterministic regardless of the exact chunk count.
         processor.tokenizer.batch_decode.side_effect = [

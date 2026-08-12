@@ -3,7 +3,7 @@
 Each adapter's ``_import_backend`` wraps its lazy backend import in a
 try/except so a missing or broken backend surfaces as
 :class:`EngineDependencyMissingError` instead of a raw ``ImportError``.
-The challenge is the message — telling the user "pip install
+The challenge is the message - telling the user "pip install
 transformers" when transformers IS installed (but a submodule import
 exploded because of a torch ABI mismatch) wastes their time and hides
 the real cause.
@@ -30,7 +30,7 @@ def make_engine_dependency_error(
         return EngineDependencyMissingError(
             f"{package_name} is installed but failed to load: {underlying}. "
             f"This usually indicates an ABI mismatch between {package_name} "
-            f"and torch (a common case on AMD Windows ROCm) — pin both to "
+            f"and torch (a common case on AMD Windows ROCm) - pin both to "
             f"the versions listed in INSTALL.md."
         )
     return EngineDependencyMissingError(install_hint)

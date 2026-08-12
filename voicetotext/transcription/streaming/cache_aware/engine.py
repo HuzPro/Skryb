@@ -2,7 +2,7 @@
 
 Mirrors :class:`StreamingNanoParakeetEngine`'s shape (GPU-only, warmup, a
 ``model_factory`` seam for tests) but loads the clean-room cache-aware model
-and hands out :class:`CacheAwareStreamingSession` sessions. Runs in fp32 — bf16
+and hands out :class:`CacheAwareStreamingSession` sessions. Runs in fp32 - bf16
 hangs MIOpen kernel-tuning on the current RDNA4 + Windows ROCm stack.
 """
 from __future__ import annotations

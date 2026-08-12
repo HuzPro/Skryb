@@ -10,7 +10,7 @@ The actual scenario is driven by
 :mod:`tests.integration._hot_swap_race_runner` in a subprocess.  That
 child process uses the **real** :class:`TransformersWhisperAdapter`
 with the tiny Whisper model so the adapter's post-dispose behaviour
-(raising ``"Model not loaded"``) is observable — a fake engine would
+(raising ``"Model not loaded"``) is observable - a fake engine would
 silently mask the very failure the test exists to catch.
 
 Running the real transformers stack inside pytest leaks sentencepiece
@@ -19,7 +19,7 @@ shutdown.  Isolating the scenario in a child process that calls
 ``os._exit`` after printing its result keeps the parent pytest
 process clean.
 
-The whole test is gated behind ``VOICETOTEXT_RUN_REAL_MODEL_TESTS`` —
+The whole test is gated behind ``VOICETOTEXT_RUN_REAL_MODEL_TESTS`` -
 without that env var the test skips before ever spawning the
 subprocess. On Windows, ``torch`` opens shared-memory regions backed
 by the OS pagefile during import, and the auto-expanding pagefile
@@ -55,7 +55,7 @@ _REAL_MODEL_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
     not os.environ.get(_REAL_MODEL_OPT_IN),
     reason=(
         "Real-model integration test gated behind "
-        f"{_REAL_MODEL_OPT_IN}=1 — opting in spawns a subprocess that "
+        f"{_REAL_MODEL_OPT_IN}=1 - opting in spawns a subprocess that "
         "imports torch and can balloon the Windows pagefile to fill "
         "the disk."
     ),

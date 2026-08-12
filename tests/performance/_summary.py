@@ -1,8 +1,8 @@
 """ASCII summary table for benchmark results.
 
 Renders the current-run entries grouped by audio fixture, sorted
-(model, engine, device). Numbers are kept short — three decimals for
-seconds, one decimal for RTF and VRAM — so the table fits a 120-char
+(model, engine, device). Numbers are kept short - three decimals for
+seconds, one decimal for RTF and VRAM - so the table fits a 120-char
 terminal.
 """
 

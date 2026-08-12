@@ -24,7 +24,7 @@ _TIMED_RUNS_SHORT = 3
 _TIMED_RUNS_LONG = 1
 
 # Models whose load is observed to corrupt process state on second
-# invocation — the safetensors multi-thread materializer in transformers
+# invocation - the safetensors multi-thread materializer in transformers
 # segfaults on this AMD ROCm Windows host when called twice. To preserve
 # the rest of the sweep, we benchmark the SHORT-audio cycle for these
 # models and record a synthetic skip entry for LONG-audio rather than
@@ -91,7 +91,7 @@ class TestShortAudioBenchmark:
             audio_duration_seconds=short_audio.duration_seconds,
         )
         # Save after every test so a future crash mid-sweep preserves
-        # earlier results. Disk write per test is ~16 KB — negligible.
+        # earlier results. Disk write per test is ~16 KB - negligible.
         perf_context.recorder.save()
         assert result.status in ("ok", "error")
         if result.status == "ok":

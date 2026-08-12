@@ -23,7 +23,7 @@ class ThreadedActionDispatcher(ActionDispatcher):
     def _run(action: Callable[[], None]) -> None:
         # Top-level catch so an unhandled exception in a dispatched
         # action can't slip past Python's default thread excepthook (which
-        # only prints to stderr — easily missed when the log file is the
+        # only prints to stderr - easily missed when the log file is the
         # canonical record). Native crashes still bypass this; for those
         # the only signal is the absence of further log output.
         try:

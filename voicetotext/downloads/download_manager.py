@@ -80,7 +80,7 @@ def _current_eta(active: _ActiveJob) -> float | None:
 def _is_in_flight(state: DownloadState) -> bool:
     """Whether a job is actively queued or running (not re-enqueuable).
 
-    Any other state — PAUSED, FAILED, CANCELLED, COMPLETED — is terminal
+    Any other state - PAUSED, FAILED, CANCELLED, COMPLETED - is terminal
     or idle, so a fresh ``enqueue`` of the same id must start a new run
     rather than no-op. Only an in-flight job is protected from a duplicate
     submit.
@@ -115,7 +115,7 @@ class DownloadManager:
             if existing is not None and _is_in_flight(existing.state):
                 return DownloadHandle(job.job_id, self)
             # Terminal/idle (or never-seen) job: start a fresh run. Replacing
-            # the _ActiveJob — rather than mutating it — zeroes the progress
+            # the _ActiveJob - rather than mutating it - zeroes the progress
             # counters and hands out new cancel/pause Events, so a re-download
             # after cancel/complete/fail starts clean and a still-running
             # orphan worker can only mutate the object we just dropped.
@@ -201,7 +201,7 @@ class DownloadManager:
                 )
             return
 
-        # Job returned normally — check for silent pause/cancel signals.
+        # Job returned normally - check for silent pause/cancel signals.
         if active.cancel_event.is_set():
             self._transition(active, DownloadState.CANCELLED)
             return

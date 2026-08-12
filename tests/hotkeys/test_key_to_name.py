@@ -1,4 +1,4 @@
-"""Tests for ``key_to_canonical_name`` — converting a hook key event back
+"""Tests for ``key_to_canonical_name`` - converting a hook key event back
 to the canonical name string used in config (inverse of the parser)."""
 
 from voicetotext.hotkeys import keys

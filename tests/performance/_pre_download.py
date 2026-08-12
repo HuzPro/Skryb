@@ -1,7 +1,7 @@
 """Ensure every (engine, repo) pair we plan to benchmark is on disk.
 
 Uses ``huggingface_hub.snapshot_download`` directly rather than going
-through the project's chunked downloader — the latter exists for async
+through the project's chunked downloader - the latter exists for async
 UI download flows that we don't need here. Snapshot layout matches what
 the adapters expect (each adapter passes ``local_files_only=True`` and
 reads from ``models_dir``).
@@ -40,7 +40,7 @@ def ensure_models_downloaded(
 ) -> None:
     """Download any (engine, repo) pair not already complete on disk.
 
-    Idempotent — repos whose snapshot already has weights are skipped.
+    Idempotent - repos whose snapshot already has weights are skipped.
     Every engine resolves its repo through ``ModelInfo.repo_id``.
     """
     from huggingface_hub import snapshot_download
@@ -54,9 +54,9 @@ def ensure_models_downloaded(
 
     for engine_id, repo_id in sorted(needed):
         if _repo_complete(models_dir, repo_id):
-            log(f"  [skip] {engine_id:<16} {repo_id} — already on disk")
+            log(f"  [skip] {engine_id:<16} {repo_id} - already on disk")
             continue
-        log(f"  [download] {engine_id:<16} {repo_id} — fetching...")
+        log(f"  [download] {engine_id:<16} {repo_id} - fetching...")
         try:
             snapshot_download(
                 repo_id=repo_id,
@@ -64,15 +64,15 @@ def ensure_models_downloaded(
                 ignore_patterns=list(_HF_IGNORE_PATTERNS),
                 local_files_only=False,
             )
-            log(f"  [download] {engine_id:<16} {repo_id} — complete")
+            log(f"  [download] {engine_id:<16} {repo_id} - complete")
         except Exception as exc:
             # Pre-download failures must NOT abort the sweep. The
             # affected combo will fail loudly at ``engine.load_model()``
             # time (adapters use ``local_files_only=True``) and that
             # failure becomes a ``status='error'`` entry in the JSON
-            # report — which is exactly the contract the user asked for.
+            # report - which is exactly the contract the user asked for.
             log(
-                f"  [download] {engine_id:<16} {repo_id} — FAILED "
+                f"  [download] {engine_id:<16} {repo_id} - FAILED "
                 f"({type(exc).__name__}: {exc}); combo will be recorded "
                 f"as an error during benchmark"
             )

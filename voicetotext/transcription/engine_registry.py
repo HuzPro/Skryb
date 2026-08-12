@@ -35,7 +35,7 @@ class EngineRegistry:
 
     Engines register a descriptor (metadata for the selection layer)
     and a builder (callable that turns an :class:`EngineSpec` into a
-    :class:`TranscriptionEngine`). The registry has no global state —
+    :class:`TranscriptionEngine`). The registry has no global state -
     instances are wired in :func:`voicetotext.bootstrap.build_app` and
     handed down explicitly.
     """
