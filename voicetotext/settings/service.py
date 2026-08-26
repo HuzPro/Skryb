@@ -1,5 +1,7 @@
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from pathlib import Path
 
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.event_bus import EventBus
@@ -16,6 +18,7 @@ from voicetotext.core.events import (
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.output.text_filter_decorator import load_dictionary
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwap
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
@@ -100,10 +103,12 @@ class SettingsService:
         downloads: DownloadCoordinator,
         hot_swap: EngineHotSwap,
         state_machine: AppStateMachine,
+        dictionary_path: Path,
         registry: EngineRegistry | None = None,
         hardware: HardwareProfile | None = None,
     ) -> None:
         self._config = config
+        self._dictionary_path = dictionary_path
         self._model_manager = model_manager
         self._event_bus = event_bus
         self._install_cache = install_cache
@@ -279,6 +284,20 @@ class SettingsService:
         """
         if original.engine != updated.engine:
             self._install_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Personal dictionary
+    # ------------------------------------------------------------------
+
+    def dictionary_rules(self) -> dict[str, str]:
+        return load_dictionary(self._dictionary_path)
+
+    def save_dictionary_rules(self, rules: dict[str, str]) -> None:
+        self._dictionary_path.parent.mkdir(parents=True, exist_ok=True)
+        self._dictionary_path.write_text(
+            json.dumps(rules, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     # ------------------------------------------------------------------
     # Engine + device queries (hardware-aware)

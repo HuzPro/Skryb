@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -38,6 +39,7 @@ def _build_service(
     registry=None,
     hardware=None,
     models=None,
+    dictionary_path: Path | None = None,
 ):
     config_data = {
         "transcription.model_size": "base",
@@ -70,6 +72,7 @@ def _build_service(
         downloads=downloads,
         hot_swap=hot_swap,
         state_machine=state_machine,
+        dictionary_path=dictionary_path or Path("dictionary.json"),
         registry=registry,
         hardware=hardware,
     )
@@ -560,6 +563,7 @@ class TestIsEngineSwapping:
             downloads=downloads,
             hot_swap=hot_swap,
             state_machine=AppStateMachine(bus),
+            dictionary_path=Path("dictionary.json"),
         )
 
         assert service.is_engine_swapping() is False
@@ -730,3 +734,36 @@ class TestLegacyModelProjection:
         service.delete_model("base")
 
         assert "base" not in {view.name for view in service.list_models()}
+
+
+class TestDictionaryRules:
+    def test_should_return_empty_rules_when_file_is_absent(self, tmp_path):
+        service, *_ = _build_service(
+            dictionary_path=tmp_path / "dictionary.json",
+        )
+
+        assert service.dictionary_rules() == {}
+
+    def test_should_round_trip_saved_rules(self, tmp_path):
+        path = tmp_path / "dictionary.json"
+        service, *_ = _build_service(dictionary_path=path)
+
+        service.save_dictionary_rules({"god": "God", "café": "Café"})
+
+        assert service.dictionary_rules() == {"god": "God", "café": "Café"}
+
+    def test_should_write_indented_json(self, tmp_path):
+        path = tmp_path / "dictionary.json"
+        service, *_ = _build_service(dictionary_path=path)
+
+        service.save_dictionary_rules({"god": "God"})
+
+        assert path.read_text(encoding="utf-8").startswith('{\n  "god"')
+
+    def test_should_create_missing_parent_directory(self, tmp_path):
+        path = tmp_path / "nested" / "dictionary.json"
+        service, *_ = _build_service(dictionary_path=path)
+
+        service.save_dictionary_rules({"god": "God"})
+
+        assert path.exists()
