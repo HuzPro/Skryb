@@ -99,9 +99,26 @@ QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_GRANITE_TURBOCTC_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"granite_turboctc": 100},
+)
+
+
+GRANITE_TURBOCTC_MODELS: dict[str, ModelInfo] = {
+    "granite-speech-5.0-470m-turboctc": ModelInfo(
+        name="granite-speech-5.0-470m-turboctc",
+        size_mb=946,
+        description="Fastest, lowest latency (English only, greedy CTC)",
+        repo_id="ibm-granite/granite-speech-5.0-470m-turboctc",
+        compatible_engines=("granite_turboctc",),
+        engine_priorities=_GRANITE_TURBOCTC_ENGINE_PRIORITIES,
+    ),
+}
+
+
 ALL_MODELS: dict[str, ModelInfo] = {
     **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **ARK_ASR_MODELS,
-    **QWEN3_ASR_MODELS,
+    **QWEN3_ASR_MODELS, **GRANITE_TURBOCTC_MODELS,
 }
 
 
