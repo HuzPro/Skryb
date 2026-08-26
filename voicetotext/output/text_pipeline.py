@@ -1,7 +1,12 @@
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+
+import jellyfish
+from text_to_num import alpha2digit
 
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
@@ -9,6 +14,13 @@ from voicetotext.output.dictionary_config import (
     LiteralRule,
     RegexRule,
 )
+from voicetotext.output.punctuation_stage import (
+    PunctuationBackend,
+    PunctuationStage,
+    create_punctuation_backend,
+)
+
+_logger = logging.getLogger(__name__)
 
 
 class PipelineMode(Enum):
@@ -35,6 +47,13 @@ class _Replacement:
     start: int
     end: int
     value: str
+    priority: int
+
+
+@dataclass(frozen=True)
+class _PhoneticRule:
+    replacement: str
+    targets_by_key: dict[str, tuple[str, ...]]
     priority: int
 
 
@@ -80,6 +99,24 @@ _COMMAND_PATTERN = re.compile(
 )
 _LITERAL_PATTERN = re.compile(r"(?<!\w)literal(?!\w)\s+", re.IGNORECASE)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
+_NUMBER = r"\d+(?:\.\d+)?"
+_PERCENT_PATTERN = re.compile(
+    rf"\b({_NUMBER})\s+percent\b", re.IGNORECASE,
+)
+_DOLLARS_AND_CENTS_PATTERN = re.compile(
+    rf"\b({_NUMBER})\s+dollars\s+and\s+(\d+)\s+cents\b", re.IGNORECASE,
+)
+_DOLLARS_PATTERN = re.compile(
+    rf"\b({_NUMBER})\s+dollars\b", re.IGNORECASE,
+)
+_PHONETIC_PRIORITY_BASE = 1 << 60
+_PHONETIC_DISTANCE_LIMIT = 0.34
+_MAX_PHONETIC_WORDS = 4
+_FUNCTION_WORD_STOPLIST = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for",
+    "from", "if", "in", "is", "it", "of", "on", "or", "the", "to",
+    "was", "with",
+})
 
 
 class TextPipeline:
@@ -87,13 +124,29 @@ class TextPipeline:
         self._stages = stages
 
     @classmethod
-    def for_batch(cls, config: DictionaryConfig) -> "TextPipeline":
+    def for_batch(
+        cls,
+        config: DictionaryConfig,
+        punctuation_backend: PunctuationBackend | None = None,
+        models_dir: Path | None = None,
+    ) -> "TextPipeline":
         stages: list[Callable[[str], str]] = []
+        if config.options.punctuation_model:
+            backend = punctuation_backend
+            if backend is None:
+                if models_dir is None:
+                    from voicetotext.core.paths import AppPaths
+
+                    models_dir = AppPaths().models_dir
+                backend = create_punctuation_backend(models_dir)
+            stages.append(PunctuationStage(backend).apply)
         if config.options.remove_fillers:
             stages.append(remove_fillers)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
         stages.append(_RuleStage(config.rules).apply)
+        if config.options.numbers:
+            stages.append(format_numbers)
         return cls(tuple(stages))
 
     @classmethod
@@ -117,11 +170,14 @@ class TextPipeline:
 
 
 def build_pipeline(
-    config: DictionaryConfig, mode: PipelineMode,
+    config: DictionaryConfig,
+    mode: PipelineMode,
+    punctuation_backend: PunctuationBackend | None = None,
+    models_dir: Path | None = None,
 ) -> TextPipeline:
     if mode is PipelineMode.STREAMING:
         return TextPipeline.for_streaming(config)
-    return TextPipeline.for_batch(config)
+    return TextPipeline.for_batch(config, punctuation_backend, models_dir)
 
 
 def tokenize(text: str) -> tuple[TextToken, ...]:
@@ -163,12 +219,24 @@ def apply_spoken_commands(text: str) -> str:
     return formatter.value()
 
 
+def format_numbers(text: str) -> str:
+    converted = alpha2digit(text, "en")
+    converted = _PERCENT_PATTERN.sub(r"\1%", converted)
+    converted = _DOLLARS_AND_CENTS_PATTERN.sub(_format_dollars_and_cents, converted)
+    return _DOLLARS_PATTERN.sub(r"$\1", converted)
+
+
 class _RuleStage:
     def __init__(self, rules: tuple[DictionaryRule, ...]) -> None:
         self._finders = tuple(
             finder
             for index, rule in enumerate(rules)
             if (finder := _make_rule_finder(rule, index)) is not None
+        )
+        self._phonetic_rules = tuple(
+            phonetic_rule
+            for index, rule in enumerate(rules)
+            if (phonetic_rule := _make_phonetic_rule(rule, index)) is not None
         )
 
     def apply(self, text: str) -> str:
@@ -177,7 +245,16 @@ class _RuleStage:
             for finder in self._finders
             for replacement in finder(text)
         ]
-        return _apply_replacements(text, replacements)
+        replacements.extend(_phonetic_replacements(text, self._phonetic_rules))
+        selected = _select_replacements(replacements)
+        for replacement in selected:
+            if replacement.priority >= _PHONETIC_PRIORITY_BASE:
+                _logger.info(
+                    "phonetic: '%s' -> '%s'",
+                    text[replacement.start:replacement.end],
+                    replacement.value,
+                )
+        return _render_replacements(text, selected)
 
 
 class _CommandFormatter:
@@ -337,27 +414,133 @@ def _regex_finder(
     return find
 
 
+def _make_phonetic_rule(
+    rule: DictionaryRule, rule_index: int,
+) -> _PhoneticRule | None:
+    if not isinstance(rule, LiteralRule) or not rule.enabled or not rule.phonetic:
+        return None
+    targets: dict[str, list[str]] = {}
+    for value in (*rule.spoken, rule.replacement):
+        normalized = _normalize_phonetic_text(value)
+        key = jellyfish.metaphone(normalized)
+        if key:
+            targets.setdefault(key, []).append(normalized)
+    if not targets:
+        return None
+    return _PhoneticRule(
+        replacement=rule.replacement,
+        targets_by_key={key: tuple(values) for key, values in targets.items()},
+        priority=_PHONETIC_PRIORITY_BASE + rule_index,
+    )
+
+
+def _phonetic_replacements(
+    text: str, rules: tuple[_PhoneticRule, ...],
+) -> list[_Replacement]:
+    if not rules:
+        return []
+    matches: dict[tuple[int, int], list[tuple[float, _PhoneticRule]]] = {}
+    for words in _word_runs(text):
+        for start_index in range(len(words)):
+            upper = min(len(words), start_index + _MAX_PHONETIC_WORDS)
+            for end_index in range(start_index + 1, upper + 1):
+                ngram = words[start_index:end_index]
+                candidate = "".join(token.text for token in ngram).lower()
+                if len(ngram) == 1 and candidate in _FUNCTION_WORD_STOPLIST:
+                    continue
+                key = jellyfish.metaphone(candidate)
+                if not key:
+                    continue
+                span = (ngram[0].start, ngram[-1].end)
+                for rule in rules:
+                    replacement = _normalize_phonetic_text(rule.replacement)
+                    if candidate == replacement:
+                        continue
+                    targets = rule.targets_by_key.get(key)
+                    if targets is None:
+                        continue
+                    distance = min(
+                        _normalized_distance(candidate, target) for target in targets
+                    )
+                    if distance <= _PHONETIC_DISTANCE_LIMIT:
+                        matches.setdefault(span, []).append((distance, rule))
+    replacements: list[_Replacement] = []
+    for (start, end), candidates in matches.items():
+        best_by_rule: dict[int, tuple[float, _PhoneticRule]] = {}
+        for distance, rule in candidates:
+            current = best_by_rule.get(rule.priority)
+            if current is None or distance < current[0]:
+                best_by_rule[rule.priority] = (distance, rule)
+        ranked = sorted(best_by_rule.values(), key=lambda item: item[0])
+        if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+            continue
+        _, rule = ranked[0]
+        replacements.append(_Replacement(start, end, rule.replacement, rule.priority))
+    return replacements
+
+
+def _word_runs(text: str) -> tuple[tuple[TextToken, ...], ...]:
+    runs: list[tuple[TextToken, ...]] = []
+    current: list[TextToken] = []
+    for token in tokenize(text):
+        if token.kind is TokenKind.WORD:
+            current.append(token)
+        elif token.kind is TokenKind.PUNCTUATION and current:
+            runs.append(tuple(current))
+            current = []
+    if current:
+        runs.append(tuple(current))
+    return tuple(runs)
+
+
+def _normalize_phonetic_text(text: str) -> str:
+    return "".join(text.split()).lower()
+
+
+def _normalized_distance(left: str, right: str) -> float:
+    length = max(len(left), len(right))
+    if length == 0:
+        return 0.0
+    return jellyfish.damerau_levenshtein_distance(left, right) / length
+
+
 def _apply_replacements(text: str, replacements: list[_Replacement]) -> str:
-    if not replacements:
-        return text
+    return _render_replacements(text, _select_replacements(replacements))
+
+
+def _select_replacements(replacements: list[_Replacement]) -> list[_Replacement]:
     ordered = sorted(
         replacements,
         key=lambda replacement: (
+            replacement.priority >= _PHONETIC_PRIORITY_BASE,
             replacement.start,
             -(replacement.end - replacement.start),
             replacement.priority,
         ),
     )
+    selected: list[_Replacement] = []
+    for replacement in ordered:
+        if any(_replacements_overlap(replacement, current) for current in selected):
+            continue
+        selected.append(replacement)
+    return sorted(selected, key=lambda replacement: replacement.start)
+
+
+def _render_replacements(text: str, replacements: list[_Replacement]) -> str:
+    if not replacements:
+        return text
     parts: list[str] = []
     cursor = 0
-    for replacement in ordered:
-        if replacement.start < cursor:
-            continue
+    for replacement in replacements:
         parts.append(text[cursor:replacement.start])
         parts.append(replacement.value)
         cursor = replacement.end
     parts.append(text[cursor:])
     return "".join(parts)
+
+
+def _replacements_overlap(left: _Replacement, right: _Replacement) -> bool:
+    return left.start < right.end and right.start < left.end
 
 
 def _literal_pattern(alias: str, whole_words: bool) -> str:
@@ -390,7 +573,7 @@ def _streaming_rule(rule: DictionaryRule) -> DictionaryRule | None:
         replacement=rule.replacement,
         case_sensitive=rule.case_sensitive,
         whole_words=rule.whole_words,
-        phonetic=rule.phonetic,
+        phonetic=False,
         enabled=rule.enabled,
     )
 
@@ -428,3 +611,8 @@ def _capitalize_first_word(text: str) -> tuple[str, bool]:
     word = match.group(0)
     capitalized = word[:1].upper() + word[1:]
     return text[:match.start()] + capitalized + text[match.end():], True
+
+
+def _format_dollars_and_cents(match: re.Match[str]) -> str:
+    cents = int(match.group(2))
+    return f"${match.group(1)}.{cents:02d}"

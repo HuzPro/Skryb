@@ -238,6 +238,90 @@ class TestRuleStage:
         assert _batch("foo bar", rules) == "bar baz"
 
 
+class TestPhoneticRules:
+    def test_should_correct_a_phonetic_multi_word_candidate(
+        self, app_caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        rules = (LiteralRule(("github",), "GitHub", phonetic=True),)
+
+        result = _batch("open get hub now", rules)
+
+        assert result == "open GitHub now"
+        assert "phonetic: 'get hub' -> 'GitHub'" in app_caplog.messages
+
+    def test_should_use_alias_and_replacement_metaphone_keys(self) -> None:
+        rules = (LiteralRule(("repository",), "GitHub", phonetic=True),)
+
+        assert _batch("get hub", rules) == "GitHub"
+
+    def test_should_not_change_an_existing_replacement(self) -> None:
+        rules = (LiteralRule(("get hub",), "GitHub", phonetic=True),)
+
+        assert _batch("github", rules) == "github"
+
+    def test_should_not_phonetically_replace_single_function_words(self) -> None:
+        rules = (LiteralRule(("too",), "Two", phonetic=True),)
+
+        assert _batch("to", rules) == "to"
+
+    def test_should_let_an_exact_match_win_any_overlap(self) -> None:
+        rules = (
+            LiteralRule(("gethub",), "GitHub", phonetic=True),
+            LiteralRule(("hub",), "HUB"),
+        )
+
+        assert _batch("get hub", rules) == "get HUB"
+
+    def test_should_choose_the_strictly_closer_rule_for_the_same_span(self) -> None:
+        rules = (
+            LiteralRule(("github",), "GitHub", phonetic=True),
+            LiteralRule(("gathub",), "Other", phonetic=True),
+        )
+
+        assert _batch("get hub", rules) == "GitHub"
+
+    def test_should_skip_a_span_when_different_rules_tie(self) -> None:
+        rules = (
+            LiteralRule(("github",), "First", phonetic=True),
+            LiteralRule(("github",), "Second", phonetic=True),
+        )
+
+        assert _batch("get hub", rules) == "get hub"
+
+    def test_should_limit_candidates_to_four_words(self) -> None:
+        rules = (LiteralRule(("one two three four five",), "Matched", phonetic=True),)
+
+        assert _batch("won two three four five", rules) == "won two three four five"
+
+
+class TestNumbers:
+    def test_should_run_alpha2digit_for_english(self) -> None:
+        options = DictionaryOptions(numbers=True)
+
+        assert _batch("I need twenty one items", options=options) == "I need 21 items"
+
+    @pytest.mark.parametrize(("spoken", "expected"), [
+        ("twenty percent", "20%"),
+        ("five dollars and six cents", "$5.06"),
+        ("five dollars", "$5"),
+        ("twelve point five dollars", "$12.5"),
+    ])
+    def test_should_apply_only_the_supported_wrappers(
+        self, spoken: str, expected: str,
+    ) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == expected
+
+    def test_should_apply_number_formatting_after_dictionary_rules(self) -> None:
+        rules = (LiteralRule(("a score",), "twenty"),)
+
+        assert _batch(
+            "a score percent", rules, DictionaryOptions(numbers=True),
+        ) == "20%"
+
+    def test_should_leave_number_words_when_the_module_is_off(self) -> None:
+        assert _batch("twenty percent") == "twenty percent"
+
+
 class TestStreamingPipeline:
     def test_should_keep_fillers_single_token_literals_and_regex(self) -> None:
         config = DictionaryConfig(
@@ -265,3 +349,13 @@ class TestStreamingPipeline:
         )
 
         assert result == "GitHub, yes"
+
+    def test_should_exclude_numbers_and_phonetic_rules(self) -> None:
+        config = DictionaryConfig(
+            options=DictionaryOptions(numbers=True, punctuation_model=True),
+            rules=(LiteralRule(("github",), "GitHub", phonetic=True),),
+        )
+
+        result = TextPipeline.for_streaming(config).process("get hub twenty percent")
+
+        assert result == "get hub twenty percent"

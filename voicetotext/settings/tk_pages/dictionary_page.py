@@ -1,5 +1,6 @@
 import re
 import tkinter
+from collections.abc import Callable
 from dataclasses import replace
 from tkinter import ttk
 
@@ -10,6 +11,7 @@ from voicetotext.output.dictionary_config import (
     LiteralRule,
     RegexRule,
 )
+from voicetotext.output.punctuation_stage import sherpa_onnx_available
 from voicetotext.settings.theme import HEADING_STYLE
 
 _HINT = (
@@ -21,21 +23,33 @@ _INVALID_REGEX_ERROR = "The regex pattern or replacement is invalid: {}"
 _NO_SELECTION_ERROR = "Select a rule from the list first."
 _DUPLICATE_ERROR = "Another literal rule already uses one of those aliases."
 _NOTHING_SELECTED = -1
+_PUNCTUATION_INSTALL_MESSAGE = (
+    "Punctuation restoration requires the optional package: "
+    "pip install voicetotext[punct]"
+)
 
 
 class TkDictionaryPage(ttk.Frame):
-    def __init__(self, parent: tkinter.Misc) -> None:
+    def __init__(
+        self,
+        parent: tkinter.Misc,
+        punctuation_available: Callable[[], bool] = sherpa_onnx_available,
+    ) -> None:
         super().__init__(parent)
+        self._punctuation_available = punctuation_available
         self._dictionary = DictionaryConfig()
         self._selected_index = _NOTHING_SELECTED
         self._dirty = False
         self._remove_fillers_var = tkinter.BooleanVar(master=self)
         self._spoken_commands_var = tkinter.BooleanVar(master=self)
+        self._numbers_var = tkinter.BooleanVar(master=self)
+        self._punctuation_model_var = tkinter.BooleanVar(master=self)
         self._rule_type_var = tkinter.StringVar(master=self, value="literal")
         self._spoken_var = tkinter.StringVar(master=self)
         self._replacement_var = tkinter.StringVar(master=self)
         self._case_sensitive_var = tkinter.BooleanVar(master=self)
         self._whole_words_var = tkinter.BooleanVar(master=self, value=True)
+        self._phonetic_var = tkinter.BooleanVar(master=self)
         self._message_var = tkinter.StringVar(master=self)
         self._build()
 
@@ -72,6 +86,20 @@ class TkDictionaryPage(ttk.Frame):
             command=self._mark_dirty,
         )
         self._commands_check.pack(side="left", padx=(16, 0))
+        self._numbers_check = ttk.Checkbutton(
+            options,
+            text="Format numbers",
+            variable=self._numbers_var,
+            command=self._mark_dirty,
+        )
+        self._numbers_check.pack(side="left", padx=(16, 0))
+        self._punctuation_check = ttk.Checkbutton(
+            options,
+            text="Restore punctuation",
+            variable=self._punctuation_model_var,
+            command=self._on_punctuation_toggle,
+        )
+        self._punctuation_check.pack(side="left", padx=(16, 0))
 
     def _build_editor(self) -> None:
         editor = ttk.Frame(self)
@@ -124,6 +152,10 @@ class TkDictionaryPage(ttk.Frame):
             editor, text="Whole words", variable=self._whole_words_var,
         )
         self._whole_check.grid(row=3, column=2, sticky="w", pady=(4, 0))
+        self._phonetic_check = ttk.Checkbutton(
+            editor, text="Phonetic", variable=self._phonetic_var,
+        )
+        self._phonetic_check.grid(row=3, column=3, sticky="w", pady=(4, 0))
 
         self._add_button = ttk.Button(editor, text="Add", command=self.add_rule)
         self._add_button.grid(row=4, column=1, sticky="w", pady=(5, 0))
@@ -188,13 +220,12 @@ class TkDictionaryPage(ttk.Frame):
             self._message_var.set(_EMPTY_SPOKEN_ERROR)
             return None
         enabled = original.enabled if isinstance(original, LiteralRule) else True
-        phonetic = original.phonetic if isinstance(original, LiteralRule) else False
         return LiteralRule(
             spoken=aliases,
             replacement=replacement,
             case_sensitive=self._case_sensitive_var.get(),
             whole_words=self._whole_words_var.get(),
-            phonetic=phonetic,
+            phonetic=self._phonetic_var.get(),
             enabled=enabled,
         )
 
@@ -224,16 +255,20 @@ class TkDictionaryPage(ttk.Frame):
         self._update_options()
 
     def _update_options(self) -> None:
-        current = self._dictionary.options
         self._dictionary = replace(
             self._dictionary,
             options=DictionaryOptions(
                 remove_fillers=self._remove_fillers_var.get(),
                 spoken_commands=self._spoken_commands_var.get(),
-                numbers=current.numbers,
-                punctuation_model=current.punctuation_model,
+                numbers=self._numbers_var.get(),
+                punctuation_model=self._punctuation_model_var.get(),
             ),
         )
+
+    def _on_punctuation_toggle(self) -> None:
+        self._mark_dirty()
+        if self._punctuation_model_var.get() and not self._punctuation_available():
+            self._message_var.set(_PUNCTUATION_INSTALL_MESSAGE)
 
     def _clear_editor(self) -> None:
         self._selected_index = _NOTHING_SELECTED
@@ -242,6 +277,7 @@ class TkDictionaryPage(ttk.Frame):
         self._replacement_var.set("")
         self._case_sensitive_var.set(False)
         self._whole_words_var.set(True)
+        self._phonetic_var.set(False)
         self._message_var.set("")
         self._sync_rule_type()
 
@@ -263,11 +299,13 @@ class TkDictionaryPage(ttk.Frame):
             self._spoken_var.set(", ".join(rule.spoken))
             self._case_sensitive_var.set(rule.case_sensitive)
             self._whole_words_var.set(rule.whole_words)
+            self._phonetic_var.set(rule.phonetic)
         else:
             self._rule_type_var.set("regex")
             self._spoken_var.set(rule.pattern)
             self._case_sensitive_var.set(False)
             self._whole_words_var.set(False)
+            self._phonetic_var.set(False)
         self._replacement_var.set(rule.replacement)
         self._message_var.set("")
         self._sync_rule_type()
@@ -276,6 +314,7 @@ class TkDictionaryPage(ttk.Frame):
         state = "!disabled" if self._rule_type_var.get() == "literal" else "disabled"
         self._case_check.state([state])
         self._whole_check.state([state])
+        self._phonetic_check.state([state])
 
     def dictionary(self) -> DictionaryConfig:
         self._update_options()
@@ -285,9 +324,13 @@ class TkDictionaryPage(ttk.Frame):
         self._dictionary = dictionary
         self._remove_fillers_var.set(dictionary.options.remove_fillers)
         self._spoken_commands_var.set(dictionary.options.spoken_commands)
+        self._numbers_var.set(dictionary.options.numbers)
+        self._punctuation_model_var.set(dictionary.options.punctuation_model)
         self._dirty = False
         self._clear_editor()
         self._refresh_listbox()
+        if dictionary.options.punctuation_model and not self._punctuation_available():
+            self._message_var.set(_PUNCTUATION_INSTALL_MESSAGE)
 
     def is_dirty(self) -> bool:
         return self._dirty
@@ -319,6 +362,12 @@ class TkDictionaryPage(ttk.Frame):
     def commands_check(self) -> ttk.Checkbutton:
         return self._commands_check
 
+    def numbers_check(self) -> ttk.Checkbutton:
+        return self._numbers_check
+
+    def punctuation_check(self) -> ttk.Checkbutton:
+        return self._punctuation_check
+
     def literal_radio(self) -> ttk.Radiobutton:
         return self._literal_radio
 
@@ -330,6 +379,9 @@ class TkDictionaryPage(ttk.Frame):
 
     def whole_words_check(self) -> ttk.Checkbutton:
         return self._whole_check
+
+    def phonetic_check(self) -> ttk.Checkbutton:
+        return self._phonetic_check
 
 
 def _rule_label(rule: DictionaryRule) -> str:

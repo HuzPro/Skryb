@@ -141,6 +141,7 @@ def _build_output(
     gui_dispatcher: GuiThreadDispatcher,
     dictionary_path: Path | None = None,
     pipeline_mode: PipelineMode = PipelineMode.BATCH,
+    models_dir: Path | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -178,7 +179,7 @@ def _build_output(
     )
     return TextFilterDecorator(
         inner=gui_output,
-        pipeline=build_pipeline(dictionary, pipeline_mode),
+        pipeline=build_pipeline(dictionary, pipeline_mode, models_dir=models_dir),
     )
 
 
@@ -617,7 +618,7 @@ def build_app(
     gui_dispatcher = TkGuiThreadDispatcher(root)
     output = _build_output(
         _resolve_output_mode(config), gui_dispatcher, paths.dictionary_path,
-        _resolve_pipeline_mode(config),
+        _resolve_pipeline_mode(config), paths.models_dir,
     )
     overlay = (
         RecordingOverlay(
@@ -691,6 +692,7 @@ def build_app(
                 changes, config, record_and_transcribe_use_case, app,
                 gui_dispatcher=gui_dispatcher,
                 dictionary_path=paths.dictionary_path,
+                models_dir=paths.models_dir,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
@@ -740,6 +742,7 @@ def apply_settings(
     app: SystemTrayApp,
     gui_dispatcher: GuiThreadDispatcher,
     dictionary_path: Path | None = None,
+    models_dir: Path | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -751,7 +754,7 @@ def apply_settings(
         use_case.set_output(
             _build_output(
                 _resolve_output_mode(config), gui_dispatcher, dictionary_path,
-                _resolve_pipeline_mode(config),
+                _resolve_pipeline_mode(config), models_dir,
             )
         )
 
