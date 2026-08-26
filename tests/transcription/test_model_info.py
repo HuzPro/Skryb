@@ -8,6 +8,7 @@ from voicetotext.transcription.model_info import (
     ALL_MODELS,
     ARK_ASR_MODELS,
     DEFAULT_MODEL,
+    GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     QWEN3_ASR_MODELS,
@@ -64,6 +65,7 @@ class TestModelCatalog:
             | set(NEMOTRON_STREAMING_MODELS)
             | set(ARK_ASR_MODELS)
             | set(QWEN3_ASR_MODELS)
+            | set(GRANITE_TURBOCTC_MODELS)
         )
 
     def test_default_should_be_current_parakeet(self) -> None:

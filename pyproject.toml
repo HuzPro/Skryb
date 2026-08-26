@@ -23,12 +23,14 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
-    # Qwen3-ASR shipped natively in transformers 5.13 (Qwen/Qwen3-ASR-*-hf);
-    # ARK-ASR needs 4.57.6+. librosa and soundfile are imported by ARK's
-    # remote processing code.
-    "transformers>=5.13.0",
+    # Transformers engines: GraniteSpeech5ForCTC landed in 5.16 (the
+    # highest floor; Qwen3-ASR needs 5.13, ARK-ASR 4.57.6). librosa and
+    # soundfile are imported by ARK's remote processing code; torchaudio
+    # feeds Granite's log-mel feature extractor.
+    "transformers>=5.16.1",
     "librosa>=0.10.0",
     "soundfile>=0.12.0",
+    "torchaudio>=2.2.0",
     "text2num>=3.1",
     "jellyfish>=1.0",
 ]
