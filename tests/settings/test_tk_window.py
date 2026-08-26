@@ -285,8 +285,8 @@ class TestModelDeleted:
     def test_should_flip_row_button_to_download_when_model_deleted(
         self, window, service,
     ):
-        row = window.transcription_page().model_list().row_for("tiny")
-        assert row.action_button().cget("text") == "Delete"
+        model_list = window.transcription_page().model_list()
+        assert model_list.row_for("tiny").action_button().cget("text") == "Delete"
 
         service.list_models.return_value = [
             _view("tiny", installed=False),
@@ -295,7 +295,7 @@ class TestModelDeleted:
         ]
         window.on_model_deleted(ModelDeletedEvent(name="tiny"))
 
-        assert row.action_button().cget("text") == "Download"
+        assert model_list.row_for("tiny").action_button().cget("text") == "Download"
 
     def test_should_route_delete_error_to_status_label(self, window):
         window.transcription_page().delete_error.emit(

@@ -117,6 +117,7 @@ class TestClickThroughStyles:
         assert styles & 0x00000080
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(sys.platform != "win32", reason="Win32 desktop acceptance")
 def test_overlay_should_not_take_focus_and_click_should_reach_window_beneath(
     tk_root,
@@ -128,6 +129,9 @@ def test_overlay_should_not_take_focus_and_click_should_reach_window_beneath(
     x = left + ((right - left - 112) // 2)
     y = bottom - 48 - 36
     target = tkinter.Toplevel(tk_root)
+    # Undecorated, so its client area lands exactly under the overlay rather
+    # than a title bar's height below it.
+    target.overrideredirect(True)
     target.geometry(f"112x48+{x}+{y}")
     clicked: list[bool] = []
     target.bind("<Button-1>", lambda _event: clicked.append(True))

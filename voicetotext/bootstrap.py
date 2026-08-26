@@ -15,6 +15,7 @@ from voicetotext.core.exceptions import (
 )
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
+from voicetotext.core.startup_log import milestone
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
@@ -222,7 +223,6 @@ def _load_engine(
 ) -> TranscriptionEngine:
     engine = create_engine_for_active_model(config, paths, registry, hardware)
     engine.load_model()
-    from voicetotext.core.startup_log import milestone
     milestone("model-loaded")
     _warmup_safely(engine)
     return engine
@@ -238,7 +238,6 @@ def _load_engine_on_cpu(
         config, paths, registry, hardware, device_override="cpu",
     )
     engine.load_model()
-    from voicetotext.core.startup_log import milestone
     milestone("model-loaded")
     _warmup_safely(engine)
     return engine
@@ -258,7 +257,6 @@ def _load_streaming_engine(
     )
     engine = _build_streaming_engine_for(model_info, paths)
     engine.load_model()
-    from voicetotext.core.startup_log import milestone
     milestone("model-loaded")
     _warmup_safely(engine)
     return engine
@@ -339,7 +337,6 @@ def _load_engine_and_attach(
     so the app stays swappable - see :func:`_recover_from_failed_load`.
     Exceptions never escape - daemon threads silently drop them.
     """
-    from voicetotext.core.startup_log import milestone
     milestone("engine-load-started")
     try:
         installer = _load_active_engine_installer(
@@ -731,15 +728,10 @@ def apply_settings(
     UI; this callback only handles the lightweight dispatches.
     """
     if changes.output_changed:
-        output = (
-            _build_output(_resolve_output_mode(config), gui_dispatcher)
-            if dictionary_path is None
-            else _build_output(
+        use_case.set_output(
+            _build_output(
                 _resolve_output_mode(config), gui_dispatcher, dictionary_path,
             )
-        )
-        use_case.set_output(
-            output
         )
 
     if changes.hotkey_changed:

@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    import winreg
 
 
 _SHORTCUT_NAME = "VoiceToText (Dev).lnk"
@@ -69,16 +75,6 @@ def create_shortcut(
     return True, f"Created {resolved_destination}"
 
 
-class RegistryKey(Protocol):
-    def __enter__(self) -> "RegistryKey": ...
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: object | None,
-    ) -> None: ...
-
-
 def enable_autostart(target: Path | None = None) -> tuple[bool, str]:
     import winreg
 
@@ -120,7 +116,7 @@ def disable_autostart(target: Path | None = None) -> tuple[bool, str]:
     return True, f"Autostart disabled for {resolved}"
 
 
-def _read_registry_value(key: RegistryKey) -> str | None:
+def _read_registry_value(key: winreg.HKEYType) -> str | None:
     import winreg
 
     try:
