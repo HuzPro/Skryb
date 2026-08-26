@@ -1,221 +1,133 @@
+from pathlib import Path
+
 import pytest
 
 from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
-    GRANITE_MODELS,
+    DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
-    WHISPER_MODELS,
     ModelInfo,
-    allows_device_selection,
-    default_model_for,
     get_model_info,
-    hidden_models_for,
+    is_catalog_model,
     migrate_engine_field,
+    migrate_removed_models,
 )
-from voicetotext.transcription.engine_types import HardwareProfile
 
 
-class TestModelInfoEntity:
-    def test_should_store_model_attributes(self):
-        info = ModelInfo(name="base", size_mb=142, description="Good balance")
+_REMOVED_MODEL_EXPECTATIONS = (
+    ("tiny", DEFAULT_MODEL),
+    ("base", DEFAULT_MODEL),
+    ("small", DEFAULT_MODEL),
+    ("medium", DEFAULT_MODEL),
+    ("large-v3", DEFAULT_MODEL),
+    ("large-v3-turbo", DEFAULT_MODEL),
+    ("granite-speech-4.1-2b", DEFAULT_MODEL),
+    ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
+    ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
+)
 
-        assert info.name == "base"
-        assert info.size_mb == 142
-        assert info.description == "Good balance"
+_REMOVED_ENGINES = (
+    "faster_whisper",
+    "transformers",
+    "granite_speech",
+)
 
-    def test_should_format_size_in_mb(self):
-        info = ModelInfo(name="small", size_mb=466, description="test")
 
-        assert info.display_size == "466 MB"
+class TestModelInfo:
+    def test_should_store_and_format_model_attributes(self) -> None:
+        info = ModelInfo(
+            name="example", size_mb=1500, description="Example model",
+            repo_id="example/model", compatible_engines=("nano_parakeet",),
+        )
 
-    def test_should_format_size_in_gb_for_large_models(self):
-        info = ModelInfo(name="medium", size_mb=1500, description="test")
-
+        assert info.name == "example"
+        assert info.repo_id == "example/model"
+        assert info.compatible_engines == ("nano_parakeet",)
         assert info.display_size == "1.5 GB"
 
-    def test_should_store_explicit_repo_id(self):
-        info = ModelInfo(
-            name="base", size_mb=290, description="test",
-            repo_id="openai/whisper-base",
-        )
+    def test_compatible_engines_should_default_to_empty(self) -> None:
+        info = ModelInfo(name="example", size_mb=1, description="Example")
 
-        assert info.repo_id == "openai/whisper-base"
-
-    def test_repo_id_defaults_to_empty(self):
-        info = ModelInfo(name="base", size_mb=142, description="test")
-
-        assert info.repo_id == ""
-
-    def test_compatible_engines_defaults_to_transformers_only(self):
-        info = ModelInfo(name="base", size_mb=142, description="test")
-
-        assert info.compatible_engines == ("transformers",)
-
-    def test_should_store_explicit_compatible_engines(self):
-        info = ModelInfo(
-            name="base", size_mb=142, description="test",
-            compatible_engines=("transformers", "nano_parakeet"),
-        )
-
-        assert info.compatible_engines == ("transformers", "nano_parakeet")
-
-    def test_engine_priorities_default_to_empty_mapping(self):
-        info = ModelInfo(name="base", size_mb=142, description="test")
-
+        assert info.compatible_engines == ()
         assert dict(info.engine_priorities) == {}
 
-    def test_should_store_explicit_engine_priorities(self):
-        info = ModelInfo(
-            name="base", size_mb=142, description="test",
-            engine_priorities={"nano_parakeet": 100, "transformers": 50},
+
+class TestModelCatalog:
+    def test_should_contain_only_surviving_model_lineups(self) -> None:
+        assert set(ALL_MODELS) == (
+            set(PARAKEET_MODELS) | set(NEMOTRON_STREAMING_MODELS)
         )
 
-        assert info.engine_priorities["nano_parakeet"] == 100
-        assert info.engine_priorities["transformers"] == 50
+    def test_default_should_be_current_parakeet(self) -> None:
+        assert DEFAULT_MODEL == "parakeet-tdt-0.6b-v3"
 
+    def test_should_return_known_model(self) -> None:
+        assert get_model_info(DEFAULT_MODEL) is PARAKEET_MODELS[DEFAULT_MODEL]
 
-class TestWhisperModels:
-    def test_should_contain_all_standard_models(self):
-        expected = {"tiny", "base", "small", "large-v3-turbo", "large-v3"}
-
-        assert set(WHISPER_MODELS.keys()) == expected
-
-    def test_all_models_should_have_openai_repo_ids(self):
-        for model in WHISPER_MODELS.values():
-            assert model.repo_id.startswith("openai/whisper-")
-
-    def test_all_whisper_models_are_transformers_only(self):
-        # Every Whisper model runs solely through the transformers engine
-        # (PyTorch, every backend). The faster-whisper / CTranslate2 engine
-        # was removed for licensing reasons.
-        for model in WHISPER_MODELS.values():
-            assert model.compatible_engines == ("transformers",)
-
-
-class TestParakeetModels:
-    def test_should_contain_tdt_v3(self):
-        expected = {"parakeet-tdt-0.6b-v3"}
-
-        assert set(PARAKEET_MODELS.keys()) == expected
-
-    def test_all_models_should_have_nvidia_repo_ids(self):
-        for model in PARAKEET_MODELS.values():
-            assert model.repo_id.startswith("nvidia/parakeet-tdt-")
-
-    def test_all_models_should_be_compatible_with_nano_parakeet_only(self):
-        for model in PARAKEET_MODELS.values():
-            assert model.compatible_engines == ("nano_parakeet",)
-
-
-class TestAllModels:
-    def test_should_contain_all_engine_specific_model_dicts(self):
-        expected = (
-            set(WHISPER_MODELS.keys())
-            | set(PARAKEET_MODELS.keys())
-            | set(NEMOTRON_STREAMING_MODELS.keys())
-            | set(GRANITE_MODELS.keys())
-        )
-
-        assert set(ALL_MODELS.keys()) == expected
-
-    def test_whisper_entries_should_match_whisper_models(self):
-        for name, info in WHISPER_MODELS.items():
-            assert ALL_MODELS[name] is info
-
-    def test_parakeet_entries_should_match_parakeet_models(self):
-        for name, info in PARAKEET_MODELS.items():
-            assert ALL_MODELS[name] is info
-
-    def test_granite_entries_should_match_granite_models(self):
-        for name, info in GRANITE_MODELS.items():
-            assert ALL_MODELS[name] is info
-
-
-class TestNemotronStreamingModels:
-    def test_should_contain_only_the_streaming_model(self):
-        assert set(NEMOTRON_STREAMING_MODELS.keys()) == {
-            "nemotron-speech-streaming-en-0.6b",
-        }
-
-    def test_streaming_model_is_nemotron_streaming_only(self):
-        info = get_model_info("nemotron-speech-streaming-en-0.6b")
-
-        assert info.compatible_engines == ("nemotron_streaming",)
-
-
-class TestGraniteModels:
-    def test_all_models_should_have_repo_id(self):
-        for model in GRANITE_MODELS.values():
-            assert model.repo_id != ""
-
-    def test_all_models_should_be_compatible_with_granite_speech_only(self):
-        for model in GRANITE_MODELS.values():
-            assert model.compatible_engines == ("granite_speech",)
-
-
-class TestGetModelInfo:
-    def test_should_return_whisper_model_by_name(self):
-        info = get_model_info("base")
-
-        assert info.name == "base"
-
-    def test_should_return_parakeet_model_by_name(self):
-        info = get_model_info("parakeet-tdt-0.6b-v3")
-
-        assert info.name == "parakeet-tdt-0.6b-v3"
-
-    def test_should_raise_configuration_error_for_unknown_model(self):
+    def test_should_raise_for_unknown_model(self) -> None:
         with pytest.raises(ConfigurationError, match="unknown-model"):
             get_model_info("unknown-model")
 
-
-class TestHardwareConditionalRetirement:
-    @pytest.mark.parametrize("kind", ["nvidia_cuda", "amd_rocm"])
-    def test_should_hide_all_whisper_models_on_gpu(self, kind):
-        profile = HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
-
-        assert set(WHISPER_MODELS) <= hidden_models_for(profile)
-        assert default_model_for(profile) == "parakeet-tdt-0.6b-v3"
-
-    def test_should_keep_tiny_and_base_visible_and_default_base_on_cpu(self):
-        profile = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
-
-        hidden = hidden_models_for(profile)
-
-        assert "tiny" not in hidden
-        assert "base" not in hidden
-        assert {"small", "large-v3-turbo", "large-v3"} <= hidden
-        assert default_model_for(profile) == "base"
-
-    @pytest.mark.parametrize("kind", ["nvidia_cuda", "amd_rocm", "cpu"])
-    def test_should_keep_granite_hidden_on_every_profile(self, kind):
-        profile = HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
-
-        assert "granite-speech-4.1-2b" in hidden_models_for(profile)
+    def test_every_catalog_entry_should_be_visible(self) -> None:
+        assert all(is_catalog_model(name) for name in ALL_MODELS)
+        assert is_catalog_model("unknown-model") is False
 
 
-class TestAllowsDeviceSelection:
-    def test_should_allow_device_selection_for_tiny(self):
-        assert allows_device_selection("tiny") is True
-
-    def test_should_allow_device_selection_for_base(self):
-        assert allows_device_selection("base") is True
-
-    def test_should_disallow_device_selection_for_small(self):
-        assert allows_device_selection("small") is False
-
-    def test_should_disallow_device_selection_for_large_v3_turbo(self):
-        assert allows_device_selection("large-v3-turbo") is False
-
-    def test_should_disallow_device_selection_for_unknown_model(self):
-        assert allows_device_selection("unknown-model") is False
+def _saved_config(path: Path, key: str, value: str) -> JsonConfigAdapter:
+    config = JsonConfigAdapter(path)
+    config.load()
+    config.set(key, value)
+    config.save()
+    reloaded = JsonConfigAdapter(path)
+    reloaded.load()
+    return reloaded
 
 
-class TestMigrateEngineField:
-    def test_should_set_engine_to_auto_when_missing(self, tmp_path):
+class TestRemovedModelMigration:
+    @pytest.mark.parametrize(
+        ("removed_model", "replacement"), _REMOVED_MODEL_EXPECTATIONS,
+    )
+    def test_each_removed_model_should_migrate_to_a_surviving_model(
+        self, tmp_path: Path, removed_model: str, replacement: str,
+    ) -> None:
+        path = tmp_path / f"{removed_model}.json"
+        config = _saved_config(path, "transcription.model_size", removed_model)
+
+        migrate_removed_models(config)
+
+        persisted = JsonConfigAdapter(path)
+        persisted.load()
+        assert persisted.get("transcription.model_size") == replacement
+        assert replacement in ALL_MODELS
+
+    def test_current_model_should_remain_unchanged(self, tmp_path: Path) -> None:
+        config = _saved_config(
+            tmp_path / "config.json", "transcription.model_size", DEFAULT_MODEL,
+        )
+
+        migrate_removed_models(config)
+
+        assert config.get("transcription.model_size") == DEFAULT_MODEL
+
+
+class TestRemovedEngineMigration:
+    @pytest.mark.parametrize("removed_engine", _REMOVED_ENGINES)
+    def test_each_removed_engine_should_migrate_to_auto(
+        self, tmp_path: Path, removed_engine: str,
+    ) -> None:
+        path = tmp_path / f"{removed_engine}.json"
+        config = _saved_config(path, "transcription.engine", removed_engine)
+
+        migrate_engine_field(config)
+
+        persisted = JsonConfigAdapter(path)
+        persisted.load()
+        assert persisted.get("transcription.engine") == "auto"
+
+    def test_missing_engine_should_migrate_to_auto(self, tmp_path: Path) -> None:
         config = JsonConfigAdapter(tmp_path / "config.json")
         config.load()
 
@@ -223,33 +135,11 @@ class TestMigrateEngineField:
 
         assert config.get("transcription.engine") == "auto"
 
-    def test_should_leave_engine_unchanged_when_explicitly_set(self, tmp_path):
-        config = JsonConfigAdapter(tmp_path / "config.json")
-        config.load()
-        config.set("transcription.engine", "nano_parakeet")
+    def test_current_engine_should_remain_unchanged(self, tmp_path: Path) -> None:
+        config = _saved_config(
+            tmp_path / "config.json", "transcription.engine", "nano_parakeet",
+        )
 
         migrate_engine_field(config)
 
         assert config.get("transcription.engine") == "nano_parakeet"
-
-    def test_should_rewrite_removed_faster_whisper_engine_to_auto(self, tmp_path):
-        config = JsonConfigAdapter(tmp_path / "config.json")
-        config.load()
-        config.set("transcription.engine", "faster_whisper")
-
-        migrate_engine_field(config)
-
-        assert config.get("transcription.engine") == "auto"
-
-    def test_should_persist_migration_to_disk(self, tmp_path):
-        path = tmp_path / "config.json"
-        config = JsonConfigAdapter(path)
-        config.load()
-
-        migrate_engine_field(config)
-
-        reloaded = JsonConfigAdapter(path)
-        reloaded.load()
-        assert reloaded.get("transcription.engine") == "auto"
-
-

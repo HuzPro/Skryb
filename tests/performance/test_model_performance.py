@@ -23,18 +23,9 @@ _LONG_AUDIO_FIXTURE_NAME = "LongStory.mp3"
 _TIMED_RUNS_SHORT = 3
 _TIMED_RUNS_LONG = 1
 
-# Models whose load is observed to corrupt process state on second
-# invocation - the safetensors multi-thread materializer in transformers
-# segfaults on this AMD ROCm Windows host when called twice. To preserve
-# the rest of the sweep, we benchmark the SHORT-audio cycle for these
-# models and record a synthetic skip entry for LONG-audio rather than
-# attempt a second load.
-_FRAGILE_ON_RELOAD = frozenset({"granite-speech-4.1-2b"})
-
-
 # pyproject.toml sets ``filterwarnings = ["error"]`` which makes every
 # benign UserWarning / DeprecationWarning / ResourceWarning emitted by
-# huggingface_hub, transformers, torch, and the Windows tempfile GC
+# huggingface_hub, torch, and the Windows tempfile GC
 # finalizer abort the run. Markers take precedence over ini filters AND
 # cover fixture setup (session fixtures are lazily set up inside the
 # first test's warning context).
@@ -107,9 +98,8 @@ def _last_short_audio_result_for(
 
     Used by the long-audio test to short-circuit when the short-audio
     test for the same combo already failed: re-attempting the engine
-    load can leave the process in an unrecoverable state (Granite has
-    aborted the entire sweep this way), so we record a synthetic error
-    instead of retrying.
+    load can leave the process in an unrecoverable state, so a synthetic
+    error is recorded instead of retrying.
     """
     short_identity = BenchmarkIdentity(
         model=combo.model_name,
@@ -157,32 +147,6 @@ class TestLongAudioBenchmark:
                     "skipping long-audio attempt to avoid re-triggering "
                     "the same engine load failure (which has been "
                     "observed to crash the process for some models)."
-                ),
-            )
-            perf_context.recorder.record(
-                identity=identity,
-                result=derived,
-                hardware=perf_context.hardware,
-                audio_duration_seconds=long_audio.duration_seconds,
-            )
-            perf_context.recorder.save()
-            return
-
-        if combo.model_name in _FRAGILE_ON_RELOAD and short_status == "ok":
-            from tests.performance._runner import BenchmarkResult
-
-            derived = BenchmarkResult(
-                status="error",
-                error_type="FragileReloadSkipped",
-                error_message=(
-                    "This model's load path corrupts process state on "
-                    "second invocation in the same Python process "
-                    "(transformers spawn_materialize segfault on AMD "
-                    "ROCm Windows). Short-audio benchmark already "
-                    "succeeded - skipping long-audio reload to keep "
-                    "the rest of the sweep alive. Run long-audio "
-                    "manually with `-k LongStory and granite` to "
-                    "benchmark it in a fresh process."
                 ),
             )
             perf_context.recorder.record(

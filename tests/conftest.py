@@ -167,7 +167,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def pytest_unconfigure(config: pytest.Config) -> None:
     """Bypass a C-extension finalizer crash during interpreter shutdown.
 
-    Whisper's tokenizer pulls in ``sentencepiece`` (and torch loads its
+    Some model tokenizers pull in ``sentencepiece`` (and torch loads its
     own native libraries) whose destructors segfault during
     ``Py_FinalizeEx`` - on Windows (``_sentencepiece.cp312-win_amd64.pyd``)
     and on Linux alike - turning an all-green run into a 139 exit. This

@@ -8,13 +8,16 @@ from voicetotext.transcription.model_info import ALL_MODELS
 from tests.settings.test_service import _build_service
 
 
+_PARAKEET = "parakeet-tdt-0.6b-v3"
+_NEMOTRON = "nemotron-speech-streaming-en-0.6b"
+
 def _gpu(kind: str) -> HardwareProfile:
     return HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
 
 
 def _draft(mode: TranscriptionMode) -> SettingsDraft:
     return SettingsDraft(
-        model_size="base", language="en", device="auto", engine="auto",
+        model_size=_PARAKEET, language="en", device="auto", engine="auto",
         hotkey_combination="ctrl+alt+m", hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE, transcription_mode=mode,
     )
@@ -23,7 +26,7 @@ def _draft(mode: TranscriptionMode) -> SettingsDraft:
 class TestSettingsDraftMode:
     def test_should_default_transcription_mode_to_batch(self):
         draft = SettingsDraft(
-            model_size="base", language="en", device="auto", engine="auto",
+            model_size=_PARAKEET, language="en", device="auto", engine="auto",
             hotkey_combination="x", hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
@@ -65,8 +68,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert "base" in names
-        assert "parakeet-tdt-0.6b-v3" in names
+        assert names == {_PARAKEET}
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
         service, *_ = _build_service(
@@ -77,23 +79,22 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            "parakeet-tdt-0.6b-v3",
-            "nemotron-speech-streaming-en-0.6b",
+            _PARAKEET,
+            _NEMOTRON,
         }
 
     def test_should_report_streaming_capability_per_model(self):
         service, *_ = _build_service(registry=build_engine_registry())
 
-        assert service.model_supports_streaming("parakeet-tdt-0.6b-v3") is True
-        assert service.model_supports_streaming("base") is False
+        assert service.model_supports_streaming(_PARAKEET) is True
+        assert service.model_supports_streaming(_NEMOTRON) is True
 
     def test_should_report_batch_capability_per_model(self):
         service, *_ = _build_service(registry=build_engine_registry())
 
-        assert service.model_supports_batch("base") is True
-        assert service.model_supports_batch("parakeet-tdt-0.6b-v3") is True
+        assert service.model_supports_batch(_PARAKEET) is True
         assert (
-            service.model_supports_batch("nemotron-speech-streaming-en-0.6b")
+            service.model_supports_batch(_NEMOTRON)
             is False
         )
 
@@ -114,7 +115,7 @@ class TestServiceModeFiltering:
 
                 assert service.list_models(), (profile.kind, mode)
 
-    def test_gpu_batch_should_hide_nemotron_and_whisper(self):
+    def test_gpu_batch_should_hide_streaming_only_nemotron(self):
         service, *_ = _build_service(
             models=ALL_MODELS,
             registry=build_engine_registry(),
@@ -123,7 +124,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {"parakeet-tdt-0.6b-v3"}
+        assert names == {_PARAKEET}
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
         service, *_ = _build_service(
@@ -136,8 +137,8 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            "parakeet-tdt-0.6b-v3",
-            "nemotron-speech-streaming-en-0.6b",
+            _PARAKEET,
+            _NEMOTRON,
         }
 
 

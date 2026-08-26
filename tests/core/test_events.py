@@ -72,10 +72,10 @@ class TestEngineLoadFailedEvent:
 
     def test_should_carry_model_name_and_error(self):
         event = EngineLoadFailedEvent(
-            model_name="large-v3-turbo", error="nano-parakeet not installed",
+            model_name="nemotron-speech-streaming-en-0.6b", error="nano-parakeet not installed",
         )
 
-        assert event.model_name == "large-v3-turbo"
+        assert event.model_name == "nemotron-speech-streaming-en-0.6b"
         assert event.error == "nano-parakeet not installed"
 
 
@@ -106,7 +106,7 @@ class TestEventInheritance:
             TranscriptionCompletedEvent(text="hi", transcription_seconds=1.0),
             TranscriptionFailedEvent(error="fail"),
             TranscriptionEmptyEvent(transcription_seconds=0.5),
-            EngineLoadFailedEvent(model_name="base", error="missing"),
+            EngineLoadFailedEvent(model_name="parakeet-tdt-0.6b-v3", error="missing"),
             ErrorOccurredEvent(error="oops"),
         ]
 

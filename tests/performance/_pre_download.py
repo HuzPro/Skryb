@@ -18,9 +18,6 @@ from pathlib import Path
 from tests.performance._combos import BenchmarkCombo
 
 
-# NB: ``*.bin`` is intentionally NOT ignored here. For the openai/whisper
-# repos we may end up with both ``model.safetensors`` and the redundant
-# ``pytorch_model.bin``; that's harmless duplication for benchmarks.
 _HF_IGNORE_PATTERNS = (
     "*.h5",
     "*.msgpack",

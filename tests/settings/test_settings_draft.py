@@ -7,7 +7,7 @@ from voicetotext.settings.transcription_mode import TranscriptionMode
 
 def _make_draft(**overrides) -> SettingsDraft:
     base = dict(
-        model_size="base",
+        model_size="parakeet-tdt-0.6b-v3",
         language="en",
         device="auto",
         engine="auto",
@@ -23,7 +23,7 @@ class TestSettingsDraftConstruction:
     def test_should_hold_all_seven_fields(self):
         draft = _make_draft()
 
-        assert draft.model_size == "base"
+        assert draft.model_size == "parakeet-tdt-0.6b-v3"
         assert draft.language == "en"
         assert draft.device == "auto"
         assert draft.engine == "auto"
@@ -35,7 +35,7 @@ class TestSettingsDraftConstruction:
         draft = _make_draft()
 
         with pytest.raises(Exception):
-            draft.model_size = "tiny"  # type: ignore[misc]
+            draft.model_size = "test-model"  # type: ignore[misc]
 
 
 class TestChangeSetFromDrafts:
@@ -50,8 +50,8 @@ class TestChangeSetFromDrafts:
         assert changes.output_changed is False
 
     def test_should_flag_engine_reload_required_when_model_size_differs(self):
-        original = _make_draft(model_size="base")
-        updated = _make_draft(model_size="small")
+        original = _make_draft(model_size="parakeet-tdt-0.6b-v3")
+        updated = _make_draft(model_size="nemotron-speech-streaming-en-0.6b")
 
         changes = ChangeSet.between(original, updated)
 
@@ -124,7 +124,7 @@ class TestChangeSetFromDrafts:
 
     def test_should_have_any_changed_helper(self):
         no_change = ChangeSet.between(_make_draft(), _make_draft())
-        with_change = ChangeSet.between(_make_draft(), _make_draft(model_size="tiny"))
+        with_change = ChangeSet.between(_make_draft(), _make_draft(model_size="test-model"))
 
         assert no_change.any_changed is False
         assert with_change.any_changed is True

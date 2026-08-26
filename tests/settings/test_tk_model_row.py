@@ -19,7 +19,7 @@ def root(tk_root):
     return tk_root
 
 
-def _view(name: str = "base", installed: bool = False) -> ModelView:
+def _view(name: str = "parakeet-tdt-0.6b-v3", installed: bool = False) -> ModelView:
     return ModelView(
         name=name,
         display_size="290 MB",
@@ -55,13 +55,13 @@ def row(root):
 
 class TestTkModelRowRendering:
     def test_should_show_model_name(self, row):
-        assert row.name_label().cget("text") == "base"
+        assert row.name_label().cget("text") == "parakeet-tdt-0.6b-v3"
 
     def test_should_show_display_size(self, row):
         assert "290 MB" in row.size_label().cget("text")
 
     def test_should_show_description(self, row):
-        assert "base description" in row.description_label().cget("text")
+        assert "parakeet-tdt-0.6b-v3 description" in row.description_label().cget("text")
 
     def test_progress_bar_should_be_hidden_initially(self, row):
         assert row.progress_visible() is False
@@ -146,7 +146,7 @@ class TestTkModelRowCallbacks:
 
         row.action_button().invoke()
 
-        assert received == ["base"]
+        assert received == ["parakeet-tdt-0.6b-v3"]
 
     def test_should_emit_delete_requested_when_clicked_installed(self, root):
         widget = TkModelRow(root, _view(installed=True))
@@ -155,7 +155,7 @@ class TestTkModelRowCallbacks:
 
         widget.action_button().invoke()
 
-        assert received == ["base"]
+        assert received == ["parakeet-tdt-0.6b-v3"]
 
         widget.destroy()
 
@@ -166,4 +166,4 @@ class TestTkModelRowCallbacks:
 
         row.action_button().invoke()
 
-        assert received == ["base"]
+        assert received == ["parakeet-tdt-0.6b-v3"]

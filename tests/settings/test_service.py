@@ -35,7 +35,10 @@ from voicetotext.settings.service import (
 )
 from voicetotext.settings.settings_draft import SettingsDraft
 from tests.settings.fakes import FakeConfig, FakeModelManager
-from voicetotext.transcription.engine_factory import build_engine_registry
+
+
+_PARAKEET = "parakeet-tdt-0.6b-v3"
+_NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 
 
 def _build_service(
@@ -48,7 +51,7 @@ def _build_service(
     dictionary_path: Path | None = None,
 ):
     config_data = {
-        "transcription.model_size": "base",
+        "transcription.model_size": _PARAKEET,
         "transcription.language": "en",
         "transcription.device": "auto",
         "hotkey.combination": "ctrl+alt+m",
@@ -89,7 +92,7 @@ class TestEngineCandidatesFor:
     def test_should_return_empty_tuple_when_registry_not_wired(self):
         service, *_ = _build_service()
 
-        assert service.engine_candidates_for("base") == ()
+        assert service.engine_candidates_for(_PARAKEET) == ()
 
     def test_should_return_ranked_candidates_when_registry_wired(self):
         from voicetotext.transcription.engine_factory import build_engine_registry
@@ -101,11 +104,11 @@ class TestEngineCandidatesFor:
         )
         service, *_ = _build_service(registry=registry, hardware=hardware)
 
-        candidates = service.engine_candidates_for("base")
+        candidates = service.engine_candidates_for(_PARAKEET)
 
         assert len(candidates) == 1
         assert candidates[0].is_recommended is True
-        assert candidates[0].engine_id == "transformers"
+        assert candidates[0].engine_id == "nano_parakeet"
 
     def test_should_return_empty_when_model_unknown(self):
         from voicetotext.transcription.engine_factory import build_engine_registry
@@ -116,53 +119,6 @@ class TestEngineCandidatesFor:
         service, *_ = _build_service(registry=registry, hardware=hardware)
 
         assert service.engine_candidates_for("nonexistent-model") == ()
-
-
-class TestAvailableDevices:
-    def test_should_return_cpu_only_when_hardware_not_wired(self):
-        service, *_ = _build_service()
-
-        assert service.available_devices() == ["auto", "cpu"]
-
-    def test_should_omit_cuda_for_cpu_only_hardware(self):
-        from voicetotext.transcription.engine_types import HardwareProfile
-
-        cpu_only = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
-        service, *_ = _build_service(hardware=cpu_only)
-
-        assert service.available_devices() == ["auto", "cpu"]
-
-    def test_should_include_cuda_for_amd_rocm_hardware(self):
-        from voicetotext.transcription.engine_types import HardwareProfile
-
-        rocm = HardwareProfile(
-            kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
-        )
-        service, *_ = _build_service(hardware=rocm)
-
-        assert service.available_devices() == ["auto", "cuda", "cpu"]
-
-    def test_should_include_cuda_for_nvidia_hardware(self):
-        from voicetotext.transcription.engine_types import HardwareProfile
-
-        cuda = HardwareProfile(
-            kind="nvidia_cuda", device_name="NVIDIA RTX 4090", gfx_arch=None,
-        )
-        service, *_ = _build_service(hardware=cuda)
-
-        assert service.available_devices() == ["auto", "cuda", "cpu"]
-
-
-class TestAllowsDeviceSelection:
-    def test_should_allow_device_selection_for_base(self):
-        service, *_ = _build_service()
-
-        assert service.allows_device_selection("base") is True
-
-    def test_should_disallow_device_selection_for_large_v3(self):
-        service, *_ = _build_service()
-
-        assert service.allows_device_selection("large-v3") is False
 
 
 class _RecordingListener(DownloadEventListener, EngineEventListener):
@@ -191,17 +147,17 @@ class TestListModels:
         views = service.list_models()
 
         names = {v.name for v in views}
-        assert "tiny" in names
-        assert "base" in names
-        assert "large-v3-turbo" in names
+        assert names == {_PARAKEET, _NEMOTRON}
 
     def test_should_mark_installed_status_on_view(self):
-        service, *_ = _build_service(installed={"base": True, "tiny": False})
+        service, *_ = _build_service(
+            installed={_PARAKEET: True, _NEMOTRON: False},
+        )
 
         views = {v.name: v for v in service.list_models()}
 
-        assert views["base"].installed is True
-        assert views["tiny"].installed is False
+        assert views[_PARAKEET].installed is True
+        assert views[_NEMOTRON].installed is False
 
 
 class TestAnyModelInstalled:
@@ -211,99 +167,99 @@ class TestAnyModelInstalled:
         assert service.any_model_installed() is False
 
     def test_should_return_true_when_at_least_one_installed(self):
-        service, *_ = _build_service(installed={"base": True})
+        service, *_ = _build_service(installed={_PARAKEET: True})
 
         assert service.any_model_installed() is True
 
 
 class TestIsInstalled:
     def test_should_return_true_when_cache_says_installed(self):
-        service, *_ = _build_service(installed={"base": True})
+        service, *_ = _build_service(installed={_PARAKEET: True})
 
-        assert service.is_installed("base") is True
+        assert service.is_installed(_PARAKEET) is True
 
     def test_should_return_false_when_cache_says_not_installed(self):
-        service, *_ = _build_service(installed={"base": False})
+        service, *_ = _build_service(installed={_PARAKEET: False})
 
-        assert service.is_installed("base") is False
+        assert service.is_installed(_PARAKEET) is False
 
 
 class TestSelectedModel:
     def test_should_read_from_config(self):
         service, *_ = _build_service(
-            config_overrides={"transcription.model_size": "large-v3-turbo"}
+            config_overrides={"transcription.model_size": _NEMOTRON}
         )
 
-        assert service.selected_model() == "large-v3-turbo"
+        assert service.selected_model() == _NEMOTRON
 
 
 class TestStartDownload:
     def test_should_delegate_to_coordinator(self):
         service, _, manager, *_ = _build_service()
 
-        service.start_download("tiny")
+        service.start_download("test-model")
 
-        assert manager.download_calls == ["tiny"]
+        assert manager.download_calls == ["test-model"]
 
 
 class TestDeleteModel:
     def test_should_delete_via_manager_when_not_selected(self):
         service, _, manager, *_ = _build_service(
-            config_overrides={"transcription.model_size": "base"},
-            installed={"tiny": True},
+            config_overrides={"transcription.model_size": _PARAKEET},
+            installed={_NEMOTRON: True},
         )
 
-        service.delete_model("tiny")
+        service.delete_model("test-model")
 
-        assert manager.delete_calls == ["tiny"]
+        assert manager.delete_calls == ["test-model"]
 
     def test_should_raise_value_error_when_deleting_active_model(self):
         service, _, manager, *_ = _build_service(
-            config_overrides={"transcription.model_size": "base"},
-            installed={"base": True},
+            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+            installed={"parakeet-tdt-0.6b-v3": True},
         )
 
         with pytest.raises(ValueError, match="active"):
-            service.delete_model("base")
+            service.delete_model("parakeet-tdt-0.6b-v3")
 
         assert manager.delete_calls == []
 
     def test_should_invalidate_cache_entry_after_delete(self):
         service, _, manager, *_ = _build_service(
-            config_overrides={"transcription.model_size": "base"},
-            installed={"tiny": True},
+            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+            installed={"test-model": True},
         )
         # Prime cache
         assert service.list_models()
 
-        service.delete_model("tiny")
+        service.delete_model(_NEMOTRON)
 
         views = {v.name: v for v in service.list_models()}
-        assert views["tiny"].installed is False
+        assert views[_NEMOTRON].installed is False
 
     def test_should_publish_model_deleted_event_on_successful_delete(self):
         service, _, _, bus, _ = _build_service(
-            config_overrides={"transcription.model_size": "base"},
-            installed={"tiny": True},
+            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+            installed={"test-model": True},
         )
         received: list[ModelDeletedEvent] = []
         bus.subscribe(ModelDeletedEvent, received.append)
 
-        service.delete_model("tiny")
+        service.delete_model("test-model")
 
         assert len(received) == 1
-        assert received[0].name == "tiny"
+        assert received[0].name == "test-model"
 
     def test_should_not_publish_event_when_delete_rejected_for_active_model(self):
         service, _, _, bus, _ = _build_service(
-            config_overrides={"transcription.model_size": "base"},
-            installed={"base": True},
+            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+            installed={"parakeet-tdt-0.6b-v3": True},
         )
         received: list[ModelDeletedEvent] = []
         bus.subscribe(ModelDeletedEvent, received.append)
 
         with pytest.raises(ValueError):
-            service.delete_model("base")
+            service.delete_model("parakeet-tdt-0.6b-v3")
 
         assert received == []
 
@@ -312,7 +268,7 @@ class TestCurrentDraft:
     def test_should_project_config_into_draft(self):
         service, *_ = _build_service(
             config_overrides={
-                "transcription.model_size": "small",
+                "transcription.model_size": "nemotron-speech-streaming-en-0.6b",
                 "transcription.language": "en",
                 "transcription.device": "cuda",
                 "hotkey.combination": "f12",
@@ -323,7 +279,7 @@ class TestCurrentDraft:
 
         draft = service.current_draft()
 
-        assert draft.model_size == "small"
+        assert draft.model_size == "nemotron-speech-streaming-en-0.6b"
         assert draft.language == "en"
         assert draft.device == "cuda"
         assert draft.hotkey_combination == "f12"
@@ -344,7 +300,7 @@ class TestApplyDraft:
     def test_should_persist_all_fields_and_save_config(self):
         service, config, *_ = _build_service()
         draft = SettingsDraft(
-            model_size="small",
+            model_size="nemotron-speech-streaming-en-0.6b",
             language="en",
             device="cuda",
             engine="auto",
@@ -355,7 +311,7 @@ class TestApplyDraft:
 
         service.apply_draft(draft)
 
-        assert config.get("transcription.model_size") == "small"
+        assert config.get("transcription.model_size") == "nemotron-speech-streaming-en-0.6b"
         assert config.get("transcription.language") == "en"
         assert config.get("transcription.device") == "cuda"
         assert config.get("hotkey.combination") == "f12"
@@ -366,7 +322,7 @@ class TestApplyDraft:
     def test_should_persist_language_exactly_as_given(self):
         service, config, *_ = _build_service()
         draft = SettingsDraft(
-            model_size="base",
+            model_size="parakeet-tdt-0.6b-v3",
             language="de",
             device="auto",
             engine="auto",
@@ -383,7 +339,7 @@ class TestApplyDraft:
         service, *_ = _build_service()
 
         draft = SettingsDraft(
-            model_size="small",  # changed from "base"
+            model_size="nemotron-speech-streaming-en-0.6b",  # changed from "parakeet-tdt-0.6b-v3"
             language="en",
             device="auto",
             engine="auto",
@@ -400,39 +356,39 @@ class TestApplyDraft:
 
     def test_should_clear_install_cache_when_engine_changes(self):
         service, _, manager, *_ = _build_service(
-            config_overrides={"transcription.engine": "transformers"},
-            installed={"base": True},
+            config_overrides={"transcription.engine": "nemotron_streaming"},
+            installed={"parakeet-tdt-0.6b-v3": True},
         )
         # Prime the cache so a stale True would survive a non-clearing apply.
-        assert service.is_installed("base") is True
-        manager._installed["base"] = False
+        assert service.is_installed("parakeet-tdt-0.6b-v3") is True
+        manager._installed["parakeet-tdt-0.6b-v3"] = False
 
         draft = SettingsDraft(
-            model_size="base",
+            model_size="parakeet-tdt-0.6b-v3",
             language="en",
             device="auto",
-            engine="nano_parakeet",  # changed from "transformers"
+            engine="nano_parakeet",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
         service.apply_draft(draft)
 
-        assert service.is_installed("base") is False
+        assert service.is_installed("parakeet-tdt-0.6b-v3") is False
 
     def test_should_preserve_install_cache_when_engine_unchanged(self):
         service, _, manager, *_ = _build_service(
-            config_overrides={"transcription.engine": "transformers"},
-            installed={"base": True},
+            config_overrides={"transcription.engine": "nano_parakeet"},
+            installed={"parakeet-tdt-0.6b-v3": True},
         )
-        assert service.is_installed("base") is True
-        manager._installed["base"] = False  # simulate stale disk read
+        assert service.is_installed("parakeet-tdt-0.6b-v3") is True
+        manager._installed["parakeet-tdt-0.6b-v3"] = False  # simulate stale disk read
 
         draft = SettingsDraft(
-            model_size="base",
+            model_size="parakeet-tdt-0.6b-v3",
             language="en",
             device="auto",
-            engine="transformers",  # unchanged
+            engine="nano_parakeet",
             hotkey_combination="ctrl+alt+m",
             hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
@@ -440,7 +396,7 @@ class TestApplyDraft:
         service.apply_draft(draft)
 
         # Cache preserved → stale True still returned.
-        assert service.is_installed("base") is True
+        assert service.is_installed("parakeet-tdt-0.6b-v3") is True
 
 
 class TestTriggerEngineSwap:
@@ -478,7 +434,7 @@ class TestListenerFanout:
 
         bus.publish(
             DownloadProgressEvent(
-                job_id="base",
+                job_id="parakeet-tdt-0.6b-v3",
                 bytes_done=100,
                 bytes_total=1000,
                 speed_bps=50.0,
@@ -487,14 +443,14 @@ class TestListenerFanout:
         )
 
         assert len(listener.progress) == 1
-        assert listener.progress[0].job_id == "base"
+        assert listener.progress[0].job_id == "parakeet-tdt-0.6b-v3"
 
     def test_should_forward_download_state_changes(self):
         service, _, _, bus, _ = _build_service()
         listener = _RecordingListener()
         service.subscribe_downloads(listener)
 
-        bus.publish(DownloadStateChangedEvent(job_id="base", state="paused"))
+        bus.publish(DownloadStateChangedEvent(job_id="parakeet-tdt-0.6b-v3", state="paused"))
 
         assert len(listener.state) == 1
 
@@ -503,7 +459,7 @@ class TestListenerFanout:
         listener = _RecordingListener()
         service.subscribe_downloads(listener)
 
-        bus.publish(DownloadCompletedEvent(job_id="base"))
+        bus.publish(DownloadCompletedEvent(job_id="parakeet-tdt-0.6b-v3"))
 
         assert len(listener.completed) == 1
 
@@ -512,7 +468,7 @@ class TestListenerFanout:
         listener = _RecordingListener()
         service.subscribe_downloads(listener)
 
-        bus.publish(DownloadFailedEvent(job_id="base", error="disk full"))
+        bus.publish(DownloadFailedEvent(job_id="parakeet-tdt-0.6b-v3", error="disk full"))
 
         assert len(listener.failed) == 1
         assert listener.failed[0].error == "disk full"
@@ -522,9 +478,9 @@ class TestListenerFanout:
         listener = _RecordingListener()
         service.subscribe_engine(listener)
 
-        bus.publish(EngineLoadStartedEvent(model_name="small"))
-        bus.publish(EngineLoadCompletedEvent(model_name="small"))
-        bus.publish(EngineLoadFailedEvent(model_name="small", error="oom"))
+        bus.publish(EngineLoadStartedEvent(model_name="nemotron-speech-streaming-en-0.6b"))
+        bus.publish(EngineLoadCompletedEvent(model_name="nemotron-speech-streaming-en-0.6b"))
+        bus.publish(EngineLoadFailedEvent(model_name="nemotron-speech-streaming-en-0.6b", error="oom"))
 
         assert len(listener.load_started) == 1
         assert len(listener.load_completed) == 1
@@ -536,7 +492,7 @@ class TestListenerFanout:
         service.subscribe_downloads(listener)
         service.unsubscribe_downloads(listener)
 
-        bus.publish(DownloadCompletedEvent(job_id="base"))
+        bus.publish(DownloadCompletedEvent(job_id="parakeet-tdt-0.6b-v3"))
 
         assert len(listener.completed) == 0
 
@@ -544,13 +500,13 @@ class TestListenerFanout:
 class TestIsEngineSwapping:
     def test_should_reflect_hot_swap_coordinator_busy_state(self):
         config = FakeConfig({
-            "transcription.model_size": "base",
+            "transcription.model_size": "parakeet-tdt-0.6b-v3",
             "transcription.device": "auto",
             "hotkey.combination": "ctrl+alt+m",
             "hotkey.mode": "toggle",
             "output.mode": "direct_paste",
         })
-        manager = FakeModelManager(installed={"base": True})
+        manager = FakeModelManager(installed={"parakeet-tdt-0.6b-v3": True})
         bus = SimpleEventBus()
         cache = ModelInstallationCache(manager, bus)
         downloads = DownloadCoordinator(manager)
@@ -646,100 +602,6 @@ class TestStateChangeSubscription:
         bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
 
         assert listener.events == []
-
-
-class TestCatalogHiding:
-    """Hidden models (e.g. unstable loads) are kept defined for the engine
-    layer but withheld from the user-facing catalog so they cannot be
-    selected and loaded."""
-
-    def test_should_hide_unavailable_models_from_list_models(self):
-        from voicetotext.transcription.model_info import (
-            GRANITE_MODELS,
-            WHISPER_MODELS,
-        )
-
-        service, *_ = _build_service(models={**WHISPER_MODELS, **GRANITE_MODELS})
-
-        names = [view.name for view in service.list_models()]
-        assert "granite-speech-4.1-2b" not in names
-        assert "base" in names
-
-
-class TestLegacyModelProjection:
-    def _gpu(self):
-        from voicetotext.transcription.engine_types import HardwareProfile
-
-        return HardwareProfile(
-            kind="nvidia_cuda", device_name="NVIDIA", gfx_arch=None,
-        )
-
-    def test_should_show_installed_non_active_whisper_as_legacy(self):
-        from voicetotext.transcription.model_info import ALL_MODELS
-
-        service, *_ = _build_service(
-            installed={"base": True},
-            models=ALL_MODELS,
-            hardware=self._gpu(),
-            registry=build_engine_registry(),
-            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
-        )
-
-        base = {view.name: view for view in service.list_models()}["base"]
-
-        assert base.legacy is True
-        assert base.selectable is False
-        assert base.deletable is True
-
-    def test_should_keep_active_legacy_model_non_deletable(self):
-        from voicetotext.transcription.model_info import ALL_MODELS
-
-        service, *_ = _build_service(
-            installed={"base": True},
-            models=ALL_MODELS,
-            hardware=self._gpu(),
-            registry=build_engine_registry(),
-            config_overrides={"transcription.model_size": "base"},
-        )
-
-        base = {view.name: view for view in service.list_models()}["base"]
-
-        assert base.legacy is True
-        assert base.deletable is False
-
-    def test_should_keep_legacy_visible_outside_streaming_filter(self):
-        from voicetotext.transcription.model_info import ALL_MODELS
-
-        service, *_ = _build_service(
-            installed={"base": True},
-            models=ALL_MODELS,
-            hardware=self._gpu(),
-            registry=build_engine_registry(),
-            config_overrides={
-                "transcription.model_size": "parakeet-tdt-0.6b-v3",
-                "transcription.mode": "streaming",
-            },
-        )
-
-        names = {view.name for view in service.list_models()}
-
-        assert "base" in names
-        assert "nemotron-speech-streaming-en-0.6b" in names
-
-    def test_should_remove_legacy_projection_after_delete(self):
-        from voicetotext.transcription.model_info import ALL_MODELS
-
-        service, *_ = _build_service(
-            installed={"base": True},
-            models=ALL_MODELS,
-            hardware=self._gpu(),
-            registry=build_engine_registry(),
-            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
-        )
-
-        service.delete_model("base")
-
-        assert "base" not in {view.name for view in service.list_models()}
 
 
 class TestDictionaryRules:

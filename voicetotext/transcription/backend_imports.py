@@ -3,10 +3,8 @@
 Each adapter's ``_import_backend`` wraps its lazy backend import in a
 try/except so a missing or broken backend surfaces as
 :class:`EngineDependencyMissingError` instead of a raw ``ImportError``.
-The challenge is the message - telling the user "pip install
-transformers" when transformers IS installed (but a submodule import
-exploded because of a torch ABI mismatch) wastes their time and hides
-the real cause.
+The challenge is distinguishing a missing package from a submodule import
+that exploded because of a torch ABI mismatch.
 
 This module's :func:`make_engine_dependency_error` checks whether the
 top-level package can be found by ``importlib.util.find_spec``. If yes,

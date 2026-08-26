@@ -36,7 +36,6 @@ from voicetotext.output.text_pipeline import PipelineMode
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.model_info import migrate_removed_models
 
 
 _HARDWARE = MagicMock()
@@ -47,7 +46,9 @@ _ROCM_PROFILE = HardwareProfile(
 )
 
 
-def _provider_config(model_size: str = "base", engine: str = "auto"):
+def _provider_config(
+    model_size: str = "parakeet-tdt-0.6b-v3", engine: str = "auto",
+) -> MagicMock:
     config = MagicMock()
     values = {
         "transcription.model_size": model_size,
@@ -64,14 +65,6 @@ class TestActiveEngineProvider:
     install state agrees with the loader. Every model now has a single
     compatible engine, so resolution is driven by the configured model.
     """
-
-    def test_should_resolve_whisper_model_to_transformers(self, tmp_path):
-        provider = _make_active_engine_provider(
-            _provider_config(model_size="base"), _ROCM_PROFILE,
-            build_engine_registry(), tmp_path,
-        )
-
-        assert provider() == "transformers"
 
     def test_should_resolve_parakeet_model_to_nano_parakeet(self, tmp_path):
         provider = _make_active_engine_provider(
@@ -318,7 +311,7 @@ class TestLoadEngineAndAttachFailureSurface:
         bus = SimpleEventBus()
         state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
         config = MagicMock()
-        config.get.return_value = "large-v3-turbo"
+        config.get.return_value = "parakeet-tdt-0.6b-v3"
         broken = MagicMock()
         broken.load_model.side_effect = EngineDependencyMissingError(
             "nano-parakeet not installed: pip install nano-parakeet"
@@ -339,7 +332,7 @@ class TestLoadEngineAndAttachFailureSurface:
 
         assert len(received) == 1
         assert "nano-parakeet not installed" in received[0].error
-        assert received[0].model_name == "large-v3-turbo"
+        assert received[0].model_name == "parakeet-tdt-0.6b-v3"
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_publish_event_before_entering_error_then_recover(
@@ -350,7 +343,7 @@ class TestLoadEngineAndAttachFailureSurface:
         bus = SimpleEventBus()
         state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
         config = MagicMock()
-        config.get.return_value = "base"
+        config.get.return_value = "parakeet-tdt-0.6b-v3"
         broken = MagicMock()
         broken.load_model.side_effect = RuntimeError("VRAM exhausted")
         mock_create.side_effect = [broken, broken]
@@ -449,66 +442,6 @@ class TestWarmupSafelyErrorClassification:
             _warmup_safely(engine)
 
         assert exc_info.value.__cause__ is original
-
-
-class TestMigrateRemovedModels:
-    def test_should_rewrite_medium_to_large_v3_turbo(self):
-        config = MagicMock()
-        config.get.return_value = "medium"
-
-        migrate_removed_models(config)
-
-        config.set.assert_called_once_with(
-            "transcription.model_size", "large-v3-turbo"
-        )
-        config.save.assert_called_once()
-
-    def test_should_rewrite_removed_compare_model_to_plain_streaming(self):
-        config = MagicMock()
-        config.get.return_value = "nemotron-streaming-compare"
-
-        migrate_removed_models(config)
-
-        config.set.assert_called_once_with(
-            "transcription.model_size", "nemotron-speech-streaming-en-0.6b"
-        )
-        config.save.assert_called_once()
-
-    def test_should_rewrite_granite_to_large_v3_turbo(self):
-        config = MagicMock()
-        config.get.return_value = "granite-speech-4.1-2b"
-
-        migrate_removed_models(config)
-
-        config.set.assert_called_once_with(
-            "transcription.model_size", "large-v3-turbo"
-        )
-        config.save.assert_called_once()
-
-    def test_should_leave_other_models_alone(self):
-        config = MagicMock()
-        config.get.return_value = "small"
-
-        migrate_removed_models(config)
-
-        config.set.assert_not_called()
-        config.save.assert_not_called()
-
-    def test_should_leave_large_v3_turbo_alone(self):
-        config = MagicMock()
-        config.get.return_value = "large-v3-turbo"
-
-        migrate_removed_models(config)
-
-        config.set.assert_not_called()
-
-    def test_should_leave_large_v3_alone(self):
-        config = MagicMock()
-        config.get.return_value = "large-v3"
-
-        migrate_removed_models(config)
-
-        config.set.assert_not_called()
 
 
 class TestMigrateOutputMode:

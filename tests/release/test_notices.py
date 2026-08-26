@@ -1,7 +1,7 @@
 """Tests for THIRD-PARTY-NOTICES generation.
 
 The shipped binary bundles permissively-licensed third-party libraries
-(torch, transformers, Pillow, ...), so the distribution must reproduce
+(torch, requests, Pillow, ...), so the distribution must reproduce
 their license texts. This is the one legal to-do from the licensing
 audit. Build and test tooling that never ends up inside the binary
 (PyInstaller, pytest, the app itself) is excluded; model weights are
@@ -28,7 +28,7 @@ from release.notices import (
 class TestDecidingWhichPackagesToInclude:
     def test_includes_a_bundled_runtime_dependency(self):
         assert should_include("torch")
-        assert should_include("transformers")
+        assert should_include("requests")
         assert should_include("Pillow")
 
     def test_excludes_the_application_itself(self):
@@ -130,10 +130,10 @@ class TestRenderingTheWholeDocument:
 
     def test_lists_components_sorted_case_insensitively(self):
         document = render_document(
-            [self._package("torch"), self._package("Accelerate")]
+            [self._package("torch"), self._package("Pillow")]
         )
 
-        assert document.index("Accelerate") < document.index("torch")
+        assert document.index("Pillow") < document.index("torch")
 
     def test_states_the_product_and_the_runtime_model_disclaimer(self):
         document = render_document([self._package("torch")])
@@ -143,8 +143,8 @@ class TestRenderingTheWholeDocument:
 
     def test_reproduces_every_component_license(self):
         document = render_document(
-            [self._package("torch"), self._package("transformers")]
+            [self._package("torch"), self._package("requests")]
         )
 
         assert "torch license body" in document
-        assert "transformers license body" in document
+        assert "requests license body" in document

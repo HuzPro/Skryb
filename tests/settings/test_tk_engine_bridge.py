@@ -33,7 +33,7 @@ class TestTkEngineBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkEngineBridge(schedule=scheduled.append, target=window)
-        event = EngineLoadStartedEvent(model_name="small")
+        event = EngineLoadStartedEvent(model_name="nemotron-speech-streaming-en-0.6b")
 
         bridge.on_engine_load_started(event)
         assert window.started == []
@@ -45,7 +45,7 @@ class TestTkEngineBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkEngineBridge(schedule=scheduled.append, target=window)
-        event = EngineLoadCompletedEvent(model_name="small")
+        event = EngineLoadCompletedEvent(model_name="nemotron-speech-streaming-en-0.6b")
 
         bridge.on_engine_load_completed(event)
         scheduled[0]()
@@ -56,7 +56,7 @@ class TestTkEngineBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkEngineBridge(schedule=scheduled.append, target=window)
-        event = EngineLoadFailedEvent(model_name="small", error="oom")
+        event = EngineLoadFailedEvent(model_name="nemotron-speech-streaming-en-0.6b", error="oom")
 
         bridge.on_engine_load_failed(event)
         scheduled[0]()

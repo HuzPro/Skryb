@@ -42,10 +42,10 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: MagicMock(),
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         assert len(started) == 1
-        assert started[0].model_name == "small"
+        assert started[0].model_name == "nemotron-speech-streaming-en-0.6b"
 
     def test_should_replace_engine_on_use_case_when_loader_succeeds(self):
         bus = SimpleEventBus()
@@ -58,7 +58,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: _installer_for(new_engine),
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         use_case.set_engine.assert_called_once_with(new_engine)
 
@@ -79,7 +79,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=loader,
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         assert call_order == ["load", "install"]
 
@@ -92,7 +92,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: MagicMock(),
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         use_case.dispose_current_engine.assert_not_called()
 
@@ -105,7 +105,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: _installer_for(new_engine),
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         new_engine.dispose.assert_not_called()
 
@@ -122,7 +122,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: _installer_for(new_engine),
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         new_engine.dispose.assert_called_once_with()
 
@@ -140,7 +140,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: _installer_for(MagicMock()),
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         assert len(failed) == 1
         assert "idle" in failed[0].error.lower()
@@ -157,7 +157,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=broken_loader,
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("large-v3")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         use_case.dispose_current_engine.assert_not_called()
         use_case.set_engine.assert_not_called()
@@ -175,10 +175,10 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=broken_loader,
             action_dispatcher=InlineActionDispatcher(),
         )
-        coord.start_swap("large-v3")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         assert len(failed) == 1
-        assert failed[0].model_name == "large-v3"
+        assert failed[0].model_name == "nemotron-speech-streaming-en-0.6b"
         assert "cuda oom" in failed[0].error
 
     def test_should_raise_when_swap_already_in_progress(self):
@@ -189,10 +189,10 @@ class TestEngineHotSwapCoordinatorStartSwap:
             loader=lambda: MagicMock(),
             action_dispatcher=dispatcher,
         )
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         with pytest.raises(EngineSwapError, match="already in progress"):
-            coord.start_swap("small")
+            coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
     def test_should_allow_new_swap_after_previous_finishes(self):
         bus = SimpleEventBus()
@@ -204,8 +204,8 @@ class TestEngineHotSwapCoordinatorStartSwap:
             action_dispatcher=InlineActionDispatcher(),
         )
 
-        coord.start_swap("tiny")
-        coord.start_swap("small")
+        coord.start_swap("test-model")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
 
         assert len(completed) == 2
 
@@ -218,7 +218,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         null = NullEngineHotSwap()
 
         with pytest.raises(EngineSwapError, match="first-run"):
-            null.start_swap("base")
+            null.start_swap("parakeet-tdt-0.6b-v3")
 
     def test_should_publish_failed_event_when_loader_exceeds_timeout(self):
         bus = SimpleEventBus()
@@ -237,12 +237,12 @@ class TestEngineHotSwapCoordinatorStartSwap:
             timeout_seconds=0.05,
         )
         try:
-            coord.start_swap("large-v3")
+            coord.start_swap("nemotron-speech-streaming-en-0.6b")
         finally:
             let_loader_return.set()
 
         assert len(failed) == 1
-        assert failed[0].model_name == "large-v3"
+        assert failed[0].model_name == "nemotron-speech-streaming-en-0.6b"
         assert "timed out" in failed[0].error.lower()
 
     def test_should_not_install_engine_when_loader_times_out(self):
@@ -261,7 +261,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
             timeout_seconds=0.05,
         )
         try:
-            coord.start_swap("large-v3")
+            coord.start_swap("nemotron-speech-streaming-en-0.6b")
         finally:
             let_loader_return.set()
 
@@ -277,7 +277,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         )
 
         assert coord.is_busy() is False
-        coord.start_swap("small")
+        coord.start_swap("nemotron-speech-streaming-en-0.6b")
         assert coord.is_busy() is True
 
         dispatcher.drain_all()

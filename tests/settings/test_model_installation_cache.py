@@ -39,87 +39,87 @@ class _FakeModelManager(ModelManager):
 
 class TestModelInstallationCacheFallback:
     def test_should_delegate_to_model_manager_on_first_call(self):
-        manager = _FakeModelManager({"base": True})
+        manager = _FakeModelManager({"parakeet-tdt-0.6b-v3": True})
         bus = SimpleEventBus()
         cache = ModelInstallationCache(manager, bus)
 
-        assert cache.is_installed("base") is True
+        assert cache.is_installed("parakeet-tdt-0.6b-v3") is True
         assert manager.is_installed_call_count == 1
 
     def test_should_return_false_when_model_not_installed(self):
-        manager = _FakeModelManager({"base": False})
+        manager = _FakeModelManager({"parakeet-tdt-0.6b-v3": False})
         cache = ModelInstallationCache(manager, SimpleEventBus())
 
-        assert cache.is_installed("base") is False
+        assert cache.is_installed("parakeet-tdt-0.6b-v3") is False
 
 
 class TestModelInstallationCacheHit:
     def test_should_return_cached_value_without_hitting_model_manager(self):
-        manager = _FakeModelManager({"base": True})
+        manager = _FakeModelManager({"parakeet-tdt-0.6b-v3": True})
         cache = ModelInstallationCache(manager, SimpleEventBus())
 
-        cache.is_installed("base")
-        cache.is_installed("base")
-        cache.is_installed("base")
+        cache.is_installed("parakeet-tdt-0.6b-v3")
+        cache.is_installed("parakeet-tdt-0.6b-v3")
+        cache.is_installed("parakeet-tdt-0.6b-v3")
 
         assert manager.is_installed_call_count == 1
 
     def test_should_populate_all_models_eagerly(self):
-        manager = _FakeModelManager({"tiny": False, "base": True, "small": False})
+        manager = _FakeModelManager({"test-model": False, "parakeet-tdt-0.6b-v3": True, "nemotron-speech-streaming-en-0.6b": False})
         cache = ModelInstallationCache(manager, SimpleEventBus())
 
         cache.populate_all()
 
-        assert cache.is_installed("tiny") is False
-        assert cache.is_installed("base") is True
-        assert cache.is_installed("small") is False
+        assert cache.is_installed("test-model") is False
+        assert cache.is_installed("parakeet-tdt-0.6b-v3") is True
+        assert cache.is_installed("nemotron-speech-streaming-en-0.6b") is False
         # populate_all hit each once; reads after are cached.
         assert manager.is_installed_call_count == 3
 
 
 class TestModelInstallationCacheInvalidation:
     def test_should_invalidate_entry_when_download_completes(self):
-        manager = _FakeModelManager({"base": False})
+        manager = _FakeModelManager({"parakeet-tdt-0.6b-v3": False})
         bus = SimpleEventBus()
         cache = ModelInstallationCache(manager, bus)
 
-        cache.is_installed("base")  # cached as False
-        manager._installed["base"] = True  # simulate on-disk change
-        bus.publish(DownloadCompletedEvent(job_id="base"))
+        cache.is_installed("parakeet-tdt-0.6b-v3")  # cached as False
+        manager._installed["parakeet-tdt-0.6b-v3"] = True  # simulate on-disk change
+        bus.publish(DownloadCompletedEvent(job_id="parakeet-tdt-0.6b-v3"))
 
-        assert cache.is_installed("base") is True
+        assert cache.is_installed("parakeet-tdt-0.6b-v3") is True
 
     def test_should_invalidate_entry_when_download_fails(self):
-        manager = _FakeModelManager({"base": True})
+        manager = _FakeModelManager({"parakeet-tdt-0.6b-v3": True})
         bus = SimpleEventBus()
         cache = ModelInstallationCache(manager, bus)
 
-        cache.is_installed("base")
-        manager._installed["base"] = False
-        bus.publish(DownloadFailedEvent(job_id="base", error="net"))
+        cache.is_installed("parakeet-tdt-0.6b-v3")
+        manager._installed["parakeet-tdt-0.6b-v3"] = False
+        bus.publish(DownloadFailedEvent(job_id="parakeet-tdt-0.6b-v3", error="net"))
 
-        assert cache.is_installed("base") is False
+        assert cache.is_installed("parakeet-tdt-0.6b-v3") is False
 
     def test_should_invalidate_explicit_name(self):
-        manager = _FakeModelManager({"base": True})
+        manager = _FakeModelManager({"parakeet-tdt-0.6b-v3": True})
         cache = ModelInstallationCache(manager, SimpleEventBus())
 
-        cache.is_installed("base")
-        manager._installed["base"] = False
-        cache.invalidate("base")
+        cache.is_installed("parakeet-tdt-0.6b-v3")
+        manager._installed["parakeet-tdt-0.6b-v3"] = False
+        cache.invalidate("parakeet-tdt-0.6b-v3")
 
-        assert cache.is_installed("base") is False
+        assert cache.is_installed("parakeet-tdt-0.6b-v3") is False
 
     def test_should_clear_all_cached_entries_when_clear_is_called(self):
-        manager = _FakeModelManager({"tiny": True, "base": True})
+        manager = _FakeModelManager({"test-model": True, "parakeet-tdt-0.6b-v3": True})
         cache = ModelInstallationCache(manager, SimpleEventBus())
-        cache.is_installed("tiny")
-        cache.is_installed("base")
+        cache.is_installed("test-model")
+        cache.is_installed("parakeet-tdt-0.6b-v3")
         calls_before_clear = manager.is_installed_call_count
 
         cache.clear()
-        cache.is_installed("tiny")
-        cache.is_installed("base")
+        cache.is_installed("test-model")
+        cache.is_installed("parakeet-tdt-0.6b-v3")
 
         assert manager.is_installed_call_count == calls_before_clear + 2
 

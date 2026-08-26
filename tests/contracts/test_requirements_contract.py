@@ -1,4 +1,4 @@
-"""Contract: every one-shot install file pulls the full torch family.
+"""Contract: every one-shot install file pulls PyTorch.
 
 The platform requirements files (`requirements-nvidia.txt`,
 `requirements-cpu.txt`, `requirements-amd.txt`,
@@ -7,15 +7,8 @@ get pinned. `requirements.txt` / `requirements-all.txt` deliberately
 omit torch so a pre-existing custom build is left untouched, so they
 are not one-shot files and are not checked here.
 
-`torchaudio` is a hard runtime dependency, not optional: the Granite
-Speech engine's transformers feature extractor calls
-`requires_backends(self, ["torchaudio"])` and builds a
-`torchaudio.transforms.MelSpectrogram`. It was originally declared
-only in the AMD files, so an NVIDIA user hit a runtime
-"install torchaudio" error because `requirements-nvidia.txt` shipped
-`torch` alone. This contract fails the build if any one-shot file -
-or the canonical `pyproject.toml` dependency list - drops a required
-torch package again.
+This contract fails the build if any one-shot file or the canonical
+`pyproject.toml` dependency list drops the engine backbone.
 """
 
 import re
@@ -27,12 +20,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Torch-family packages every one-shot install must provide. `torch`
-# is the engine backbone; `torchaudio` is required by the Granite
-# Speech feature extractor. `torchvision` is deliberately NOT listed -
-# no engine imports it, so it stays out of the required set even though
-# AMD's ROCm trio happens to ship it.
-_REQUIRED_TORCH_PACKAGES = frozenset({"torch", "torchaudio"})
+_REQUIRED_TORCH_PACKAGES = frozenset({"torch"})
 
 _ONE_SHOT_INSTALL_FILES = (
     "requirements-nvidia.txt",

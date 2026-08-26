@@ -79,8 +79,8 @@ from voicetotext.transcription.engine_install import (
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
 from voicetotext.transcription.model_info import (
+    DEFAULT_MODEL,
     ModelInfo,
-    default_model_for,
     get_model_info,
 )
 from voicetotext.transcription.streaming.streaming_engine import (
@@ -116,18 +116,7 @@ def migrate_output_mode(config: JsonConfigAdapter) -> None:
 
 
 def migrate_language(config: JsonConfigAdapter) -> None:
-    """Rewrite a legacy ``transcription.language`` of ``None`` or ``"auto"`` to ``"en"``.
-
-    Older configs used ``None`` (or the sentinel ``"auto"``) to request
-    Whisper's auto-detect path.  That path fails on audio shorter than
-    30 seconds because of how transformers 5.x routes short-form vs.
-    long-form generation - and short recordings are the whole use case
-    of this app.  Pinning the language to a specific value (default
-    ``"en"``) sidesteps the bug and is more reliable anyway, since
-    language detection on sub-30-second utterances is unreliable by
-    construction.  This one-shot migration protects existing users
-    whose configs still hold the legacy value.
-    """
+    """Rewrite a legacy language of ``None`` or ``"auto"`` to ``"en"``."""
     current = config.get("transcription.language")
     if current not in (None, "auto"):
         return
@@ -270,7 +259,7 @@ def _load_streaming_engine(
 ) -> StreamingTranscriptionEngine:
     """Build, load, and warm the GPU-only streaming engine for the active model."""
     model_info = get_model_info(
-        config.get("transcription.model_size", default_model_for(hardware))
+        config.get("transcription.model_size", DEFAULT_MODEL)
     )
     engine = _build_streaming_engine_for(model_info, paths)
     engine.load_model()
@@ -393,7 +382,7 @@ def _recover_from_failed_load(
     event_bus.publish(
         EngineLoadFailedEvent(
             model_name=str(
-                config.get("transcription.model_size", default_model_for(None))
+                config.get("transcription.model_size", DEFAULT_MODEL)
             ),
             error=str(exc),
         )
@@ -471,15 +460,14 @@ def _make_active_engine_provider(
     toward whichever engine actually has loadable files on disk (see
     ``create_engine_for_active_model``). The composite routes
     ``is_installed`` to this active child, so without the on-disk bias a
-    model present only under another engine's repo - e.g. a Parakeet
-    model under the nano-parakeet cache while the saved engine is a
-    Whisper backend - looked uninstalled in the UI even though the
-    loader could open it. Tying both to the same resolution keeps the
+    model present only under another engine's repo looked uninstalled in
+    the UI even though the loader could open it. Tying both to the same
+    resolution keeps the
     install state and the loader in agreement.
     """
     def provider() -> EngineId:
         model_name = config.get(
-            "transcription.model_size", default_model_for(hardware),
+            "transcription.model_size", DEFAULT_MODEL,
         )
         model_info = get_model_info(model_name)
         return resolve_engine_id(

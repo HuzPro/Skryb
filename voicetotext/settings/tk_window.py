@@ -215,7 +215,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         return SettingsDraft(
             model_size=self._transcription_page.current_model(),
             language=self._transcription_page.current_language(),
-            device=self._transcription_page.current_device(),
+            device=self._service.current_draft().device,
             engine=self._transcription_page.current_engine(),
             hotkey_combination=self._hotkeys_page.current_combination(),
             hotkey_mode=self._hotkeys_page.current_mode(),
