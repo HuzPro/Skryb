@@ -456,7 +456,7 @@ class TestEngineLoadFailureNotification:
 
         app._event_bus.publish(
             EngineLoadFailedEvent(
-                model_name="large-v3-turbo",
+                model_name="nemotron-speech-streaming-en-0.6b",
                 error="nano-parakeet not installed: pip install nano-parakeet",
             )
         )
@@ -474,7 +474,7 @@ class TestEngineLoadFailureNotification:
         icon.update_state.reset_mock()
 
         app._event_bus.publish(
-            EngineLoadFailedEvent(model_name="base", error="missing")
+            EngineLoadFailedEvent(model_name="parakeet-tdt-0.6b-v3", error="missing")
         )
 
         icon.update_state.assert_any_call(AppState.ERROR, "Error")
@@ -488,7 +488,7 @@ class TestEngineLoadFailureNotification:
 
         app = _build_app(tray_factory=factory)
         app._event_bus.publish(
-            EngineLoadFailedEvent(model_name="base", error="load failed early")
+            EngineLoadFailedEvent(model_name="parakeet-tdt-0.6b-v3", error="load failed early")
         )
 
         app.run()

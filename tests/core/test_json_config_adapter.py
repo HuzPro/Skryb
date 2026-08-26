@@ -43,9 +43,9 @@ class TestJsonConfigAdapterDotNotation:
         config = JsonConfigAdapter(tmp_path / "config.json")
         config.load()
 
-        config.set("transcription.model_size", "small")
+        config.set("transcription.model_size", "nemotron-speech-streaming-en-0.6b")
 
-        assert config.get("transcription.model_size") == "small"
+        assert config.get("transcription.model_size") == "nemotron-speech-streaming-en-0.6b"
 
     def test_should_get_top_level_section_as_dict(self, tmp_path):
         config = JsonConfigAdapter(tmp_path / "config.json")
@@ -67,7 +67,7 @@ class TestJsonConfigAdapterPersistence:
         assert config.has_persisted_value("transcription.model_size") is False
 
         config.load()
-        config.set("transcription.model_size", "base")
+        config.set("transcription.model_size", "parakeet-tdt-0.6b-v3")
         config.save()
 
         assert config.has_persisted_value("transcription.model_size") is True

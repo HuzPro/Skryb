@@ -56,13 +56,6 @@ class TestDoctorReportsMissingBackends:
         assert "nano_parakeet" in report or "nano-parakeet" in report
         assert "MISSING" in report
 
-    def test_should_report_missing_transformers(self) -> None:
-        with patch.dict("sys.modules", {"transformers": None}):
-            report = run_doctor()
-
-        assert "transformers" in report
-        assert "MISSING" in report
-
     def test_missing_backend_line_should_include_install_hint(self) -> None:
         with patch.dict("sys.modules", {"nano_parakeet": None}):
             report = run_doctor()

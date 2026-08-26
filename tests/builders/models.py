@@ -5,10 +5,10 @@ class ModelInfoBuilder:
     """Fluent builder for :class:`ModelInfo`."""
 
     def __init__(self) -> None:
-        self._name: str = "base"
-        self._size_mb: int = 290
-        self._description: str = "Good balance"
-        self._repo_id: str = "openai/whisper-base"
+        self._name = "parakeet-tdt-0.6b-v3"
+        self._size_mb = 2510
+        self._description = "Best accuracy"
+        self._repo_id = "nvidia/parakeet-tdt-0.6b-v3"
 
     def named(self, name: str) -> "ModelInfoBuilder":
         self._name = name

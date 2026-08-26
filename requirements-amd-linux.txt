@@ -19,11 +19,10 @@ rocm==7.2.1
 rocm-sdk-core==7.2.1
 rocm-sdk-libraries-custom==7.2.1
 
-# PyTorch + audio/vision built against ROCm 7.2.1. Constraints are
+# PyTorch + vision built against ROCm 7.2.1. Constraints are
 # minor-bounded so a future ROCm 7.2.x rebuild gets picked up without
 # silently jumping to 2.10.
 torch>=2.9.1,<2.10
-torchaudio>=2.9.1,<2.10
 torchvision>=0.24.1,<0.25
 
 # Rest of the app dependencies.

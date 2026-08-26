@@ -60,7 +60,6 @@ class TkModelList(ttk.Frame):
         self._mode: TranscriptionMode | None = None
         self._views: list[ModelView] = []
         self._rows: dict[str, TkModelRow] = {}
-        self._section_labels: list[ttk.Label] = []
         self._downloads: dict[str, DownloadProgressSnapshot] = {}
         self._selected = ""
         self.selection_changed = Signal()
@@ -149,19 +148,10 @@ class TkModelList(ttk.Frame):
     def _rebuild(self) -> None:
         for row in self._rows.values():
             row.destroy()
-        for label in self._section_labels:
-            label.destroy()
         self._rows.clear()
-        self._section_labels.clear()
         self._views = list(self._service.list_models(self._mode))
         self._selected = self._service.selected_model()
-        legacy_heading_added = False
         for view in self._views:
-            if view.legacy and not legacy_heading_added:
-                heading = ttk.Label(self._inner, text="Legacy (installed)")
-                heading.pack(fill="x", padx=4, pady=(8, 6))
-                self._section_labels.append(heading)
-                legacy_heading_added = True
             self._add_row(view)
         self._apply_selection()
         self._refresh_content_height()
@@ -209,7 +199,7 @@ class TkModelList(ttk.Frame):
 
     def select_model(self, name: str) -> None:
         view = self._view_for(name)
-        if view is None or not view.installed or not view.selectable:
+        if view is None or not view.installed:
             return
         self.set_selected(name)
         self.selection_changed.emit(name)

@@ -10,8 +10,8 @@ from voicetotext.transcription.result import TranscriptionResult
 
 
 _DESCRIPTOR = EngineDescriptor(
-    engine_id="transformers",
-    display_name="Transformers",
+    engine_id="nano_parakeet",
+    display_name="nano-parakeet",
     supported_hardware=("cpu",),
     base_priority=50,
 )
@@ -32,9 +32,10 @@ class _FakeEngine(TranscriptionEngine):
     def dispose(self) -> None: ...
 
 
-def _spec(*, repo_id: str = "openai/whisper-base") -> EngineSpec:
+def _spec(*, repo_id: str = "nvidia/parakeet-tdt-0.6b-v3") -> EngineSpec:
     return EngineSpec(
-        model_name="base", repo_id=repo_id, device="cpu", language="en",
+        model_name="parakeet-tdt-0.6b-v3", repo_id=repo_id,
+        device="cpu", language="en",
         beam_size=5, model_dir=Path("/tmp/models"),
     )
 
@@ -43,11 +44,11 @@ class TestEngineRegistry:
     def test_should_build_engine_via_registered_builder(self):
         registry = EngineRegistry(
             descriptors=[_DESCRIPTOR],
-            builders={"transformers": _FakeEngine},
+            builders={"nano_parakeet": _FakeEngine},
         )
         spec = _spec()
 
-        engine = registry.build("transformers", spec)
+        engine = registry.build("nano_parakeet", spec)
 
         assert isinstance(engine, _FakeEngine)
         assert engine.spec is spec
@@ -55,24 +56,24 @@ class TestEngineRegistry:
     def test_should_raise_on_unknown_engine_id(self):
         registry = EngineRegistry(
             descriptors=[_DESCRIPTOR],
-            builders={"transformers": _FakeEngine},
+            builders={"nano_parakeet": _FakeEngine},
         )
 
         with pytest.raises(KeyError):
-            registry.build("nano_parakeet", _spec())
+            registry.build("nemotron_streaming", _spec())
 
     def test_should_return_descriptor_by_id(self):
         registry = EngineRegistry(
             descriptors=[_DESCRIPTOR],
-            builders={"transformers": _FakeEngine},
+            builders={"nano_parakeet": _FakeEngine},
         )
 
-        assert registry.descriptor("transformers") is _DESCRIPTOR
+        assert registry.descriptor("nano_parakeet") is _DESCRIPTOR
 
     def test_all_descriptors_should_return_tuple(self):
         registry = EngineRegistry(
             descriptors=[_DESCRIPTOR],
-            builders={"transformers": _FakeEngine},
+            builders={"nano_parakeet": _FakeEngine},
         )
 
         assert registry.all_descriptors() == (_DESCRIPTOR,)

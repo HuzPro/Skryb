@@ -15,13 +15,9 @@ _SUPPORTED_LANGUAGES = [
     "en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh",
 ]
 
-_AUTO_DEVICE = "auto"
-_GPU_DEVICE = "cuda"
-_DEVICE_LABELS: dict[str, str] = {_GPU_DEVICE: "GPU"}
-
 # Last-resort defaults if the service lists no models for a mode.
 _FALLBACK_MODELS: dict[TranscriptionMode, str] = {
-    TranscriptionMode.BATCH: "base",
+    TranscriptionMode.BATCH: "parakeet-tdt-0.6b-v3",
     TranscriptionMode.STREAMING: "parakeet-tdt-0.6b-v3",
 }
 
@@ -30,13 +26,8 @@ _NO_GPU_STREAMING_REASON = (
 )
 
 
-def _device_label(device: str) -> str:
-    """User-facing name for a torch device string (``cuda`` shows as ``GPU``)."""
-    return _DEVICE_LABELS.get(device, device)
-
-
 class TkTranscriptionPage(ttk.Frame):
-    """Page for picking the mode, model, language, device, and engine.
+    """Page for picking the mode, model, language, and engine.
 
     The batch/streaming :class:`TkModeSelector` sits above the
     :class:`TkModelList` it filters. The Engine combo is hardware-aware:
@@ -52,7 +43,6 @@ class TkTranscriptionPage(ttk.Frame):
         self.delete_error = Signal()
         self.model_auto_switched = Signal()
         self._engine_ids: list[str] = ["auto"]
-        self._device_values: list[str] = []
         self._build()
 
     # ------------------------------------------------------------------
@@ -102,26 +92,15 @@ class TkTranscriptionPage(ttk.Frame):
             state="readonly",
         )
 
-        self._device_values = list(self._service.available_devices())
-        self._device_combo = ttk.Combobox(
-            form,
-            state="readonly",
-            values=[_device_label(d) for d in self._device_values],
-        )
-        self._set_device_value(draft.device)
-
         self._engine_combo = ttk.Combobox(form, state="readonly", values=[])
         self._engine_reason = ttk.Label(form, text="")
 
         ttk.Label(form, text="Language:").grid(row=0, column=0, sticky="w", pady=2)
         self._language_combo.grid(row=0, column=1, sticky="ew", pady=2)
-        ttk.Label(form, text="Device:").grid(row=1, column=0, sticky="w", pady=2)
-        self._device_combo.grid(row=1, column=1, sticky="ew", pady=2)
-        ttk.Label(form, text="Engine:").grid(row=2, column=0, sticky="w", pady=2)
-        self._engine_combo.grid(row=2, column=1, sticky="ew", pady=2)
-        self._engine_reason.grid(row=3, column=1, sticky="w")
+        ttk.Label(form, text="Engine:").grid(row=1, column=0, sticky="w", pady=2)
+        self._engine_combo.grid(row=1, column=1, sticky="ew", pady=2)
+        self._engine_reason.grid(row=2, column=1, sticky="w")
 
-        self._refresh_device_enabled(draft.model_size)
         self._populate_engine_combo(draft.model_size, current_engine=draft.engine)
 
     # ------------------------------------------------------------------
@@ -139,7 +118,6 @@ class TkTranscriptionPage(ttk.Frame):
 
     def set_model(self, name: str) -> None:
         self._model_list.set_selected(name)
-        self._refresh_device_enabled(name)
 
     def current_mode(self) -> TranscriptionMode:
         return self._mode_selector.current_mode()
@@ -149,21 +127,6 @@ class TkTranscriptionPage(ttk.Frame):
 
     def set_language(self, language: str) -> None:
         self._language_var.set(language)
-
-    def current_device(self) -> str:
-        index = self._device_combo.current()
-        if index < 0:
-            return _AUTO_DEVICE
-        return self._device_values[index]
-
-    def set_device(self, device: str) -> None:
-        self._set_device_value(device)
-
-    def device_labels(self) -> list[str]:
-        return list(self._device_combo.cget("values"))
-
-    def device_enabled(self) -> bool:
-        return str(self._device_combo.cget("state")) != "disabled"
 
     def current_engine(self) -> str:
         index = self._engine_combo.current()
@@ -189,13 +152,12 @@ class TkTranscriptionPage(ttk.Frame):
 
         Re-filters the model list, auto-selects a compatible model if the
         current one cannot run in the new mode (announced via
-        :attr:`model_auto_switched`), and re-locks the device picker.
+        :attr:`model_auto_switched`).
         """
         self._mode = mode
         self._mode_selector.set_mode(mode)
         self._model_list.set_mode(mode)
         self._switch_model_if_incompatible(mode)
-        self._refresh_device_enabled(self.current_model())
 
     def _switch_model_if_incompatible(self, mode: TranscriptionMode) -> None:
         current = self.current_model()
@@ -221,36 +183,11 @@ class TkTranscriptionPage(ttk.Frame):
         return _FALLBACK_MODELS[mode]
 
     # ------------------------------------------------------------------
-    # Selection / device / engine internals
+    # Selection and engine internals
     # ------------------------------------------------------------------
 
     def _on_model_selected(self, name: str) -> None:
         self._populate_engine_combo(name)
-        self._refresh_device_enabled(name)
-
-    def _set_device_value(self, device: str) -> None:
-        if device in self._device_values:
-            self._device_combo.current(self._device_values.index(device))
-        elif self._device_values:
-            self._device_combo.current(0)
-
-    def _refresh_device_enabled(self, model_name: str) -> None:
-        """Enable the device picker only for models that may leave the GPU.
-
-        Streaming pins the device to the GPU. Otherwise larger models are
-        pinned to ``auto`` and greyed out.
-        """
-        if self._mode is TranscriptionMode.STREAMING:
-            self._set_device_value(_GPU_DEVICE)
-            self._set_device_enabled(False)
-            return
-        selectable = self._service.allows_device_selection(model_name)
-        if not selectable:
-            self._set_device_value(_AUTO_DEVICE)
-        self._set_device_enabled(selectable)
-
-    def _set_device_enabled(self, enabled: bool) -> None:
-        self._device_combo.configure(state="readonly" if enabled else "disabled")
 
     def _populate_engine_combo(
         self, model_name: str, current_engine: str = "auto",

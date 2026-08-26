@@ -29,19 +29,19 @@ class TestHfRepoResolverListFiles:
         )
 
         resolver = HfRepoResolver(api=api)
-        commit_sha, files = resolver.resolve("openai/whisper-tiny")
+        commit_sha, files = resolver.resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         assert commit_sha == "abc123"
         assert files == [
             ResolvedFile(
                 filename="config.json",
                 size=1983,
-                url="https://huggingface.co/openai/whisper-tiny/resolve/abc123/config.json",
+                url="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/resolve/abc123/config.json",
             ),
             ResolvedFile(
                 filename="model.safetensors",
                 size=151061672,
-                url="https://huggingface.co/openai/whisper-tiny/resolve/abc123/model.safetensors",
+                url="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/resolve/abc123/model.safetensors",
             ),
         ]
 
@@ -49,10 +49,10 @@ class TestHfRepoResolverListFiles:
         api = MagicMock()
         api.repo_info.return_value = _fake_repo_info(sha="x", files=[])
 
-        HfRepoResolver(api=api).resolve("openai/whisper-tiny")
+        HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         api.repo_info.assert_called_once_with(
-            "openai/whisper-tiny", files_metadata=True
+            "nvidia/parakeet-tdt-0.6b-v3", files_metadata=True
         )
 
 
@@ -73,7 +73,7 @@ class TestHfRepoResolverIgnorePatterns:
             ],
         )
 
-        _, files = HfRepoResolver(api=api).resolve("openai/whisper-tiny")
+        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         names = [f.filename for f in files]
         assert names == ["config.json", "model.safetensors", "model.bin"]
@@ -89,7 +89,7 @@ class TestHfRepoResolverIgnorePatterns:
             ],
         )
 
-        _, files = HfRepoResolver(api=api).resolve("openai/whisper-tiny")
+        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         assert [f.filename for f in files] == ["config.json"]
 
@@ -104,7 +104,7 @@ class TestHfRepoResolverIgnorePatterns:
             ],
         )
 
-        _, files = HfRepoResolver(api=api).resolve("openai/whisper-tiny")
+        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         assert [f.filename for f in files] == ["model.safetensors"]
 
@@ -115,6 +115,6 @@ class TestHfRepoResolverIgnorePatterns:
         sibling.size = None
         api.repo_info.return_value = _fake_repo_info(sha="sha", files=[sibling])
 
-        _, files = HfRepoResolver(api=api).resolve("openai/whisper-tiny")
+        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         assert files == []

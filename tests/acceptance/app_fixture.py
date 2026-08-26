@@ -134,33 +134,6 @@ class VoiceToTextApp:
     def next_engine_will_be(self, engine: FakeTranscriptionEngine) -> None:
         self._next_engine = engine
 
-    def uses_real_engine(self, model: str = "base") -> None:
-        """Swap the default ``FakeTranscriptionEngine`` for a real
-        :class:`TransformersWhisperAdapter` loaded on the CUDA/ROCm GPU.
-
-        Tests that call this must also call
-        :func:`tests.helpers.gpu.require_cuda` so they skip cleanly on
-        machines without a GPU.  Call before any ``press_hotkey`` -
-        the use case reads ``engine`` at transcribe time via
-        :meth:`set_engine`.  The replaced engine is disposed; the new
-        one is disposed at :meth:`dispose`.
-        """
-        from voicetotext.core.paths import AppPaths
-        from voicetotext.transcription.transformers_whisper_adapter import (
-            TransformersWhisperAdapter,
-        )
-
-        self._engine.dispose()
-        real_engine = TransformersWhisperAdapter(
-            model_size=model,
-            device="cuda",
-            language="en",
-            download_root=str(AppPaths().models_dir),
-        )
-        real_engine.load_model()
-        self._use_case.set_engine(real_engine)
-        self._engine = real_engine
-
     # ------------------------------------------------------------------
     # When - the user's actions
     # ------------------------------------------------------------------
@@ -171,7 +144,9 @@ class VoiceToTextApp:
     def release_hotkey(self) -> None:
         self._use_case.on_hotkey_deactivated()
 
-    def trigger_engine_swap(self, model_name: str = "base") -> None:
+    def trigger_engine_swap(
+        self, model_name: str = "parakeet-tdt-0.6b-v3",
+    ) -> None:
         self._hot_swap.start_swap(model_name)
 
     # ------------------------------------------------------------------

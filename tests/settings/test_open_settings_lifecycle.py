@@ -31,7 +31,7 @@ class FakeCaptureBridge:
 
 def _draft() -> SettingsDraft:
     return SettingsDraft(
-        model_size="base",
+        model_size="parakeet-tdt-0.6b-v3",
         language="en",
         device="auto",
         engine="auto",
@@ -50,7 +50,7 @@ class _TrackingService:
         self._download_listeners: list[object] = []
         self._model_deleted_handlers: list[object] = []
         self.list_models = MagicMock(return_value=[])
-        self.selected_model = MagicMock(return_value="base")
+        self.selected_model = MagicMock(return_value="parakeet-tdt-0.6b-v3")
         self.current_draft = MagicMock(return_value=_draft())
         self.any_model_installed = MagicMock(return_value=True)
         self.is_installed = MagicMock(return_value=True)
@@ -64,10 +64,6 @@ class _TrackingService:
             )
         )
         self.trigger_engine_swap = MagicMock()
-        self.available_devices = MagicMock(return_value=["auto", "cuda", "cpu"])
-        self.allows_device_selection = MagicMock(
-            side_effect=lambda n: n in {"tiny", "base"}
-        )
         self.supports_streaming_hardware = MagicMock(return_value=True)
         self.engine_candidates_for = MagicMock(return_value=())
         self.dictionary_rules = MagicMock(return_value=DictionaryConfig())

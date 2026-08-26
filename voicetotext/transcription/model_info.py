@@ -5,13 +5,14 @@ from types import MappingProxyType
 
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.exceptions import ConfigurationError
-from voicetotext.transcription.engine_types import EngineId, HardwareProfile
+from voicetotext.transcription.engine_types import EngineId
 
 
 _logger = logging.getLogger(__name__)
 
 
 _EMPTY_PRIORITIES: Mapping[EngineId, int] = MappingProxyType({})
+DEFAULT_MODEL = "parakeet-tdt-0.6b-v3"
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,7 @@ class ModelInfo:
     size_mb: int
     description: str
     repo_id: str = ""
-    compatible_engines: tuple[EngineId, ...] = ("transformers",)
+    compatible_engines: tuple[EngineId, ...] = ()
     engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
 
     @property
@@ -28,41 +29,6 @@ class ModelInfo:
         if self.size_mb >= 1000:
             return f"{self.size_mb / 1000:.1f} GB"
         return f"{self.size_mb} MB"
-
-
-# Every Whisper model runs through the transformers engine (PyTorch, every
-# backend). They carry no ``engine_priorities``: with a single compatible
-# engine the selector falls back to the descriptor's ``base_priority``, so
-# an explicit map would be dead config.
-WHISPER_MODELS: dict[str, ModelInfo] = {
-    "tiny": ModelInfo(
-        name="tiny", size_mb=151, description="Fastest, least accurate",
-        repo_id="openai/whisper-tiny",
-        compatible_engines=("transformers",),
-    ),
-    "base": ModelInfo(
-        name="base", size_mb=290, description="Good balance",
-        repo_id="openai/whisper-base",
-        compatible_engines=("transformers",),
-    ),
-    "small": ModelInfo(
-        name="small", size_mb=967, description="More accurate, slower",
-        repo_id="openai/whisper-small",
-        compatible_engines=("transformers",),
-    ),
-    "large-v3-turbo": ModelInfo(
-        name="large-v3-turbo", size_mb=1620,
-        description="Recommended: nearly large-v3 quality, 6-8x faster",
-        repo_id="openai/whisper-large-v3-turbo",
-        compatible_engines=("transformers",),
-    ),
-    "large-v3": ModelInfo(
-        name="large-v3", size_mb=3090,
-        description="Max accuracy for rare languages and noisy audio",
-        repo_id="openai/whisper-large-v3",
-        compatible_engines=("transformers",),
-    ),
-}
 
 
 _PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
@@ -99,64 +65,14 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 }
 
 
-_GRANITE_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"granite_speech": 100},
-)
-
-
-GRANITE_MODELS: dict[str, ModelInfo] = {
-    "granite-speech-4.1-2b": ModelInfo(
-        name="granite-speech-4.1-2b",
-        size_mb=4500,
-        description="IBM Granite Speech: top OpenASR (English, WER 5.33)",
-        repo_id="ibm-granite/granite-speech-4.1-2b",
-        compatible_engines=("granite_speech",),
-        engine_priorities=_GRANITE_ENGINE_PRIORITIES,
-    ),
-}
-
-
 ALL_MODELS: dict[str, ModelInfo] = {
-    **WHISPER_MODELS, **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS,
-    **GRANITE_MODELS,
+    **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS,
 }
 
 
-# Models kept defined for the engine layer but withheld from the
-# user-facing catalog (e.g. their load is currently unstable). They cannot
-# be selected; an existing config pinned to one is migrated off it (see
-# ``_REMOVED_MODEL_REPLACEMENTS``). Re-enable by removing the entry here.
-ALWAYS_HIDDEN_MODELS: frozenset[str] = frozenset({"granite-speech-4.1-2b"})
-GPU_RETIRED_MODELS: frozenset[str] = frozenset(WHISPER_MODELS)
-CPU_RETIRED_MODELS: frozenset[str] = frozenset(
-    set(WHISPER_MODELS) - {"tiny", "base"}
-)
-
-
-def hidden_models_for(
-    profile: HardwareProfile | None,
-) -> frozenset[str]:
-    if profile is None:
-        retired = frozenset()
-    elif profile.kind == "cpu":
-        retired = CPU_RETIRED_MODELS
-    else:
-        retired = GPU_RETIRED_MODELS
-    return ALWAYS_HIDDEN_MODELS | retired
-
-
-def is_catalog_model(
-    name: str,
-    profile: HardwareProfile | None = None,
-) -> bool:
+def is_catalog_model(name: str) -> bool:
     """Whether *name* should appear in the user-facing model catalog."""
-    return name in ALL_MODELS and name not in hidden_models_for(profile)
-
-
-def default_model_for(profile: HardwareProfile | None) -> str:
-    if profile is not None and profile.kind != "cpu":
-        return "parakeet-tdt-0.6b-v3"
-    return "base"
+    return name in ALL_MODELS
 
 
 def get_model_info(name: str) -> ModelInfo:
@@ -169,27 +85,16 @@ def get_model_info(name: str) -> ModelInfo:
     return info
 
 
-_DEVICE_SELECTABLE_MODELS: frozenset[str] = frozenset({"tiny", "base"})
-
-
-def allows_device_selection(name: str) -> bool:
-    """Whether the user may pick a compute device for model *name*.
-
-    Only the two smallest Whisper models expose the device picker. Larger
-    models are pinned to ``auto`` (the GPU on accelerated hardware) so a
-    tester cannot accidentally run a multi-gigabyte model on the CPU and
-    trigger a multi-minute transcription or an out-of-memory error.
-    """
-    return name in _DEVICE_SELECTABLE_MODELS
-
-
 _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
-    "medium": "large-v3-turbo",
-    "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v3",
+    "tiny": DEFAULT_MODEL,
+    "base": DEFAULT_MODEL,
+    "small": DEFAULT_MODEL,
+    "medium": DEFAULT_MODEL,
+    "large-v3": DEFAULT_MODEL,
+    "large-v3-turbo": DEFAULT_MODEL,
+    "granite-speech-4.1-2b": DEFAULT_MODEL,
+    "parakeet-tdt-0.6b-v2": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
-    # Withdrawn from the catalog (unstable load); move quality-seeking
-    # users to the recommended high-accuracy batch model.
-    "granite-speech-4.1-2b": "large-v3-turbo",
 }
 
 
@@ -205,7 +110,11 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
     config.save()
 
 
-_REMOVED_ENGINES: frozenset[str] = frozenset({"faster_whisper"})
+_REMOVED_ENGINES: frozenset[str] = frozenset({
+    "faster_whisper",
+    "granite_speech",
+    "transformers",
+})
 
 
 def migrate_engine_field(config: ConfigurationStore) -> None:
@@ -213,10 +122,9 @@ def migrate_engine_field(config: ConfigurationStore) -> None:
 
     Legacy configs that pre-date #9 have no ``transcription.engine`` key;
     they get ``"auto"`` so the selector picks the recommended engine for
-    the user's hardware. Configs that pinned the now-removed
-    ``faster_whisper`` engine are reset to ``"auto"`` so startup does not
-    fail building a nonexistent engine. Any other explicit value (e.g.
-    set via the settings UI) is left alone.
+    the user's hardware. Configs that pinned a now-removed engine are
+    reset to ``"auto"`` so startup does not fail building a nonexistent
+    engine. Any other explicit value is left alone.
     """
     current = config.get("transcription.engine")
     if current is None:

@@ -37,13 +37,10 @@ def _apply_torch_env_overrides() -> None:
     to the driver immediately, at a notable perf cost. Use only if the
     normal teardown path fails to release VRAM between model swaps.
 
-    ``TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`` opts into the
-    AOTriton flash / mem-efficient attention kernels on AMD ROCm.
-    Without it, ``transformers``' default SDPA path emits two
-    ``UserWarning``s per attention layer per forward pass and falls
-    back to the slower math implementation. The flag is a no-op on
-    NVIDIA / CPU, so we set it unconditionally; ``setdefault`` lets a
-    user explicitly opt out by exporting ``=0`` first.
+    ``TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`` opts into the AOTriton
+    flash / mem-efficient attention kernels on AMD ROCm. The flag is a
+    no-op on NVIDIA / CPU, so it is set unconditionally; ``setdefault``
+    lets a user explicitly opt out by exporting ``=0`` first.
     """
     if os.environ.get("VOICETOTEXT_DISABLE_CUDA_CACHE") == "1":
         os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
@@ -182,6 +179,14 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
     config.load()
     milestone("config-loaded")
 
+    from voicetotext.transcription.model_info import (
+        migrate_engine_field,
+        migrate_removed_models,
+    )
+
+    migrate_removed_models(config)
+    migrate_engine_field(config)
+
     event_bus = SimpleEventBus()
     download_manager = DownloadManager(event_bus=event_bus)
     model_manager = create_model_manager(paths.models_dir, download_manager)
@@ -193,20 +198,20 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
     )
 
     hardware = TorchHardwareDetector().detect()
-    from voicetotext.transcription.model_info import default_model_for
+    from voicetotext.transcription.model_info import DEFAULT_MODEL
 
     if not model_was_configured:
-        config.set("transcription.model_size", default_model_for(hardware))
+        config.set("transcription.model_size", DEFAULT_MODEL)
 
     if paths.is_first_run() or not _configured_model_installed(
-        config, model_manager, hardware,
+        config, model_manager,
     ):
         _run_first_time_setup(
             config, model_manager, event_bus, root, registry, hardware,
             paths.dictionary_path,
         )
 
-    if not _configured_model_installed(config, model_manager, hardware):
+    if not _configured_model_installed(config, model_manager):
         root.destroy()
         return
 
@@ -227,13 +232,12 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
 def _configured_model_installed(
     config: ConfigurationStore,
     model_manager: ModelManager,
-    hardware: HardwareProfile | None = None,
 ) -> bool:
-    from voicetotext.transcription.model_info import default_model_for
+    from voicetotext.transcription.model_info import DEFAULT_MODEL
 
     model_name = config.get(
         "transcription.model_size",
-        default_model_for(hardware),
+        DEFAULT_MODEL,
     )
     return bool(model_manager.is_installed(model_name))
 

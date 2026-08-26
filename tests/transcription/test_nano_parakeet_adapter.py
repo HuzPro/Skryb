@@ -1,7 +1,7 @@
 """Tests for :class:`NanoParakeetAdapter`.
 
 ``nano_parakeet`` is patched at the module boundary via
-``sys.modules`` - the same seam strategy used by the transformers
+``sys.modules`` so tests never import the real backend
 adapter tests.
 """
 
