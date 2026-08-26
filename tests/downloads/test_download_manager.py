@@ -36,7 +36,7 @@ class _SlowDownloader:
 
 def _make_job(
     tmp_path: Path,
-    job_id: str = "tiny",
+    job_id: str = "test-model",
     downloader=None,
     files=None,
 ) -> ModelDownloadJob:
@@ -70,7 +70,7 @@ class TestDownloadManagerEnqueue:
         handle = manager.enqueue(job)
 
         try:
-            assert handle.id == "tiny"
+            assert handle.id == "test-model"
             assert handle.state() in (DownloadState.QUEUED, DownloadState.DOWNLOADING, DownloadState.COMPLETED)
         finally:
             manager.shutdown()
@@ -87,7 +87,7 @@ class TestDownloadManagerEnqueue:
         _wait_for(lambda: handle.state() == DownloadState.COMPLETED)
 
         assert len(completed) == 1
-        assert completed[0].job_id == "tiny"
+        assert completed[0].job_id == "test-model"
         manager.shutdown()
 
     def test_enqueue_should_publish_progress_events(self, tmp_path):
@@ -231,7 +231,7 @@ class TestDownloadManagerRestart:
         manager.enqueue(_make_job(tmp_path, downloader=_SlowDownloader()))
         _wait_for(lambda: handle.state() == DownloadState.COMPLETED)
 
-        assert any(e.job_id == "tiny" for e in completed)
+        assert any(e.job_id == "test-model" for e in completed)
         manager.shutdown()
 
     def test_enqueue_should_rerun_a_completed_job_when_re_enqueued_with_same_id(

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from voicetotext.downloads.download_manager import DownloadHandle
-from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
+from voicetotext.transcription.model_info import ALL_MODELS, ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -28,7 +28,7 @@ class FakeModelManager(ModelManager):
         models: dict[str, ModelInfo] | None = None,
     ) -> None:
         self._installed: dict[str, bool] = dict(installed or {})
-        self._models: dict[str, ModelInfo] = models or WHISPER_MODELS
+        self._models = ALL_MODELS if models is None else models
         self.download_calls: list[str] = []
         self.delete_calls: list[str] = []
 

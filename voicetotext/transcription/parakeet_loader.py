@@ -59,7 +59,7 @@ class ParakeetModelLoader:
         decoder, and joint to the requested dtype while leaving the
         preprocessor in fp32; on CPU the fp32 encoder output then hits the
         bf16 joint and ``F.linear`` raises "mat1 and mat2 must have the
-        same dtype". CPU has no accelerated bf16 matmul anyway, so fp32 is
+        same dtype". CPU has no fast bf16 matmul anyway, so fp32 is
         both correct and faster there.
         """
         original_download = nano_parakeet_module.hf_hub_download

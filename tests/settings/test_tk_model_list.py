@@ -34,7 +34,7 @@ def _view(name: str, installed: bool = False) -> ModelView:
     )
 
 
-def _service(views: list[ModelView], selected: str = "base") -> MagicMock:
+def _service(views: list[ModelView], selected: str = "parakeet-tdt-0.6b-v3") -> MagicMock:
     svc = MagicMock()
     svc.list_models.return_value = views
     svc.selected_model.return_value = selected
@@ -54,8 +54,8 @@ def _snapshot(state: str = "downloading") -> DownloadProgressSnapshot:
 
 @pytest.fixture
 def fixture(root):
-    views = [_view("tiny", installed=True), _view("base"), _view("small")]
-    service = _service(views, selected="base")
+    views = [_view("test-model", installed=True), _view("parakeet-tdt-0.6b-v3"), _view("nemotron-speech-streaming-en-0.6b")]
+    service = _service(views, selected="parakeet-tdt-0.6b-v3")
     widget = TkModelList(root, service)
     yield widget, service, views
     widget.destroy()
@@ -65,40 +65,40 @@ class TestTkModelListBuild:
     def test_should_create_one_row_per_service_model(self, fixture):
         model_list, _, _ = fixture
 
-        assert set(model_list.row_names()) == {"tiny", "base", "small"}
+        assert set(model_list.row_names()) == {"test-model", "parakeet-tdt-0.6b-v3", "nemotron-speech-streaming-en-0.6b"}
 
     def test_should_default_selection_to_service_selected_model(self, fixture):
         model_list, _, _ = fixture
 
-        assert model_list.selected_model_name() == "base"
+        assert model_list.selected_model_name() == "parakeet-tdt-0.6b-v3"
 
 
 class TestTkModelListSelection:
     def test_set_selected_should_update_selection(self, fixture):
         model_list, _, _ = fixture
 
-        model_list.set_selected("small")
+        model_list.set_selected("nemotron-speech-streaming-en-0.6b")
 
-        assert model_list.selected_model_name() == "small"
+        assert model_list.selected_model_name() == "nemotron-speech-streaming-en-0.6b"
 
     def test_select_model_should_select_and_notify_for_installed_model(self, fixture):
         model_list, _, _ = fixture
         received: list[str] = []
         model_list.selection_changed.connect(received.append)
 
-        model_list.select_model("tiny")  # installed
+        model_list.select_model("test-model")  # installed
 
-        assert model_list.selected_model_name() == "tiny"
-        assert received == ["tiny"]
+        assert model_list.selected_model_name() == "test-model"
+        assert received == ["test-model"]
 
     def test_select_model_should_ignore_uninstalled_model(self, fixture):
         model_list, _, _ = fixture
         received: list[str] = []
         model_list.selection_changed.connect(received.append)
 
-        model_list.select_model("small")  # not installed
+        model_list.select_model("nemotron-speech-streaming-en-0.6b")  # not installed
 
-        assert model_list.selected_model_name() == "base"
+        assert model_list.selected_model_name() == "parakeet-tdt-0.6b-v3"
         assert received == []
 
 
@@ -107,46 +107,46 @@ class TestTkModelListDownload:
         model_list, _, _ = fixture
         snapshot = _snapshot()
 
-        model_list.set_download_progress("base", snapshot)
+        model_list.set_download_progress("parakeet-tdt-0.6b-v3", snapshot)
 
-        assert model_list.download_snapshot("base") == snapshot
-        assert model_list.row_for("base").progress_visible() is True
+        assert model_list.download_snapshot("parakeet-tdt-0.6b-v3") == snapshot
+        assert model_list.row_for("parakeet-tdt-0.6b-v3").progress_visible() is True
 
     def test_should_report_none_snapshot_when_no_download(self, fixture):
         model_list, _, _ = fixture
 
-        assert model_list.download_snapshot("base") is None
+        assert model_list.download_snapshot("parakeet-tdt-0.6b-v3") is None
 
     def test_should_clear_snapshot_and_hide_row_progress(self, fixture):
         model_list, _, _ = fixture
-        model_list.set_download_progress("base", _snapshot())
+        model_list.set_download_progress("parakeet-tdt-0.6b-v3", _snapshot())
 
-        model_list.clear_download("base")
+        model_list.clear_download("parakeet-tdt-0.6b-v3")
 
-        assert model_list.download_snapshot("base") is None
-        assert model_list.row_for("base").progress_visible() is False
+        assert model_list.download_snapshot("parakeet-tdt-0.6b-v3") is None
+        assert model_list.row_for("parakeet-tdt-0.6b-v3").progress_visible() is False
 
     def test_should_keep_row_progress_when_rows_are_rebuilt(self, fixture):
         model_list, _service, _ = fixture
-        model_list.set_download_progress("small", _snapshot())
+        model_list.set_download_progress("nemotron-speech-streaming-en-0.6b", _snapshot())
 
-        model_list.update_install_state("base")
+        model_list.update_install_state("parakeet-tdt-0.6b-v3")
 
-        assert model_list.row_for("small").progress_visible() is True
+        assert model_list.row_for("nemotron-speech-streaming-en-0.6b").progress_visible() is True
 
 
 class TestTkModelListInstallState:
     def test_update_install_state_should_refresh_row_to_installed(self, fixture):
         model_list, service, _ = fixture
         service.list_models.return_value = [
-            _view("tiny", installed=True),
-            _view("base", installed=True),
-            _view("small"),
+            _view("test-model", installed=True),
+            _view("parakeet-tdt-0.6b-v3", installed=True),
+            _view("nemotron-speech-streaming-en-0.6b"),
         ]
 
-        model_list.update_install_state("base")
+        model_list.update_install_state("parakeet-tdt-0.6b-v3")
 
-        assert model_list.row_for("base").action_button().cget("text") == "Delete"
+        assert model_list.row_for("parakeet-tdt-0.6b-v3").action_button().cget("text") == "Delete"
 
 
 class TestTkModelListMode:
@@ -176,21 +176,21 @@ class TestTkModelListSelectionStyle:
     def test_selected_row_uses_the_filled_selection_style(self, fixture):
         model_list, _, _ = fixture
 
-        model_list.select_model("tiny")
+        model_list.select_model("test-model")
 
-        assert model_list.row_for("tiny").cget("style") == "Selected.TFrame"
-        assert model_list.row_for("small").cget("style") == "TFrame"
+        assert model_list.row_for("test-model").cget("style") == "Selected.TFrame"
+        assert model_list.row_for("nemotron-speech-streaming-en-0.6b").cget("style") == "TFrame"
 
 
 class TestTkModelListActions:
     def test_clicking_download_button_should_call_injected_callback(self, root):
-        views = [_view("base")]
-        service = _service(views, selected="base")
+        views = [_view("parakeet-tdt-0.6b-v3")]
+        service = _service(views, selected="parakeet-tdt-0.6b-v3")
         received: list[str] = []
         model_list = TkModelList(root, service, on_download=received.append)
 
-        model_list.row_for("base").action_button().invoke()
+        model_list.row_for("parakeet-tdt-0.6b-v3").action_button().invoke()
 
-        assert received == ["base"]
+        assert received == ["parakeet-tdt-0.6b-v3"]
 
         model_list.destroy()

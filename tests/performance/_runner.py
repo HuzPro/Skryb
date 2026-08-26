@@ -39,9 +39,8 @@ _logger = logging.getLogger(__name__)
 
 _LANGUAGE = "en"
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
-    "transformers": 5,
-    "granite_speech": 4,
     "nano_parakeet": 1,
+    "nemotron_streaming": 1,
 }
 
 

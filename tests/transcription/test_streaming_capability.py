@@ -18,7 +18,7 @@ def _descriptors() -> list[EngineDescriptor]:
 class TestEngineDescriptorStreamingFlag:
     def test_should_default_supports_streaming_to_false(self):
         descriptor = EngineDescriptor(
-            engine_id="transformers", display_name="x",
+            engine_id="nano_parakeet", display_name="x",
             supported_hardware=("cpu",), base_priority=1,
         )
 
@@ -40,11 +40,10 @@ class TestRegistryStreamingDescriptors:
 
         assert by_id["nano_parakeet"].supports_streaming is True
 
-    def test_should_not_mark_other_engines_as_streaming_capable(self):
+    def test_should_mark_nemotron_as_streaming_capable(self):
         by_id = {d.engine_id: d for d in _descriptors()}
 
-        assert by_id["transformers"].supports_streaming is False
-        assert by_id["granite_speech"].supports_streaming is False
+        assert by_id["nemotron_streaming"].supports_streaming is True
 
 
 class TestModelSupportsStreaming:
@@ -52,16 +51,6 @@ class TestModelSupportsStreaming:
         assert model_supports_streaming(
             get_model_info("parakeet-tdt-0.6b-v3"), _descriptors(),
         ) is True
-
-    def test_should_report_whisper_not_streaming_capable(self):
-        assert model_supports_streaming(
-            get_model_info("base"), _descriptors(),
-        ) is False
-
-    def test_should_report_granite_not_streaming_capable(self):
-        assert model_supports_streaming(
-            get_model_info("granite-speech-4.1-2b"), _descriptors(),
-        ) is False
 
 
 class TestNemotronStreamingDescriptor:
@@ -93,11 +82,6 @@ class TestModelSupportsBatch:
             get_model_info("parakeet-tdt-0.6b-v3"), _descriptors(),
         ) is True
 
-    def test_should_report_whisper_batch_capable(self):
-        assert model_supports_batch(
-            get_model_info("base"), _descriptors(),
-        ) is True
-
 
 class TestSelectorUnaffectedByStreamingFlag:
     def test_streaming_flag_should_not_change_ranking_order(self):
@@ -109,14 +93,14 @@ class TestSelectorUnaffectedByStreamingFlag:
         )
         model = ModelInfo(
             name="dual", size_mb=1, description="test", repo_id="example/dual",
-            compatible_engines=("transformers", "nano_parakeet"),
-            engine_priorities={"nano_parakeet": 100, "transformers": 50},
+            compatible_engines=("nemotron_streaming", "nano_parakeet"),
+            engine_priorities={"nano_parakeet": 100, "nemotron_streaming": 50},
         )
 
         def descriptors(streaming: bool) -> list[EngineDescriptor]:
             return [
                 EngineDescriptor(
-                    engine_id="transformers", display_name="t",
+                    engine_id="nemotron_streaming", display_name="n",
                     supported_hardware=("amd_rocm",), base_priority=50,
                 ),
                 EngineDescriptor(
@@ -131,4 +115,6 @@ class TestSelectorUnaffectedByStreamingFlag:
             c.engine_id for c in rank_engines(model, rocm, descriptors(False))
         ]
 
-        assert order_with == order_without == ["nano_parakeet", "transformers"]
+        assert order_with == order_without == [
+            "nano_parakeet", "nemotron_streaming",
+        ]

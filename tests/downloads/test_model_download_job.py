@@ -39,8 +39,8 @@ class TestModelDownloadJobHappyPath:
         payloads = {"config.json": b"{}\n", "model.safetensors": b"WGHT"}
         downloader = _FakeDownloader(payloads=payloads)
         job = ModelDownloadJob(
-            job_id="tiny",
-            repo_id="openai/whisper-tiny",
+            job_id="parakeet-tdt-0.6b-v3",
+            repo_id="nvidia/parakeet-tdt-0.6b-v3",
             commit_sha="sha123",
             files=resolved,
             models_dir=tmp_path,
@@ -53,10 +53,16 @@ class TestModelDownloadJobHappyPath:
             pause_event=threading.Event(),
         )
 
-        snapshot = tmp_path / "models--openai--whisper-tiny" / "snapshots" / "sha123"
+        snapshot = (
+            tmp_path / "models--nvidia--parakeet-tdt-0.6b-v3"
+            / "snapshots" / "sha123"
+        )
         assert (snapshot / "config.json").read_bytes() == b"{}\n"
         assert (snapshot / "model.safetensors").read_bytes() == b"WGHT"
-        refs_main = tmp_path / "models--openai--whisper-tiny" / "refs" / "main"
+        refs_main = (
+            tmp_path / "models--nvidia--parakeet-tdt-0.6b-v3"
+            / "refs" / "main"
+        )
         assert refs_main.read_text() == "sha123"
 
     def test_should_aggregate_progress_across_files(self, tmp_path):
@@ -67,7 +73,7 @@ class TestModelDownloadJobHappyPath:
         payloads = {"a.json": b"A" * 100, "b.json": b"B" * 200}
         downloader = _FakeDownloader(payloads=payloads)
         job = ModelDownloadJob(
-            job_id="tiny",
+            job_id="parakeet-tdt-0.6b-v3",
             repo_id="r",
             commit_sha="sha",
             files=resolved,

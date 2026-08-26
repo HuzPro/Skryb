@@ -3,284 +3,151 @@ from unittest.mock import MagicMock
 
 from voicetotext.downloads.hf_repo_resolver import ResolvedFile
 from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
-from voicetotext.transcription.model_info import WHISPER_MODELS
+from voicetotext.transcription.model_info import (
+    DEFAULT_MODEL,
+    PARAKEET_MODELS,
+    ModelInfo,
+)
 from voicetotext.transcription.model_manager import ModelManager
 
 
 def _make_manager(
     tmp_path: Path,
-    download_manager=None,
-    resolver=None,
-    file_downloader=None,
-    models=None,
+    *,
+    download_manager: MagicMock | None = None,
+    resolver: MagicMock | None = None,
+    models: dict[str, ModelInfo] = PARAKEET_MODELS,
 ) -> HuggingFaceModelManager:
     return HuggingFaceModelManager(
         models_dir=tmp_path,
         download_manager=download_manager or MagicMock(),
         resolver=resolver or MagicMock(),
-        file_downloader=file_downloader or MagicMock(),
+        file_downloader=MagicMock(),
         models=models,
     )
 
 
-class TestHuggingFaceModelManagerListModels:
-    def test_should_list_all_available_models(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        models = manager.list_models()
-
-        assert len(models) == len(WHISPER_MODELS)
-
-    def test_should_include_model_names(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        names = {m.name for m in manager.list_models()}
-
-        assert "base" in names
-        assert "small" in names
-
-
-class TestHuggingFaceModelManagerHasModel:
-    def test_should_return_true_for_known_whisper_model(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        assert manager.has_model("base") is True
-
-    def test_should_return_false_for_unknown_model(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        assert manager.has_model("does-not-exist") is False
-
-    def test_should_only_recognise_models_in_its_own_dict(self, tmp_path):
-        from voicetotext.transcription.model_info import PARAKEET_MODELS
-
-        manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
-
-        assert manager.has_model("parakeet-tdt-0.6b-v3") is True
-        assert manager.has_model("base") is False
+def _model_dir(root: Path) -> Path:
+    return root / "models--nvidia--parakeet-tdt-0.6b-v3"
 
 
 def _write_refs_main(model_dir: Path, sha: str = "abc123") -> None:
-    """Write the ``refs/main`` pointer a local_files_only load resolves through."""
     refs_main = model_dir / "refs" / "main"
     refs_main.parent.mkdir(parents=True, exist_ok=True)
     refs_main.write_text(sha)
 
 
-class TestHuggingFaceModelManagerIsInstalled:
-    def test_should_return_false_when_model_not_downloaded(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        assert manager.is_installed("base") is False
-
-    def test_should_return_true_when_snapshot_has_config_and_weights(self, tmp_path):
-        model_dir = tmp_path / "models--openai--whisper-base"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "model.safetensors").touch()
+def _write_nemo_snapshot(root: Path, *, with_ref: bool = True) -> Path:
+    model_dir = _model_dir(root)
+    snapshot = model_dir / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "parakeet.nemo").touch()
+    if with_ref:
         _write_refs_main(model_dir)
+    return model_dir
+
+
+class TestHuggingFaceModelManagerCatalog:
+    def test_should_list_supplied_models(self, tmp_path: Path) -> None:
         manager = _make_manager(tmp_path)
 
-        assert manager.is_installed("base") is True
+        assert [model.name for model in manager.list_models()] == [DEFAULT_MODEL]
+        assert manager.has_model(DEFAULT_MODEL) is True
+        assert manager.has_model("unknown") is False
 
-    def test_should_return_false_for_empty_model_directory(self, tmp_path):
-        (tmp_path / "models--openai--whisper-base").mkdir()
-        manager = _make_manager(tmp_path)
 
-        assert manager.is_installed("base") is False
+class TestHuggingFaceModelManagerInstallation:
+    def test_should_return_false_when_model_is_not_downloaded(
+        self, tmp_path: Path,
+    ) -> None:
+        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
 
-    def test_should_return_false_when_weights_file_missing(self, tmp_path):
-        model_dir = tmp_path / "models--openai--whisper-base"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "tokenizer.json").touch()
-        _write_refs_main(model_dir)
-        manager = _make_manager(tmp_path)
+    def test_should_accept_nemo_snapshot(self, tmp_path: Path) -> None:
+        _write_nemo_snapshot(tmp_path)
 
-        assert manager.is_installed("base") is False
+        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is True
 
-    def test_should_return_false_when_snapshot_complete_but_refs_main_missing(
-        self, tmp_path,
-    ):
-        # A cancelled download writes the files but not refs/main (which the
-        # job writes last). huggingface_hub's local_files_only load resolves
-        # `main` through refs/main, so without it the model is unloadable
-        # and must NOT report installed - the root cause of the "swap to
-        # base fails with LocalEntryNotFoundError" report.
-        snapshot = (
-            tmp_path / "models--openai--whisper-base" / "snapshots" / "abc123"
-        )
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "model.safetensors").touch()
-        manager = _make_manager(tmp_path)
+    def test_should_reject_snapshot_without_refs_main(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_nemo_snapshot(tmp_path, with_ref=False)
 
-        assert manager.is_installed("base") is False
+        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
 
-    def test_should_return_false_when_refs_main_points_at_absent_snapshot(
-        self, tmp_path,
-    ):
-        # refs/main names a revision whose snapshot dir was never written.
-        model_dir = tmp_path / "models--openai--whisper-base"
+    def test_should_reject_ref_to_missing_snapshot(self, tmp_path: Path) -> None:
+        model_dir = _model_dir(tmp_path)
         model_dir.mkdir(parents=True)
-        _write_refs_main(model_dir, "deadbeef")
-        manager = _make_manager(tmp_path)
+        _write_refs_main(model_dir, "missing")
 
-        assert manager.is_installed("base") is False
+        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
 
-    def test_should_return_true_when_safetensors_present(self, tmp_path):
-        model_dir = tmp_path / "models--openai--whisper-base"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "model.safetensors").touch()
-        _write_refs_main(model_dir)
-        manager = _make_manager(tmp_path)
-
-        assert manager.is_installed("base") is True
-
-    def test_should_return_true_when_sharded_safetensors_index_present(
-        self, tmp_path,
-    ):
-        # Granite Speech 4.1-2b ships as sharded safetensors:
-        # ``model-00001-of-00003.safetensors`` etc. plus
-        # ``model.safetensors.index.json``. There is no single
-        # ``model.safetensors`` file, so the install check must accept
-        # the index-file layout as a complete model.
-        from voicetotext.transcription.model_info import GRANITE_MODELS
-
-        model_dir = tmp_path / "models--ibm-granite--granite-speech-4.1-2b"
+    def test_should_accept_sharded_safetensors_layout(
+        self, tmp_path: Path,
+    ) -> None:
+        info = ModelInfo(
+            name="example-sharded", size_mb=10, description="Example",
+            repo_id="example/sharded", compatible_engines=("nano_parakeet",),
+        )
+        model_dir = tmp_path / "models--example--sharded"
         snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
         (snapshot / "config.json").touch()
         (snapshot / "model.safetensors.index.json").touch()
-        (snapshot / "model-00001-of-00003.safetensors").touch()
-        (snapshot / "model-00002-of-00003.safetensors").touch()
-        (snapshot / "model-00003-of-00003.safetensors").touch()
         _write_refs_main(model_dir)
-        manager = _make_manager(tmp_path, models=GRANITE_MODELS)
 
-        assert manager.is_installed("granite-speech-4.1-2b") is True
+        manager = _make_manager(tmp_path, models={info.name: info})
 
-    def test_should_return_true_for_nemo_only_snapshot(self, tmp_path):
-        # Parakeet ships as a single .nemo file. nano-parakeet doesn't need
-        # config.json or safetensors - just the .nemo. The install check
-        # must recognise that as a complete model.
-        from voicetotext.transcription.model_info import PARAKEET_MODELS
-
-        model_dir = tmp_path / "models--nvidia--parakeet-tdt-0.6b-v3"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "parakeet-tdt-0.6b-v3.nemo").touch()
-        _write_refs_main(model_dir)
-        manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
-
-        assert manager.is_installed("parakeet-tdt-0.6b-v3") is True
+        assert manager.is_installed(info.name) is True
 
 
-class TestHuggingFaceModelManagerGetModelPath:
-    def test_should_return_none_when_not_installed(self, tmp_path):
-        manager = _make_manager(tmp_path)
+class TestHuggingFaceModelManagerOperations:
+    def test_get_model_path_should_reflect_installation(
+        self, tmp_path: Path,
+    ) -> None:
+        assert _make_manager(tmp_path).get_model_path(DEFAULT_MODEL) is None
+        model_dir = _write_nemo_snapshot(tmp_path)
 
-        assert manager.get_model_path("base") is None
+        assert _make_manager(tmp_path).get_model_path(DEFAULT_MODEL) == model_dir
 
-    def test_should_return_path_when_installed(self, tmp_path):
-        model_dir = tmp_path / "models--openai--whisper-base"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "model.safetensors").touch()
-        _write_refs_main(model_dir)
-        manager = _make_manager(tmp_path)
-
-        assert manager.get_model_path("base") == model_dir
-
-
-class TestHuggingFaceModelManagerDownload:
-    def test_should_resolve_repo_and_enqueue_job_on_manager(self, tmp_path):
+    def test_download_should_resolve_and_enqueue(self, tmp_path: Path) -> None:
         resolver = MagicMock()
         resolver.resolve.return_value = (
             "sha123",
             [
                 ResolvedFile(
-                    filename="config.json",
+                    filename="model.nemo",
                     size=100,
-                    url="https://huggingface.co/openai/whisper-base/resolve/sha123/config.json",
+                    url=(
+                        "https://huggingface.co/nvidia/"
+                        "parakeet-tdt-0.6b-v3/resolve/sha123/model.nemo"
+                    ),
                 ),
             ],
         )
         download_manager = MagicMock()
-        manager = _make_manager(
-            tmp_path, download_manager=download_manager, resolver=resolver
-        )
-
-        manager.download("base")
-
-        resolver.resolve.assert_called_once_with("openai/whisper-base")
-        download_manager.enqueue.assert_called_once()
-        job = download_manager.enqueue.call_args[0][0]
-        assert job.job_id == "base"
-        assert job.repo_id == "openai/whisper-base"
-        assert job.commit_sha == "sha123"
-
-    def test_should_return_handle_from_download_manager(self, tmp_path):
-        resolver = MagicMock()
-        resolver.resolve.return_value = ("s", [])
         expected_handle = MagicMock()
-        download_manager = MagicMock()
         download_manager.enqueue.return_value = expected_handle
         manager = _make_manager(
-            tmp_path, download_manager=download_manager, resolver=resolver
+            tmp_path, resolver=resolver, download_manager=download_manager,
         )
 
-        handle = manager.download("base")
+        handle = manager.download(DEFAULT_MODEL)
 
+        resolver.resolve.assert_called_once_with(
+            "nvidia/parakeet-tdt-0.6b-v3",
+        )
+        job = download_manager.enqueue.call_args.args[0]
+        assert job.job_id == DEFAULT_MODEL
+        assert job.repo_id == "nvidia/parakeet-tdt-0.6b-v3"
         assert handle is expected_handle
 
-
-class TestHuggingFaceModelManagerDelete:
-    def test_should_remove_model_directory(self, tmp_path):
-        model_dir = tmp_path / "models--openai--whisper-base"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
+    def test_delete_should_remove_model_directory(self, tmp_path: Path) -> None:
+        model_dir = _write_nemo_snapshot(tmp_path)
         manager = _make_manager(tmp_path)
 
-        manager.delete("base")
+        manager.delete(DEFAULT_MODEL)
 
-        assert not model_dir.exists()
+        assert model_dir.exists() is False
 
-    def test_should_not_raise_when_deleting_nonexistent_model(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        manager.delete("base")
-
-
-class TestHuggingFaceModelManagerIsAModelManager:
-    def test_should_implement_model_manager_interface(self, tmp_path):
-        manager = _make_manager(tmp_path)
-
-        assert isinstance(manager, ModelManager)
-
-
-class TestWhisperModelLineup:
-    def test_lineup_contains_large_v3_turbo(self):
-        from voicetotext.transcription.model_info import WHISPER_MODELS
-
-        assert "large-v3-turbo" in WHISPER_MODELS
-        info = WHISPER_MODELS["large-v3-turbo"]
-        assert info.repo_id == "openai/whisper-large-v3-turbo"
-        assert info.size_mb == 1620
-
-    def test_lineup_does_not_contain_medium(self):
-        from voicetotext.transcription.model_info import WHISPER_MODELS
-
-        assert "medium" not in WHISPER_MODELS
-
-    def test_lineup_uses_only_official_openai_repos(self):
-        from voicetotext.transcription.model_info import WHISPER_MODELS
-
-        for info in WHISPER_MODELS.values():
-            assert info.repo_id.startswith("openai/whisper-")
+    def test_should_implement_model_manager_interface(self, tmp_path: Path) -> None:
+        assert isinstance(_make_manager(tmp_path), ModelManager)

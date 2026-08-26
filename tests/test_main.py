@@ -25,23 +25,27 @@ from voicetotext.__main__ import (
 class TestConfiguredModelInstalled:
     def test_should_return_true_when_model_present_on_disk(self):
         config = MagicMock()
-        config.get.return_value = "base"
+        config.get.return_value = "parakeet-tdt-0.6b-v3"
         model_manager = MagicMock()
         model_manager.is_installed.return_value = True
 
         assert _configured_model_installed(config, model_manager) is True
-        model_manager.is_installed.assert_called_once_with("base")
+        model_manager.is_installed.assert_called_once_with(
+            "parakeet-tdt-0.6b-v3",
+        )
 
     def test_should_return_false_when_model_missing_from_disk(self):
         config = MagicMock()
-        config.get.return_value = "small"
+        config.get.return_value = "nemotron-speech-streaming-en-0.6b"
         model_manager = MagicMock()
         model_manager.is_installed.return_value = False
 
         assert _configured_model_installed(config, model_manager) is False
-        model_manager.is_installed.assert_called_once_with("small")
+        model_manager.is_installed.assert_called_once_with(
+            "nemotron-speech-streaming-en-0.6b",
+        )
 
-    def test_should_default_to_base_when_config_missing(self):
+    def test_should_default_to_current_parakeet_when_config_missing(self):
         config = MagicMock()
         config.get.side_effect = lambda key, default=None: default
         model_manager = MagicMock()
@@ -49,7 +53,9 @@ class TestConfiguredModelInstalled:
 
         _configured_model_installed(config, model_manager)
 
-        model_manager.is_installed.assert_called_once_with("base")
+        model_manager.is_installed.assert_called_once_with(
+            "parakeet-tdt-0.6b-v3",
+        )
 
 
 class TestApplyHfCacheEnvOverrides:
@@ -76,13 +82,8 @@ class TestApplyHfCacheEnvOverrides:
 
 class TestApplyTorchEnvOverrides:
     """Enable the AOTriton-based flash / mem-efficient attention path
-    on AMD ROCm. Without the experimental flag, ``transformers``'
-    default ``sdpa`` attention emits two ``UserWarning``s per attention
-    layer per forward pass and falls back to a slower path. Setting
-    the flag silences the warnings and lets PyTorch use the faster
-    backends. The env var is a no-op on NVIDIA / CPU so we set it
-    unconditionally rather than detecting hardware before torch is
-    importable.
+    on AMD ROCm. The env var is a no-op on NVIDIA / CPU, so it is set
+    unconditionally before torch is importable.
     """
 
     def test_should_enable_aotriton_experimental_for_amd_attention(self):
@@ -203,7 +204,7 @@ class TestBindingStartupOrder:
         root = MagicMock()
         config = MagicMock()
         config.has_persisted_value.return_value = True
-        config.get.return_value = "base"
+        config.get.return_value = "parakeet-tdt-0.6b-v3"
         manager = MagicMock()
         manager.is_installed.return_value = True
         registry = MagicMock(name="registry")
@@ -223,6 +224,14 @@ class TestBindingStartupOrder:
                 side_effect=lambda _path: timeline.append("config-constructed") or config,
             ),
             patch.object(config, "load", side_effect=lambda: timeline.append("config-loaded")),
+            patch(
+                "voicetotext.transcription.model_info.migrate_removed_models",
+                side_effect=lambda _config: timeline.append("models-migrated"),
+            ),
+            patch(
+                "voicetotext.transcription.model_info.migrate_engine_field",
+                side_effect=lambda _config: timeline.append("engine-migrated"),
+            ),
             patch(
                 "voicetotext.downloads.download_manager.DownloadManager",
                 side_effect=lambda **_kwargs: timeline.append("downloads") or MagicMock(),
@@ -254,6 +263,8 @@ class TestBindingStartupOrder:
             "tk",
             "config-constructed",
             "config-loaded",
+            "models-migrated",
+            "engine-migrated",
             "downloads",
             "manager",
             "registry",

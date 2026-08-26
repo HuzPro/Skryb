@@ -110,7 +110,7 @@ class TestEngineReadyBeeper:
         player = _FakeReadyCuePlayer()
         EngineReadyBeeper(bus, player)
 
-        bus.publish(EngineLoadCompletedEvent(model_name="small"))
+        bus.publish(EngineLoadCompletedEvent(model_name="nemotron-speech-streaming-en-0.6b"))
 
         assert player.readies == 1
 

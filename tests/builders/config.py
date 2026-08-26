@@ -3,7 +3,7 @@ from voicetotext.core.config import ConfigValue
 
 
 _DEFAULTS: dict[str, ConfigValue] = {
-    "transcription.model_size": "base",
+    "transcription.model_size": "parakeet-tdt-0.6b-v3",
     "transcription.language": "en",
     "transcription.device": "auto",
     "hotkey.combination": "ctrl+alt+m",

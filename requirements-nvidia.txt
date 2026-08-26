@@ -1,12 +1,8 @@
 # One-shot install for NVIDIA GPU machines (fresh venv, no torch yet).
-# Pulls torch + torchaudio from PyTorch's CUDA 12.6 wheel index, then
+# Pulls torch from PyTorch's CUDA 12.6 wheel index, then
 # everything else. If you have a different CUDA version, change cu126 to
 # cu124 / cu121 / cu118 to match your driver. PyTorch wheels bundle the
 # CUDA runtime, so only the driver version matters.
 --extra-index-url https://download.pytorch.org/whl/cu126
 -r requirements-all.txt
-# `torchaudio` is not optional: the Granite Speech feature extractor
-# calls `requires_backends(self, ["torchaudio"])`. Both wheels resolve
-# from the CUDA index above so their builds match.
 torch>=2.2.0
-torchaudio>=2.2.0

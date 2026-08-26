@@ -44,7 +44,7 @@ class TestTkDownloadBridge:
         window = _FakeWindow()
         bridge = TkDownloadBridge(schedule=scheduled.append, target=window)
         event = DownloadProgressEvent(
-            job_id="base",
+            job_id="parakeet-tdt-0.6b-v3",
             bytes_done=100,
             bytes_total=1000,
             speed_bps=50.0,
@@ -61,7 +61,7 @@ class TestTkDownloadBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkDownloadBridge(schedule=scheduled.append, target=window)
-        event = DownloadStateChangedEvent(job_id="base", state="paused")
+        event = DownloadStateChangedEvent(job_id="parakeet-tdt-0.6b-v3", state="paused")
 
         bridge.on_download_state(event)
         scheduled[0]()
@@ -72,7 +72,7 @@ class TestTkDownloadBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkDownloadBridge(schedule=scheduled.append, target=window)
-        event = DownloadCompletedEvent(job_id="base")
+        event = DownloadCompletedEvent(job_id="parakeet-tdt-0.6b-v3")
 
         bridge.on_download_completed(event)
         scheduled[0]()
@@ -83,7 +83,7 @@ class TestTkDownloadBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkDownloadBridge(schedule=scheduled.append, target=window)
-        event = DownloadFailedEvent(job_id="base", error="disk full")
+        event = DownloadFailedEvent(job_id="parakeet-tdt-0.6b-v3", error="disk full")
 
         bridge.on_download_failed(event)
         scheduled[0]()
@@ -94,7 +94,7 @@ class TestTkDownloadBridge:
         scheduled: list = []
         window = _FakeWindow()
         bridge = TkDownloadBridge(schedule=scheduled.append, target=window)
-        event = ModelDeletedEvent(name="tiny")
+        event = ModelDeletedEvent(name="test-model")
 
         bridge.on_model_deleted(event)
         scheduled[0]()

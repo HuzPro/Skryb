@@ -24,6 +24,8 @@ from voicetotext.settings.tk_window import TkSettingsWindow
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
+_NEMOTRON = "nemotron-speech-streaming-en-0.6b"
+_BATCH_ONLY = "batch-only"
 
 
 class FakeCaptureBridge:
@@ -48,7 +50,7 @@ def _view(name: str, installed: bool = False) -> ModelView:
 
 def _draft(**overrides) -> SettingsDraft:
     fields = {
-        "model_size": "base",
+        "model_size": _PARAKEET,
         "language": "en",
         "device": "auto",
         "engine": "auto",
@@ -76,18 +78,15 @@ def _reload_change() -> ChangeSet:
 def service():
     svc = MagicMock()
     svc.list_models.return_value = [
-        _view("tiny", installed=True),
-        _view("base", installed=True),
-        _view("small"),
+        _view(_PARAKEET, installed=True),
+        _view(_NEMOTRON),
     ]
-    svc.selected_model.return_value = "base"
+    svc.selected_model.return_value = _PARAKEET
     svc.current_draft.return_value = _draft()
     svc.any_model_installed.return_value = True
     svc.is_installed.return_value = True
     svc.can_apply_now.return_value = True
     svc.is_engine_swapping.return_value = False
-    svc.available_devices.return_value = ["auto", "cuda", "cpu"]
-    svc.allows_device_selection.side_effect = lambda n: n in {"tiny", "base"}
     svc.supports_streaming_hardware.return_value = True
     svc.engine_candidates_for.return_value = ()
     svc.apply_draft.return_value = _no_change()
@@ -111,7 +110,7 @@ def window(tk_root, service):
 
 class TestInitial:
     def test_should_populate_pages_from_current_draft(self, window):
-        assert window.transcription_page().current_model() == "base"
+        assert window.transcription_page().current_model() == _PARAKEET
         assert window.hotkeys_page().current_combination() == "ctrl+alt+m"
         assert window.output_page().current_mode() is OutputMode.DIRECT_PASTE
 
@@ -143,6 +142,16 @@ class TestCollectDraft:
         assert draft.hotkey_combination == "ctrl+shift+space"
         assert draft.hotkey_mode == "push_to_talk"
         assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
+
+    def test_should_preserve_saved_device_without_a_picker(
+        self, tk_root, service,
+    ):
+        service.current_draft.return_value = _draft(device="cuda")
+        window = _make_window(tk_root, service)
+
+        assert window.collect_draft().device == "cuda"
+
+        window.destroy()
 
 
 class TestSave:
@@ -188,7 +197,9 @@ class TestSave:
         window = _make_window(tk_root, service, on_save=received.append)
 
         window.save_button().invoke()
-        window.on_engine_load_completed(EngineLoadCompletedEvent(model_name="base"))
+        window.on_engine_load_completed(
+            EngineLoadCompletedEvent(model_name=_PARAKEET),
+        )
 
         assert window.save_enabled() is True
         assert received == [changes]
@@ -199,7 +210,7 @@ class TestSave:
 
         window.save_button().invoke()
         window.on_engine_load_failed(
-            EngineLoadFailedEvent(model_name="base", error="boom")
+            EngineLoadFailedEvent(model_name=_PARAKEET, error="boom")
         )
 
         assert window.save_enabled() is True
@@ -210,12 +221,12 @@ class TestSave:
         window = _make_window(tk_root, service, schedule=scheduled.append)
 
         window._engine_bridge.on_engine_load_started(
-            EngineLoadStartedEvent(model_name="base")
+            EngineLoadStartedEvent(model_name=_PARAKEET)
         )
 
         assert window.status_label().cget("text") == ""  # deferred
         scheduled[0]()
-        assert "base" in window.status_label().cget("text")
+        assert _PARAKEET in window.status_label().cget("text")
 
 
 class TestDictionary:
@@ -287,7 +298,7 @@ class TestSaveGuard:
 
         window.save_button().invoke()
 
-        service.is_installed.assert_called_with("base")
+        service.is_installed.assert_called_with(_PARAKEET)
 
 
 class TestDownloadBridge:
@@ -298,28 +309,32 @@ class TestDownloadBridge:
 
     def test_should_propagate_download_progress_to_model_list(self, window):
         window._download_bridge.on_download_progress(DownloadProgressEvent(
-            job_id="small",
+            job_id=_NEMOTRON,
             bytes_done=10_000_000,
             bytes_total=100_000_000,
             speed_bps=1_000_000.0,
             eta_seconds=90.0,
         ))
 
-        snapshot = window.transcription_page().model_list().download_snapshot("small")
+        snapshot = window.transcription_page().model_list().download_snapshot(
+            _NEMOTRON,
+        )
         assert snapshot is not None
         assert snapshot.bytes_done == 10_000_000
 
     def test_should_clear_download_and_refresh_install_on_completed(self, window):
         window._download_bridge.on_download_progress(DownloadProgressEvent(
-            job_id="small", bytes_done=10_000_000, bytes_total=100_000_000,
+            job_id=_NEMOTRON, bytes_done=10_000_000, bytes_total=100_000_000,
             speed_bps=0.0, eta_seconds=0.0,
         ))
 
         window._download_bridge.on_download_completed(
-            DownloadCompletedEvent(job_id="small")
+            DownloadCompletedEvent(job_id=_NEMOTRON)
         )
 
-        snapshot = window.transcription_page().model_list().download_snapshot("small")
+        snapshot = window.transcription_page().model_list().download_snapshot(
+            _NEMOTRON,
+        )
         assert snapshot is None
 
 
@@ -328,24 +343,27 @@ class TestModelDeleted:
         self, window, service,
     ):
         model_list = window.transcription_page().model_list()
-        assert model_list.row_for("tiny").action_button().cget("text") == "Delete"
+        assert model_list.row_for(_PARAKEET).action_button().cget("text") == (
+            "Delete"
+        )
 
         service.list_models.return_value = [
-            _view("tiny", installed=False),
-            _view("base", installed=True),
-            _view("small"),
+            _view(_PARAKEET, installed=False),
+            _view(_NEMOTRON),
         ]
-        window.on_model_deleted(ModelDeletedEvent(name="tiny"))
+        window.on_model_deleted(ModelDeletedEvent(name=_PARAKEET))
 
-        assert model_list.row_for("tiny").action_button().cget("text") == "Download"
+        assert model_list.row_for(_PARAKEET).action_button().cget("text") == (
+            "Download"
+        )
 
     def test_should_route_delete_error_to_status_label(self, window):
         window.transcription_page().delete_error.emit(
-            "base", "cannot delete active model 'base'",
+            _PARAKEET, f"cannot delete active model '{_PARAKEET}'",
         )
 
         status = window.status_label().cget("text").lower()
-        assert "base" in status
+        assert _PARAKEET in status
         assert "cannot delete" in status
 
 
@@ -445,20 +463,17 @@ class TestMode:
             if mode is TranscriptionMode.STREAMING:
                 return [_view(_PARAKEET, installed=True)]
             return [
-                _view("tiny", installed=True),
-                _view("base", installed=True),
+                _view(_BATCH_ONLY, installed=True),
                 _view(_PARAKEET, installed=True),
             ]
 
         svc.list_models.side_effect = list_models
-        svc.selected_model.return_value = "base"
-        svc.current_draft.return_value = _draft()
+        svc.selected_model.return_value = _BATCH_ONLY
+        svc.current_draft.return_value = _draft(model_size=_BATCH_ONLY)
         svc.any_model_installed.return_value = True
         svc.is_installed.return_value = True
         svc.can_apply_now.return_value = True
         svc.is_engine_swapping.return_value = False
-        svc.available_devices.return_value = ["auto", "cuda", "cpu"]
-        svc.allows_device_selection.side_effect = lambda n: n in {"tiny", "base"}
         svc.model_supports_streaming.side_effect = lambda n: n == _PARAKEET
         svc.model_supports_batch.return_value = True
         svc.supports_streaming_hardware.return_value = True
@@ -503,4 +518,4 @@ class TestMode:
 
         status = mode_window.status_label().cget("text")
         assert _PARAKEET in status
-        assert "base" in status
+        assert _BATCH_ONLY in status

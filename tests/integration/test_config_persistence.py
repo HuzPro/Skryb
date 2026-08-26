@@ -13,7 +13,7 @@ class TestConfigRoundTrip:
         config.set("hotkey.mode", "push_to_talk")
         config.set("hotkey.combination", "f12")
         config.set("output.mode", "clipboard_only")
-        config.set("transcription.model_size", "small")
+        config.set("transcription.model_size", "nemotron-speech-streaming-en-0.6b")
         config.set("transcription.device", "cuda")
         config.save()
 
@@ -23,7 +23,7 @@ class TestConfigRoundTrip:
         assert config2.get("hotkey.mode") == "push_to_talk"
         assert config2.get("hotkey.combination") == "f12"
         assert config2.get("output.mode") == "clipboard_only"
-        assert config2.get("transcription.model_size") == "small"
+        assert config2.get("transcription.model_size") == "nemotron-speech-streaming-en-0.6b"
         assert config2.get("transcription.device") == "cuda"
         # Defaults should still be present for unmodified keys
         assert config2.get("transcription.beam_size") == 5

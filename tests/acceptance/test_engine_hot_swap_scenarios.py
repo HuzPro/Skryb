@@ -19,11 +19,11 @@ class TestEngineHotSwap:
         )
         voice_to_text_app.next_engine_will_be(new_engine)
 
-        voice_to_text_app.trigger_engine_swap("large-v3")
+        voice_to_text_app.trigger_engine_swap("nemotron-speech-streaming-en-0.6b")
 
         completed = voice_to_text_app.events_of(EngineLoadCompletedEvent)
         assert len(completed) == 1
-        assert completed[0].model_name == "large-v3"
+        assert completed[0].model_name == "nemotron-speech-streaming-en-0.6b"
 
     def test_new_engine_is_used_for_next_transcription(
         self, voice_to_text_app: VoiceToTextApp
@@ -33,7 +33,7 @@ class TestEngineHotSwap:
             a_transcription_result().with_text("from new engine").build()
         )
         voice_to_text_app.next_engine_will_be(new_engine)
-        voice_to_text_app.trigger_engine_swap("large-v3")
+        voice_to_text_app.trigger_engine_swap("nemotron-speech-streaming-en-0.6b")
 
         voice_to_text_app.press_hotkey()
         voice_to_text_app.press_hotkey()
@@ -47,7 +47,7 @@ class TestEngineHotSwap:
         new_engine = FakeTranscriptionEngine()
         voice_to_text_app.next_engine_will_be(new_engine)
 
-        voice_to_text_app.trigger_engine_swap("large-v3")
+        voice_to_text_app.trigger_engine_swap("nemotron-speech-streaming-en-0.6b")
 
         failed = voice_to_text_app.events_of(EngineLoadFailedEvent)
         assert len(failed) == 1
@@ -61,7 +61,7 @@ class TestEngineHotSwap:
         new_engine.will_return(a_transcription_result().build())
         voice_to_text_app.next_engine_will_be(new_engine)
 
-        voice_to_text_app.trigger_engine_swap("base")
+        voice_to_text_app.trigger_engine_swap("parakeet-tdt-0.6b-v3")
 
         assert old_engine.dispose_called is True
 
@@ -79,7 +79,7 @@ class TestEngineHotSwap:
         )
         voice_to_text_app.next_engine_will_be(new_engine)
 
-        voice_to_text_app.trigger_engine_swap("large-v3")
+        voice_to_text_app.trigger_engine_swap("nemotron-speech-streaming-en-0.6b")
 
         assert new_engine.dispose_called is True
         assert old_engine.dispose_called is False

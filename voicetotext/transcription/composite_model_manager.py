@@ -13,9 +13,8 @@ ActiveEngineProvider = Callable[[], EngineId]
 class CompositeModelManager(ModelManager):
     """Composite (GoF) over per-engine :class:`ModelManager` children.
 
-    Each engine has its own on-disk cache (``models--openai--whisper-*``
-    for transformers, ``models--nvidia--parakeet-*`` for nano-parakeet,
-    etc.), so the composite delegates routing decisions to the *active*
+    Each engine has its own on-disk cache, so the composite delegates
+    routing decisions to the *active*
     engine - the one currently selected in the user's config - for
     actions whose target storage matters (download, delete,
     get_model_path).
@@ -82,9 +81,8 @@ class CompositeModelManager(ModelManager):
 
         Prefers the active child when it owns the model, so routing
         stays with the engine the user configured. Falls through to the
-        first non-active child that owns the model - this is the path
-        Parakeet downloads take when the saved engine is currently a
-        Whisper backend. Falls back to the active child for unknown
+        first non-active child that owns the model. Falls back to the active
+        child for unknown
         models so the existing error surface (KeyError from the child's
         models dict) is preserved.
         """
