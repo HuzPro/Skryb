@@ -6,9 +6,8 @@ import os
 import sys
 import traceback
 from concurrent.futures import Future
-from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -23,18 +22,47 @@ if TYPE_CHECKING:
     from voicetotext.transcription.model_manager import ModelManager
 
 
-class ModelsPathProvider(Protocol):
-    @property
-    def models_dir(self) -> Path: ...
-
-
 def _apply_torch_env_overrides() -> None:
+    """Translate VoiceToText env vars into PyTorch env vars.
+
+    Must run **before** any code imports ``torch``, because PyTorch
+    reads its allocator configuration once at import time. We do not
+    import torch anywhere above this point in the startup chain.
+
+    ``VOICETOTEXT_DISABLE_CUDA_CACHE=1`` is the escape hatch for the
+    model-hot-swap VRAM leak: it sets
+    ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` which disables PyTorch's
+    caching allocator entirely. Tensor deallocations then return memory
+    to the driver immediately, at a notable perf cost. Use only if the
+    normal teardown path fails to release VRAM between model swaps.
+
+    ``TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`` opts into the
+    AOTriton flash / mem-efficient attention kernels on AMD ROCm.
+    Without it, ``transformers``' default SDPA path emits two
+    ``UserWarning``s per attention layer per forward pass and falls
+    back to the slower math implementation. The flag is a no-op on
+    NVIDIA / CPU, so we set it unconditionally; ``setdefault`` lets a
+    user explicitly opt out by exporting ``=0`` first.
+    """
     if os.environ.get("VOICETOTEXT_DISABLE_CUDA_CACHE") == "1":
         os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
     os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 
-def _apply_hf_cache_env_overrides(paths: ModelsPathProvider) -> None:
+def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
+    """Point ``huggingface_hub``'s default cache at our models dir.
+
+    Must run **before** any code imports ``huggingface_hub``, because
+    its ``HF_HUB_CACHE`` constant is read once at module import. Our
+    ``ChunkedFileDownloader`` writes to ``paths.models_dir``, but
+    third-party libraries that use ``hf_hub_download()`` (notably
+    ``nano_parakeet``) call it with no ``cache_dir`` argument and fall
+    back to the global default - which would otherwise be
+    ``~/.cache/huggingface/hub``. Pointing the global default at our
+    models dir keeps a single source of truth for cached model files.
+
+    Uses ``setdefault`` so a user-set ``HF_HUB_CACHE`` still wins.
+    """
     os.environ.setdefault("HF_HUB_CACHE", str(paths.models_dir))
 
 

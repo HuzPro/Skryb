@@ -662,7 +662,7 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_output.assert_called_once_with(
-            OutputMode.CLIPBOARD_ONLY, dispatcher
+            OutputMode.CLIPBOARD_ONLY, dispatcher, None
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 

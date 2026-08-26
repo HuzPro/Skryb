@@ -41,7 +41,32 @@ class OverlayWindowApi(Protocol):
 
 class Win32OverlayWindowApi:
     def __init__(self) -> None:
-        self._user32 = ctypes.windll.user32
+        self._user32 = ctypes.WinDLL("user32")
+        self._declare_signatures()
+
+    def _declare_signatures(self) -> None:
+        # Without these, ctypes narrows handles to C int and 64-bit HWNDs
+        # arrive at the API truncated.
+        self._user32.GetForegroundWindow.argtypes = []
+        self._user32.GetForegroundWindow.restype = wintypes.HWND
+        self._user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        self._user32.MonitorFromWindow.restype = wintypes.HANDLE
+        self._user32.GetMonitorInfoW.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(MonitorInfo),
+        ]
+        self._user32.GetMonitorInfoW.restype = wintypes.BOOL
+        self._user32.GetParent.argtypes = [wintypes.HWND]
+        self._user32.GetParent.restype = wintypes.HWND
+        self._user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        self._user32.GetWindowLongW.restype = ctypes.c_long
+        self._user32.SetWindowLongW.argtypes = [
+            wintypes.HWND, ctypes.c_int, ctypes.c_long,
+        ]
+        self._user32.SetWindowLongW.restype = ctypes.c_long
+        self._user32.SetLayeredWindowAttributes.argtypes = [
+            wintypes.HWND, wintypes.COLORREF, wintypes.BYTE, wintypes.DWORD,
+        ]
+        self._user32.SetLayeredWindowAttributes.restype = wintypes.BOOL
 
     def work_area_for_foreground(self) -> tuple[int, int, int, int]:
         foreground = self._user32.GetForegroundWindow()
@@ -95,6 +120,9 @@ class RecordingOverlay:
         self._window = tkinter.Toplevel(root)
         self._window.withdraw()
         self._window.overrideredirect(True)
+        # Set before the first map: Tk rebuilds the wrapper window when this
+        # attribute changes, which would discard the click-through styles.
+        self._window.attributes("-topmost", True)
         self._window.configure(background="#17191d")
         self._canvas = tkinter.Canvas(
             self._window,
@@ -117,10 +145,11 @@ class RecordingOverlay:
         x = left + ((right - left - _WIDTH) // 2)
         y = bottom - _HEIGHT - _BOTTOM_MARGIN
         self._window.geometry(f"{_WIDTH}x{_HEIGHT}+{x}+{y}")
-        self._window.update_idletasks()
-        self._window_api.make_click_through(self._window.winfo_id())
         self._window.deiconify()
-        self._window.lift()
+        self._window.update_idletasks()
+        # The wrapper window only exists once Tk has mapped the toplevel, so
+        # the styles have to be applied after ``deiconify``.
+        self._window_api.make_click_through(self._window.winfo_id())
         if self._after_id is None:
             self._animate()
 

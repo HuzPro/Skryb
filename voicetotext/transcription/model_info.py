@@ -131,7 +131,6 @@ GPU_RETIRED_MODELS: frozenset[str] = frozenset(WHISPER_MODELS)
 CPU_RETIRED_MODELS: frozenset[str] = frozenset(
     set(WHISPER_MODELS) - {"tiny", "base"}
 )
-HIDDEN_MODELS = ALWAYS_HIDDEN_MODELS
 
 
 def hidden_models_for(
