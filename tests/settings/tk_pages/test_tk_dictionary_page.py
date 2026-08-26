@@ -73,6 +73,19 @@ class TestOptions:
             remove_fillers=True, numbers=True, punctuation_model=True,
         )
 
+    def test_should_stage_number_and_punctuation_toggles(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.set_dictionary(DictionaryConfig())
+
+        page.numbers_check().invoke()
+        page.punctuation_check().invoke()
+
+        assert page.dictionary().options == DictionaryOptions(
+            numbers=True, punctuation_model=True,
+        )
+        assert page.is_dirty() is True
+
 
 class TestAdd:
     def test_should_stage_a_multi_alias_literal_rule(
@@ -98,6 +111,18 @@ class TestAdd:
         page.add_button().invoke()
 
         assert page.dictionary().rules == (RegexRule(r"\bum+\b", ""),)
+
+    def test_should_stage_a_phonetic_literal_rule(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        _type_rule(page, "github", "GitHub")
+        page.phonetic_check().invoke()
+
+        page.add_button().invoke()
+
+        assert page.dictionary().rules == (
+            LiteralRule(("github",), "GitHub", phonetic=True),
+        )
 
     def test_should_clear_the_entry_fields(self, page: TkDictionaryPage) -> None:
         _type_rule(page, "god", "God")
@@ -176,6 +201,7 @@ class TestEdit:
         page.set_dictionary(DictionaryConfig(rules=(
             LiteralRule(
                 ("god", "gosh"), "God", case_sensitive=True, whole_words=False,
+                phonetic=True,
             ),
         )))
 
@@ -185,6 +211,14 @@ class TestEdit:
         assert page.replacement_entry().get() == "God"
         assert page.case_check().instate(["selected"])
         assert not page.whole_words_check().instate(["selected"])
+        assert page.phonetic_check().instate(["selected"])
+
+    def test_should_disable_phonetic_for_regex_rules(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.regex_radio().invoke()
+
+        assert page.phonetic_check().instate(["disabled"])
 
     def test_should_report_when_nothing_is_selected(
         self, page: TkDictionaryPage,
