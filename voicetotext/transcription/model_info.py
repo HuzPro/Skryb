@@ -116,9 +116,40 @@ GRANITE_TURBOCTC_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"crisperwhisper": 40},
+)
+
+
+CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
+    "crisperwhisper-2.0-turbo": ModelInfo(
+        name="crisperwhisper-2.0-turbo",
+        size_mb=1630,
+        description=(
+            "Fast 0.8B intended/verbatim Whisper; "
+            "weights/outputs under non-commercial research license"
+        ),
+        repo_id="nyralabs/CrisperWhisper2.0_turbo",
+        compatible_engines=("crisperwhisper",),
+        engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
+    ),
+    "crisperwhisper-2.0-large": ModelInfo(
+        name="crisperwhisper-2.0-large",
+        size_mb=3100,
+        description=(
+            "Accurate 1.55B intended/verbatim Whisper; "
+            "weights/outputs under non-commercial research license"
+        ),
+        repo_id="nyralabs/CrisperWhisper2.0_large",
+        compatible_engines=("crisperwhisper",),
+        engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
+    ),
+}
+
+
 ALL_MODELS: dict[str, ModelInfo] = {
     **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **ARK_ASR_MODELS,
-    **QWEN3_ASR_MODELS, **GRANITE_TURBOCTC_MODELS,
+    **QWEN3_ASR_MODELS, **GRANITE_TURBOCTC_MODELS, **CRISPERWHISPER_MODELS,
 }
 
 

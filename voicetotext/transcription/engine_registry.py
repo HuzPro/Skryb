@@ -4,7 +4,11 @@ from pathlib import Path
 from typing import Protocol
 
 from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.engine_types import EngineDescriptor, EngineId
+from voicetotext.transcription.engine_types import (
+    CrisperWhisperMode,
+    EngineDescriptor,
+    EngineId,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +28,7 @@ class EngineSpec:
     language: str
     beam_size: int
     model_dir: Path
+    crisperwhisper_mode: CrisperWhisperMode = "intended"
 
 
 class EngineBuilder(Protocol):

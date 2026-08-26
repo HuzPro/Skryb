@@ -24,9 +24,9 @@ dependencies = [
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
     # Transformers engines: GraniteSpeech5ForCTC landed in 5.16 (the
-    # highest floor; Qwen3-ASR needs 5.13, ARK-ASR 4.57.6). librosa and
-    # soundfile are imported by ARK's remote processing code; torchaudio
-    # feeds Granite's log-mel feature extractor.
+    # highest floor; Qwen3-ASR needs 5.13, ARK-ASR 4.57.6, CrisperWhisper
+    # 4.40). librosa and soundfile are imported by ARK's remote processing
+    # code; torchaudio feeds Granite's log-mel feature extractor.
     "transformers>=5.16.1",
     "librosa>=0.10.0",
     "soundfile>=0.12.0",
