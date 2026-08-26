@@ -24,6 +24,7 @@ from voicetotext.transcription.model_info import (
     PARAKEET_MODELS,
     WHISPER_MODELS,
     ModelInfo,
+    default_model_for,
     get_model_info,
 )
 from voicetotext.transcription.model_manager import ModelManager
@@ -210,7 +211,9 @@ def create_engine_for_active_model(
     *,
     device_override: str | None = None,
 ) -> TranscriptionEngine:
-    model_name = config.get("transcription.model_size", "base")
+    model_name = config.get(
+        "transcription.model_size", default_model_for(hardware),
+    )
     model_info = get_model_info(model_name)
     installed = engines_with_model_on_disk(model_info, paths.models_dir)
     engine_id = resolve_engine_id(

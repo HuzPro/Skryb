@@ -1,6 +1,5 @@
 import functools
 import logging
-import sys
 import threading
 import time
 import tkinter
@@ -8,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
-from voicetotext.core.debug_logger import setup_debug_logger
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
 from voicetotext.core.events import EngineLoadFailedEvent
 from voicetotext.core.exceptions import (
@@ -39,6 +37,10 @@ from voicetotext.output.modifier_release_waiting_key_sender import (
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
+from voicetotext.output.text_filter_decorator import (
+    TextFilterDecorator,
+    load_dictionary,
+)
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -47,6 +49,7 @@ from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
+from voicetotext.recording.overlay import RecordingOverlay
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.settings.download_coordinator import DownloadCoordinator
@@ -62,7 +65,6 @@ from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
-    build_engine_registry,
     create_engine_for_active_model,
     engines_with_model_on_disk,
     resolve_engine_id,
@@ -73,7 +75,11 @@ from voicetotext.transcription.engine_install import (
 )
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
-from voicetotext.transcription.model_info import ModelInfo, get_model_info
+from voicetotext.transcription.model_info import (
+    ModelInfo,
+    default_model_for,
+    get_model_info,
+)
 from voicetotext.transcription.streaming.streaming_engine import (
     StreamingTranscriptionEngine,
 )
@@ -82,7 +88,6 @@ from voicetotext.transcription.streaming.live_streaming_controller import (
 )
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription.placeholder_engine import PlaceholderEngine
-from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
 from voicetotext.tray.win32_tray_adapter import build_win32_tray_adapter
@@ -129,7 +134,9 @@ def migrate_language(config: JsonConfigAdapter) -> None:
 
 
 def _build_output(
-    mode: OutputMode, gui_dispatcher: GuiThreadDispatcher,
+    mode: OutputMode,
+    gui_dispatcher: GuiThreadDispatcher,
+    dictionary_path: Path | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -159,7 +166,9 @@ def _build_output(
     # ``SendInput`` calls require a UI thread, and the use case runs
     # on a daemon worker. Wrapping every concrete handler with this
     # decorator means the worker never touches Win32 directly.
-    return GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
+    gui_output = GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
+    rules = load_dictionary(dictionary_path) if dictionary_path is not None else {}
+    return TextFilterDecorator(inner=gui_output, rules=rules)
 
 
 def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
@@ -213,6 +222,8 @@ def _load_engine(
 ) -> TranscriptionEngine:
     engine = create_engine_for_active_model(config, paths, registry, hardware)
     engine.load_model()
+    from voicetotext.core.startup_log import milestone
+    milestone("model-loaded")
     _warmup_safely(engine)
     return engine
 
@@ -227,6 +238,8 @@ def _load_engine_on_cpu(
         config, paths, registry, hardware, device_override="cpu",
     )
     engine.load_model()
+    from voicetotext.core.startup_log import milestone
+    milestone("model-loaded")
     _warmup_safely(engine)
     return engine
 
@@ -235,14 +248,18 @@ _STREAMING_DEVICE = "cuda"
 
 
 def _load_streaming_engine(
-    config: JsonConfigAdapter, paths: AppPaths,
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    hardware: HardwareProfile,
 ) -> StreamingTranscriptionEngine:
     """Build, load, and warm the GPU-only streaming engine for the active model."""
     model_info = get_model_info(
-        config.get("transcription.model_size", "base")
+        config.get("transcription.model_size", default_model_for(hardware))
     )
     engine = _build_streaming_engine_for(model_info, paths)
     engine.load_model()
+    from voicetotext.core.startup_log import milestone
+    milestone("model-loaded")
     _warmup_safely(engine)
     return engine
 
@@ -294,7 +311,7 @@ def _load_active_engine_installer(
     CPU fallback inside ``_load_engine_with_fallback``.
     """
     if config.get("transcription.mode", "batch") == "streaming":
-        engine = _load_streaming_engine(config, paths)
+        engine = _load_streaming_engine(config, paths, hardware)
         return make_engine_installer(
             engine, lambda use_case, loaded: use_case.set_streaming_engine(loaded),
         )
@@ -322,6 +339,8 @@ def _load_engine_and_attach(
     so the app stays swappable - see :func:`_recover_from_failed_load`.
     Exceptions never escape - daemon threads silently drop them.
     """
+    from voicetotext.core.startup_log import milestone
+    milestone("engine-load-started")
     try:
         installer = _load_active_engine_installer(
             config, paths, registry, hardware,
@@ -330,6 +349,7 @@ def _load_engine_and_attach(
     except Exception as exc:
         _recover_from_failed_load(exc, config, state_machine, event_bus)
         return
+    milestone("warm-ready")
     state_machine.transition_to(AppState.IDLE)
     _logger.info("Engine ready.")
 
@@ -358,7 +378,9 @@ def _recover_from_failed_load(
     _logger.exception("Engine load failed: %s", exc)
     event_bus.publish(
         EngineLoadFailedEvent(
-            model_name=str(config.get("transcription.model_size", "base")),
+            model_name=str(
+                config.get("transcription.model_size", default_model_for(None))
+            ),
             error=str(exc),
         )
     )
@@ -442,7 +464,9 @@ def _make_active_engine_provider(
     install state and the loader in agreement.
     """
     def provider() -> EngineId:
-        model_name = config.get("transcription.model_size", "base")
+        model_name = config.get(
+            "transcription.model_size", default_model_for(hardware),
+        )
         model_info = get_model_info(model_name)
         return resolve_engine_id(
             config, model_info, hardware, registry,
@@ -501,6 +525,8 @@ def build_first_run_settings_service(
     config: JsonConfigAdapter,
     event_bus: SimpleEventBus,
     model_manager: ModelManager,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
 ) -> SettingsService:
     """Build a SettingsService for the first-run setup window.
 
@@ -520,6 +546,8 @@ def build_first_run_settings_service(
         downloads=downloads,
         hot_swap=hot_swap,
         state_machine=AppStateMachine(event_bus),
+        registry=registry,
+        hardware=hardware,
     )
 
 
@@ -529,9 +557,10 @@ def build_app(
     root: tkinter.Misc,
     event_bus: SimpleEventBus | None = None,
     download_manager: DownloadManager | None = None,
+    *,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
 ) -> SystemTrayApp:
-    setup_debug_logger(paths.base / "debug.log", console=sys.stderr.isatty())
-
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
         migrate_removed_models,
@@ -556,13 +585,10 @@ def build_app(
 
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
 
-    hardware = TorchHardwareDetector().detect()
     _logger.info(
         "Detected hardware: %s (%s, gfx=%s)",
         hardware.kind, hardware.device_name, hardware.gfx_arch,
     )
-    registry = build_engine_registry()
-
     recorder = SoundDeviceAdapter(
         sample_rate=config.get("audio.sample_rate", 16000),
     )
@@ -573,7 +599,19 @@ def build_app(
     # ``root`` (the main thread), and it is injected everywhere output
     # handlers are constructed.
     gui_dispatcher = TkGuiThreadDispatcher(root)
-    output = _build_output(_resolve_output_mode(config), gui_dispatcher)
+    output = _build_output(
+        _resolve_output_mode(config), gui_dispatcher, paths.dictionary_path,
+    )
+    overlay = (
+        RecordingOverlay(
+            root=root,
+            event_bus=event_bus,
+            dispatcher=gui_dispatcher,
+            level_provider=lambda: recorder.current_rms,
+        )
+        if config.get("overlay.enabled", True)
+        else None
+    )
 
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -635,6 +673,7 @@ def build_app(
             on_save=lambda changes: apply_settings(
                 changes, config, record_and_transcribe_use_case, app,
                 gui_dispatcher=gui_dispatcher,
+                dictionary_path=paths.dictionary_path,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
@@ -654,6 +693,7 @@ def build_app(
         ),
         on_open_settings=open_settings,
         download_manager=download_manager,
+        owned_disposables=(overlay,) if overlay is not None else (),
     )
 
     config.save()
@@ -682,6 +722,7 @@ def apply_settings(
     use_case: RecordAndTranscribeUseCase,
     app: SystemTrayApp,
     gui_dispatcher: GuiThreadDispatcher,
+    dictionary_path: Path | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -690,8 +731,15 @@ def apply_settings(
     UI; this callback only handles the lightweight dispatches.
     """
     if changes.output_changed:
-        use_case.set_output(
+        output = (
             _build_output(_resolve_output_mode(config), gui_dispatcher)
+            if dictionary_path is None
+            else _build_output(
+                _resolve_output_mode(config), gui_dispatcher, dictionary_path,
+            )
+        )
+        use_case.set_output(
+            output
         )
 
     if changes.hotkey_changed:

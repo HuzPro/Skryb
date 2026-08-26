@@ -479,6 +479,39 @@ class TestEngineLoadFailureNotification:
 
         icon.update_state.assert_any_call(AppState.ERROR, "Error")
 
+    def test_should_replay_failure_that_arrived_before_icon_attachment(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app._event_bus.publish(
+            EngineLoadFailedEvent(model_name="base", error="load failed early")
+        )
+
+        app.run()
+
+        icon.notify.assert_called_once_with("VoiceToText", "load failed early")
+        icon.update_state.assert_called_with(AppState.ERROR, "Error")
+
+    def test_should_replay_ready_state_that_arrived_before_icon_attachment(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app._event_bus.publish(
+            StateChangedEvent(old_state="loading", new_state="idle")
+        )
+
+        app.run()
+
+        icon.update_state.assert_called_with(AppState.IDLE, "Idle - ready")
+
 
 class TestTranscriptionEmptyNotification:
     """An empty transcription is the symptom the friend reported. The
