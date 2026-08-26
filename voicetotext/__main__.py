@@ -103,7 +103,7 @@ def main() -> None:
         paths.ensure_dirs()
         from voicetotext.core.startup_log import initialize_session_log
 
-        initialize_session_log(paths.session_log_path, console=sys.stderr.isatty())
+        initialize_session_log(paths.session_log_path, console=_stderr_is_console())
         from voicetotext.core.torch_prewarm import start_torch_prewarm
 
         prewarm = start_torch_prewarm()
@@ -141,7 +141,8 @@ def _run_maintenance(options: argparse.Namespace) -> int | None:
     else:
         succeeded, message = disable_autostart()
     output = sys.stdout if succeeded else sys.stderr
-    output.write(message + "\n")
+    if output is not None:
+        output.write(message + "\n")
     return 0 if succeeded else 1
 
 
@@ -280,8 +281,14 @@ def _show_instance_conflict() -> None:
     )
 
 
+def _stderr_is_console() -> bool:
+    # pythonw (GUI launches, the Start Menu shortcut) runs with no stdio.
+    return sys.stderr is not None and sys.stderr.isatty()
+
+
 def _show_error(message: str) -> None:
-    sys.stderr.write(message)
+    if sys.stderr is not None:
+        sys.stderr.write(message)
     _try_show_error_dialog(message)
 
 
