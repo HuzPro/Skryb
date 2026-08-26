@@ -44,9 +44,12 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
+    "text2num>=3.1",
+    "jellyfish>=1.0",
 ]
 
 [project.optional-dependencies]
+punct = ["sherpa-onnx>=1.10"]
 dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",

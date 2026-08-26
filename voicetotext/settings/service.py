@@ -17,6 +17,10 @@ from voicetotext.core.events import (
     StateChangedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.output.dictionary_config import (
+    DictionaryConfig,
+    dictionary_to_json,
+)
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.text_filter_decorator import load_dictionary
 from voicetotext.settings.download_coordinator import DownloadCoordinator
@@ -289,13 +293,15 @@ class SettingsService:
     # Personal dictionary
     # ------------------------------------------------------------------
 
-    def dictionary_rules(self) -> dict[str, str]:
+    def dictionary_rules(self) -> DictionaryConfig:
         return load_dictionary(self._dictionary_path)
 
-    def save_dictionary_rules(self, rules: dict[str, str]) -> None:
+    def save_dictionary_rules(self, dictionary: DictionaryConfig) -> None:
         self._dictionary_path.parent.mkdir(parents=True, exist_ok=True)
         self._dictionary_path.write_text(
-            json.dumps(rules, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(
+                dictionary_to_json(dictionary), ensure_ascii=False, indent=2,
+            ) + "\n",
             encoding="utf-8",
         )
 

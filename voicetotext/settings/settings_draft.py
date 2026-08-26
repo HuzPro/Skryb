@@ -51,8 +51,8 @@ class ChangeSet:
             original.hotkey_combination != updated.hotkey_combination
             or original.hotkey_mode != updated.hotkey_mode
         )
-        output_changed = original.output_mode != updated.output_mode
         mode_changed = original.transcription_mode != updated.transcription_mode
+        output_changed = original.output_mode != updated.output_mode or mode_changed
         return cls(
             engine_reload_required=engine_reload_required,
             hotkey_changed=hotkey_changed,

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from voicetotext.output.dictionary_config import DictionaryConfig
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.signal import Signal
@@ -69,7 +70,7 @@ class _TrackingService:
         )
         self.supports_streaming_hardware = MagicMock(return_value=True)
         self.engine_candidates_for = MagicMock(return_value=())
-        self.dictionary_rules = MagicMock(return_value={})
+        self.dictionary_rules = MagicMock(return_value=DictionaryConfig())
         self.save_dictionary_rules = MagicMock()
 
     def subscribe_engine(self, listener: object) -> None:
