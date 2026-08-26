@@ -10,3 +10,8 @@ Pillow>=10.0.0
 huggingface-hub>=0.20.0
 requests>=2.31.0
 nano-parakeet>=0.2.1
+# ARK-ASR engine: transformers drives the model; librosa and soundfile
+# are imported by the model's remote processing code.
+transformers>=4.57.6
+librosa>=0.10.0
+soundfile>=0.12.0

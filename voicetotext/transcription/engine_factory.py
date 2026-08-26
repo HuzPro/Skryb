@@ -19,6 +19,7 @@ from voicetotext.transcription.engine_types import (
 from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapshot
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    ARK_ASR_MODELS,
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
@@ -46,7 +47,16 @@ _NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
 )
 
 
+_ARK_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="ark_asr",
+    display_name="ARK-ASR 3B (Transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm"),
+    base_priority=80,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
+    "ark_asr": 1,
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
 }
@@ -59,10 +69,12 @@ def build_engine_registry() -> EngineRegistry:
         descriptors=[
             _NANO_PARAKEET_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
+            _ARK_ASR_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
+            "ark_asr": _build_ark_asr_engine,
         },
     )
 
@@ -73,6 +85,16 @@ def _build_nemotron_streaming_engine(spec: EngineSpec) -> TranscriptionEngine:
     # registry should never reach this model (the picker hides it in batch).
     raise ConfigurationError(
         "nemotron-speech-streaming is streaming-only; it has no batch engine."
+    )
+
+
+def _build_ark_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
+
+    return ArkAsrAdapter(
+        repo_id=spec.repo_id,
+        device=spec.device,
+        model_dir=spec.model_dir,
     )
 
 
@@ -234,6 +256,9 @@ def build_composite_model_manager(
     nemotron_streaming_models = {
         name: info for name, info in NEMOTRON_STREAMING_MODELS.items() if info.repo_id
     }
+    ark_asr_models = {
+        name: info for name, info in ARK_ASR_MODELS.items() if info.repo_id
+    }
 
     nano_parakeet_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -249,11 +274,19 @@ def build_composite_model_manager(
         file_downloader=file_downloader,
         models=nemotron_streaming_models,
     )
+    ark_asr_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=ark_asr_models,
+    )
 
     return CompositeModelManager(
         by_engine={
             "nano_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
+            "ark_asr": ark_asr_manager,
         },
         active_engine_provider=active_engine_provider,
     )
