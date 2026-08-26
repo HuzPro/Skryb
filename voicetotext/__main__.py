@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import tkinter
+    from pathlib import Path
 
     from voicetotext.core.config import ConfigurationStore
     from voicetotext.core.event_bus import SimpleEventBus
@@ -201,6 +202,7 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
     ):
         _run_first_time_setup(
             config, model_manager, event_bus, root, registry, hardware,
+            paths.dictionary_path,
         )
 
     if not _configured_model_installed(config, model_manager, hardware):
@@ -242,6 +244,7 @@ def _run_first_time_setup(
     root: tkinter.Misc,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    dictionary_path: Path,
 ) -> None:
     from voicetotext.bootstrap import build_first_run_settings_service
     from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
@@ -254,6 +257,7 @@ def _run_first_time_setup(
         model_manager=model_manager,
         registry=registry,
         hardware=hardware,
+        dictionary_path=dictionary_path,
     )
     dispatcher = TkGuiThreadDispatcher(root)
     window = TkSettingsWindow(
