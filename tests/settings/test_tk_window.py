@@ -11,6 +11,7 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
 )
 from voicetotext.core.color_scheme import ColorScheme
+from voicetotext.output.dictionary_config import DictionaryConfig, LiteralRule
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
@@ -90,7 +91,7 @@ def service():
     svc.supports_streaming_hardware.return_value = True
     svc.engine_candidates_for.return_value = ()
     svc.apply_draft.return_value = _no_change()
-    svc.dictionary_rules.return_value = {}
+    svc.dictionary_rules.return_value = DictionaryConfig()
     return svc
 
 
@@ -219,11 +220,14 @@ class TestSave:
 
 class TestDictionary:
     def test_should_populate_page_from_service_rules(self, tk_root, service):
-        service.dictionary_rules.return_value = {"god": "God"}
+        dictionary = DictionaryConfig(
+            rules=(LiteralRule(("god",), "God", case_sensitive=True),)
+        )
+        service.dictionary_rules.return_value = dictionary
 
         window = _make_window(tk_root, service)
 
-        assert window.dictionary_page().rules() == {"god": "God"}
+        assert window.dictionary_page().dictionary() == dictionary
 
     def test_should_save_edited_rules_and_request_output_rebuild(
         self, tk_root, service,
@@ -237,7 +241,9 @@ class TestDictionary:
 
         window.save_button().invoke()
 
-        service.save_dictionary_rules.assert_called_once_with({"god": "God"})
+        service.save_dictionary_rules.assert_called_once_with(
+            DictionaryConfig(rules=(LiteralRule(("god",), "God"),))
+        )
         assert received[0].output_changed is True
 
     def test_should_leave_dictionary_alone_when_no_rule_was_edited(
@@ -457,7 +463,7 @@ class TestMode:
         svc.model_supports_batch.return_value = True
         svc.supports_streaming_hardware.return_value = True
         svc.engine_candidates_for.return_value = ()
-        svc.dictionary_rules.return_value = {}
+        svc.dictionary_rules.return_value = DictionaryConfig()
         return svc
 
     @pytest.fixture
