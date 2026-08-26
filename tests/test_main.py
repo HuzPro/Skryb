@@ -14,6 +14,7 @@ from voicetotext.__main__ import (
     _apply_torch_env_overrides,
     _configured_model_installed,
     _show_error,
+    _stderr_is_console,
     _try_show_error_dialog,
     main,
     _parse_cli,
@@ -266,6 +267,19 @@ class TestBindingStartupOrder:
         app.run.assert_called_once_with()
 
 
+class TestStderrIsConsole:
+    def test_should_report_no_console_when_stderr_is_missing(self):
+        with patch("sys.stderr", None):
+            assert _stderr_is_console() is False
+
+    def test_should_report_a_console_for_an_interactive_stderr(self):
+        interactive = MagicMock()
+        interactive.isatty.return_value = True
+
+        with patch("sys.stderr", interactive):
+            assert _stderr_is_console() is True
+
+
 class TestShowError:
     def test_should_write_message_to_stderr(self):
         captured = io.StringIO()
@@ -277,6 +291,16 @@ class TestShowError:
             _show_error("something broke")
 
         assert "something broke" in captured.getvalue()
+
+    def test_should_still_show_dialog_when_stderr_is_missing(self):
+        # pythonw (GUI launches, the Start Menu shortcut) has no stdio.
+        with (
+            patch("sys.stderr", None),
+            patch("voicetotext.__main__._try_show_error_dialog") as dialog,
+        ):
+            _show_error("something broke")
+
+        dialog.assert_called_once_with("something broke")
 
     def test_dialog_should_swallow_errors_when_tk_unavailable(self):
         # Best-effort: a failure constructing the Tk dialog must not
