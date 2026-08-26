@@ -82,8 +82,26 @@ ARK_ASR_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_QWEN3_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"qwen3_asr": 100},
+)
+
+
+QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
+    "qwen3-asr-1.7b": ModelInfo(
+        name="qwen3-asr-1.7b",
+        size_mb=4088,
+        description="Qwen3-ASR 1.7B, multilingual with hotword biasing (GPU)",
+        repo_id="Qwen/Qwen3-ASR-1.7B-hf",
+        compatible_engines=("qwen3_asr",),
+        engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
+    ),
+}
+
+
 ALL_MODELS: dict[str, ModelInfo] = {
     **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **ARK_ASR_MODELS,
+    **QWEN3_ASR_MODELS,
 }
 
 

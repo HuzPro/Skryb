@@ -11,6 +11,7 @@ from tests.settings.test_service import _build_service
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _ARK_ASR = "ark-asr-3b"
+_QWEN = "qwen3-asr-1.7b"
 
 def _gpu(kind: str) -> HardwareProfile:
     return HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
@@ -69,7 +70,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {_PARAKEET, _ARK_ASR}
+        assert names == {_PARAKEET, _ARK_ASR, _QWEN}
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
         service, *_ = _build_service(
@@ -125,7 +126,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {_PARAKEET, _ARK_ASR}
+        assert names == {_PARAKEET, _ARK_ASR, _QWEN}
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
         service, *_ = _build_service(

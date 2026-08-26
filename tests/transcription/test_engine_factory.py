@@ -21,6 +21,7 @@ from voicetotext.transcription.model_info import (
 )
 from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
 from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
+from voicetotext.transcription.qwen3_asr_adapter import Qwen3AsrAdapter
 
 
 def _config(
@@ -63,7 +64,7 @@ class TestBuildEngineRegistry:
         registry = build_engine_registry()
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
-            "nano_parakeet", "nemotron_streaming", "ark_asr",
+            "nano_parakeet", "nemotron_streaming", "ark_asr", "qwen3_asr",
         }
 
 
@@ -159,6 +160,22 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, ArkAsrAdapter)
         assert engine._repo_id == "Audio8/ARK-ASR-3B"
+
+    def test_should_build_qwen3_asr_adapter(self, tmp_path: Path) -> None:
+        engine = create_engine_for_active_model(
+            _config(
+                model_size="qwen3-asr-1.7b",
+                engine="qwen3_asr",
+                device="cpu",
+            ),
+            _paths(tmp_path),
+            build_engine_registry(),
+            _CPU,
+        )
+
+        assert isinstance(engine, Qwen3AsrAdapter)
+        assert engine._repo_id == "Qwen/Qwen3-ASR-1.7B-hf"
+        assert engine._language == "en"
 
     def test_device_override_should_force_cpu(self, tmp_path: Path) -> None:
         engine = create_engine_for_active_model(

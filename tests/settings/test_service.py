@@ -40,6 +40,7 @@ from tests.settings.fakes import FakeConfig, FakeModelManager
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _ARK_ASR = "ark-asr-3b"
+_QWEN = "qwen3-asr-1.7b"
 
 
 def _build_service(
@@ -148,7 +149,7 @@ class TestListModels:
         views = service.list_models()
 
         names = {v.name for v in views}
-        assert names == {_PARAKEET, _NEMOTRON, _ARK_ASR}
+        assert names == {_PARAKEET, _NEMOTRON, _ARK_ASR, _QWEN}
 
     def test_should_mark_installed_status_on_view(self):
         service, *_ = _build_service(
