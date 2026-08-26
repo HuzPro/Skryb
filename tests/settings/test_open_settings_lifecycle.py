@@ -69,6 +69,8 @@ class _TrackingService:
         )
         self.supports_streaming_hardware = MagicMock(return_value=True)
         self.engine_candidates_for = MagicMock(return_value=())
+        self.dictionary_rules = MagicMock(return_value={})
+        self.save_dictionary_rules = MagicMock()
 
     def subscribe_engine(self, listener: object) -> None:
         self._engine_listeners.append(listener)
