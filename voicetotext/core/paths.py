@@ -17,6 +17,14 @@ class AppPaths:
     def models_dir(self) -> Path:
         return self.base / "models"
 
+    @property
+    def dictionary_path(self) -> Path:
+        return self.base / "dictionary.json"
+
+    @property
+    def session_log_path(self) -> Path:
+        return self.base / "session.log"
+
     def ensure_dirs(self) -> None:
         self.base.mkdir(parents=True, exist_ok=True)
         self.models_dir.mkdir(parents=True, exist_ok=True)

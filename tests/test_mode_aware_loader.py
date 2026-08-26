@@ -18,7 +18,9 @@ class TestModeAwareLoader:
     def test_streaming_mode_installs_the_streaming_engine(self, monkeypatch):
         fake_streaming = MagicMock()
         monkeypatch.setattr(
-            bootstrap, "_load_streaming_engine", lambda config, paths: fake_streaming,
+            bootstrap,
+            "_load_streaming_engine",
+            lambda config, paths, hardware: fake_streaming,
         )
         monkeypatch.setattr(
             bootstrap, "_load_engine_with_fallback",

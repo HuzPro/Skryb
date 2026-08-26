@@ -5,7 +5,7 @@ from types import MappingProxyType
 
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.exceptions import ConfigurationError
-from voicetotext.transcription.engine_types import EngineId
+from voicetotext.transcription.engine_types import EngineId, HardwareProfile
 
 
 _logger = logging.getLogger(__name__)
@@ -126,12 +126,37 @@ ALL_MODELS: dict[str, ModelInfo] = {
 # user-facing catalog (e.g. their load is currently unstable). They cannot
 # be selected; an existing config pinned to one is migrated off it (see
 # ``_REMOVED_MODEL_REPLACEMENTS``). Re-enable by removing the entry here.
-HIDDEN_MODELS: frozenset[str] = frozenset({"granite-speech-4.1-2b"})
+ALWAYS_HIDDEN_MODELS: frozenset[str] = frozenset({"granite-speech-4.1-2b"})
+GPU_RETIRED_MODELS: frozenset[str] = frozenset(WHISPER_MODELS)
+CPU_RETIRED_MODELS: frozenset[str] = frozenset(
+    set(WHISPER_MODELS) - {"tiny", "base"}
+)
 
 
-def is_catalog_model(name: str) -> bool:
+def hidden_models_for(
+    profile: HardwareProfile | None,
+) -> frozenset[str]:
+    if profile is None:
+        retired = frozenset()
+    elif profile.kind == "cpu":
+        retired = CPU_RETIRED_MODELS
+    else:
+        retired = GPU_RETIRED_MODELS
+    return ALWAYS_HIDDEN_MODELS | retired
+
+
+def is_catalog_model(
+    name: str,
+    profile: HardwareProfile | None = None,
+) -> bool:
     """Whether *name* should appear in the user-facing model catalog."""
-    return name in ALL_MODELS and name not in HIDDEN_MODELS
+    return name in ALL_MODELS and name not in hidden_models_for(profile)
+
+
+def default_model_for(profile: HardwareProfile | None) -> str:
+    if profile is not None and profile.kind != "cpu":
+        return "parakeet-tdt-0.6b-v3"
+    return "base"
 
 
 def get_model_info(name: str) -> ModelInfo:

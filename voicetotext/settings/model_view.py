@@ -17,12 +17,26 @@ class ModelView:
     display_size: str
     description: str
     installed: bool
+    legacy: bool = False
+    selectable: bool = True
+    deletable: bool = True
 
     @classmethod
-    def from_info(cls, info: ModelInfo, installed: bool) -> "ModelView":
+    def from_info(
+        cls,
+        info: ModelInfo,
+        installed: bool,
+        *,
+        legacy: bool = False,
+        selectable: bool = True,
+        deletable: bool = True,
+    ) -> "ModelView":
         return cls(
             name=info.name,
             display_size=info.display_size,
             description=info.description,
             installed=installed,
+            legacy=legacy,
+            selectable=selectable,
+            deletable=deletable,
         )

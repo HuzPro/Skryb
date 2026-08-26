@@ -9,8 +9,10 @@ leaving the box.
 
 - **System-wide dictation.** Toggle or push-to-talk hotkey (default
   `Ctrl+Alt+M`), text lands in the focused app; your clipboard is preserved.
-- **Local models.** Whisper tiny / base / small / large-v3-turbo / large-v3,
-  downloaded on first use and cached. Pick the size that fits your hardware.
+- **Local models.** Parakeet is the preferred GPU batch model and Nemotron
+  provides low-latency GPU streaming. Whisper `tiny` and `base` remain the
+  selectable CPU fallback; installed Whisper models remain removable as
+  legacy models on GPU systems.
 - **Live streaming mode (experimental).** Text appears while you speak,
   using `parakeet-tdt-0.6b-v3` or the cache-aware
   `nemotron-speech-streaming-en-0.6b`. GPU only.
@@ -35,6 +37,12 @@ To run from source (Windows, and what to pick for NVIDIA / AMD / CPU), see
 ```powershell
 python -m voicetotext
 ```
+
+For a source checkout installed with `pip install -e .`, create a console-free
+Start Menu entry with `voicetotext --create-shortcut`. Optional development
+autostart is managed with `voicetotext --enable-autostart` and
+`voicetotext --disable-autostart`. The dev Run entry is intentionally not
+removed by the packaged installer or its uninstaller.
 
 First run opens a setup window: pick a model, download it, set your hotkey.
 Then dictate anywhere: hit the hotkey, talk, hit it again, and the text is

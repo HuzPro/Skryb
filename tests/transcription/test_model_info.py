@@ -10,9 +10,12 @@ from voicetotext.transcription.model_info import (
     WHISPER_MODELS,
     ModelInfo,
     allows_device_selection,
+    default_model_for,
     get_model_info,
+    hidden_models_for,
     migrate_engine_field,
 )
+from voicetotext.transcription.engine_types import HardwareProfile
 
 
 class TestModelInfoEntity:
@@ -167,6 +170,31 @@ class TestGetModelInfo:
     def test_should_raise_configuration_error_for_unknown_model(self):
         with pytest.raises(ConfigurationError, match="unknown-model"):
             get_model_info("unknown-model")
+
+
+class TestHardwareConditionalRetirement:
+    @pytest.mark.parametrize("kind", ["nvidia_cuda", "amd_rocm"])
+    def test_should_hide_all_whisper_models_on_gpu(self, kind):
+        profile = HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
+
+        assert set(WHISPER_MODELS) <= hidden_models_for(profile)
+        assert default_model_for(profile) == "parakeet-tdt-0.6b-v3"
+
+    def test_should_keep_tiny_and_base_visible_and_default_base_on_cpu(self):
+        profile = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
+
+        hidden = hidden_models_for(profile)
+
+        assert "tiny" not in hidden
+        assert "base" not in hidden
+        assert {"small", "large-v3-turbo", "large-v3"} <= hidden
+        assert default_model_for(profile) == "base"
+
+    @pytest.mark.parametrize("kind", ["nvidia_cuda", "amd_rocm", "cpu"])
+    def test_should_keep_granite_hidden_on_every_profile(self, kind):
+        profile = HardwareProfile(kind=kind, device_name=kind, gfx_arch=None)
+
+        assert "granite-speech-4.1-2b" in hidden_models_for(profile)
 
 
 class TestAllowsDeviceSelection:

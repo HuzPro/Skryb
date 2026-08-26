@@ -126,6 +126,14 @@ class TestTkModelListDownload:
         assert model_list.download_snapshot("base") is None
         assert model_list.row_for("base").progress_visible() is False
 
+    def test_should_keep_row_progress_when_rows_are_rebuilt(self, fixture):
+        model_list, _service, _ = fixture
+        model_list.set_download_progress("small", _snapshot())
+
+        model_list.update_install_state("base")
+
+        assert model_list.row_for("small").progress_visible() is True
+
 
 class TestTkModelListInstallState:
     def test_update_install_state_should_refresh_row_to_installed(self, fixture):

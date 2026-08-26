@@ -26,7 +26,8 @@ class TestJsonConfigAdapterDefaults:
         assert config.get("hotkey.mode") == "toggle"
         assert config.get("hotkey.combination") == "ctrl+alt+m"
         assert config.get("output.mode") == "direct_paste"
-        assert config.get("transcription.model_size") == "base"
+        assert config.get("transcription.model_size") is None
+        assert config.get("overlay.enabled") is True
         assert config.get("transcription.device") == "auto"
         assert config.get("audio.sample_rate") == 16000
 
@@ -57,6 +58,20 @@ class TestJsonConfigAdapterDotNotation:
 
 
 class TestJsonConfigAdapterPersistence:
+    def test_should_distinguish_missing_profile_default_from_persisted_model(
+        self, tmp_path,
+    ):
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+
+        assert config.has_persisted_value("transcription.model_size") is False
+
+        config.load()
+        config.set("transcription.model_size", "base")
+        config.save()
+
+        assert config.has_persisted_value("transcription.model_size") is True
+
     def test_should_persist_changes_to_file(self, tmp_path):
         path = tmp_path / "config.json"
         config = JsonConfigAdapter(path)

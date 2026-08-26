@@ -291,17 +291,17 @@ class TestRowWidgets:
         service.delete_model.assert_called_once_with("tiny")
 
     def test_row_should_refresh_when_install_state_changes(self, page, service):
-        row = page.model_list().row_for("small")
-        assert row.action_button().cget("text") == "Download"
+        model_list = page.model_list()
+        assert model_list.row_for("small").action_button().cget("text") == "Download"
 
         service.list_models.return_value = [
             _view("tiny", installed=True),
             _view("base", installed=True),
             _view("small", installed=True),
         ]
-        page.model_list().update_install_state("small")
+        model_list.update_install_state("small")
 
-        assert row.action_button().cget("text") == "Delete"
+        assert model_list.row_for("small").action_button().cget("text") == "Delete"
 
     def test_row_should_show_progress_when_download_progress_set(self, page):
         from voicetotext.settings.download_progress import DownloadProgressSnapshot

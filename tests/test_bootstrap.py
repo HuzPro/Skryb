@@ -30,6 +30,7 @@ from voicetotext.output.gui_thread_output_decorator import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.text_filter_decorator import TextFilterDecorator
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
@@ -593,8 +594,10 @@ class TestBuildOutput:
 
         result = _build_output(OutputMode.DIRECT_PASTE, dispatcher)
 
-        assert isinstance(result, GuiThreadOutputDecorator)
-        clipboard_preserving = result._inner
+        assert isinstance(result, TextFilterDecorator)
+        gui_output = result._inner
+        assert isinstance(gui_output, GuiThreadOutputDecorator)
+        clipboard_preserving = gui_output._inner
         assert isinstance(clipboard_preserving, ClipboardPreservingDecorator)
         assert isinstance(clipboard_preserving._inner, PasteAndClipboardAdapter)
         mock_preserver_cls.assert_called_once()
@@ -607,23 +610,25 @@ class TestBuildOutput:
 
         result = _build_output(OutputMode.PASTE_AND_CLIPBOARD, dispatcher)
 
-        assert isinstance(result, GuiThreadOutputDecorator)
-        assert isinstance(result._inner, PasteAndClipboardAdapter)
+        assert isinstance(result, TextFilterDecorator)
+        assert isinstance(result._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner._inner, PasteAndClipboardAdapter)
 
     def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
         dispatcher = MagicMock()
 
         result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
 
-        assert isinstance(result, GuiThreadOutputDecorator)
-        assert isinstance(result._inner, ClipboardAdapter)
+        assert isinstance(result, TextFilterDecorator)
+        assert isinstance(result._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner._inner, ClipboardAdapter)
 
     def test_should_wrap_inner_with_gui_thread_dispatcher(self):
         dispatcher = MagicMock()
 
         result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
 
-        assert result._dispatcher is dispatcher
+        assert result._inner._dispatcher is dispatcher
 
 
 class TestApplySettings:
@@ -657,7 +662,7 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_output.assert_called_once_with(
-            OutputMode.CLIPBOARD_ONLY, dispatcher
+            OutputMode.CLIPBOARD_ONLY, dispatcher, None
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
