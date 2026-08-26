@@ -150,6 +150,15 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         foreground=[("disabled", theme.border)],
         indicatorcolor=[("selected", theme.accent)],
     )
+    style.configure(
+        "TCheckbutton", background=theme.background, foreground=theme.foreground,
+    )
+    style.map(
+        "TCheckbutton",
+        background=[("active", theme.background)],
+        foreground=[("disabled", theme.border)],
+        indicatorcolor=[("selected", theme.accent)],
+    )
     _configure_flat_button(style, theme)
     style.configure(
         "TEntry",
