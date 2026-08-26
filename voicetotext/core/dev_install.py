@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
+import sysconfig
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,7 +27,7 @@ $check = $shell.CreateShortcut($env:VOICETOTEXT_SHORTCUT_PATH)
 
 
 def launcher_path() -> Path:
-    return Path(sys.executable).resolve().parent / "voicetotext-gui.exe"
+    return Path(sysconfig.get_path("scripts")).resolve() / "voicetotext-gui.exe"
 
 
 def shortcut_path() -> Path:
