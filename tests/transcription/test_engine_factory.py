@@ -22,6 +22,9 @@ from voicetotext.transcription.model_info import (
 from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
 from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
 from voicetotext.transcription.qwen3_asr_adapter import Qwen3AsrAdapter
+from voicetotext.transcription.crisperwhisper_adapter import (
+    CrisperWhisperAdapter,
+)
 
 
 def _config(
@@ -29,6 +32,7 @@ def _config(
     model_size: str = DEFAULT_MODEL,
     device: str = "auto",
     engine: str = "auto",
+    crisperwhisper_mode: str = "intended",
 ) -> MagicMock:
     config = MagicMock()
     values = {
@@ -36,6 +40,7 @@ def _config(
         "transcription.device": device,
         "transcription.language": "en",
         "transcription.engine": engine,
+        "transcription.crisperwhisper_mode": crisperwhisper_mode,
     }
     config.get.side_effect = lambda key, default=None: values.get(key, default)
     return config
@@ -65,8 +70,15 @@ class TestBuildEngineRegistry:
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "ark_asr", "qwen3_asr",
-            "granite_turboctc",
+            "granite_turboctc", "crisperwhisper",
         }
+
+    def test_crisperwhisper_should_have_lower_base_priority(self) -> None:
+        by_id = {d.engine_id: d for d in build_engine_registry().all_descriptors()}
+
+        assert by_id["crisperwhisper"].base_priority < (
+            by_id["nano_parakeet"].base_priority
+        )
 
 
 class TestResolveEngineId:
@@ -205,6 +217,54 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, NanoParakeetAdapter)
         assert engine._device == "cpu"
+
+    def test_should_build_crisperwhisper_with_default_intended_mode(
+        self, tmp_path: Path,
+    ) -> None:
+        engine = create_engine_for_active_model(
+            _config(
+                model_size="crisperwhisper-2.0-turbo",
+                engine="crisperwhisper",
+                device="cpu",
+            ),
+            _paths(tmp_path),
+            build_engine_registry(),
+            _CPU,
+        )
+
+        assert isinstance(engine, CrisperWhisperAdapter)
+        assert engine._repo_id == "nyralabs/CrisperWhisper2.0_turbo"
+        assert engine._mode == "intended"
+
+    def test_should_pass_validated_verbatim_mode(self, tmp_path: Path) -> None:
+        engine = create_engine_for_active_model(
+            _config(
+                model_size="crisperwhisper-2.0-large",
+                engine="crisperwhisper",
+                crisperwhisper_mode="verbatim",
+            ),
+            _paths(tmp_path),
+            build_engine_registry(),
+            _GPU,
+        )
+
+        assert isinstance(engine, CrisperWhisperAdapter)
+        assert engine._mode == "verbatim"
+
+    def test_should_reject_invalid_crisperwhisper_mode(
+        self, tmp_path: Path,
+    ) -> None:
+        with pytest.raises(ConfigurationError, match="crisperwhisper_mode"):
+            create_engine_for_active_model(
+                _config(
+                    model_size="crisperwhisper-2.0-turbo",
+                    engine="crisperwhisper",
+                    crisperwhisper_mode="raw",
+                ),
+                _paths(tmp_path),
+                build_engine_registry(),
+                _GPU,
+            )
 
 
 class TestModelManagers:

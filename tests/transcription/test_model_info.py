@@ -7,6 +7,7 @@ from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     ARK_ASR_MODELS,
+    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
@@ -66,6 +67,7 @@ class TestModelCatalog:
             | set(ARK_ASR_MODELS)
             | set(QWEN3_ASR_MODELS)
             | set(GRANITE_TURBOCTC_MODELS)
+            | set(CRISPERWHISPER_MODELS)
         )
 
     def test_default_should_be_current_parakeet(self) -> None:
@@ -81,6 +83,17 @@ class TestModelCatalog:
     def test_every_catalog_entry_should_be_visible(self) -> None:
         assert all(is_catalog_model(name) for name in ALL_MODELS)
         assert is_catalog_model("unknown-model") is False
+
+    def test_crisperwhisper_models_should_disclose_restrictive_license(
+        self,
+    ) -> None:
+        assert CRISPERWHISPER_MODELS
+        for model in CRISPERWHISPER_MODELS.values():
+            assert "non-commercial research license" in model.description
+            assert model.compatible_engines == ("crisperwhisper",)
+
+    def test_crisperwhisper_should_not_replace_default_model(self) -> None:
+        assert DEFAULT_MODEL not in CRISPERWHISPER_MODELS
 
 
 def _saved_config(path: Path, key: str, value: str) -> JsonConfigAdapter:

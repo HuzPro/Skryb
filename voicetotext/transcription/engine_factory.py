@@ -12,6 +12,7 @@ from voicetotext.transcription.engine_registry import (
 )
 from voicetotext.transcription.engine_selector import rank_engines
 from voicetotext.transcription.engine_types import (
+    CrisperWhisperMode,
     EngineDescriptor,
     EngineId,
     HardwareProfile,
@@ -20,6 +21,7 @@ from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapsho
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     ARK_ASR_MODELS,
+    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
@@ -46,6 +48,13 @@ _NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
     base_priority=85,
     supports_streaming=True,
     streaming_only=True,
+)
+
+_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
+    engine_id="crisperwhisper",
+    display_name="CrisperWhisper 2.0 (Transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=40,
 )
 
 
@@ -79,6 +88,7 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nemotron_streaming": 1,
     "qwen3_asr": 1,
     "granite_turboctc": 1,
+    "crisperwhisper": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -92,6 +102,7 @@ def build_engine_registry() -> EngineRegistry:
             _ARK_ASR_DESCRIPTOR,
             _QWEN3_ASR_DESCRIPTOR,
             _GRANITE_TURBOCTC_DESCRIPTOR,
+            _CRISPERWHISPER_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
@@ -99,6 +110,7 @@ def build_engine_registry() -> EngineRegistry:
             "ark_asr": _build_ark_asr_engine,
             "qwen3_asr": _build_qwen3_asr_engine,
             "granite_turboctc": _build_granite_turboctc_engine,
+            "crisperwhisper": _build_crisperwhisper_engine,
         },
     )
 
@@ -154,6 +166,20 @@ def _build_granite_turboctc_engine(spec: EngineSpec) -> TranscriptionEngine:
         repo_id=spec.repo_id,
         device=spec.device,
         model_dir=spec.model_dir,
+    )
+
+
+def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.crisperwhisper_adapter import (
+        CrisperWhisperAdapter,
+    )
+
+    return CrisperWhisperAdapter(
+        repo_id=spec.repo_id,
+        device=spec.device,
+        model_dir=spec.model_dir,
+        language=spec.language,
+        mode=spec.crisperwhisper_mode,
     )
 
 
@@ -237,6 +263,7 @@ def create_engine_for_active_model(
         language=config.get("transcription.language", "en"),
         beam_size=_resolve_beam_size(config, engine_id),
         model_dir=paths.models_dir,
+        crisperwhisper_mode=_resolve_crisperwhisper_mode(config, engine_id),
     )
     return registry.build(engine_id, spec)
 
@@ -248,6 +275,21 @@ def _resolve_beam_size(
     if explicit is None:
         return _DEFAULT_BEAM_SIZE_BY_ENGINE.get(engine_id, _FALLBACK_BEAM_SIZE)
     return explicit  # type: ignore[return-value]
+
+
+def _resolve_crisperwhisper_mode(
+    config: ConfigurationStore,
+    engine_id: EngineId,
+) -> CrisperWhisperMode:
+    if engine_id != "crisperwhisper":
+        return "intended"
+    from voicetotext.transcription.crisperwhisper_adapter import (
+        resolve_crisperwhisper_mode,
+    )
+
+    return resolve_crisperwhisper_mode(
+        config.get("transcription.crisperwhisper_mode", "intended")
+    )
 
 
 def _resolve_device(
@@ -312,6 +354,9 @@ def build_composite_model_manager(
     granite_turboctc_models = {
         name: info for name, info in GRANITE_TURBOCTC_MODELS.items() if info.repo_id
     }
+    crisperwhisper_models = {
+        name: info for name, info in CRISPERWHISPER_MODELS.items() if info.repo_id
+    }
 
     nano_parakeet_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -348,6 +393,13 @@ def build_composite_model_manager(
         file_downloader=file_downloader,
         models=granite_turboctc_models,
     )
+    crisperwhisper_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=crisperwhisper_models,
+    )
 
     return CompositeModelManager(
         by_engine={
@@ -356,6 +408,7 @@ def build_composite_model_manager(
             "ark_asr": ark_asr_manager,
             "qwen3_asr": qwen3_asr_manager,
             "granite_turboctc": granite_turboctc_manager,
+            "crisperwhisper": crisperwhisper_manager,
         },
         active_engine_provider=active_engine_provider,
     )
