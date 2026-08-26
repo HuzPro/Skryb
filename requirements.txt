@@ -19,3 +19,4 @@ numpy>=1.24.0
 Pillow>=10.0.0
 huggingface-hub>=0.20.0
 requests>=2.31.0
+nano-parakeet>=0.2.1

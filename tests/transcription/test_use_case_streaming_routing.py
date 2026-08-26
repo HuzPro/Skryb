@@ -179,7 +179,7 @@ class TestStreamingRouting:
         assert completed[0].transcription_seconds == 1.23
         assert state_machine.state is AppState.IDLE
 
-    def test_should_log_the_streamed_transcript_on_completion(self, app_caplog):
+    def test_should_log_streaming_duration_without_transcript(self, app_caplog):
         result = TranscriptionResult(
             text="hello world", language="en",
             language_probability=0.0, transcription_seconds=1.23,
@@ -190,8 +190,8 @@ class TestStreamingRouting:
         use_case.on_hotkey_activated()
         use_case.on_hotkey_activated()
 
-        assert "Streaming transcription in" in app_caplog.text
-        assert "hello world" in app_caplog.text
+        assert "Streaming transcription completed" in app_caplog.text
+        assert "hello world" not in app_caplog.text
 
     def test_should_recover_streaming_state_when_worker_fails_mid_run(self):
         # The worker can fail mid-run (e.g. a decode error) and call

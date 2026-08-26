@@ -40,6 +40,7 @@ class TkModelRow(ttk.Frame):
         self._name = view.name
         self._installed = view.installed
         self._description = view.description
+        self._deletable = view.deletable
         self._download_active = False
         self._progress_shown = False
         self.download_requested = Signal()
@@ -82,6 +83,7 @@ class TkModelRow(ttk.Frame):
     def update_view(self, view: ModelView) -> None:
         self._installed = view.installed
         self._description = view.description
+        self._deletable = view.deletable
         self._size_label.configure(text=view.display_size)
         self._description_label.configure(text=view.description)
         self._refresh_action_button()
@@ -166,19 +168,25 @@ class TkModelRow(ttk.Frame):
             self._progress_shown = False
 
     def _refresh_action_button(self) -> None:
-        self._action_button.configure(text=self._action_label())
+        self._action_button.configure(
+            text=self._action_label(),
+            state="normal" if self._action_enabled() else "disabled",
+        )
 
     def _action_label(self) -> str:
         if self._download_active:
             return "Cancel"
         if self._installed:
-            return "Delete"
+            return "Delete" if self._deletable else "Switch models first"
         return "Download"
+
+    def _action_enabled(self) -> bool:
+        return self._download_active or not self._installed or self._deletable
 
     def _on_action_clicked(self) -> None:
         if self._download_active:
             self.cancel_requested.emit(self._name)
-        elif self._installed:
+        elif self._installed and self._deletable:
             self.delete_requested.emit(self._name)
         else:
             self.download_requested.emit(self._name)

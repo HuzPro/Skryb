@@ -141,6 +141,18 @@ class TestSoundDeviceAdapterEmptyRecording:
 
 class TestSoundDeviceAdapterLiveFrames:
     @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_should_publish_latest_chunk_rms_without_buffering(self, mock_sd):
+        adapter = SoundDeviceAdapter(sample_rate=16000)
+        adapter.start_recording()
+
+        _feed(mock_sd, np.full((4, 1), 0.5, dtype=np.float32))
+
+        assert adapter.current_rms == pytest.approx(0.5)
+
+        adapter.stop_recording()
+        assert adapter.current_rms == 0.0
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
     def test_should_forward_mono_one_dimensional_frame_to_on_frame(self, mock_sd):
         # The recorder contract promises "float32, mono" frames. sounddevice
         # delivers (frames, 1); the adapter must flatten to (frames,) so the

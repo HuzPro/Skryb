@@ -42,7 +42,7 @@ class TestConfigRoundTrip:
         # Old setting preserved
         assert config.get("hotkey.mode") == "toggle"
         # New defaults filled in
-        assert config.get("transcription.model_size") == "base"
+        assert config.get("transcription.model_size") is None
         assert config.get("output.mode") == "direct_paste"
 
 

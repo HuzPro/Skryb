@@ -94,3 +94,27 @@ def test_pyproject_dependencies_declare_every_required_torch_package() -> None:
         f"the canonical dependency list must declare every torch-family "
         f"runtime dependency."
     )
+
+
+def test_parakeet_is_a_core_dependency_and_not_an_extra() -> None:
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    dependencies = _names_from_requirement_lines(
+        pyproject["project"]["dependencies"]
+    )
+    requirements = _packages_in_requirements_file("requirements.txt")
+
+    assert "nano-parakeet" in dependencies
+    assert "nano-parakeet" in requirements
+    assert "parakeet" not in pyproject["project"]["optional-dependencies"]
+
+
+def test_editable_install_declares_console_free_gui_launcher() -> None:
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    assert pyproject["project"]["gui-scripts"]["voicetotext-gui"] == (
+        "voicetotext.__main__:main"
+    )

@@ -14,7 +14,7 @@
 | `requirements-nvidia.txt`    | NVIDIA GPU (Windows or Linux). Installs PyTorch CUDA build. |
 | `requirements-cpu.txt`       | No GPU (or smaller download). Installs CPU-only PyTorch. |
 | `requirements-all.txt`       | You already have PyTorch installed and just want the rest of the deps. |
-| `requirements.txt`           | Same as `requirements-all.txt` minus the optional `nano-parakeet` engine. |
+| `requirements.txt`           | Core dependencies, including the `nano-parakeet` engine, without PyTorch. |
 
 The GPU files use `--find-links` (AMD's index is a flat HTML directory) or `--extra-index-url` (PyTorch's CUDA index is a PEP 503 index) to pull the right wheel without disturbing PyPI lookups for everything else.
 
@@ -34,12 +34,25 @@ python -m voicetotext
 
 First run opens a setup window where you pick a model and download it.
 
+For an editable development install, `pip install -e .` installs both the
+console command and a console-free `voicetotext-gui.exe`. Run
+`voicetotext --create-shortcut` to add **VoiceToText (Dev)** to the Start
+Menu. `voicetotext --enable-autostart` and `--disable-autostart` manage the
+development install's per-user startup entry. Installer uninstall cleanup for
+that development entry is intentionally out of scope.
+
+On detected NVIDIA or AMD GPUs, Parakeet is the fresh-install batch default
+and Nemotron is available in streaming mode. On CPU-only systems, Whisper
+`base` remains the default and `tiny`/`base` remain selectable. Installed
+Whisper models on GPU systems appear as legacy entries so they can be deleted
+after switching away from an active one.
+
 ## Streaming dictation (experimental)
 
 Streaming mode types text live as you speak, instead of recording first and transcribing on stop.
 
 - **GPU-only.** A CUDA or ROCm GPU is required; the streaming models are rejected at load on CPU. On a box with no detected GPU the Settings UI disables the Streaming toggle. It is still experimental on AMD ROCm.
-- **Needs the Parakeet extra.** Install via `requirements-all.txt` / `-amd.txt` / `-nvidia.txt` - these include `nano-parakeet` (which pulls `sentencepiece`). The bare `requirements.txt` omits it and streaming will not load.
+- **Parakeet is a core dependency.** Every supported requirements path and a plain `pip install -e .` install `nano-parakeet` (which pulls `sentencepiece`).
 - **Models:** `parakeet-tdt-0.6b-v3` (windowed) and `nemotron-speech-streaming-en-0.6b` (cache-aware, lowest latency). Choose **Streaming** on the Transcription page, then download a streaming model.
 
 ## Notes per platform

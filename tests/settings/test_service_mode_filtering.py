@@ -97,6 +97,49 @@ class TestServiceModeFiltering:
             is False
         )
 
+    def test_first_run_catalog_routing_should_never_be_empty(self):
+        profiles = [
+            _gpu("cpu"),
+            _gpu("nvidia_cuda"),
+            _gpu("amd_rocm"),
+        ]
+        for profile in profiles:
+            for mode in ("batch", "streaming"):
+                service, *_ = _build_service(
+                    models=ALL_MODELS,
+                    registry=build_engine_registry(),
+                    hardware=profile,
+                    config_overrides={"transcription.mode": mode},
+                )
+
+                assert service.list_models(), (profile.kind, mode)
+
+    def test_gpu_batch_should_hide_nemotron_and_whisper(self):
+        service, *_ = _build_service(
+            models=ALL_MODELS,
+            registry=build_engine_registry(),
+            hardware=_gpu("nvidia_cuda"),
+        )
+
+        names = {view.name for view in service.list_models()}
+
+        assert names == {"parakeet-tdt-0.6b-v3"}
+
+    def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
+        service, *_ = _build_service(
+            models=ALL_MODELS,
+            registry=build_engine_registry(),
+            hardware=_gpu("amd_rocm"),
+            config_overrides={"transcription.mode": "streaming"},
+        )
+
+        names = {view.name for view in service.list_models()}
+
+        assert names == {
+            "parakeet-tdt-0.6b-v3",
+            "nemotron-speech-streaming-en-0.6b",
+        }
+
 
 class TestStreamingHardwareGate:
     """Streaming is GPU-only, so the service reports whether the box can run it."""
