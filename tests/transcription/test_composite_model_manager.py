@@ -2,18 +2,19 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from voicetotext.transcription.composite_model_manager import CompositeModelManager
+from voicetotext.transcription.engine_types import EngineId
 from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
 
-def _info(name: str, repo_id: str = "openai/whisper-base") -> ModelInfo:
+def _info(name: str = "parakeet-tdt-0.6b-v3") -> ModelInfo:
     return ModelInfo(
-        name=name, size_mb=290, description="test", repo_id=repo_id,
+        name=name, size_mb=2510, description="test",
+        repo_id=f"example/{name}", compatible_engines=("nano_parakeet",),
     )
 
 
 class _FakeManager(ModelManager):
-
     def __init__(
         self,
         models: list[ModelInfo] | None = None,
@@ -48,207 +49,77 @@ class _FakeManager(ModelManager):
 
 def _make_composite(
     *,
-    transformers: _FakeManager | None = None,
-    nano_parakeet: _FakeManager | None = None,
-    active: str = "transformers",
+    nano: _FakeManager | None = None,
+    nemotron: _FakeManager | None = None,
+    active: EngineId = "nano_parakeet",
 ) -> CompositeModelManager:
     return CompositeModelManager(
         by_engine={
-            "transformers": transformers or _FakeManager(),
-            "nano_parakeet": nano_parakeet or _FakeManager(),
+            "nano_parakeet": nano or _FakeManager(),
+            "nemotron_streaming": nemotron or _FakeManager(),
         },
-        active_engine_provider=lambda: active,  # type: ignore[arg-type]
+        active_engine_provider=lambda: active,
     )
 
 
-class TestCompositeModelManagerListing:
-    def test_should_aggregate_models_from_all_children_deduped(self):
-        info = _info("base")
+class TestCompositeModelManager:
+    def test_should_aggregate_models_from_children_without_duplicates(
+        self,
+    ) -> None:
+        info = _info()
         composite = _make_composite(
-            transformers=_FakeManager(models=[info]),
-            nano_parakeet=_FakeManager(models=[info]),
+            nano=_FakeManager(models=[info]),
+            nemotron=_FakeManager(models=[info]),
         )
 
-        models = composite.list_models()
+        assert composite.list_models() == [info]
 
-        assert len(models) == 1
-        assert models[0].name == "base"
-
-
-class TestCompositeModelManagerInstallation:
-    def test_should_report_installed_when_any_owning_child_has_model(self):
-        # The loader can open the model via the engine whose files are
-        # present, so install state is engine-agnostic: a model on disk
-        # under the (non-active) transformers cache is still installed.
-        info = _info("large-v3-turbo")
+    def test_should_report_installed_when_any_owner_has_files(self) -> None:
+        info = _info()
         composite = _make_composite(
-            transformers=_FakeManager(
-                models=[info], installed={"large-v3-turbo": True},
-            ),
-            nano_parakeet=_FakeManager(
-                models=[info], installed={"large-v3-turbo": False},
-            ),
-            active="nano_parakeet",
+            nano=_FakeManager(models=[info], installed={info.name: False}),
+            nemotron=_FakeManager(models=[info], installed={info.name: True}),
         )
 
-        assert composite.is_installed("large-v3-turbo") is True
+        assert composite.is_installed(info.name) is True
 
-    def test_should_report_not_installed_when_no_owning_child_has_files(self):
-        info = _info("large-v3-turbo")
-        composite = _make_composite(
-            transformers=_FakeManager(
-                models=[info], installed={"large-v3-turbo": False},
-            ),
-            nano_parakeet=_FakeManager(
-                models=[info], installed={"large-v3-turbo": False},
-            ),
-            active="nano_parakeet",
-        )
+    def test_should_report_unknown_model_not_installed(self) -> None:
+        assert _make_composite().is_installed("unknown") is False
 
-        assert composite.is_installed("large-v3-turbo") is False
-
-    def test_should_report_installed_when_active_engine_has_model(self):
-        info = _info("large-v3-turbo")
-        composite = _make_composite(
-            transformers=_FakeManager(
-                models=[info], installed={"large-v3-turbo": False},
-            ),
-            nano_parakeet=_FakeManager(
-                models=[info], installed={"large-v3-turbo": True},
-            ),
-            active="nano_parakeet",
-        )
-
-        assert composite.is_installed("large-v3-turbo") is True
-
-    def test_should_report_not_installed_when_no_child_owns_model(self):
-        composite = _make_composite()
-
-        assert composite.is_installed("unknown") is False
-
-    def test_should_delegate_to_owning_child_when_active_does_not_own_model(self):
-        info = _info(
-            "parakeet-tdt-0.6b-v3", repo_id="nvidia/parakeet-tdt-0.6b-v3",
-        )
-        composite = CompositeModelManager(
-            by_engine={
-                "transformers": _FakeManager(),
-                "nano_parakeet": _FakeManager(
-                    models=[info],
-                    installed={"parakeet-tdt-0.6b-v3": True},
-                ),
-            },
-            active_engine_provider=lambda: "transformers",
-        )
-
-        assert composite.is_installed("parakeet-tdt-0.6b-v3") is True
-
-
-class TestCompositeModelManagerRouting:
-    def test_should_route_download_to_active_engine_child(self):
-        transformers = _FakeManager()
-        nano_parakeet = _FakeManager()
-        composite = _make_composite(
-            transformers=transformers,
-            nano_parakeet=nano_parakeet,
-            active="nano_parakeet",
-        )
-
-        composite.download("base")
-
-        assert nano_parakeet.download_calls == ["base"]
-        assert transformers.download_calls == []
-
-    def test_should_route_delete_to_active_engine_child(self):
-        transformers = _FakeManager()
-        nano_parakeet = _FakeManager()
-        composite = _make_composite(
-            transformers=transformers,
-            nano_parakeet=nano_parakeet,
-            active="transformers",
-        )
-
-        composite.delete("base")
-
-        assert transformers.delete_calls == ["base"]
-        assert nano_parakeet.delete_calls == []
-
-    def test_should_return_get_model_path_from_active_engine_child(self, tmp_path):
-        active_path = tmp_path / "models--openai--whisper-base"
-        composite = _make_composite(
-            transformers=_FakeManager(installed={"base": True}, path=active_path),
-            active="transformers",
-        )
-
-        assert composite.get_model_path("base") == active_path
-
-    def test_should_implement_model_manager_interface(self):
-        composite = _make_composite()
-
-        assert isinstance(composite, ModelManager)
-
-
-class TestCompositeModelManagerOwnerRouting:
-    def test_should_route_download_to_owning_child_when_active_does_not_own_model(self):
-        info = _info("parakeet-tdt-0.6b-v2", repo_id="nvidia/parakeet-tdt-0.6b-v2")
+    def test_should_route_to_non_active_owner(self) -> None:
+        info = _info("nemotron-speech-streaming-en-0.6b")
         owner = _FakeManager(models=[info])
-        non_owner = _FakeManager()
-        composite = CompositeModelManager(
-            by_engine={
-                "transformers": non_owner,
-                "nano_parakeet": owner,
-            },
-            active_engine_provider=lambda: "transformers",
+        active = _FakeManager()
+        composite = _make_composite(
+            nano=active, nemotron=owner, active="nano_parakeet",
         )
 
-        composite.download("parakeet-tdt-0.6b-v2")
+        composite.download(info.name)
+        composite.delete(info.name)
 
-        assert owner.download_calls == ["parakeet-tdt-0.6b-v2"]
-        assert non_owner.download_calls == []
+        assert owner.download_calls == [info.name]
+        assert owner.delete_calls == [info.name]
+        assert active.download_calls == []
 
-    def test_should_route_delete_to_owning_child_when_active_does_not_own_model(self):
-        info = _info("parakeet-tdt-0.6b-v2", repo_id="nvidia/parakeet-tdt-0.6b-v2")
-        owner = _FakeManager(models=[info])
-        non_owner = _FakeManager()
-        composite = CompositeModelManager(
-            by_engine={
-                "transformers": non_owner,
-                "nano_parakeet": owner,
-            },
-            active_engine_provider=lambda: "transformers",
-        )
-
-        composite.delete("parakeet-tdt-0.6b-v2")
-
-        assert owner.delete_calls == ["parakeet-tdt-0.6b-v2"]
-        assert non_owner.delete_calls == []
-
-    def test_should_prefer_active_child_when_multiple_own_model(self):
-        info = _info("base")
+    def test_should_prefer_active_owner_when_both_own_model(self) -> None:
+        info = _info()
         active = _FakeManager(models=[info])
-        also_owner = _FakeManager(models=[info])
-        composite = CompositeModelManager(
-            by_engine={
-                "transformers": active,
-                "nano_parakeet": also_owner,
-            },
-            active_engine_provider=lambda: "transformers",
+        other = _FakeManager(models=[info])
+        composite = _make_composite(nano=active, nemotron=other)
+
+        composite.download(info.name)
+
+        assert active.download_calls == [info.name]
+        assert other.download_calls == []
+
+    def test_get_model_path_should_use_owning_child(self, tmp_path: Path) -> None:
+        info = _info()
+        expected = tmp_path / "models--example--parakeet"
+        composite = _make_composite(
+            nano=_FakeManager(
+                models=[info], installed={info.name: True}, path=expected,
+            ),
         )
 
-        composite.download("base")
-
-        assert active.download_calls == ["base"]
-        assert also_owner.download_calls == []
-
-    def test_has_model_should_return_true_when_any_child_owns_it(self):
-        info = _info("parakeet-tdt-0.6b-v2", repo_id="nvidia/parakeet-tdt-0.6b-v2")
-        composite = CompositeModelManager(
-            by_engine={
-                "transformers": _FakeManager(),
-                "nano_parakeet": _FakeManager(models=[info]),
-            },
-            active_engine_provider=lambda: "transformers",
-        )
-
-        assert composite.has_model("parakeet-tdt-0.6b-v2") is True
-        assert composite.has_model("does-not-exist") is False
+        assert composite.get_model_path(info.name) == expected
+        assert isinstance(composite, ModelManager)

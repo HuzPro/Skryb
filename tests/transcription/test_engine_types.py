@@ -27,14 +27,14 @@ class TestHardwareProfile:
 class TestEngineDescriptor:
     def test_should_create_with_required_fields(self):
         descriptor = EngineDescriptor(
-            engine_id="transformers",
-            display_name="Transformers (HuggingFace)",
+            engine_id="nano_parakeet",
+            display_name="nano-parakeet (PyTorch)",
             supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
             base_priority=50,
         )
 
-        assert descriptor.engine_id == "transformers"
-        assert descriptor.display_name == "Transformers (HuggingFace)"
+        assert descriptor.engine_id == "nano_parakeet"
+        assert descriptor.display_name == "nano-parakeet (PyTorch)"
         assert descriptor.supported_hardware == ("nvidia_cuda", "amd_rocm", "cpu")
         assert descriptor.base_priority == 50
 

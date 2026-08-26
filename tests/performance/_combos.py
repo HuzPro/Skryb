@@ -32,23 +32,7 @@ def build_benchmark_combinations() -> list[BenchmarkCombo]:
     for model_name, info in ALL_MODELS.items():
         for engine_id in info.compatible_engines:
             combos.append(BenchmarkCombo(model_name, engine_id, "cuda"))
-    return _ordered_for_fragile_models_first(combos)
-
-
-# Models that historically corrupt process state on this hardware
-# when loaded AFTER other large models. We schedule them at the start
-# of the sweep where the process is cleanest. Granite's multi-shard
-# safetensors load via ``spawn_materialize`` has been observed to
-# segfault when called after Parakeet on this AMD ROCm Windows host.
-_FRAGILE_MODELS = ("granite-speech-4.1-2b",)
-
-
-def _ordered_for_fragile_models_first(
-    combos: list[BenchmarkCombo],
-) -> list[BenchmarkCombo]:
-    fragile = [c for c in combos if c.model_name in _FRAGILE_MODELS]
-    other = [c for c in combos if c.model_name not in _FRAGILE_MODELS]
-    return fragile + other
+    return combos
 
 
 BENCHMARK_COMBOS: list[BenchmarkCombo] = build_benchmark_combinations()

@@ -5,20 +5,18 @@ from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
 from voicetotext.downloads.download_manager import DownloadHandle, DownloadManager
 from voicetotext.downloads.hf_repo_resolver import HfRepoResolver
 from voicetotext.downloads.model_download_job import ModelDownloadJob
-from voicetotext.transcription.model_info import WHISPER_MODELS, ModelInfo
+from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
 
-_TRANSFORMERS_CONFIG_FILENAME = "config.json"
+_CONFIG_FILENAME = "config.json"
 
 
 def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
     """Whether *repo_dir* holds a snapshot a ``local_files_only`` load can use.
 
-    HuggingFace's ``snapshot_download(local_files_only=True)`` - the call
-    every engine's loader makes under the hood (the transformers Whisper
-    adapter, and nano-parakeet via its patched ``hf_hub_download``) -
-    resolves the default ``main`` revision through
+    HuggingFace's ``snapshot_download(local_files_only=True)`` resolves the
+    default ``main`` revision through
     ``refs/main`` and then reads ``snapshots/<sha>``. So a snapshot is
     only *loadable* when ``refs/main`` exists AND the snapshot directory it
     names holds a complete model.
@@ -53,9 +51,8 @@ class HuggingFaceModelManager(ModelManager):
     """ModelManager backed by the chunked DownloadManager and HfRepoResolver.
 
     Keeps the existing HuggingFace cache layout
-    (``models--org--repo/snapshots/<sha>/...``) so the
-    :class:`TransformersWhisperAdapter` can continue loading models with
-    ``local_files_only=True`` without any knowledge of how they got on disk.
+    (``models--org--repo/snapshots/<sha>/...``) so engines can load models
+    with ``local_files_only=True`` without knowing how they got on disk.
     """
 
     def __init__(
@@ -64,13 +61,13 @@ class HuggingFaceModelManager(ModelManager):
         download_manager: DownloadManager,
         resolver: HfRepoResolver,
         file_downloader: ChunkedFileDownloader,
-        models: dict[str, ModelInfo] | None = None,
+        models: dict[str, ModelInfo],
     ) -> None:
         self._models_dir = models_dir
         self._download_manager = download_manager
         self._resolver = resolver
         self._file_downloader = file_downloader
-        self._models = models or WHISPER_MODELS
+        self._models = models
 
     # ------------------------------------------------------------------
     # Listing / inspection
@@ -91,7 +88,7 @@ class HuggingFaceModelManager(ModelManager):
     def _snapshot_has_complete_model(snapshot: Path) -> bool:
         return (
             HuggingFaceModelManager._is_nemo_layout(snapshot)
-            or HuggingFaceModelManager._is_transformers_layout(snapshot)
+            or HuggingFaceModelManager._is_safetensors_layout(snapshot)
         )
 
     @staticmethod
@@ -102,13 +99,8 @@ class HuggingFaceModelManager(ModelManager):
         return any(p.suffix == ".nemo" for p in snapshot.iterdir() if p.is_file())
 
     @staticmethod
-    def _is_transformers_layout(snapshot: Path) -> bool:
-        # Standard transformers layout: ``config.json`` + weights. Weights
-        # may be a single ``model.safetensors`` / ``pytorch_model.bin``
-        # (Whisper) or a sharded layout indexed by
-        # ``model.safetensors.index.json`` with ``model-NNNNN-of-MMMMM``
-        # shards (Granite Speech and other multi-GB models).
-        if not (snapshot / _TRANSFORMERS_CONFIG_FILENAME).exists():
+    def _is_safetensors_layout(snapshot: Path) -> bool:
+        if not (snapshot / _CONFIG_FILENAME).exists():
             return False
         return (
             (snapshot / "model.safetensors").exists()

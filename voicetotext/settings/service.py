@@ -38,10 +38,8 @@ from voicetotext.transcription.engine_selector import (
 from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    DEFAULT_MODEL,
     ModelInfo,
-    allows_device_selection as _allows_device_selection,
-    default_model_for,
-    hidden_models_for,
     is_catalog_model as _is_catalog_model,
 )
 from voicetotext.transcription.model_manager import ModelManager
@@ -150,30 +148,16 @@ class SettingsService:
         all_infos = self._model_manager.list_models()
         infos = [
             info for info in all_infos
-            if _is_catalog_model(info.name, self._hardware)
+            if _is_catalog_model(info.name)
         ]
         if effective_mode is TranscriptionMode.STREAMING:
             infos = [info for info in infos if self._is_streaming_model(info)]
         else:
             infos = [info for info in infos if self._is_batch_model(info)]
-        catalog = [
+        return [
             ModelView.from_info(info, installed=self._install_cache.is_installed(info.name))
             for info in infos
         ]
-        selected = self.selected_model()
-        hidden = hidden_models_for(self._hardware)
-        legacy = [
-            ModelView.from_info(
-                info,
-                installed=True,
-                legacy=True,
-                selectable=False,
-                deletable=info.name != selected,
-            )
-            for info in all_infos
-            if info.name in hidden and self._install_cache.is_installed(info.name)
-        ]
-        return catalog + legacy
 
     def transcription_mode(self) -> TranscriptionMode:
         return TranscriptionMode.migrate(self._config.get("transcription.mode"))
@@ -210,7 +194,7 @@ class SettingsService:
     def selected_model(self) -> str:
         return self._config.get(
             "transcription.model_size",
-            default_model_for(self._hardware),
+            DEFAULT_MODEL,
         )
 
     # ------------------------------------------------------------------
@@ -247,7 +231,7 @@ class SettingsService:
         return SettingsDraft(
             model_size=self._config.get(
                 "transcription.model_size",
-                default_model_for(self._hardware),
+                DEFAULT_MODEL,
             ),
             language=self._config.get("transcription.language", "en"),
             device=self._config.get("transcription.device", "auto"),
@@ -325,17 +309,6 @@ class SettingsService:
             return ()
         return rank_engines(info, self._hardware, self._registry.all_descriptors())
 
-    def available_devices(self) -> list[str]:
-        """Return device choices applicable to the detected hardware.
-
-        Always includes ``auto`` and ``cpu``; adds ``cuda`` only when a
-        GPU was detected, so a CPU-only box doesn't show a non-functional
-        option.
-        """
-        if self._hardware is None or self._hardware.kind == "cpu":
-            return ["auto", "cpu"]
-        return ["auto", "cuda", "cpu"]
-
     def supports_streaming_hardware(self) -> bool:
         """Whether the detected hardware can run the GPU-only streaming engine.
 
@@ -344,14 +317,6 @@ class SettingsService:
         UI uses this to keep the Streaming mode from being selected there.
         """
         return self._hardware is not None and self._hardware.kind != "cpu"
-
-    def allows_device_selection(self, model_name: str) -> bool:
-        """Whether the device picker should be enabled for *model_name*.
-
-        Delegates to the model catalog so the settings UI never imports
-        the transcription domain directly (see class docstring).
-        """
-        return _allows_device_selection(model_name)
 
     # ------------------------------------------------------------------
     # Engine hot-swap

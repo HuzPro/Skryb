@@ -41,11 +41,10 @@ Menu. `voicetotext --enable-autostart` and `--disable-autostart` manage the
 development install's per-user startup entry. Installer uninstall cleanup for
 that development entry is intentionally out of scope.
 
-On detected NVIDIA or AMD GPUs, Parakeet is the fresh-install batch default
-and Nemotron is available in streaming mode. On CPU-only systems, Whisper
-`base` remains the default and `tiny`/`base` remain selectable. Installed
-Whisper models on GPU systems appear as legacy entries so they can be deleted
-after switching away from an active one.
+Parakeet (`parakeet-tdt-0.6b-v3`) is the batch model and the fresh-install
+default. Nemotron (`nemotron-speech-streaming-en-0.6b`) is available in
+streaming mode. A CUDA or ROCm GPU is expected. Parakeet technically runs on
+CPU, but measured throughput is about 15x slower than real time.
 
 ## Streaming dictation (experimental)
 
@@ -63,7 +62,7 @@ Streaming mode types text live as you speak, instead of recording first and tran
 - **AMD Adrenalin driver 26.2.2 or newer** is required for the 7.2.1 wheel.
 - ROCm 7.2.1 is the latest stable Windows release (March 2026). To upgrade later, update the version strings inside `requirements-amd.txt` to the new `rocm-rel-X.Y.Z` directory at https://repo.radeon.com/rocm/windows/.
 - One wheel covers all RDNA archs - no per-gfx selection needed.
-- **`torch.distributed` is unavailable** on the Windows ROCm wheel - anything that imports `torch._C._distributed_c10d` at module load (notably `transformers>=5.9`, `torchao`, `deepspeed`, `bitsandbytes`) will crash on Windows AMD. The requirements files cap `transformers<5.9` for this reason. Don't add `torchao`, `bitsandbytes`, `flash-attn`, `deepspeed`, or `triton` to the project - none of them have Windows ROCm support.
+- **`torch.distributed` is unavailable** on the Windows ROCm wheel. Packages that require it at module load will crash on Windows AMD. Don't add `torchao`, `bitsandbytes`, `flash-attn`, `deepspeed`, or `triton` to the project - none of them have Windows ROCm support.
 
 ### Linux AMD
 
@@ -95,36 +94,3 @@ You have a custom torch already (different ROCm / CUDA / nightly version) and yo
 ### "Could not find a version that satisfies the requirement torch==2.9.1+rocm7.2.1"
 
 You're on the wrong Python version for the AMD Windows wheels. They're cp312 only. Recreate the venv with `py -3.12 -m venv .venv`.
-
-### "ModuleNotFoundError: No module named 'torch._C._distributed_c10d'"
-
-You have `transformers>=5.9` installed alongside AMD's Windows ROCm torch. Transformers 5.9+ added an unconditional import of `torch.distributed.tensor`, which doesn't exist in AMD's Windows build. Downgrade transformers:
-
-```powershell
-pip install "transformers>=4.52.1,<5.9"
-```
-
-Or simply re-run `pip install -r requirements-amd.txt` after pulling the latest changes - the requirements files now pin `transformers<5.9`.
-
-### "Using a device_map ... requires accelerate"
-
-`accelerate` is a soft-dependency of transformers needed whenever a model is loaded with `device_map=...` (which the Granite Speech adapter does for direct-to-GPU loading). Install it:
-
-```powershell
-pip install "accelerate>=1.1.0"
-```
-
-The requirements files now declare it explicitly, so a fresh `pip install -r requirements-amd.txt` will pull it.
-
-### "GraniteSpeechFeatureExtractor requires the torchaudio library"
-
-Granite Speech's feature extractor builds its mel-spectrogram with `torchaudio`, so it's a hard dependency of that engine. Earlier `requirements-nvidia.txt` / `requirements-cpu.txt` shipped `torch` alone, so NVIDIA/CPU users hit this at transcription time. Install the matching build:
-
-```powershell
-# NVIDIA (match the CUDA index from requirements-nvidia.txt)
-pip install torchaudio --extra-index-url https://download.pytorch.org/whl/cu126
-# CPU
-pip install torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
-```
-
-Or simply re-run `pip install -r requirements-nvidia.txt` (or `-cpu`) after pulling the latest changes - all one-shot files now pull `torchaudio` alongside `torch`.

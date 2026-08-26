@@ -9,15 +9,14 @@ leaving the box.
 
 - **System-wide dictation.** Toggle or push-to-talk hotkey (default
   `Ctrl+Alt+M`), text lands in the focused app; your clipboard is preserved.
-- **Local models.** Parakeet is the preferred GPU batch model and Nemotron
-  provides low-latency GPU streaming. Whisper `tiny` and `base` remain the
-  selectable CPU fallback; installed Whisper models remain removable as
-  legacy models on GPU systems.
+- **Local models.** Parakeet provides accurate batch transcription and
+  Nemotron provides low-latency streaming.
 - **Live streaming mode (experimental).** Text appears while you speak,
   using `parakeet-tdt-0.6b-v3` or the cache-aware
   `nemotron-speech-streaming-en-0.6b`. GPU only.
-- **NVIDIA, AMD, and CPU.** CUDA and ROCm (including Windows ROCm) are both
-  first-class; CPU works for the smaller models.
+- **GPU-focused.** CUDA and ROCm (including Windows ROCm) are first-class.
+  A GPU is expected; Parakeet technically runs on CPU but is about 15x slower
+  than real time.
 - **Native and lightweight UI.** Win32 tray icon plus a Tkinter settings
   window with OS-aware dark mode. No browser, no Electron, no Qt.
 - **Self-diagnosis.** `python -m voicetotext --doctor` reports Python,

@@ -6,11 +6,8 @@ raw ``ImportError``. But the message must accurately distinguish
 between two distinct failure modes:
 
 * The package is **not installed** - pip install fixes it.
-* The package **is** installed but a submodule import fails - usually
-  an ABI mismatch with torch (e.g. AMD Windows ROCm torch lacks
-  ``torch._C._distributed_c10d``, which transformers 5.x imports
-  unconditionally). Telling the user "pip install transformers" here
-  is misleading and wastes their time.
+* The package **is** installed but a submodule import fails, usually because
+  of an ABI mismatch with torch.
 """
 
 from unittest.mock import MagicMock, patch
@@ -25,7 +22,7 @@ from voicetotext.transcription.backend_imports import (
 
 class TestPackageMissing:
     def test_should_return_install_hint_when_package_is_not_installed(self) -> None:
-        underlying = ImportError("No module named 'transformers'")
+        underlying = ImportError("No module named 'nano_parakeet'")
 
         with patch(
             "voicetotext.transcription.backend_imports."
@@ -33,13 +30,13 @@ class TestPackageMissing:
             return_value=None,
         ):
             error = make_engine_dependency_error(
-                package_name="transformers",
-                install_hint="transformers not installed: pip install transformers",
+                package_name="nano_parakeet",
+                install_hint="nano-parakeet not installed: pip install nano-parakeet",
                 underlying=underlying,
             )
 
         assert isinstance(error, EngineDependencyMissingError)
-        assert "pip install transformers" in str(error)
+        assert "pip install nano-parakeet" in str(error)
 
     def test_should_classify_top_level_module_not_found_as_missing(self) -> None:
         """The canonical ``ModuleNotFoundError: No module named 'X'`` case."""
@@ -60,11 +57,6 @@ class TestPackageMissing:
 
 
 class TestPackageInstalledButBroken:
-    """The user's actual symptom on AMD Windows ROCm: transformers is
-    installed but loading it triggers a deep import chain that touches
-    ``torch._C._distributed_c10d`` which doesn't exist in AMD's
-    Windows torch build.
-    """
 
     def test_should_surface_submodule_failure_when_package_is_findable(self) -> None:
         underlying = ImportError(
@@ -78,15 +70,15 @@ class TestPackageInstalledButBroken:
             return_value=MagicMock(),
         ):
             error = make_engine_dependency_error(
-                package_name="transformers",
-                install_hint="transformers not installed: pip install transformers",
+                package_name="nano_parakeet",
+                install_hint="nano-parakeet not installed: pip install nano-parakeet",
                 underlying=underlying,
             )
 
         message = str(error)
         assert "installed but failed to load" in message
         assert "torch._C._distributed_c10d" in message
-        assert "pip install transformers" not in message
+        assert "pip install nano-parakeet" not in message
 
     def test_should_name_the_package_in_the_failure_message(self) -> None:
         with patch(
@@ -95,12 +87,12 @@ class TestPackageInstalledButBroken:
             return_value=MagicMock(),
         ):
             error = make_engine_dependency_error(
-                package_name="transformers",
+                package_name="nano_parakeet",
                 install_hint="...",
                 underlying=ImportError("inner detail"),
             )
 
-        assert "transformers" in str(error)
+        assert "nano_parakeet" in str(error)
 
     def test_should_hint_at_torch_abi_mismatch_in_submodule_failure(self) -> None:
         """The hint must point the user at the real cause (torch ABI)
@@ -113,7 +105,7 @@ class TestPackageInstalledButBroken:
             return_value=MagicMock(),
         ):
             error = make_engine_dependency_error(
-                package_name="transformers",
+                package_name="nano_parakeet",
                 install_hint="...",
                 underlying=ImportError("anything"),
             )

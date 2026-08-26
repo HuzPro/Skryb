@@ -6,35 +6,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voicetotext"
 version = "0.1.0"
-description = "Local voice-to-text with HuggingFace Whisper (PyTorch) - CUDA/ROCm/CPU"
+description = "Local voice-to-text with Parakeet and Nemotron - CUDA/ROCm/CPU"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE.txt", "NOTICE"]
 authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    # `transformers` is capped below 5.9 because 5.9.0 added an
-    # unconditional `from torch.distributed.tensor.device_mesh import
-    # DeviceMesh` in `generation/continuous_batching/distributed.py`
-    # (PR huggingface/transformers#45821). AMD's Windows ROCm 7.2.x
-    # PyTorch build does not ship `torch._C._distributed_c10d`, so any
-    # transformers >=5.9 crashes at import time on Windows AMD. 5.8.1
-    # is the last release before the regression and supports both
-    # Whisper and Granite Speech 4.1-2b.
-    "transformers>=4.52.1,<5.9",
-    # `accelerate` is a soft dependency of transformers required as soon
-    # as `from_pretrained(device_map=...)` is called - the Granite
-    # Speech adapter relies on it for direct-to-GPU model loading. >=1.1
-    # matches what transformers 5.8.1 itself declares as its minimum.
-    "accelerate>=1.1.0",
     "torch>=2.2.0",
-    # `torchaudio` is a hard runtime dependency, not optional: the
-    # Granite Speech feature extractor calls
-    # `requires_backends(self, ["torchaudio"])` and builds a
-    # `torchaudio.transforms.MelSpectrogram`. Like torch, the actual
-    # CUDA/ROCm/CPU build is pinned per-platform in the requirements-*
-    # files; this floor keeps the canonical metadata honest.
-    "torchaudio>=2.2.0",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
     # Tkinter (stdlib) drives the GUI; Pillow only renders the tray icon
@@ -66,10 +45,8 @@ voicetotext-gui = "voicetotext.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `slow` is deselected by default - it covers tests that load real
-# multi-GB Whisper models or spawn subprocesses that import torch, which
-# can exhaust the Windows pagefile and balloon the OS swap file. Opt in
-# explicitly with `pytest -m slow` when you actually want those.
+# `slow` is deselected by default because model benchmarks can exhaust the
+# Windows pagefile. Opt in explicitly with `pytest -m slow`.
 addopts = [
     "-ra",
     "--strict-markers",
@@ -84,10 +61,7 @@ markers = [
     "slow: tests that take longer than 100ms (deselected by default; opt in via `-m slow`)",
     "performance: model performance benchmarks (very slow; opt in via `-m performance` and VOICETOTEXT_RUN_PERFORMANCE_TESTS=1)",
 ]
-filterwarnings = [
-    "error",
-    "ignore:.*attention on Current AMD GPU is still experimental.*:UserWarning",
-]
+filterwarnings = ["error"]
 
 # Only the application package ships in the wheel. Without an explicit
 # include, find() crawls the whole tree (venv, tests, release) and the

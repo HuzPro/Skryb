@@ -10,7 +10,7 @@ class TestParakeetModelLoader:
         self, monkeypatch,
     ):
         # On CPU, bf16 weights crash the fp32 joint matmul (and CPU has no
-        # accelerated bf16 path), so the loader must request fp32 there.
+        # fast bf16 path), so the loader must request fp32 there.
         import nano_parakeet
         import torch
 
