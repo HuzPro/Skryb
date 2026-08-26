@@ -150,7 +150,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         )
         self._output_page = TkOutputPage(content)
         self._dictionary_page = TkDictionaryPage(content)
-        self._dictionary_page.set_rules(self._service.dictionary_rules())
+        self._dictionary_page.set_dictionary(self._service.dictionary_rules())
 
         self._pages = [
             self._transcription_page,
@@ -258,7 +258,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         """
         if not self._dictionary_page.is_dirty():
             return changes
-        self._service.save_dictionary_rules(self._dictionary_page.rules())
+        self._service.save_dictionary_rules(self._dictionary_page.dictionary())
         return replace(changes, output_changed=True)
 
     def _finalize_save(self) -> None:

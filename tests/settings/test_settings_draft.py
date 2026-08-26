@@ -112,6 +112,7 @@ class TestChangeSetFromDrafts:
 
         assert changes.engine_reload_required is True
         assert changes.mode_changed is True
+        assert changes.output_changed is True
 
     def test_should_flag_output_change_when_mode_differs(self):
         original = _make_draft(output_mode=OutputMode.DIRECT_PASTE)
