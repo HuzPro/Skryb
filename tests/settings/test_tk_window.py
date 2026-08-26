@@ -90,6 +90,7 @@ def service():
     svc.supports_streaming_hardware.return_value = True
     svc.engine_candidates_for.return_value = ()
     svc.apply_draft.return_value = _no_change()
+    svc.dictionary_rules.return_value = {}
     return svc
 
 
@@ -214,6 +215,41 @@ class TestSave:
         assert window.status_label().cget("text") == ""  # deferred
         scheduled[0]()
         assert "base" in window.status_label().cget("text")
+
+
+class TestDictionary:
+    def test_should_populate_page_from_service_rules(self, tk_root, service):
+        service.dictionary_rules.return_value = {"god": "God"}
+
+        window = _make_window(tk_root, service)
+
+        assert window.dictionary_page().rules() == {"god": "God"}
+
+    def test_should_save_edited_rules_and_request_output_rebuild(
+        self, tk_root, service,
+    ):
+        received: list[ChangeSet] = []
+        window = _make_window(tk_root, service, on_save=received.append)
+        page = window.dictionary_page()
+        page.spoken_entry().insert(0, "god")
+        page.replacement_entry().insert(0, "God")
+        page.add_button().invoke()
+
+        window.save_button().invoke()
+
+        service.save_dictionary_rules.assert_called_once_with({"god": "God"})
+        assert received[0].output_changed is True
+
+    def test_should_leave_dictionary_alone_when_no_rule_was_edited(
+        self, tk_root, service,
+    ):
+        received: list[ChangeSet] = []
+        window = _make_window(tk_root, service, on_save=received.append)
+
+        window.save_button().invoke()
+
+        assert not service.save_dictionary_rules.called
+        assert received == [_no_change()]
 
 
 class TestStateMachineGuard:
@@ -421,6 +457,7 @@ class TestMode:
         svc.model_supports_batch.return_value = True
         svc.supports_streaming_hardware.return_value = True
         svc.engine_candidates_for.return_value = ()
+        svc.dictionary_rules.return_value = {}
         return svc
 
     @pytest.fixture
@@ -430,8 +467,10 @@ class TestMode:
         if w.winfo_exists():
             w.destroy()
 
-    def test_should_show_the_three_sidebar_sections(self, mode_window):
-        assert mode_window.sidebar_labels() == ["Transcription", "Hotkeys", "Output"]
+    def test_should_show_every_sidebar_section(self, mode_window):
+        assert mode_window.sidebar_labels() == [
+            "Transcription", "Hotkeys", "Output", "Dictionary",
+        ]
 
     def test_should_include_mode_in_collected_draft(self, mode_window):
         mode_window.transcription_page().apply_mode(TranscriptionMode.STREAMING)

@@ -1,5 +1,6 @@
 import tkinter
 from collections.abc import Callable
+from dataclasses import replace
 from tkinter import ttk
 
 from voicetotext.core.color_scheme import ColorScheme, detect_color_scheme
@@ -20,6 +21,7 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.tk_download_bridge import TkDownloadBridge
 from voicetotext.settings.tk_engine_bridge import TkEngineBridge
 from voicetotext.settings.tk_hotkey_capture import CaptureBridge
+from voicetotext.settings.tk_pages.dictionary_page import TkDictionaryPage
 from voicetotext.settings.tk_pages.hotkeys_page import TkHotkeysPage
 from voicetotext.settings.tk_pages.output_page import TkOutputPage
 from voicetotext.settings.tk_pages.transcription_page import TkTranscriptionPage
@@ -31,7 +33,7 @@ ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 ChangeSetCallback = Callable[[ChangeSet], None]
 CaptureStateCallback = Callable[[bool], None]
 
-_SECTIONS = ["Transcription", "Hotkeys", "Output"]
+_SECTIONS = ["Transcription", "Hotkeys", "Output", "Dictionary"]
 
 
 def _run_now(action: Callable[[], None]) -> None:
@@ -147,11 +149,14 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._on_recording_state_changed,
         )
         self._output_page = TkOutputPage(content)
+        self._dictionary_page = TkDictionaryPage(content)
+        self._dictionary_page.set_rules(self._service.dictionary_rules())
 
         self._pages = [
             self._transcription_page,
             self._hotkeys_page,
             self._output_page,
+            self._dictionary_page,
         ]
         for page in self._pages:
             page.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
@@ -234,7 +239,7 @@ class TkSettingsWindow(tkinter.Toplevel):
             )
             return
         changes = self._service.apply_draft(draft)
-        self._pending_changes = changes
+        self._pending_changes = self._save_dictionary_edits(changes)
 
         if changes.engine_reload_required and not self._first_run:
             self._disable_save_button()
@@ -243,6 +248,18 @@ class TkSettingsWindow(tkinter.Toplevel):
             return
 
         self._finalize_save()
+
+    def _save_dictionary_edits(self, changes: ChangeSet) -> ChangeSet:
+        """Persist staged dictionary rules and flag the output chain for rebuild.
+
+        The rules live in the outermost output decorator, so rebuilding
+        output is exactly what makes new rules take effect without a
+        restart.
+        """
+        if not self._dictionary_page.is_dirty():
+            return changes
+        self._service.save_dictionary_rules(self._dictionary_page.rules())
+        return replace(changes, output_changed=True)
 
     def _finalize_save(self) -> None:
         changes = self._pending_changes
@@ -406,6 +423,9 @@ class TkSettingsWindow(tkinter.Toplevel):
 
     def output_page(self) -> TkOutputPage:
         return self._output_page
+
+    def dictionary_page(self) -> TkDictionaryPage:
+        return self._dictionary_page
 
     def save_button(self) -> ttk.Button:
         return self._save_button

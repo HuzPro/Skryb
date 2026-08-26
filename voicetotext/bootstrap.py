@@ -505,6 +505,7 @@ def _build_settings_service(
         downloads=downloads,
         hot_swap=hot_swap,
         state_machine=state_machine,
+        dictionary_path=paths.dictionary_path,
         registry=registry,
         hardware=hardware,
     )
@@ -524,6 +525,7 @@ def build_first_run_settings_service(
     model_manager: ModelManager,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    dictionary_path: Path,
 ) -> SettingsService:
     """Build a SettingsService for the first-run setup window.
 
@@ -543,6 +545,7 @@ def build_first_run_settings_service(
         downloads=downloads,
         hot_swap=hot_swap,
         state_machine=AppStateMachine(event_bus),
+        dictionary_path=dictionary_path,
         registry=registry,
         hardware=hardware,
     )
