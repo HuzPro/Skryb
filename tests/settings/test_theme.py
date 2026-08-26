@@ -77,6 +77,22 @@ class TestApplyTheme:
             DARK_THEME.selection_background
         )
 
+    def test_hovered_checkbutton_should_keep_the_theme_background(self, container):
+        apply_theme(container, DARK_THEME)
+
+        hovered = ttk.Style(container).lookup(
+            "TCheckbutton", "background", state=["active"],
+        )
+        assert hovered == DARK_THEME.background
+
+    def test_hovered_radiobutton_should_keep_the_theme_background(self, container):
+        apply_theme(container, DARK_THEME)
+
+        hovered = ttk.Style(container).lookup(
+            "TRadiobutton", "background", state=["active"],
+        )
+        assert hovered == DARK_THEME.background
+
     def test_should_hide_the_dotted_focus_ring(self, container):
         apply_theme(container, DARK_THEME)
 
