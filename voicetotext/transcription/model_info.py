@@ -65,8 +65,25 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_ARK_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"ark_asr": 100},
+)
+
+
+ARK_ASR_MODELS: dict[str, ModelInfo] = {
+    "ark-asr-3b": ModelInfo(
+        name="ark-asr-3b",
+        size_mb=8144,
+        description="Top Open ASR leaderboard accuracy (19 languages, GPU)",
+        repo_id="Audio8/ARK-ASR-3B",
+        compatible_engines=("ark_asr",),
+        engine_priorities=_ARK_ASR_ENGINE_PRIORITIES,
+    ),
+}
+
+
 ALL_MODELS: dict[str, ModelInfo] = {
-    **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS,
+    **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **ARK_ASR_MODELS,
 }
 
 

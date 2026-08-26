@@ -3,7 +3,7 @@ from typing import Literal
 
 
 EngineId = Literal[
-    "nano_parakeet", "nemotron_streaming",
+    "ark_asr", "nano_parakeet", "nemotron_streaming",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 

@@ -19,6 +19,7 @@ from voicetotext.transcription.model_info import (
     PARAKEET_MODELS,
     ModelInfo,
 )
+from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
 from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
 
 
@@ -62,7 +63,7 @@ class TestBuildEngineRegistry:
         registry = build_engine_registry()
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
-            "nano_parakeet", "nemotron_streaming",
+            "nano_parakeet", "nemotron_streaming", "ark_asr",
         }
 
 
@@ -147,6 +148,17 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, NanoParakeetAdapter)
         assert engine._repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+
+    def test_should_build_ark_asr_adapter(self, tmp_path: Path) -> None:
+        engine = create_engine_for_active_model(
+            _config(model_size="ark-asr-3b", engine="ark_asr", device="cpu"),
+            _paths(tmp_path),
+            build_engine_registry(),
+            _CPU,
+        )
+
+        assert isinstance(engine, ArkAsrAdapter)
+        assert engine._repo_id == "Audio8/ARK-ASR-3B"
 
     def test_device_override_should_force_cpu(self, tmp_path: Path) -> None:
         engine = create_engine_for_active_model(

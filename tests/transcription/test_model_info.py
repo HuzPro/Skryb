@@ -6,6 +6,7 @@ from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    ARK_ASR_MODELS,
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
@@ -58,7 +59,9 @@ class TestModelInfo:
 class TestModelCatalog:
     def test_should_contain_only_surviving_model_lineups(self) -> None:
         assert set(ALL_MODELS) == (
-            set(PARAKEET_MODELS) | set(NEMOTRON_STREAMING_MODELS)
+            set(PARAKEET_MODELS)
+            | set(NEMOTRON_STREAMING_MODELS)
+            | set(ARK_ASR_MODELS)
         )
 
     def test_default_should_be_current_parakeet(self) -> None:
