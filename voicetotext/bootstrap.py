@@ -28,6 +28,7 @@ from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
+from voicetotext.output.dictionary_config import DictionaryConfig
 from voicetotext.output.gui_thread_output_decorator import (
     GuiThreadOutputDecorator,
 )
@@ -42,6 +43,7 @@ from voicetotext.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
+from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -138,6 +140,7 @@ def _build_output(
     mode: OutputMode,
     gui_dispatcher: GuiThreadDispatcher,
     dictionary_path: Path | None = None,
+    pipeline_mode: PipelineMode = PipelineMode.BATCH,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -168,12 +171,25 @@ def _build_output(
     # on a daemon worker. Wrapping every concrete handler with this
     # decorator means the worker never touches Win32 directly.
     gui_output = GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
-    rules = load_dictionary(dictionary_path) if dictionary_path is not None else {}
-    return TextFilterDecorator(inner=gui_output, rules=rules)
+    dictionary = (
+        load_dictionary(dictionary_path)
+        if dictionary_path is not None
+        else DictionaryConfig()
+    )
+    return TextFilterDecorator(
+        inner=gui_output,
+        pipeline=build_pipeline(dictionary, pipeline_mode),
+    )
 
 
 def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
     return OutputMode.migrate(config.get("output.mode"))
+
+
+def _resolve_pipeline_mode(config: JsonConfigAdapter) -> PipelineMode:
+    if config.get("transcription.mode", "batch") == "streaming":
+        return PipelineMode.STREAMING
+    return PipelineMode.BATCH
 
 
 def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscribeUseCase) -> HotkeyListener:
@@ -601,6 +617,7 @@ def build_app(
     gui_dispatcher = TkGuiThreadDispatcher(root)
     output = _build_output(
         _resolve_output_mode(config), gui_dispatcher, paths.dictionary_path,
+        _resolve_pipeline_mode(config),
     )
     overlay = (
         RecordingOverlay(
@@ -734,6 +751,7 @@ def apply_settings(
         use_case.set_output(
             _build_output(
                 _resolve_output_mode(config), gui_dispatcher, dictionary_path,
+                _resolve_pipeline_mode(config),
             )
         )
 

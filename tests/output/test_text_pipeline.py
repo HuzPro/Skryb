@@ -1,0 +1,267 @@
+import pytest
+
+from voicetotext.output.dictionary_config import (
+    DictionaryConfig,
+    DictionaryOptions,
+    LiteralRule,
+    RegexRule,
+)
+from voicetotext.output.text_pipeline import (
+    PipelineMode,
+    TextPipeline,
+    TokenKind,
+    build_pipeline,
+    tokenize,
+)
+
+
+def _batch(
+    text: str,
+    rules: tuple[LiteralRule | RegexRule, ...] = (),
+    options: DictionaryOptions | None = None,
+) -> str:
+    return TextPipeline.for_batch(
+        DictionaryConfig(options=options or DictionaryOptions(), rules=rules)
+    ).process(text)
+
+
+class TestTokenizer:
+    def test_should_preserve_word_whitespace_and_punctuation_spans(self) -> None:
+        tokens = tokenize("Hi,  café!")
+
+        assert [(token.text, token.start, token.end, token.kind) for token in tokens] == [
+            ("Hi", 0, 2, TokenKind.WORD),
+            (",", 2, 3, TokenKind.PUNCTUATION),
+            ("  ", 3, 5, TokenKind.WHITESPACE),
+            ("café", 5, 9, TokenKind.WORD),
+            ("!", 9, 10, TokenKind.PUNCTUATION),
+        ]
+
+
+class TestFillerRemoval:
+    @pytest.mark.parametrize("filler", ["um", "uh", "uhh", "umm", "erm"])
+    def test_should_remove_only_the_exact_fillers(self, filler: str) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        result = _batch(f"I {filler} agree", options=options)
+
+        assert result == "I agree"
+
+    @pytest.mark.parametrize("filler", ["ummmm", "uhhh", "ermmm"])
+    def test_should_remove_elongated_fillers(self, filler: str) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        result = _batch(f"I {filler} agree", options=options)
+
+        assert result == "I agree"
+
+    def test_should_match_fillers_case_insensitively(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        assert _batch("UHH yes", options=options) == "yes"
+
+    def test_should_not_remove_fillers_inside_words_or_expand_the_list(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        result = _batch("a drum and an umbrella like so well actually", options=options)
+
+        assert result == "a drum and an umbrella like so well actually"
+
+    def test_should_leave_one_comma_when_a_filler_is_comma_wrapped(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        result = _batch("I was, um, thinking", options=options)
+
+        assert result == "I was, thinking"
+
+    def test_should_drop_the_trailing_comma_of_a_leading_filler(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        result = _batch("Um, hello", options=options)
+
+        assert result == "hello"
+
+    def test_should_drop_the_leading_comma_of_a_sentence_final_filler(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        result = _batch("I was, um.", options=options)
+
+        assert result == "I was."
+
+    def test_should_preserve_text_when_the_module_is_off(self) -> None:
+        assert _batch("I um agree") == "I um agree"
+
+    def test_should_preserve_unrelated_existing_spacing(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        assert _batch("I  agree um now", options=options) == "I  agree now"
+
+
+class TestSpokenCommands:
+    @pytest.mark.parametrize(("spoken", "expected"), [
+        ("comma", "hello, world"),
+        ("period", "hello. World"),
+        ("question mark", "hello? World"),
+        ("exclamation mark", "hello! World"),
+        ("colon", "hello: world"),
+        ("semicolon", "hello; world"),
+        ("dash", "hello- world"),
+    ])
+    def test_should_insert_attached_punctuation(
+        self, spoken: str, expected: str,
+    ) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch(f"hello {spoken} world", options=options)
+
+        assert result == expected
+
+    @pytest.mark.parametrize(("spoken", "expected"), [
+        ("new line", "first\nsecond"),
+        ("new paragraph", "first\n\nSecond"),
+        ("tab", "first\tsecond"),
+    ])
+    def test_should_trim_spaces_around_layout_commands(
+        self, spoken: str, expected: str,
+    ) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch(f"first {spoken} second", options=options)
+
+        assert result == expected
+
+    def test_should_reverse_spacing_for_openers_and_attach_closers(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch(
+            "say open quote hello close quote and open paren yes close paren",
+            options=options,
+        )
+
+        assert result == 'say "hello" and (yes)'
+
+    def test_should_recognize_commands_case_insensitively(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        assert _batch("hello PERIOD next", options=options) == "hello. Next"
+
+    def test_should_escape_a_single_command_word(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch("say literal comma then comma", options=options)
+
+        assert result == "say comma then,"
+
+    def test_should_escape_an_entire_multi_word_command(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch("literal question mark then period", options=options)
+
+        assert result == "question mark then."
+
+    def test_should_keep_literal_and_the_next_word_when_no_command_follows(
+        self,
+    ) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch("a literal interpretation", options=options)
+
+        assert result == "a literal interpretation"
+
+    def test_should_still_apply_later_commands_after_an_unused_literal(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch("a literal interpretation comma really", options=options)
+
+        assert result == "a literal interpretation, really"
+
+    def test_should_capitalize_after_an_opener_following_a_terminal(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        result = _batch(
+            "hello period open quote next close quote", options=options,
+        )
+
+        assert result == 'hello. "Next"'
+
+    def test_should_preserve_commands_when_the_module_is_off(self) -> None:
+        assert _batch("hello comma world") == "hello comma world"
+
+
+class TestRuleStage:
+    def test_should_apply_the_longest_multi_alias_literal_match(self) -> None:
+        rules = (
+            LiteralRule(("git",), "Git"),
+            LiteralRule(("git hub", "get hub"), "GitHub"),
+        )
+
+        result = _batch("git hub and get hub use git", rules)
+
+        assert result == "GitHub and GitHub use Git"
+
+    def test_should_match_case_insensitively_and_emit_verbatim(self) -> None:
+        rules = (LiteralRule(("git hub",), "GitHub"),)
+
+        assert _batch("GIT HUB", rules) == "GitHub"
+
+    def test_should_respect_case_sensitive_literal_rules(self) -> None:
+        rules = (LiteralRule(("god",), "God", case_sensitive=True),)
+
+        assert _batch("god GOD", rules) == "God GOD"
+
+    def test_should_allow_unbounded_literal_rules(self) -> None:
+        rules = (LiteralRule(("cat",), "dog", whole_words=False),)
+
+        assert _batch("concatenate cat", rules) == "condogenate dog"
+
+    def test_should_apply_regex_capture_replacements(self) -> None:
+        rules = (RegexRule(r"(\d{2})-(\d{2})", r"\2/\1"),)
+
+        assert _batch("Date 12-31", rules) == "Date 31/12"
+
+    def test_should_skip_disabled_rules(self) -> None:
+        rules = (
+            LiteralRule(("one",), "two", enabled=False),
+            RegexRule("three", "four", enabled=False),
+        )
+
+        assert _batch("one three", rules) == "one three"
+
+    def test_should_apply_literal_and_regex_rules_in_one_non_cascading_pass(
+        self,
+    ) -> None:
+        rules = (
+            LiteralRule(("foo",), "bar"),
+            RegexRule("bar", "baz"),
+        )
+
+        assert _batch("foo bar", rules) == "bar baz"
+
+
+class TestStreamingPipeline:
+    def test_should_keep_fillers_single_token_literals_and_regex(self) -> None:
+        config = DictionaryConfig(
+            options=DictionaryOptions(remove_fillers=True, spoken_commands=True),
+            rules=(
+                LiteralRule(("git", "git hub"), "Git"),
+                RegexRule(r"\bissue (\d+)\b", r"#\1"),
+            ),
+        )
+
+        result = build_pipeline(config, PipelineMode.STREAMING).process(
+            "um git hub issue 42 comma"
+        )
+
+        assert result == "Git hub #42 comma"
+
+    def test_should_keep_phrase_rules_and_commands_in_batch(self) -> None:
+        config = DictionaryConfig(
+            options=DictionaryOptions(spoken_commands=True),
+            rules=(LiteralRule(("git hub",), "GitHub"),),
+        )
+
+        result = build_pipeline(config, PipelineMode.BATCH).process(
+            "git hub comma yes"
+        )
+
+        assert result == "GitHub, yes"

@@ -17,6 +17,12 @@ from voicetotext.core.events import (
     StateChangedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.output.dictionary_config import (
+    DictionaryConfig,
+    DictionaryOptions,
+    LiteralRule,
+    RegexRule,
+)
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
@@ -737,33 +743,42 @@ class TestLegacyModelProjection:
 
 
 class TestDictionaryRules:
-    def test_should_return_empty_rules_when_file_is_absent(self, tmp_path):
+    def test_should_return_empty_rules_when_file_is_absent(
+        self, tmp_path: Path,
+    ) -> None:
         service, *_ = _build_service(
             dictionary_path=tmp_path / "dictionary.json",
         )
 
-        assert service.dictionary_rules() == {}
+        assert service.dictionary_rules() == DictionaryConfig()
 
-    def test_should_round_trip_saved_rules(self, tmp_path):
+    def test_should_round_trip_saved_v2_dictionary(self, tmp_path: Path) -> None:
+        path = tmp_path / "dictionary.json"
+        service, *_ = _build_service(dictionary_path=path)
+        dictionary = DictionaryConfig(
+            options=DictionaryOptions(remove_fillers=True),
+            rules=(
+                LiteralRule(("god", "oh god"), "God", case_sensitive=True),
+                RegexRule(r"\bum+\b", ""),
+            ),
+        )
+
+        service.save_dictionary_rules(dictionary)
+
+        assert service.dictionary_rules() == dictionary
+
+    def test_should_write_indented_v2_json(self, tmp_path: Path) -> None:
         path = tmp_path / "dictionary.json"
         service, *_ = _build_service(dictionary_path=path)
 
-        service.save_dictionary_rules({"god": "God", "café": "Café"})
+        service.save_dictionary_rules(DictionaryConfig())
 
-        assert service.dictionary_rules() == {"god": "God", "café": "Café"}
+        assert path.read_text(encoding="utf-8").startswith('{\n  "version": 2')
 
-    def test_should_write_indented_json(self, tmp_path):
-        path = tmp_path / "dictionary.json"
-        service, *_ = _build_service(dictionary_path=path)
-
-        service.save_dictionary_rules({"god": "God"})
-
-        assert path.read_text(encoding="utf-8").startswith('{\n  "god"')
-
-    def test_should_create_missing_parent_directory(self, tmp_path):
+    def test_should_create_missing_parent_directory(self, tmp_path: Path) -> None:
         path = tmp_path / "nested" / "dictionary.json"
         service, *_ = _build_service(dictionary_path=path)
 
-        service.save_dictionary_rules({"god": "God"})
+        service.save_dictionary_rules(DictionaryConfig())
 
         assert path.exists()

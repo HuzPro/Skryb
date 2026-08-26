@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -31,6 +32,7 @@ from voicetotext.output.gui_thread_output_decorator import (
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.text_filter_decorator import TextFilterDecorator
+from voicetotext.output.text_pipeline import PipelineMode
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
@@ -630,6 +632,28 @@ class TestBuildOutput:
 
         assert result._inner._dispatcher is dispatcher
 
+    def test_should_build_reduced_pipeline_for_streaming_mode(
+        self, tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "dictionary.json"
+        path.write_text(
+            '{"version": 2, "options": {"spoken_commands": true}, '
+            '"rules": [{"type": "literal", "spoken": ["git hub"], '
+            '"replacement": "GitHub"}]}',
+            encoding="utf-8",
+        )
+
+        result = _build_output(
+            OutputMode.CLIPBOARD_ONLY,
+            MagicMock(),
+            path,
+            PipelineMode.STREAMING,
+        )
+
+        assert result._pipeline.process("git hub comma next") == (
+            "git hub comma next"
+        )
+
 
 class TestApplySettings:
     """Characterize the hot-reload dispatch: apply_settings routes each
@@ -662,9 +686,28 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_output.assert_called_once_with(
-            OutputMode.CLIPBOARD_ONLY, dispatcher, None
+            OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
+
+    @patch("voicetotext.bootstrap._build_output")
+    def test_should_rebuild_streaming_safe_output_for_streaming_mode(
+        self, mock_build_output: MagicMock,
+    ) -> None:
+        config = MagicMock()
+        values = {
+            "output.mode": "clipboard_only",
+            "transcription.mode": "streaming",
+        }
+        config.get.side_effect = lambda key, default=None: values.get(key, default)
+        use_case = MagicMock()
+        changes = self._make_changes(output_changed=True)
+
+        apply_settings(
+            changes, config, use_case, MagicMock(), gui_dispatcher=MagicMock(),
+        )
+
+        assert mock_build_output.call_args.args[3] is PipelineMode.STREAMING
 
     @patch("voicetotext.bootstrap._build_output")
     def test_should_not_rebuild_output_when_output_unchanged(self, mock_build_output):
