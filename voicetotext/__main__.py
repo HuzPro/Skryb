@@ -1,14 +1,25 @@
+from __future__ import annotations
+
+import argparse
+import logging
 import os
 import sys
-import tkinter
 import traceback
+from concurrent.futures import Future
+from types import ModuleType
+from typing import TYPE_CHECKING
 
-from voicetotext.core.config import ConfigurationStore
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.core.paths import AppPaths
-from voicetotext.downloads.download_manager import DownloadManager
-from voicetotext.transcription.model_manager import ModelManager
+
+if TYPE_CHECKING:
+    import tkinter
+
+    from voicetotext.core.config import ConfigurationStore
+    from voicetotext.core.event_bus import SimpleEventBus
+    from voicetotext.core.json_config_adapter import JsonConfigAdapter
+    from voicetotext.core.paths import AppPaths
+    from voicetotext.transcription.engine_registry import EngineRegistry
+    from voicetotext.transcription.engine_types import HardwareProfile
+    from voicetotext.transcription.model_manager import ModelManager
 
 
 def _apply_torch_env_overrides() -> None:
@@ -55,71 +66,173 @@ def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
     os.environ.setdefault("HF_HUB_CACHE", str(paths.models_dir))
 
 
+def _parse_cli(arguments: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="voicetotext")
+    maintenance = parser.add_mutually_exclusive_group()
+    maintenance.add_argument("--doctor", action="store_true")
+    maintenance.add_argument("--create-shortcut", action="store_true")
+    maintenance.add_argument("--enable-autostart", action="store_true")
+    maintenance.add_argument("--disable-autostart", action="store_true")
+    return parser.parse_args(arguments)
+
+
 def main() -> None:
-    _apply_torch_env_overrides()
-    if _is_doctor_request():
-        _print_doctor_report()
-        return
-    try:
-        _run()
-    except Exception:
-        _show_error(traceback.format_exc())
-        sys.exit(1)
+    from voicetotext.core.startup_log import begin_startup_timing
 
+    begin_startup_timing()
+    options = _parse_cli()
 
-def _is_doctor_request() -> bool:
-    return "--doctor" in sys.argv[1:]
+    from voicetotext.core.paths import AppPaths
 
-
-def _print_doctor_report() -> None:
-    from voicetotext.diagnostics.doctor import run_doctor
-
-    print(run_doctor())
-
-
-def _run() -> None:
     paths = AppPaths()
-    paths.ensure_dirs()
+    _apply_torch_env_overrides()
     _apply_hf_cache_env_overrides(paths)
+    maintenance_code = _run_maintenance(options)
+    if maintenance_code is not None:
+        raise SystemExit(maintenance_code)
 
-    # One Tk root for the whole process, created up front and hidden.
-    # ``root.mainloop()`` (entered later via the tray adapter) is the
-    # single primary loop on the main thread; the tray's message-only
-    # window and every transient settings window live on this root.
+    from voicetotext.core.single_instance import SingleInstanceMutex
+
+    mutex = SingleInstanceMutex()
+    if not mutex.acquire():
+        _show_instance_conflict()
+        raise SystemExit(0)
+
+    try:
+        paths.ensure_dirs()
+        from voicetotext.core.startup_log import initialize_session_log
+
+        initialize_session_log(paths.session_log_path, console=sys.stderr.isatty())
+        from voicetotext.core.torch_prewarm import start_torch_prewarm
+
+        prewarm = start_torch_prewarm()
+        _run(paths, prewarm)
+    except Exception:
+        logging.getLogger(__name__).exception("Startup failed")
+        _show_error(traceback.format_exc())
+        raise SystemExit(1)
+    finally:
+        mutex.release()
+
+
+def _run_maintenance(options: argparse.Namespace) -> int | None:
+    if options.doctor:
+        from voicetotext.diagnostics.doctor import run_doctor
+
+        print(run_doctor())
+        return 0
+    if not (
+        options.create_shortcut
+        or options.enable_autostart
+        or options.disable_autostart
+    ):
+        return None
+    from voicetotext.core.dev_install import (
+        create_shortcut,
+        disable_autostart,
+        enable_autostart,
+    )
+
+    if options.create_shortcut:
+        succeeded, message = create_shortcut()
+    elif options.enable_autostart:
+        succeeded, message = enable_autostart()
+    else:
+        succeeded, message = disable_autostart()
+    output = sys.stdout if succeeded else sys.stderr
+    output.write(message + "\n")
+    return 0 if succeeded else 1
+
+
+def _consume_torch_prewarm(prewarm: Future[ModuleType]) -> None:
+    logger = logging.getLogger(__name__)
+    try:
+        module = prewarm.result()
+    except BaseException:
+        logger.exception("Torch prewarm failed")
+        return
+    logger.info(
+        "Torch prewarm complete (version=%s)",
+        getattr(module, "__version__", "unknown"),
+    )
+
+
+def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
+    import tkinter
+
+    from voicetotext.core.event_bus import SimpleEventBus
+    from voicetotext.core.json_config_adapter import JsonConfigAdapter
+    from voicetotext.core.startup_log import milestone
+    from voicetotext.downloads.download_manager import DownloadManager
+    from voicetotext.transcription.engine_factory import (
+        build_engine_registry,
+        create_model_manager,
+    )
+
     root = tkinter.Tk()
     root.withdraw()
+    milestone("Tk-created")
 
     config = JsonConfigAdapter(paths.config_path)
+    model_was_configured = config.has_persisted_value(
+        "transcription.model_size",
+    )
     config.load()
+    milestone("config-loaded")
 
     event_bus = SimpleEventBus()
     download_manager = DownloadManager(event_bus=event_bus)
-
-    from voicetotext.transcription.engine_factory import create_model_manager
     model_manager = create_model_manager(paths.models_dir, download_manager)
+    registry = build_engine_registry()
 
-    if paths.is_first_run() or not _configured_model_installed(config, model_manager):
-        _run_first_time_setup(config, model_manager, event_bus, root)
+    _consume_torch_prewarm(prewarm)
+    from voicetotext.transcription.torch_hardware_detector import (
+        TorchHardwareDetector,
+    )
 
-    if not _configured_model_installed(config, model_manager):
-        # User closed first-run without installing a model - nothing
-        # to load, so bail cleanly before build_app tries the engine.
+    hardware = TorchHardwareDetector().detect()
+    from voicetotext.transcription.model_info import default_model_for
+
+    if not model_was_configured:
+        config.set("transcription.model_size", default_model_for(hardware))
+
+    if paths.is_first_run() or not _configured_model_installed(
+        config, model_manager, hardware,
+    ):
+        _run_first_time_setup(
+            config, model_manager, event_bus, root, registry, hardware,
+        )
+
+    if not _configured_model_installed(config, model_manager, hardware):
+        root.destroy()
         return
 
     from voicetotext.bootstrap import build_app
 
     app = build_app(
-        config, paths, root,
-        event_bus=event_bus, download_manager=download_manager,
+        config,
+        paths,
+        root,
+        event_bus=event_bus,
+        download_manager=download_manager,
+        registry=registry,
+        hardware=hardware,
     )
     app.run()
 
 
 def _configured_model_installed(
-    config: ConfigurationStore, model_manager: ModelManager
+    config: ConfigurationStore,
+    model_manager: ModelManager,
+    hardware: HardwareProfile | None = None,
 ) -> bool:
-    model_name = config.get("transcription.model_size", "base")
-    return model_manager.is_installed(model_name)
+    from voicetotext.transcription.model_info import default_model_for
+
+    model_name = config.get(
+        "transcription.model_size",
+        default_model_for(hardware),
+    )
+    return bool(model_manager.is_installed(model_name))
 
 
 def _run_first_time_setup(
@@ -127,6 +240,8 @@ def _run_first_time_setup(
     model_manager: ModelManager,
     event_bus: SimpleEventBus,
     root: tkinter.Misc,
+    registry: EngineRegistry,
+    hardware: HardwareProfile,
 ) -> None:
     from voicetotext.bootstrap import build_first_run_settings_service
     from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
@@ -137,12 +252,9 @@ def _run_first_time_setup(
         config=config,
         event_bus=event_bus,
         model_manager=model_manager,
+        registry=registry,
+        hardware=hardware,
     )
-
-    # Block until the first-run window closes (Save or the OS close
-    # button). ``wait_window`` keeps the main event pump running without
-    # entering the tray's later ``mainloop``. A short-lived dispatcher
-    # marshals download events fired during setup onto this pump.
     dispatcher = TkGuiThreadDispatcher(root)
     window = TkSettingsWindow(
         root,
@@ -154,8 +266,14 @@ def _run_first_time_setup(
     window.show()
     root.wait_window(window)
     dispatcher.cancel()
-
     config.save()
+
+
+def _show_instance_conflict() -> None:
+    _try_show_message(
+        "VoiceToText",
+        "VoiceToText is already running in this Windows session.",
+    )
 
 
 def _show_error(message: str) -> None:
@@ -163,8 +281,18 @@ def _show_error(message: str) -> None:
     _try_show_error_dialog(message)
 
 
+def _try_show_message(title: str, message: str) -> None:
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
+    except Exception:
+        pass
+
+
 def _try_show_error_dialog(message: str) -> None:
     try:
+        import tkinter
         from tkinter import messagebox
 
         root = tkinter.Tk()

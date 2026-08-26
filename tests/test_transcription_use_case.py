@@ -207,7 +207,7 @@ class TestTranscriptionLogging:
     inference.
     """
 
-    def test_should_log_transcription_time_and_text_when_completed(
+    def test_should_log_transcription_time_without_text_when_completed(
         self, caplog,
     ):
         use_case, recorder, engine, _, _, _ = _build_use_case()
@@ -228,9 +228,8 @@ class TestTranscriptionLogging:
             r.getMessage() for r in records
             if r.getMessage().startswith("Transcription")
         ]
-        assert any(
-            "0.42" in msg and "hello" in msg for msg in transcription_logs
-        ), f"Expected log with time and text; got: {transcription_logs}"
+        assert any("0.42" in msg for msg in transcription_logs)
+        assert all("hello" not in msg for msg in transcription_logs)
 
     def test_should_log_transcription_time_when_result_is_empty(
         self, caplog,

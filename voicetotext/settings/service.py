@@ -33,6 +33,8 @@ from voicetotext.transcription.model_info import (
     ALL_MODELS,
     ModelInfo,
     allows_device_selection as _allows_device_selection,
+    default_model_for,
+    hidden_models_for,
     is_catalog_model as _is_catalog_model,
 )
 from voicetotext.transcription.model_manager import ModelManager
@@ -136,18 +138,33 @@ class SettingsService:
         persisted ``transcription.mode`` is used.
         """
         effective_mode = mode if mode is not None else self.transcription_mode()
+        all_infos = self._model_manager.list_models()
         infos = [
-            info for info in self._model_manager.list_models()
-            if _is_catalog_model(info.name)
+            info for info in all_infos
+            if _is_catalog_model(info.name, self._hardware)
         ]
         if effective_mode is TranscriptionMode.STREAMING:
             infos = [info for info in infos if self._is_streaming_model(info)]
         else:
             infos = [info for info in infos if self._is_batch_model(info)]
-        return [
+        catalog = [
             ModelView.from_info(info, installed=self._install_cache.is_installed(info.name))
             for info in infos
         ]
+        selected = self.selected_model()
+        hidden = hidden_models_for(self._hardware)
+        legacy = [
+            ModelView.from_info(
+                info,
+                installed=True,
+                legacy=True,
+                selectable=False,
+                deletable=info.name != selected,
+            )
+            for info in all_infos
+            if info.name in hidden and self._install_cache.is_installed(info.name)
+        ]
+        return catalog + legacy
 
     def transcription_mode(self) -> TranscriptionMode:
         return TranscriptionMode.migrate(self._config.get("transcription.mode"))
@@ -182,7 +199,10 @@ class SettingsService:
         return self._install_cache.is_installed(name)
 
     def selected_model(self) -> str:
-        return self._config.get("transcription.model_size", "base")
+        return self._config.get(
+            "transcription.model_size",
+            default_model_for(self._hardware),
+        )
 
     # ------------------------------------------------------------------
     # Download commands
@@ -216,7 +236,10 @@ class SettingsService:
 
     def current_draft(self) -> SettingsDraft:
         return SettingsDraft(
-            model_size=self._config.get("transcription.model_size", "base"),
+            model_size=self._config.get(
+                "transcription.model_size",
+                default_model_for(self._hardware),
+            ),
             language=self._config.get("transcription.language", "en"),
             device=self._config.get("transcription.device", "auto"),
             engine=self._config.get("transcription.engine", "auto"),

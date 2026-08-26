@@ -1,4 +1,3 @@
-# Base + optional engines - does NOT include `torch`.
+# Core application dependencies - does NOT include `torch`.
 # Install PyTorch separately. See INSTALL.md.
 -r requirements.txt
-nano-parakeet>=0.2.1

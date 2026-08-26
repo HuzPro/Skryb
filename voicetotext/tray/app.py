@@ -56,6 +56,10 @@ class TrayIcon(Protocol):
     def stop(self) -> None: ...
 
 
+class Disposable(Protocol):
+    def dispose(self) -> None: ...
+
+
 TrayIconFactory = Callable[..., TrayIcon]
 
 
@@ -77,6 +81,7 @@ class SystemTrayApp:
         tray_factory: TrayIconFactory,
         on_open_settings: Callable[[], None] | None = None,
         download_manager: DownloadManager | None = None,
+        owned_disposables: tuple[Disposable, ...] = (),
     ) -> None:
         self._use_case = use_case
         self._state_machine = state_machine
@@ -85,7 +90,10 @@ class SystemTrayApp:
         self._tray_factory = tray_factory
         self._on_open_settings = on_open_settings
         self._download_manager = download_manager
+        self._owned_disposables = owned_disposables
         self._icon: TrayIcon | None = None
+        self._pending_engine_failure: str | None = None
+        self._pending_engine_ready = False
         # ``_error_sticky`` keeps the icon in ERROR colour after an
         # error event even once the state machine has cycled back to
         # IDLE. The OS notification balloon can be silenced by Focus
@@ -133,7 +141,20 @@ class SystemTrayApp:
 
     def _on_setup(self, icon: TrayIcon) -> None:
         icon.visible = True
+        from voicetotext.core.startup_log import milestone
+
+        milestone("tray-visible")
+        self._replay_engine_outcome(icon)
         self._hotkey_listener.start()
+
+    def _replay_engine_outcome(self, icon: TrayIcon) -> None:
+        if self._pending_engine_failure is not None:
+            self._error_sticky = True
+            icon.notify("VoiceToText", self._pending_engine_failure)
+            icon.update_state(AppState.ERROR, _STATE_LABELS[AppState.ERROR])
+            return
+        if self._pending_engine_ready:
+            icon.update_state(AppState.IDLE, _STATE_LABELS[AppState.IDLE])
 
     def _current_state_label(self) -> str:
         return _STATE_LABELS.get(self._state_machine.state, "Unknown")
@@ -161,12 +182,19 @@ class SystemTrayApp:
         os._exit(0)
 
     def _quit_cleanup(self) -> None:
-        for step_name, step in (
+        steps: list[tuple[str, Callable[[], None]]] = [
             ("hotkey_listener.stop", self._hotkey_listener.stop),
             ("use_case.dispose", self._use_case.dispose),
+        ]
+        steps.extend(
+            ("owned_disposable.dispose", item.dispose)
+            for item in self._owned_disposables
+        )
+        steps.extend([
             ("download_manager.shutdown", self._shutdown_download_manager),
             ("icon.stop", self._stop_icon),
-        ):
+        ])
+        for step_name, step in steps:
             try:
                 step()
             except Exception:
@@ -202,6 +230,8 @@ class SystemTrayApp:
         )
 
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
+        self._pending_engine_failure = event.error
+        self._pending_engine_ready = False
         if self._icon is None:
             return
         self._error_sticky = True
@@ -221,6 +251,12 @@ class SystemTrayApp:
         self._icon.notify("VoiceToText", "No speech detected.")
 
     def _handle_state_changed(self, event: StateChangedEvent) -> None:
+        if (
+            event.old_state == AppState.LOADING.value
+            and event.new_state == AppState.IDLE.value
+        ):
+            self._pending_engine_ready = True
+            self._pending_engine_failure = None
         if self._icon is None:
             return
         new_state = AppState(event.new_state)

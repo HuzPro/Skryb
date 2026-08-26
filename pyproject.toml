@@ -43,12 +43,10 @@ dependencies = [
     "Pillow>=10.0.0",
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
+    "nano-parakeet>=0.2.1",
 ]
 
 [project.optional-dependencies]
-parakeet = [
-    "nano-parakeet>=0.2.1",
-]
 dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",
@@ -59,6 +57,9 @@ dev = [
 
 [project.scripts]
 voicetotext = "voicetotext.__main__:main"
+
+[project.gui-scripts]
+voicetotext-gui = "voicetotext.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

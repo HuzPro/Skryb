@@ -28,6 +28,7 @@ from voicetotext.settings.service import (
 )
 from voicetotext.settings.settings_draft import SettingsDraft
 from tests.settings.fakes import FakeConfig, FakeModelManager
+from voicetotext.transcription.engine_factory import build_engine_registry
 
 
 def _build_service(
@@ -653,3 +654,79 @@ class TestCatalogHiding:
         names = [view.name for view in service.list_models()]
         assert "granite-speech-4.1-2b" not in names
         assert "base" in names
+
+
+class TestLegacyModelProjection:
+    def _gpu(self):
+        from voicetotext.transcription.engine_types import HardwareProfile
+
+        return HardwareProfile(
+            kind="nvidia_cuda", device_name="NVIDIA", gfx_arch=None,
+        )
+
+    def test_should_show_installed_non_active_whisper_as_legacy(self):
+        from voicetotext.transcription.model_info import ALL_MODELS
+
+        service, *_ = _build_service(
+            installed={"base": True},
+            models=ALL_MODELS,
+            hardware=self._gpu(),
+            registry=build_engine_registry(),
+            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+        )
+
+        base = {view.name: view for view in service.list_models()}["base"]
+
+        assert base.legacy is True
+        assert base.selectable is False
+        assert base.deletable is True
+
+    def test_should_keep_active_legacy_model_non_deletable(self):
+        from voicetotext.transcription.model_info import ALL_MODELS
+
+        service, *_ = _build_service(
+            installed={"base": True},
+            models=ALL_MODELS,
+            hardware=self._gpu(),
+            registry=build_engine_registry(),
+            config_overrides={"transcription.model_size": "base"},
+        )
+
+        base = {view.name: view for view in service.list_models()}["base"]
+
+        assert base.legacy is True
+        assert base.deletable is False
+
+    def test_should_keep_legacy_visible_outside_streaming_filter(self):
+        from voicetotext.transcription.model_info import ALL_MODELS
+
+        service, *_ = _build_service(
+            installed={"base": True},
+            models=ALL_MODELS,
+            hardware=self._gpu(),
+            registry=build_engine_registry(),
+            config_overrides={
+                "transcription.model_size": "parakeet-tdt-0.6b-v3",
+                "transcription.mode": "streaming",
+            },
+        )
+
+        names = {view.name for view in service.list_models()}
+
+        assert "base" in names
+        assert "nemotron-speech-streaming-en-0.6b" in names
+
+    def test_should_remove_legacy_projection_after_delete(self):
+        from voicetotext.transcription.model_info import ALL_MODELS
+
+        service, *_ = _build_service(
+            installed={"base": True},
+            models=ALL_MODELS,
+            hardware=self._gpu(),
+            registry=build_engine_registry(),
+            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+        )
+
+        service.delete_model("base")
+
+        assert "base" not in {view.name for view in service.list_models()}

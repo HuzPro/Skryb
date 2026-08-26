@@ -13,8 +13,10 @@ DEFAULT_CONFIG = {
     "output": {
         "mode": "direct_paste",
     },
+    "overlay": {
+        "enabled": True,
+    },
     "transcription": {
-        "model_size": "base",
         "device": "auto",
         "language": "en",
         "beam_size": 5,
@@ -50,6 +52,17 @@ class JsonConfigAdapter(ConfigurationStore):
                 self._data = _deep_merge(DEFAULT_CONFIG, raw)
             else:
                 self._data = copy.deepcopy(DEFAULT_CONFIG)
+
+    def has_persisted_value(self, key: str) -> bool:
+        if not self._path.exists():
+            return False
+        raw = json.loads(self._path.read_text(encoding="utf-8"))
+        current: object = raw
+        for part in key.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return False
+            current = current[part]
+        return True
 
     def save(self) -> None:
         with self._lock:

@@ -253,9 +253,8 @@ class RecordAndTranscribeUseCase:
             self._announce_empty_transcription(result)
             return
         _logger.info(
-            "Streaming transcription in %.2fs: '%s'",
+            "Streaming transcription completed in %.2fs",
             result.transcription_seconds,
-            result.text,
         )
 
     def _schedule_cap_timer(self) -> None:
@@ -356,9 +355,8 @@ class RecordAndTranscribeUseCase:
             self._announce_empty_transcription(result)
             return
         _logger.info(
-            "Transcription in %.2fs: '%s'",
+            "Transcription completed in %.2fs",
             result.transcription_seconds,
-            result.text,
         )
         _logger.debug("output.output: calling")
         try:

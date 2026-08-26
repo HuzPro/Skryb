@@ -1,8 +1,13 @@
 import io
 import os
 import sys
+from concurrent.futures import Future
 from pathlib import Path
+from types import ModuleType
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from voicetotext.__main__ import (
     _apply_hf_cache_env_overrides,
@@ -11,6 +16,8 @@ from voicetotext.__main__ import (
     _show_error,
     _try_show_error_dialog,
     main,
+    _parse_cli,
+    _run,
 )
 
 
@@ -113,22 +120,150 @@ class TestDoctorCli:
             patch.object(sys, "argv", ["voicetotext", "--doctor"]),
             patch("sys.stdout", captured),
             patch("voicetotext.__main__._run") as mock_run,
+            patch(
+                "voicetotext.diagnostics.doctor.run_doctor",
+                return_value="[Python]\nok\n[Engine backends]\nok",
+            ),
+            pytest.raises(SystemExit) as exit_info,
         ):
             main()
 
         output = captured.getvalue()
         assert "[Python]" in output
         assert "[Engine backends]" in output
+        assert exit_info.value.code == 0
         mock_run.assert_not_called()
 
-    def test_should_call_run_when_doctor_flag_absent(self):
+    def test_should_call_run_when_doctor_flag_absent(self, tmp_path):
+        prewarm: Future[ModuleType] = Future()
+        prewarm.set_result(ModuleType("torch"))
+        mutex = MagicMock()
+        mutex.acquire.return_value = True
         with (
             patch.object(sys, "argv", ["voicetotext"]),
+            patch.dict(os.environ, {"APPDATA": str(tmp_path)}),
             patch("voicetotext.__main__._run") as mock_run,
+            patch(
+                "voicetotext.core.torch_prewarm.start_torch_prewarm",
+                return_value=prewarm,
+            ),
+            patch(
+                "voicetotext.core.single_instance.SingleInstanceMutex",
+                return_value=mutex,
+            ),
         ):
             main()
 
         mock_run.assert_called_once()
+        mutex.release.assert_called_once()
+
+
+class TestMaintenanceStartupIsolation:
+    @pytest.mark.parametrize(
+        ("flag", "target"),
+        [
+            ("--create-shortcut", "create_shortcut"),
+            ("--enable-autostart", "enable_autostart"),
+            ("--disable-autostart", "disable_autostart"),
+        ],
+    )
+    def test_should_exit_before_tk_prewarm_mutex_and_run(
+        self,
+        flag: str,
+        target: str,
+    ) -> None:
+        with (
+            patch.object(sys, "argv", ["voicetotext", flag]),
+            patch(f"voicetotext.core.dev_install.{target}", return_value=(True, "ok")),
+            patch("voicetotext.__main__._run") as run,
+            patch("voicetotext.core.torch_prewarm.start_torch_prewarm") as prewarm,
+            patch("voicetotext.core.single_instance.SingleInstanceMutex") as mutex,
+            patch("tkinter.Tk") as tk,
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            main()
+
+        assert exit_info.value.code == 0
+        run.assert_not_called()
+        prewarm.assert_not_called()
+        mutex.assert_not_called()
+        tk.assert_not_called()
+
+    def test_should_reject_multiple_maintenance_flags(self) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            _parse_cli(["--doctor", "--create-shortcut"])
+
+        assert exit_info.value.code == 2
+
+
+class TestBindingStartupOrder:
+    def test_should_overlap_hardware_independent_setup_before_detection(self) -> None:
+        timeline: list[str] = []
+        root = MagicMock()
+        config = MagicMock()
+        config.has_persisted_value.return_value = True
+        config.get.return_value = "base"
+        manager = MagicMock()
+        manager.is_installed.return_value = True
+        registry = MagicMock(name="registry")
+        hardware = MagicMock(name="hardware")
+        app = MagicMock()
+        paths = SimpleNamespace(
+            config_path=Path("config.json"),
+            models_dir=Path("models"),
+            is_first_run=lambda: False,
+        )
+        future: Future[ModuleType] = Future()
+
+        with (
+            patch("tkinter.Tk", side_effect=lambda: timeline.append("tk") or root),
+            patch(
+                "voicetotext.core.json_config_adapter.JsonConfigAdapter",
+                side_effect=lambda _path: timeline.append("config-constructed") or config,
+            ),
+            patch.object(config, "load", side_effect=lambda: timeline.append("config-loaded")),
+            patch(
+                "voicetotext.downloads.download_manager.DownloadManager",
+                side_effect=lambda **_kwargs: timeline.append("downloads") or MagicMock(),
+            ),
+            patch(
+                "voicetotext.transcription.engine_factory.create_model_manager",
+                side_effect=lambda *_args: timeline.append("manager") or manager,
+            ),
+            patch(
+                "voicetotext.transcription.engine_factory.build_engine_registry",
+                side_effect=lambda: timeline.append("registry") or registry,
+            ),
+            patch(
+                "voicetotext.__main__._consume_torch_prewarm",
+                side_effect=lambda _future: timeline.append("consume"),
+            ),
+            patch(
+                "voicetotext.transcription.torch_hardware_detector.TorchHardwareDetector.detect",
+                side_effect=lambda: timeline.append("detect") or hardware,
+            ) as detect,
+            patch(
+                "voicetotext.bootstrap.build_app",
+                side_effect=lambda *_args, **_kwargs: timeline.append("build-app") or app,
+            ) as build_app,
+        ):
+            _run(paths, future)
+
+        assert timeline == [
+            "tk",
+            "config-constructed",
+            "config-loaded",
+            "downloads",
+            "manager",
+            "registry",
+            "consume",
+            "detect",
+            "build-app",
+        ]
+        detect.assert_called_once_with()
+        assert build_app.call_args.kwargs["registry"] is registry
+        assert build_app.call_args.kwargs["hardware"] is hardware
+        app.run.assert_called_once_with()
 
 
 class TestShowError:
