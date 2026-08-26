@@ -30,7 +30,7 @@ class PunctuationBackend(Protocol):
 
 
 class _SherpaPunctuator(Protocol):
-    def add_punctuation(self, text: str) -> str:
+    def add_punctuation_with_case(self, text: str) -> str:
         ...
 
 
@@ -46,7 +46,7 @@ class _SherpaModule(Protocol):
     ) -> object:
         ...
 
-    def OnlinePunctuationConfig(self, *, model: object) -> object:
+    def OnlinePunctuationConfig(self, *, model_config: object) -> object:
         ...
 
     def OnlinePunctuation(self, config: object) -> _SherpaPunctuator:
@@ -74,7 +74,7 @@ class SherpaOnnxPunctuationBackend:
         self._punctuator = punctuator
 
     def punctuate(self, text: str) -> str:
-        return self._punctuator.add_punctuation(text)
+        return self._punctuator.add_punctuation_with_case(text)
 
 
 def sherpa_onnx_available() -> bool:
@@ -101,7 +101,7 @@ def create_punctuation_backend(models_dir: Path) -> PunctuationBackend | None:
             debug=False,
             provider="cpu",
         )
-        config = module.OnlinePunctuationConfig(model=model_config)
+        config = module.OnlinePunctuationConfig(model_config=model_config)
         punctuator = module.OnlinePunctuation(config)
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         _warn_once("Punctuation restoration unavailable: %s", exc)
