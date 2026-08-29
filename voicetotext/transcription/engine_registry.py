@@ -4,7 +4,11 @@ from pathlib import Path
 from typing import Protocol
 
 from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.engine_types import EngineDescriptor, EngineId
+from voicetotext.transcription.engine_types import (
+    CrisperWhisperMode,
+    EngineDescriptor,
+    EngineId,
+)
 
 
 @dataclass(frozen=True)
@@ -14,9 +18,10 @@ class EngineSpec:
     Threaded through :class:`EngineBuilder` so the registry can stay
     ignorant of any engine-specific config: dtype overrides,
     compute-type heuristics, and similar live inside the adapters and
-    pull from :class:`ConfigurationStore` directly. ``repo_id`` comes
-    from ``ModelInfo.repo_id`` so each adapter receives the HF repo it
-    knows how to load.
+    pull from :class:`ConfigurationStore` directly. ``repo_id`` and
+    ``revision`` come from ``ModelInfo`` so each adapter receives the HF
+    repo it knows how to load, at the same commit the downloader fetched.
+    An empty ``revision`` tracks the repo's ``main`` branch.
     """
     model_name: str
     repo_id: str
@@ -24,6 +29,8 @@ class EngineSpec:
     language: str
     beam_size: int
     model_dir: Path
+    revision: str = ""
+    crisperwhisper_mode: CrisperWhisperMode = "intended"
 
 
 class EngineBuilder(Protocol):

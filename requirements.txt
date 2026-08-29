@@ -10,3 +10,10 @@ Pillow>=10.0.0
 huggingface-hub>=0.20.0
 requests>=2.31.0
 nano-parakeet>=0.2.1
+# Transformers engines (ARK-ASR, Qwen3-ASR, Granite TurboCTC,
+# CrisperWhisper); librosa and soundfile are imported by ARK's remote
+# processing code; torchaudio feeds Granite's log-mel extractor.
+transformers>=5.16.0,<6
+librosa>=0.10.0
+soundfile>=0.12.0
+torchaudio>=2.5

@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
         "language": "en",
         "beam_size": 5,
         "mode": "batch",
+        "crisperwhisper_mode": "intended",
     },
     "audio": {
         "sample_rate": 16000,

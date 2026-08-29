@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from tests.fakes.config import FakeConfig
+from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.state_machine import AppStateMachine
@@ -41,6 +42,7 @@ def _settings_service(dictionary_path: Path) -> SettingsService:
         hot_swap=NullEngineHotSwap(),
         state_machine=AppStateMachine(event_bus),
         dictionary_path=dictionary_path,
+        license_policy=AllowAllLicensePolicy(),
     )
 
 

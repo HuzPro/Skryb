@@ -53,7 +53,9 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 # and must see HF_HUB_CACHE.
 from voicetotext.transcription.engine_registry import EngineRegistry  # noqa: E402
 from voicetotext.transcription.engine_types import HardwareProfile  # noqa: E402
+from voicetotext.transcription.license_policy import LicensePolicy  # noqa: E402
 
+from tests.helpers.license_gate import user_license_policy  # noqa: E402
 from tests.performance._recorder import PerformanceRecorder  # noqa: E402
 
 
@@ -68,6 +70,7 @@ class PerformanceContext:
     hardware: HardwareProfile
     registry: EngineRegistry
     recorder: PerformanceRecorder
+    license_policy: LicensePolicy
 
 
 def pytest_collection_modifyitems(
@@ -109,12 +112,17 @@ def perf_context(request: pytest.FixtureRequest) -> Iterator[PerformanceContext]
     print(f"Models dir: {_paths.models_dir}", flush=True)
     print(f"HF_HUB_CACHE: {os.environ.get('HF_HUB_CACHE')}", flush=True)
 
+    # The sweep downloads and runs the very weights the app gates, so it
+    # reads the same acceptance record the app writes. A gated model the
+    # user has not accepted is never fetched and never benchmarked.
+    license_policy = user_license_policy()
+
     relevant_combos = _filter_combos_for_hardware(BENCHMARK_COMBOS, hardware.kind)
     print(
         f"Pre-downloading models for {len(relevant_combos)} (engine, repo) pairs...",
         flush=True,
     )
-    ensure_models_downloaded(relevant_combos, _paths.models_dir)
+    ensure_models_downloaded(relevant_combos, _paths.models_dir, license_policy)
     print("Pre-download complete.", flush=True)
 
     recorder = PerformanceRecorder(_RESULTS_PATH)
@@ -131,6 +139,7 @@ def perf_context(request: pytest.FixtureRequest) -> Iterator[PerformanceContext]
         hardware=hardware,
         registry=registry,
         recorder=recorder,
+        license_policy=license_policy,
     )
     print("=== Setup complete; starting benchmark sweep ===", flush=True)
     yield ctx

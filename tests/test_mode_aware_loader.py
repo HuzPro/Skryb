@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import voicetotext.bootstrap as bootstrap
 
-from tests.fakes import FakeConfig
+from tests.fakes import AllowAllLicensePolicy, FakeConfig
 
 
 def _config(mode: str) -> FakeConfig:
@@ -20,7 +20,7 @@ class TestModeAwareLoader:
         monkeypatch.setattr(
             bootstrap,
             "_load_streaming_engine",
-            lambda config, paths, hardware: fake_streaming,
+            lambda config, paths, hardware, policy: fake_streaming,
         )
         monkeypatch.setattr(
             bootstrap, "_load_engine_with_fallback",
@@ -29,6 +29,7 @@ class TestModeAwareLoader:
 
         installer = bootstrap._load_active_engine_installer(
             _config("streaming"), MagicMock(), MagicMock(), MagicMock(),
+            AllowAllLicensePolicy(),
         )
         use_case = MagicMock()
         installer(use_case)
@@ -40,7 +41,7 @@ class TestModeAwareLoader:
         fake_batch = MagicMock()
         monkeypatch.setattr(
             bootstrap, "_load_engine_with_fallback",
-            lambda config, paths, registry, hardware: fake_batch,
+            lambda config, paths, registry, hardware, policy: fake_batch,
         )
         monkeypatch.setattr(
             bootstrap, "_load_streaming_engine",
@@ -49,6 +50,7 @@ class TestModeAwareLoader:
 
         installer = bootstrap._load_active_engine_installer(
             _config("batch"), MagicMock(), MagicMock(), MagicMock(),
+            AllowAllLicensePolicy(),
         )
         use_case = MagicMock()
         installer(use_case)

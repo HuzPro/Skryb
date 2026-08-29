@@ -1,14 +1,33 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from voicetotext.downloads.hf_repo_resolver import ResolvedFile
+import pytest
+
+from tests.fakes.config import FakeConfig
+from tests.fakes.licensing import AllowAllLicensePolicy
+from voicetotext.core.exceptions import LicenseNotAcceptedError
+from voicetotext.downloads.hf_repo_resolver import ResolvedFile, ResolvedRepo
 from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
+    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     PARAKEET_MODELS,
     ModelInfo,
 )
 from voicetotext.transcription.model_manager import ModelManager
+
+
+_PINNED_SHA = "1e28271b79edc97635783bea65abc89195a09ed3"
+_LEGACY_SHA = "0000000000000000000000000000000000000000"
+
+_PINNED_MODEL = ModelInfo(
+    name="pinned-example", size_mb=10, description="Example",
+    repo_id="example/pinned", revision=_PINNED_SHA,
+    compatible_engines=("nano_parakeet",),
+)
+
+_GATED_MODEL_NAME = "crisperwhisper-2.0-turbo"
 
 
 def _make_manager(
@@ -17,6 +36,7 @@ def _make_manager(
     download_manager: MagicMock | None = None,
     resolver: MagicMock | None = None,
     models: dict[str, ModelInfo] = PARAKEET_MODELS,
+    license_policy: LicensePolicy | None = None,
 ) -> HuggingFaceModelManager:
     return HuggingFaceModelManager(
         models_dir=tmp_path,
@@ -24,6 +44,7 @@ def _make_manager(
         resolver=resolver or MagicMock(),
         file_downloader=MagicMock(),
         models=models,
+        license_policy=license_policy or AllowAllLicensePolicy(),
     )
 
 
@@ -44,6 +65,23 @@ def _write_nemo_snapshot(root: Path, *, with_ref: bool = True) -> Path:
     (snapshot / "parakeet.nemo").touch()
     if with_ref:
         _write_refs_main(model_dir)
+    return model_dir
+
+
+def _pinned_manager(tmp_path: Path) -> HuggingFaceModelManager:
+    return _make_manager(tmp_path, models={_PINNED_MODEL.name: _PINNED_MODEL})
+
+
+def _write_pinned_snapshot(
+    root: Path, *, snapshot_sha: str = _PINNED_SHA, refs_sha: str = _PINNED_SHA,
+) -> Path:
+    model_dir = root / "models--example--pinned"
+    snapshot = model_dir / "snapshots" / snapshot_sha
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").touch()
+    (snapshot / "model.safetensors").touch()
+    if refs_sha:
+        _write_refs_main(model_dir, refs_sha)
     return model_dir
 
 
@@ -100,6 +138,47 @@ class TestHuggingFaceModelManagerInstallation:
         assert manager.is_installed(info.name) is True
 
 
+class TestPinnedModelInstallation:
+    """A pinned model counts as installed only when ``refs/main`` names
+    the pinned commit. ``refs/main`` is written last, after every file
+    lands, so it is the completion barrier - reading the snapshot
+    directory instead would call a half-finished download installed.
+    """
+
+    def test_should_accept_snapshot_when_refs_main_names_the_pin(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_pinned_snapshot(tmp_path)
+
+        assert _pinned_manager(tmp_path).is_installed(_PINNED_MODEL.name) is True
+
+    def test_should_reject_legacy_cache_at_a_different_commit(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_pinned_snapshot(
+            tmp_path, snapshot_sha=_LEGACY_SHA, refs_sha=_LEGACY_SHA,
+        )
+
+        assert _pinned_manager(tmp_path).is_installed(_PINNED_MODEL.name) is False
+
+    def test_should_reject_complete_pinned_snapshot_without_refs_main(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_pinned_snapshot(tmp_path, refs_sha="")
+
+        assert _pinned_manager(tmp_path).is_installed(_PINNED_MODEL.name) is False
+
+    def test_should_reject_pinned_snapshot_while_refs_main_still_lags(
+        self, tmp_path: Path,
+    ) -> None:
+        # Re-download over a legacy cache: the pinned snapshot directory
+        # is already on disk while ``refs/main`` still names the old
+        # commit, so the pinned files may be mid-flight.
+        _write_pinned_snapshot(tmp_path, refs_sha=_LEGACY_SHA)
+
+        assert _pinned_manager(tmp_path).is_installed(_PINNED_MODEL.name) is False
+
+
 class TestHuggingFaceModelManagerOperations:
     def test_get_model_path_should_reflect_installation(
         self, tmp_path: Path,
@@ -111,9 +190,10 @@ class TestHuggingFaceModelManagerOperations:
 
     def test_download_should_resolve_and_enqueue(self, tmp_path: Path) -> None:
         resolver = MagicMock()
-        resolver.resolve.return_value = (
-            "sha123",
-            [
+        resolver.resolve.return_value = ResolvedRepo(
+            requested_revision="",
+            canonical_commit="sha123",
+            files=[
                 ResolvedFile(
                     filename="model.nemo",
                     size=100,
@@ -134,12 +214,35 @@ class TestHuggingFaceModelManagerOperations:
         handle = manager.download(DEFAULT_MODEL)
 
         resolver.resolve.assert_called_once_with(
-            "nvidia/parakeet-tdt-0.6b-v3",
+            "nvidia/parakeet-tdt-0.6b-v3", "",
         )
         job = download_manager.enqueue.call_args.args[0]
         assert job.job_id == DEFAULT_MODEL
         assert job.repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+        assert job.commit_sha == "sha123"
         assert handle is expected_handle
+
+    def test_download_should_request_the_models_pinned_revision(
+        self, tmp_path: Path,
+    ) -> None:
+        resolver = MagicMock()
+        resolver.resolve.return_value = ResolvedRepo(
+            requested_revision=_PINNED_SHA,
+            canonical_commit=_PINNED_SHA,
+            files=[],
+        )
+        download_manager = MagicMock()
+        manager = _make_manager(
+            tmp_path,
+            resolver=resolver,
+            download_manager=download_manager,
+            models={_PINNED_MODEL.name: _PINNED_MODEL},
+        )
+
+        manager.download(_PINNED_MODEL.name)
+
+        resolver.resolve.assert_called_once_with("example/pinned", _PINNED_SHA)
+        assert download_manager.enqueue.call_args.args[0].commit_sha == _PINNED_SHA
 
     def test_delete_should_remove_model_directory(self, tmp_path: Path) -> None:
         model_dir = _write_nemo_snapshot(tmp_path)
@@ -149,5 +252,85 @@ class TestHuggingFaceModelManagerOperations:
 
         assert model_dir.exists() is False
 
+    def test_delete_should_remove_a_pinned_model_cache(
+        self, tmp_path: Path,
+    ) -> None:
+        model_dir = _write_pinned_snapshot(tmp_path)
+        manager = _pinned_manager(tmp_path)
+
+        manager.delete(_PINNED_MODEL.name)
+
+        assert model_dir.exists() is False
+        assert manager.is_installed(_PINNED_MODEL.name) is False
+
     def test_should_implement_model_manager_interface(self, tmp_path: Path) -> None:
         assert isinstance(_make_manager(tmp_path), ModelManager)
+
+
+class TestLicenceGatedDownload:
+    """Acquiring weights is gated: a model whose licence has not been
+    accepted must not be fetched, and nothing may be enqueued or even
+    resolved on its behalf.
+    """
+
+    def _gated_manager(
+        self, tmp_path: Path, config: FakeConfig,
+    ) -> tuple[HuggingFaceModelManager, MagicMock, MagicMock]:
+        resolver = MagicMock()
+        download_manager = MagicMock()
+        manager = _make_manager(
+            tmp_path,
+            resolver=resolver,
+            download_manager=download_manager,
+            models=CRISPERWHISPER_MODELS,
+            license_policy=LicensePolicy(config),
+        )
+        return manager, resolver, download_manager
+
+    def test_should_refuse_to_download_a_model_whose_licence_is_unaccepted(
+        self, tmp_path: Path,
+    ) -> None:
+        manager, resolver, download_manager = self._gated_manager(
+            tmp_path, FakeConfig(),
+        )
+
+        with pytest.raises(LicenseNotAcceptedError, match=_GATED_MODEL_NAME):
+            manager.download(_GATED_MODEL_NAME)
+
+        assert resolver.resolve.called is False
+        assert download_manager.enqueue.called is False
+
+    def test_should_download_once_the_licence_has_been_accepted(
+        self, tmp_path: Path,
+    ) -> None:
+        config = FakeConfig()
+        manager, resolver, download_manager = self._gated_manager(
+            tmp_path, config,
+        )
+        resolver.resolve.return_value = ResolvedRepo(
+            requested_revision="", canonical_commit="sha123", files=[],
+        )
+        LicensePolicy(config).accept(CRISPERWHISPER_MODELS[_GATED_MODEL_NAME])
+
+        manager.download(_GATED_MODEL_NAME)
+
+        assert download_manager.enqueue.called is True
+
+    def test_should_leave_an_ungated_model_downloadable(
+        self, tmp_path: Path,
+    ) -> None:
+        resolver = MagicMock()
+        resolver.resolve.return_value = ResolvedRepo(
+            requested_revision="", canonical_commit="sha123", files=[],
+        )
+        download_manager = MagicMock()
+        manager = _make_manager(
+            tmp_path,
+            resolver=resolver,
+            download_manager=download_manager,
+            license_policy=LicensePolicy(FakeConfig()),
+        )
+
+        manager.download(DEFAULT_MODEL)
+
+        assert download_manager.enqueue.called is True
