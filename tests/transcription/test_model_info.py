@@ -6,9 +6,13 @@ from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    ARK_ASR_MODELS,
+    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
+    GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
+    QWEN3_ASR_MODELS,
     ModelInfo,
     get_model_info,
     is_catalog_model,
@@ -54,11 +58,84 @@ class TestModelInfo:
         assert info.compatible_engines == ()
         assert dict(info.engine_priorities) == {}
 
+    def test_revision_should_default_to_tracking_main(self) -> None:
+        info = ModelInfo(name="example", size_mb=1, description="Example")
+
+        assert info.revision == ""
+
+    def test_license_should_default_to_ungated(self) -> None:
+        info = ModelInfo(name="example", size_mb=1, description="Example")
+
+        assert info.license_id == ""
+        assert info.license_url == ""
+
+
+class TestPinnedRevisions:
+    """ARK-ASR runs remote code and CrisperWhisper ships a licence keyed
+    to the exact text at its commit, so all three resolve one audited
+    commit instead of whatever ``main`` points at today.
+    """
+
+    _EXPECTED_PINS = {
+        "ark-asr-3b": "1e28271b79edc97635783bea65abc89195a09ed3",
+        "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
+        "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
+    }
+
+    @pytest.mark.parametrize(
+        ("model_name", "revision"), sorted(_EXPECTED_PINS.items()),
+    )
+    def test_each_pinned_model_should_carry_its_audited_commit(
+        self, model_name: str, revision: str,
+    ) -> None:
+        assert get_model_info(model_name).revision == revision
+
+    def test_every_other_model_should_track_main(self) -> None:
+        unpinned = {
+            name for name, info in ALL_MODELS.items() if not info.revision
+        }
+
+        assert unpinned == set(ALL_MODELS) - set(self._EXPECTED_PINS)
+
+
+class TestGatedLicences:
+    """Both CrisperWhisper variants ship the same licence bytes, so they
+    share one ``license_id`` and one acceptance. Their ``license_url``
+    must point at the pinned commit, never at a branch that can be
+    edited under the acceptance.
+    """
+
+    def test_both_crisperwhisper_variants_should_share_one_licence(self) -> None:
+        license_ids = {
+            info.license_id for info in CRISPERWHISPER_MODELS.values()
+        }
+
+        assert license_ids == {"crisperwhisper-nc"}
+
+    @pytest.mark.parametrize("model_name", sorted(CRISPERWHISPER_MODELS))
+    def test_licence_url_should_name_the_pinned_commit(
+        self, model_name: str,
+    ) -> None:
+        info = get_model_info(model_name)
+
+        assert info.revision in info.license_url
+        assert "/main/" not in info.license_url
+
+    def test_every_other_model_should_be_ungated(self) -> None:
+        gated = {name for name, info in ALL_MODELS.items() if info.license_id}
+
+        assert gated == set(CRISPERWHISPER_MODELS)
+
 
 class TestModelCatalog:
     def test_should_contain_only_surviving_model_lineups(self) -> None:
         assert set(ALL_MODELS) == (
-            set(PARAKEET_MODELS) | set(NEMOTRON_STREAMING_MODELS)
+            set(PARAKEET_MODELS)
+            | set(NEMOTRON_STREAMING_MODELS)
+            | set(ARK_ASR_MODELS)
+            | set(QWEN3_ASR_MODELS)
+            | set(GRANITE_TURBOCTC_MODELS)
+            | set(CRISPERWHISPER_MODELS)
         )
 
     def test_default_should_be_current_parakeet(self) -> None:
@@ -74,6 +151,17 @@ class TestModelCatalog:
     def test_every_catalog_entry_should_be_visible(self) -> None:
         assert all(is_catalog_model(name) for name in ALL_MODELS)
         assert is_catalog_model("unknown-model") is False
+
+    def test_crisperwhisper_models_should_disclose_restrictive_license(
+        self,
+    ) -> None:
+        assert CRISPERWHISPER_MODELS
+        for model in CRISPERWHISPER_MODELS.values():
+            assert "non-commercial research license" in model.description
+            assert model.compatible_engines == ("crisperwhisper",)
+
+    def test_crisperwhisper_should_not_replace_default_model(self) -> None:
+        assert DEFAULT_MODEL not in CRISPERWHISPER_MODELS
 
 
 def _saved_config(path: Path, key: str, value: str) -> JsonConfigAdapter:

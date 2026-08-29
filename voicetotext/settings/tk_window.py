@@ -16,6 +16,11 @@ from voicetotext.core.events import (
     StateChangedEvent,
 )
 from voicetotext.settings.download_progress import DownloadProgressSnapshot
+from voicetotext.settings.license_consent import (
+    LicenseConsentPrompt,
+    ask_license_consent,
+    collect_license_acceptance,
+)
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.tk_download_bridge import TkDownloadBridge
@@ -72,6 +77,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         on_capture_state_changed: CaptureStateCallback = _ignore_capture,
         schedule: ScheduleOnGuiThread = _run_now,
         color_scheme: ColorScheme | None = None,
+        confirm_license: LicenseConsentPrompt = ask_license_consent,
     ) -> None:
         super().__init__(master)
         # Hide immediately so the half-built, not-yet-themed window never
@@ -83,6 +89,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._on_capture_state_changed = on_capture_state_changed
         self._schedule = schedule
         self._capture_bridge = capture_bridge
+        self._confirm_license = confirm_license
         self._pending_changes: ChangeSet | None = None
         self._closing = False
         # ``None`` means follow the OS light/dark setting at open time.
@@ -136,7 +143,9 @@ class TkSettingsWindow(tkinter.Toplevel):
         content.columnconfigure(0, weight=1)
 
         draft = self._service.current_draft()
-        self._transcription_page = TkTranscriptionPage(content, self._service)
+        self._transcription_page = TkTranscriptionPage(
+            content, self._service, confirm_license=self._confirm_license,
+        )
         self._transcription_page.download_error.connect(self._on_download_error)
         self._transcription_page.delete_error.connect(self._on_delete_error)
         self._transcription_page.model_auto_switched.connect(
@@ -238,6 +247,13 @@ class TkSettingsWindow(tkinter.Toplevel):
                 error=True,
             )
             return
+        if not self._license_accepted_for(draft.model_size):
+            self._show_status(
+                f"'{draft.model_size}' needs its licence accepted before it "
+                "can be used. Nothing was changed.",
+                error=True,
+            )
+            return
         changes = self._service.apply_draft(draft)
         self._pending_changes = self._save_dictionary_edits(changes)
 
@@ -248,6 +264,16 @@ class TkSettingsWindow(tkinter.Toplevel):
             return
 
         self._finalize_save()
+
+    def _license_accepted_for(self, model_name: str) -> bool:
+        """Collect consent before Save commits anything.
+
+        Save both persists the draft and closes this window, so a licence
+        asked for afterwards would have no surface left to accept on.
+        """
+        return collect_license_acceptance(
+            self._service, model_name, self, self._confirm_license,
+        )
 
     def _save_dictionary_edits(self, changes: ChangeSet) -> ChangeSet:
         """Persist staged dictionary rules and flag the output chain for rebuild.

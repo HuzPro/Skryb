@@ -74,6 +74,7 @@ class TestShortAudioBenchmark:
             n_timed_runs=_TIMED_RUNS_SHORT,
             registry=perf_context.registry,
             models_dir=perf_context.models_dir,
+            license_policy=perf_context.license_policy,
         )
         perf_context.recorder.record(
             identity=identity,
@@ -164,6 +165,7 @@ class TestLongAudioBenchmark:
             n_timed_runs=_TIMED_RUNS_LONG,
             registry=perf_context.registry,
             models_dir=perf_context.models_dir,
+            license_policy=perf_context.license_policy,
         )
         perf_context.recorder.record(
             identity=identity,

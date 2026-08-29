@@ -91,6 +91,7 @@ def service():
     svc.engine_candidates_for.return_value = ()
     svc.apply_draft.return_value = _no_change()
     svc.dictionary_rules.return_value = DictionaryConfig()
+    svc.license_acceptance_required.return_value = False
     return svc
 
 
@@ -381,6 +382,95 @@ class TestFirstRun:
         assert "model" in window.status_label().cget("text").lower()
 
 
+class TestLicencePreflightOnSave:
+    """Save both persists the draft and closes the window, so consent has
+    to be collected before either happens - otherwise picking an
+    already-installed gated model fails after the only surface that could
+    have collected it is gone.
+    """
+
+    @pytest.fixture
+    def gated_service(self, service):
+        service.license_acceptance_required.side_effect = (
+            lambda name: name == _PARAKEET
+        )
+        return service
+
+    def test_should_prompt_before_applying_the_draft(
+        self, tk_root, gated_service,
+    ):
+        order: list[str] = []
+        gated_service.apply_draft.side_effect = (
+            lambda _draft: order.append("apply") or _no_change()
+        )
+        window = _make_window(
+            tk_root, gated_service,
+            first_run=True,
+            confirm_license=lambda _parent, _terms: bool(
+                order.append("prompt"),
+            ) or True,
+        )
+
+        window.save_button().invoke()
+
+        assert order == ["prompt", "apply"]
+
+    def test_should_record_acceptance_before_applying_the_draft(
+        self, tk_root, gated_service,
+    ):
+        window = _make_window(
+            tk_root, gated_service, confirm_license=lambda _parent, _terms: True,
+        )
+
+        window.save_button().invoke()
+
+        gated_service.accept_license.assert_called_once_with(_PARAKEET)
+
+    def test_should_persist_nothing_when_the_licence_is_declined(
+        self, tk_root, gated_service,
+    ):
+        received: list[ChangeSet] = []
+        window = _make_window(
+            tk_root, gated_service,
+            on_save=received.append,
+            confirm_license=lambda _parent, _terms: False,
+        )
+
+        window.save_button().invoke()
+
+        assert received == []
+        assert gated_service.apply_draft.called is False
+        assert gated_service.accept_license.called is False
+        assert gated_service.trigger_engine_swap.called is False
+
+    def test_should_keep_the_window_open_when_the_licence_is_declined(
+        self, tk_root, gated_service,
+    ):
+        window = _make_window(
+            tk_root, gated_service, confirm_license=lambda _parent, _terms: False,
+        )
+
+        window.save_button().invoke()
+
+        assert window.is_open() is True
+        assert "licence" in window.status_label().cget("text").lower()
+
+        if window.winfo_exists():
+            window.destroy()
+
+    def test_should_not_prompt_for_an_ungated_model(self, tk_root, service):
+        prompted: list[bool] = []
+        window = _make_window(
+            tk_root, service,
+            confirm_license=lambda _parent, _terms: bool(prompted.append(True)),
+        )
+
+        window.save_button().invoke()
+
+        assert prompted == []
+        assert service.apply_draft.called is True
+
+
 class TestCaptureCallback:
     def test_should_invoke_capture_callback_when_recording_starts(
         self, tk_root, service,
@@ -479,6 +569,7 @@ class TestMode:
         svc.supports_streaming_hardware.return_value = True
         svc.engine_candidates_for.return_value = ()
         svc.dictionary_rules.return_value = DictionaryConfig()
+        svc.license_acceptance_required.return_value = False
         return svc
 
     @pytest.fixture

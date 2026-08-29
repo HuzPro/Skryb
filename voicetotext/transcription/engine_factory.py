@@ -12,16 +12,22 @@ from voicetotext.transcription.engine_registry import (
 )
 from voicetotext.transcription.engine_selector import rank_engines
 from voicetotext.transcription.engine_types import (
+    CrisperWhisperMode,
     EngineDescriptor,
     EngineId,
     HardwareProfile,
 )
 from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapshot
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
+    ARK_ASR_MODELS,
+    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
+    GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
+    QWEN3_ASR_MODELS,
     ModelInfo,
     get_model_info,
 )
@@ -45,10 +51,45 @@ _NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
     streaming_only=True,
 )
 
+_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
+    engine_id="crisperwhisper",
+    display_name="CrisperWhisper 2.0 (Transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=40,
+)
+
+
+_ARK_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="ark_asr",
+    display_name="ARK-ASR 3B (Transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm"),
+    base_priority=80,
+)
+
+
+_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="qwen3_asr",
+    display_name="Qwen3-ASR (transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm"),
+    base_priority=80,
+)
+
+
+_GRANITE_TURBOCTC_DESCRIPTOR = EngineDescriptor(
+    engine_id="granite_turboctc",
+    display_name="Granite TurboCTC (English, fastest)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=80,
+)
+
 
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
+    "ark_asr": 1,
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
+    "qwen3_asr": 1,
+    "granite_turboctc": 1,
+    "crisperwhisper": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -59,10 +100,18 @@ def build_engine_registry() -> EngineRegistry:
         descriptors=[
             _NANO_PARAKEET_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
+            _ARK_ASR_DESCRIPTOR,
+            _QWEN3_ASR_DESCRIPTOR,
+            _GRANITE_TURBOCTC_DESCRIPTOR,
+            _CRISPERWHISPER_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
+            "ark_asr": _build_ark_asr_engine,
+            "qwen3_asr": _build_qwen3_asr_engine,
+            "granite_turboctc": _build_granite_turboctc_engine,
+            "crisperwhisper": _build_crisperwhisper_engine,
         },
     )
 
@@ -76,6 +125,17 @@ def _build_nemotron_streaming_engine(spec: EngineSpec) -> TranscriptionEngine:
     )
 
 
+def _build_ark_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
+
+    return ArkAsrAdapter(
+        repo_id=spec.repo_id,
+        revision=spec.revision,
+        device=spec.device,
+        model_dir=spec.model_dir,
+    )
+
+
 def _build_nano_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
     from voicetotext.transcription.nano_parakeet_adapter import (
         NanoParakeetAdapter,
@@ -85,6 +145,44 @@ def _build_nano_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
         repo_id=spec.repo_id,
         device=spec.device,
         model_dir=spec.model_dir,
+    )
+
+
+def _build_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.qwen3_asr_adapter import Qwen3AsrAdapter
+
+    return Qwen3AsrAdapter(
+        repo_id=spec.repo_id,
+        device=spec.device,
+        model_dir=spec.model_dir,
+        language=spec.language,
+    )
+
+
+def _build_granite_turboctc_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.granite_turboctc_adapter import (
+        GraniteTurboCtcAdapter,
+    )
+
+    return GraniteTurboCtcAdapter(
+        repo_id=spec.repo_id,
+        device=spec.device,
+        model_dir=spec.model_dir,
+    )
+
+
+def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.crisperwhisper_adapter import (
+        CrisperWhisperAdapter,
+    )
+
+    return CrisperWhisperAdapter(
+        repo_id=spec.repo_id,
+        revision=spec.revision,
+        device=spec.device,
+        model_dir=spec.model_dir,
+        language=spec.language,
+        mode=spec.crisperwhisper_mode,
     )
 
 
@@ -130,7 +228,7 @@ def engines_with_model_on_disk(
     installed: set[EngineId] = set()
     for engine_id, repo_id in _engine_repo_ids(model_info):
         repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
-        if repo_has_loadable_snapshot(repo_dir):
+        if repo_has_loadable_snapshot(repo_dir, model_info.revision):
             installed.add(engine_id)
     return frozenset(installed)
 
@@ -150,12 +248,14 @@ def create_engine_for_active_model(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     *,
+    license_policy: LicensePolicy,
     device_override: str | None = None,
 ) -> TranscriptionEngine:
     model_name = config.get(
         "transcription.model_size", DEFAULT_MODEL,
     )
     model_info = get_model_info(model_name)
+    license_policy.assert_accepted(model_info)
     installed = engines_with_model_on_disk(model_info, paths.models_dir)
     engine_id = resolve_engine_id(
         config, model_info, hardware, registry,
@@ -168,6 +268,8 @@ def create_engine_for_active_model(
         language=config.get("transcription.language", "en"),
         beam_size=_resolve_beam_size(config, engine_id),
         model_dir=paths.models_dir,
+        revision=model_info.revision,
+        crisperwhisper_mode=_resolve_crisperwhisper_mode(config, engine_id),
     )
     return registry.build(engine_id, spec)
 
@@ -179,6 +281,21 @@ def _resolve_beam_size(
     if explicit is None:
         return _DEFAULT_BEAM_SIZE_BY_ENGINE.get(engine_id, _FALLBACK_BEAM_SIZE)
     return explicit  # type: ignore[return-value]
+
+
+def _resolve_crisperwhisper_mode(
+    config: ConfigurationStore,
+    engine_id: EngineId,
+) -> CrisperWhisperMode:
+    if engine_id != "crisperwhisper":
+        return "intended"
+    from voicetotext.transcription.crisperwhisper_adapter import (
+        resolve_crisperwhisper_mode,
+    )
+
+    return resolve_crisperwhisper_mode(
+        config.get("transcription.crisperwhisper_mode", "intended")
+    )
 
 
 def _resolve_device(
@@ -193,11 +310,13 @@ def _resolve_device(
 def create_model_manager(
     models_dir: Path,
     download_manager: DownloadManager,
+    license_policy: LicensePolicy,
 ) -> ModelManager:
     return build_composite_model_manager(
         models_dir,
         download_manager,
         active_engine_provider=lambda: "nano_parakeet",
+        license_policy=license_policy,
     )
 
 
@@ -205,6 +324,7 @@ def build_composite_model_manager(
     models_dir: Path,
     download_manager: DownloadManager,
     active_engine_provider: Callable[[], EngineId],
+    license_policy: LicensePolicy,
 ) -> ModelManager:
     """Build a Composite ModelManager covering every engine cache.
 
@@ -234,6 +354,18 @@ def build_composite_model_manager(
     nemotron_streaming_models = {
         name: info for name, info in NEMOTRON_STREAMING_MODELS.items() if info.repo_id
     }
+    ark_asr_models = {
+        name: info for name, info in ARK_ASR_MODELS.items() if info.repo_id
+    }
+    qwen3_asr_models = {
+        name: info for name, info in QWEN3_ASR_MODELS.items() if info.repo_id
+    }
+    granite_turboctc_models = {
+        name: info for name, info in GRANITE_TURBOCTC_MODELS.items() if info.repo_id
+    }
+    crisperwhisper_models = {
+        name: info for name, info in CRISPERWHISPER_MODELS.items() if info.repo_id
+    }
 
     nano_parakeet_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -241,6 +373,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=parakeet_models,
+        license_policy=license_policy,
     )
     nemotron_streaming_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -248,12 +381,49 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=nemotron_streaming_models,
+        license_policy=license_policy,
+    )
+    ark_asr_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=ark_asr_models,
+        license_policy=license_policy,
+    )
+    qwen3_asr_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=qwen3_asr_models,
+        license_policy=license_policy,
+    )
+    granite_turboctc_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=granite_turboctc_models,
+        license_policy=license_policy,
+    )
+    crisperwhisper_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=crisperwhisper_models,
+        license_policy=license_policy,
     )
 
     return CompositeModelManager(
         by_engine={
             "nano_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
+            "ark_asr": ark_asr_manager,
+            "qwen3_asr": qwen3_asr_manager,
+            "granite_turboctc": granite_turboctc_manager,
+            "crisperwhisper": crisperwhisper_manager,
         },
         active_engine_provider=active_engine_provider,
     )
