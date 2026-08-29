@@ -20,6 +20,7 @@ import pytest
 
 from tests.helpers.gpu import require_cuda
 from tests.helpers.model_cache import models_dir
+from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapshot
 from voicetotext.transcription.model_info import get_model_info
 
 
@@ -39,13 +40,8 @@ def _skip_unless_ark_asr_ready() -> None:
     directory = models_dir()
     if directory is None:
         pytest.skip("models dir unavailable")
-    snapshot = (
-        directory
-        / f"models--{_ARK_ASR.repo_id.replace('/', '--')}"
-        / "snapshots"
-        / _ARK_ASR.revision
-    )
-    if not (snapshot / "model.safetensors.index.json").exists():
+    repo_dir = directory / f"models--{_ARK_ASR.repo_id.replace('/', '--')}"
+    if not repo_has_loadable_snapshot(repo_dir, _ARK_ASR.revision):
         pytest.skip(
             f"ARK-ASR pinned snapshot not installed: {_ARK_ASR.repo_id}"
         )

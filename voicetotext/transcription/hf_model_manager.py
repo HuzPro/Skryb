@@ -1,5 +1,7 @@
+import json
 import shutil
 from pathlib import Path
+from typing import cast
 
 from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
 from voicetotext.downloads.download_manager import DownloadHandle, DownloadManager
@@ -11,6 +13,7 @@ from voicetotext.transcription.model_manager import ModelManager
 
 
 _CONFIG_FILENAME = "config.json"
+_SHARD_INDEX_FILENAME = "model.safetensors.index.json"
 
 
 def repo_has_loadable_snapshot(repo_dir: Path, revision: str = "") -> bool:
@@ -56,6 +59,39 @@ def _resolved_main_revision(repo_dir: Path) -> str | None:
         return None
     commit_sha = refs_main.read_text().strip()
     return commit_sha or None
+
+
+def _every_indexed_shard_present(snapshot: Path) -> bool:
+    """Whether *snapshot* holds every weight shard its index names.
+
+    ``model.safetensors.index.json`` is a manifest, not weights: an
+    interrupted download leaves the 80 KB index on disk beside none of
+    the multi-gigabyte shards it maps to. An index that cannot be read,
+    or that names no shard at all, counts as incomplete, so a damaged
+    cache is re-downloaded rather than handed to a loader that will
+    fail on the missing bytes.
+    """
+    shards = _indexed_shard_filenames(snapshot / _SHARD_INDEX_FILENAME)
+    return bool(shards) and all(
+        (snapshot / filename).is_file() for filename in shards
+    )
+
+
+def _indexed_shard_filenames(index_path: Path) -> set[str]:
+    try:
+        index: object = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return set()
+    if not isinstance(index, dict):
+        return set()
+    weight_map: object = cast(dict[object, object], index).get("weight_map")
+    if not isinstance(weight_map, dict):
+        return set()
+    return {
+        filename
+        for filename in cast(dict[object, object], weight_map).values()
+        if isinstance(filename, str)
+    }
 
 
 class HuggingFaceModelManager(ModelManager):
@@ -121,10 +157,11 @@ class HuggingFaceModelManager(ModelManager):
     def _is_safetensors_layout(snapshot: Path) -> bool:
         if not (snapshot / _CONFIG_FILENAME).exists():
             return False
+        if (snapshot / _SHARD_INDEX_FILENAME).exists():
+            return _every_indexed_shard_present(snapshot)
         return (
             (snapshot / "model.safetensors").exists()
             or (snapshot / "pytorch_model.bin").exists()
-            or (snapshot / "model.safetensors.index.json").exists()
         )
 
     # ------------------------------------------------------------------
