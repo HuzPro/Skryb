@@ -270,6 +270,25 @@ class TestCreateEngineForActiveModel:
         assert isinstance(engine, CrisperWhisperAdapter)
         assert engine._repo_id == "nyralabs/CrisperWhisper2.0_turbo"
         assert engine._mode == "intended"
+        assert engine._revision == ALL_MODELS["crisperwhisper-2.0-turbo"].revision
+
+    def test_should_build_crisperwhisper_large_at_its_own_pin(
+        self, tmp_path: Path,
+    ) -> None:
+        engine = create_engine_for_active_model(
+            _config(
+                model_size="crisperwhisper-2.0-large",
+                engine="crisperwhisper",
+                device="cpu",
+            ),
+            _paths(tmp_path),
+            build_engine_registry(),
+            _CPU,
+            license_policy=AllowAllLicensePolicy(),
+        )
+
+        assert isinstance(engine, CrisperWhisperAdapter)
+        assert engine._revision == ALL_MODELS["crisperwhisper-2.0-large"].revision
 
     def test_should_pass_validated_verbatim_mode(self, tmp_path: Path) -> None:
         engine = create_engine_for_active_model(

@@ -1,7 +1,9 @@
 """Opt-in real CrisperWhisper inference in a clean subprocess.
 
 The test is GPU-only and requires the turbo model to have already been
-downloaded through VoiceToText. It does not contact Hugging Face.
+downloaded through VoiceToText at the catalog's pinned commit. It does
+not contact Hugging Face. The driver it launches refuses to run until
+the model's licence has been accepted in the app.
 """
 
 import os
@@ -15,15 +17,16 @@ from tests.fixtures import require_short_fixture
 from tests.helpers.gpu import require_cuda
 from tests.helpers.model_cache import models_dir
 from voicetotext.transcription.hf_model_manager import (
-    HuggingFaceModelManager,
+    repo_has_loadable_snapshot,
 )
+from voicetotext.transcription.model_info import get_model_info
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = _REPO_ROOT / "scripts" / "bench_crisperwhisper.py"
-_REPO_ID = "nyralabs/CrisperWhisper2.0_turbo"
+_CRISPERWHISPER = get_model_info("crisperwhisper-2.0-turbo")
 _OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
 
 
@@ -35,14 +38,17 @@ def _skip_unless_crisperwhisper_ready() -> None:
     directory = models_dir()
     if directory is None:
         pytest.skip("models dir unavailable")
-    snapshots = (
-        directory / f"models--{_REPO_ID.replace('/', '--')}" / "snapshots"
+    # Any-snapshot would let this validate stale pre-pin weights; the
+    # loader opens the pinned commit and nothing else.
+    repo_dir = (
+        directory
+        / f"models--{_CRISPERWHISPER.repo_id.replace('/', '--')}"
     )
-    if not snapshots.exists() or not any(
-        HuggingFaceModelManager._snapshot_has_complete_model(snapshot)
-        for snapshot in snapshots.iterdir()
-    ):
-        pytest.skip(f"CrisperWhisper model not installed: {_REPO_ID}")
+    if not repo_has_loadable_snapshot(repo_dir, _CRISPERWHISPER.revision):
+        pytest.skip(
+            "CrisperWhisper pinned snapshot not installed: "
+            f"{_CRISPERWHISPER.repo_id}"
+        )
 
 
 def _transcribe_in_subprocess(mode: str) -> str:

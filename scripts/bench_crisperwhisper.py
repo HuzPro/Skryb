@@ -2,7 +2,9 @@
 
 This clean-process driver doubles as the subprocess target for the opt-in
 integration test. It never downloads weights: the adapter requires the turbo
-snapshot to already exist in VoiceToText's model cache.
+snapshot at the catalog's pinned commit to already exist in VoiceToText's
+model cache. CrisperWhisper's licence covers use and generated outputs, so
+the run refuses to start until the licence is accepted in the app.
 
     python scripts/bench_crisperwhisper.py intended
     python scripts/bench_crisperwhisper.py verbatim
@@ -22,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 
-_REPO_ID = "nyralabs/CrisperWhisper2.0_turbo"
+_MODEL_NAME = "crisperwhisper-2.0-turbo"
 
 
 def log(message: str) -> None:
@@ -32,18 +34,23 @@ def log(message: str) -> None:
 def main() -> None:
     from tests.fixtures import SHORT_MP3
     from tests.helpers.audio_file_loader import load_audio_file
+    from tests.helpers.license_gate import user_license_policy
     from voicetotext.core.paths import AppPaths
     from voicetotext.transcription.crisperwhisper_adapter import (
         CrisperWhisperAdapter,
         resolve_crisperwhisper_mode,
     )
+    from voicetotext.transcription.model_info import get_model_info
 
     mode = resolve_crisperwhisper_mode(
         sys.argv[1] if len(sys.argv) > 1 else "intended"
     )
+    model_info = get_model_info(_MODEL_NAME)
+    user_license_policy().assert_accepted(model_info)
     audio = load_audio_file(SHORT_MP3)
     engine = CrisperWhisperAdapter(
-        repo_id=_REPO_ID,
+        repo_id=model_info.repo_id,
+        revision=model_info.revision,
         device="cuda",
         model_dir=AppPaths().models_dir,
         language="en",
