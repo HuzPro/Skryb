@@ -78,6 +78,7 @@ from voicetotext.transcription.engine_install import (
 )
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import EngineId, HardwareProfile
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
     DEFAULT_MODEL,
     ModelInfo,
@@ -203,6 +204,7 @@ def _load_engine_with_fallback(
     paths: AppPaths,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> TranscriptionEngine:
     """Try the active engine on its preferred device, falling back to CPU.
 
@@ -213,12 +215,12 @@ def _load_engine_with_fallback(
     only automatic step.
     """
     try:
-        return _load_engine(config, paths, registry, hardware)
+        return _load_engine(config, paths, registry, hardware, license_policy)
     except (RuntimeError, OSError) as exc:
         _logger.warning("load_engine: primary device failed: %s", exc)
 
     _logger.info("load_engine: retrying on CPU")
-    return _load_engine_on_cpu(config, paths, registry, hardware)
+    return _load_engine_on_cpu(config, paths, registry, hardware, license_policy)
 
 
 def _load_engine(
@@ -226,8 +228,11 @@ def _load_engine(
     paths: AppPaths,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> TranscriptionEngine:
-    engine = create_engine_for_active_model(config, paths, registry, hardware)
+    engine = create_engine_for_active_model(
+        config, paths, registry, hardware, license_policy=license_policy,
+    )
     engine.load_model()
     milestone("model-loaded")
     _warmup_safely(engine)
@@ -239,9 +244,11 @@ def _load_engine_on_cpu(
     paths: AppPaths,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> TranscriptionEngine:
     engine = create_engine_for_active_model(
-        config, paths, registry, hardware, device_override="cpu",
+        config, paths, registry, hardware,
+        license_policy=license_policy, device_override="cpu",
     )
     engine.load_model()
     milestone("model-loaded")
@@ -256,11 +263,17 @@ def _load_streaming_engine(
     config: JsonConfigAdapter,
     paths: AppPaths,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> StreamingTranscriptionEngine:
-    """Build, load, and warm the GPU-only streaming engine for the active model."""
+    """Build, load, and warm the GPU-only streaming engine for the active model.
+
+    Streaming bypasses ``engine_factory`` entirely, so it asserts the
+    licence itself rather than inheriting the factory's check.
+    """
     model_info = get_model_info(
         config.get("transcription.model_size", DEFAULT_MODEL)
     )
+    license_policy.assert_accepted(model_info)
     engine = _build_streaming_engine_for(model_info, paths)
     engine.load_model()
     milestone("model-loaded")
@@ -308,6 +321,7 @@ def _load_active_engine_installer(
     paths: AppPaths,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> EngineInstaller:
     """Load the engine for the active mode and return its installer.
 
@@ -315,11 +329,13 @@ def _load_active_engine_installer(
     CPU fallback inside ``_load_engine_with_fallback``.
     """
     if config.get("transcription.mode", "batch") == "streaming":
-        engine = _load_streaming_engine(config, paths, hardware)
+        engine = _load_streaming_engine(config, paths, hardware, license_policy)
         return make_engine_installer(
             engine, lambda use_case, loaded: use_case.set_streaming_engine(loaded),
         )
-    engine = _load_engine_with_fallback(config, paths, registry, hardware)
+    engine = _load_engine_with_fallback(
+        config, paths, registry, hardware, license_policy,
+    )
     return make_engine_installer(
         engine, lambda use_case, loaded: use_case.set_engine(loaded),
     )
@@ -330,6 +346,7 @@ def _load_engine_and_attach(
     paths: AppPaths,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
     *,
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
@@ -346,7 +363,7 @@ def _load_engine_and_attach(
     milestone("engine-load-started")
     try:
         installer = _load_active_engine_installer(
-            config, paths, registry, hardware,
+            config, paths, registry, hardware, license_policy,
         )
         installer(use_case)
     except Exception as exc:
@@ -396,6 +413,7 @@ def _spawn_engine_load_thread(
     paths: AppPaths,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
     *,
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
@@ -403,7 +421,7 @@ def _spawn_engine_load_thread(
 ) -> None:
     thread = threading.Thread(
         target=_load_engine_and_attach,
-        args=(config, paths, registry, hardware),
+        args=(config, paths, registry, hardware, license_policy),
         kwargs={
             "use_case": use_case,
             "state_machine": state_machine,
@@ -492,13 +510,16 @@ def _build_settings_service(
     state_machine: AppStateMachine,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> SettingsService:
     install_cache = ModelInstallationCache(model_manager, event_bus)
     downloads = DownloadCoordinator(model_manager)
     hot_swap = EngineHotSwapCoordinator(
         use_case=use_case,
         event_bus=event_bus,
-        loader=lambda: _load_active_engine_installer(config, paths, registry, hardware),
+        loader=lambda: _load_active_engine_installer(
+            config, paths, registry, hardware, license_policy,
+        ),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
     )
@@ -511,6 +532,7 @@ def _build_settings_service(
         hot_swap=hot_swap,
         state_machine=state_machine,
         dictionary_path=paths.dictionary_path,
+        license_policy=license_policy,
         registry=registry,
         hardware=hardware,
     )
@@ -531,6 +553,7 @@ def build_first_run_settings_service(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     dictionary_path: Path,
+    license_policy: LicensePolicy,
 ) -> SettingsService:
     """Build a SettingsService for the first-run setup window.
 
@@ -551,6 +574,7 @@ def build_first_run_settings_service(
         hot_swap=hot_swap,
         state_machine=AppStateMachine(event_bus),
         dictionary_path=dictionary_path,
+        license_policy=license_policy,
         registry=registry,
         hardware=hardware,
     )
@@ -565,6 +589,7 @@ def build_app(
     *,
     registry: EngineRegistry,
     hardware: HardwareProfile,
+    license_policy: LicensePolicy,
 ) -> SystemTrayApp:
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
@@ -650,6 +675,7 @@ def build_app(
     )
     model_manager = build_composite_model_manager(
         paths.models_dir, download_manager, active_engine_provider,
+        license_policy,
     )
 
     settings_service = _build_settings_service(
@@ -662,6 +688,7 @@ def build_app(
         state_machine=state_machine,
         registry=registry,
         hardware=hardware,
+        license_policy=license_policy,
     )
 
     settings_window_ref: dict[str, TkSettingsWindow | None] = {"current": None}
@@ -714,7 +741,7 @@ def build_app(
     )
 
     _spawn_engine_load_thread(
-        config, paths, registry, hardware,
+        config, paths, registry, hardware, license_policy,
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,

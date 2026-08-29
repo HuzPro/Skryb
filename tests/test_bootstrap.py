@@ -4,11 +4,15 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+import voicetotext.bootstrap as bootstrap
+from tests.fakes.config import FakeConfig
+from tests.fakes.licensing import AllowAllLicensePolicy
 from voicetotext.bootstrap import (
     _build_output,
     _build_streaming_engine_for,
     _load_engine_and_attach,
     _load_engine_with_fallback,
+    _load_streaming_engine,
     _make_active_engine_provider,
     _warmup_safely,
     apply_settings,
@@ -20,7 +24,9 @@ from voicetotext.core.events import EngineLoadFailedEvent, StateChangedEvent
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
+    LicenseNotAcceptedError,
 )
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
@@ -40,6 +46,7 @@ from voicetotext.transcription.engine_types import HardwareProfile
 
 _HARDWARE = MagicMock()
 _REGISTRY = MagicMock()
+_ALLOW_ALL_LICENCES = AllowAllLicensePolicy()
 
 _ROCM_PROFILE = HardwareProfile(
     kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
@@ -82,7 +89,7 @@ class TestLoadEngineWithFallback:
         mock_create.return_value = engine
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
         )
 
         assert result is engine
@@ -97,12 +104,14 @@ class TestLoadEngineWithFallback:
         config = MagicMock()
         paths = MagicMock()
 
-        result = _load_engine_with_fallback(config, paths, _REGISTRY, _HARDWARE)
+        result = _load_engine_with_fallback(
+            config, paths, _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+        )
 
         assert result is cpu_engine
         first_call, second_call = mock_create.call_args_list
         assert first_call.kwargs.get("device_override") is None
-        assert second_call.kwargs == {"device_override": "cpu"}
+        assert second_call.kwargs["device_override"] == "cpu"
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_catch_os_error_from_missing_model_files(self, mock_create):
@@ -112,7 +121,7 @@ class TestLoadEngineWithFallback:
         mock_create.side_effect = [broken_engine, cpu_engine]
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
         )
 
         assert result is cpu_engine
@@ -127,7 +136,7 @@ class TestLoadEngineWithFallback:
 
         with pytest.raises(RuntimeError):
             _load_engine_with_fallback(
-                MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+                MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             )
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
@@ -141,7 +150,7 @@ class TestLoadEngineWithFallback:
         mock_create.return_value = engine
 
         _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
         )
 
         engine.load_model.assert_called_once()
@@ -164,7 +173,7 @@ class TestLoadEngineWithFallback:
         mock_create.return_value = engine
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
         )
 
         assert result is engine
@@ -179,7 +188,7 @@ class TestLoadEngineWithFallback:
         mock_create.side_effect = [gpu_engine, cpu_engine]
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
         )
 
         assert result is cpu_engine
@@ -201,14 +210,19 @@ class TestLoadEngineWithFallback:
         config = MagicMock()
         paths = MagicMock()
 
-        _load_engine_with_fallback(config, paths, _REGISTRY, _HARDWARE)
+        _load_engine_with_fallback(
+            config, paths, _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+        )
 
         # Both calls go through the SAME factory function, which routes
         # to the SAME engine_id from config - only device_override differs.
         first_call, second_call = mock_create.call_args_list
         assert first_call.args == (config, paths, _REGISTRY, _HARDWARE)
         assert second_call.args == (config, paths, _REGISTRY, _HARDWARE)
-        assert second_call.kwargs == {"device_override": "cpu"}
+        assert second_call.kwargs["device_override"] == "cpu"
+        assert first_call.kwargs["license_policy"] is (
+            second_call.kwargs["license_policy"]
+        )
 
 
 class TestLoadEngineAndAttach:
@@ -227,7 +241,7 @@ class TestLoadEngineAndAttach:
         use_case = MagicMock()
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=use_case,
             state_machine=state_machine,
             event_bus=bus,
@@ -242,7 +256,7 @@ class TestLoadEngineAndAttach:
         mock_create.return_value = MagicMock()
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -266,7 +280,7 @@ class TestLoadEngineAndAttach:
         use_case = MagicMock()
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=use_case,
             state_machine=state_machine,
             event_bus=bus,
@@ -290,7 +304,7 @@ class TestLoadEngineAndAttach:
         mock_create.side_effect = [broken, broken]
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -324,7 +338,7 @@ class TestLoadEngineAndAttachFailureSurface:
         bus.subscribe(EngineLoadFailedEvent, received.append)
 
         _load_engine_and_attach(
-            config, MagicMock(), _REGISTRY, _HARDWARE,
+            config, MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -356,7 +370,7 @@ class TestLoadEngineAndAttachFailureSurface:
         )
 
         _load_engine_and_attach(
-            config, MagicMock(), _REGISTRY, _HARDWARE,
+            config, MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -376,13 +390,81 @@ class TestLoadEngineAndAttachFailureSurface:
         bus.subscribe(EngineLoadFailedEvent, received.append)
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
         )
 
         assert received == []
+
+
+class TestLicenceGateAtStartupLoad:
+    """Startup loads weights, so it is a gated path. The batch loader
+    inherits the check from ``create_engine_for_active_model``; the
+    streaming loader bypasses that factory entirely and asserts for
+    itself, so both are exercised here.
+    """
+
+    _GATED = "crisperwhisper-2.0-turbo"
+
+    def _gated_config(self) -> FakeConfig:
+        return FakeConfig({"transcription.model_size": self._GATED})
+
+    def test_streaming_load_should_refuse_before_building_an_engine(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = SimpleNamespace(models_dir=tmp_path)
+
+        with pytest.raises(LicenseNotAcceptedError, match=self._GATED):
+            _load_streaming_engine(
+                self._gated_config(), paths, _HARDWARE,
+                LicensePolicy(FakeConfig()),
+            )
+
+    def test_streaming_load_should_leave_an_ungated_model_alone(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        engine = MagicMock()
+        monkeypatch.setattr(
+            bootstrap, "_build_streaming_engine_for",
+            lambda model_info, paths: engine,
+        )
+        config = FakeConfig(
+            {"transcription.model_size": "nemotron-speech-streaming-en-0.6b"},
+        )
+
+        loaded = _load_streaming_engine(
+            config, SimpleNamespace(models_dir=tmp_path), _HARDWARE,
+            LicensePolicy(FakeConfig()),
+        )
+
+        assert loaded is engine
+
+    def test_batch_load_should_publish_the_licence_failure_and_recover(
+        self, tmp_path: Path,
+    ) -> None:
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        received: list[EngineLoadFailedEvent] = []
+        bus.subscribe(EngineLoadFailedEvent, received.append)
+        use_case = MagicMock()
+
+        _load_engine_and_attach(
+            self._gated_config(),
+            SimpleNamespace(models_dir=tmp_path),
+            build_engine_registry(),
+            _ROCM_PROFILE,
+            LicensePolicy(FakeConfig()),
+            use_case=use_case,
+            state_machine=state_machine,
+            event_bus=bus,
+        )
+
+        assert len(received) == 1
+        assert "crisperwhisper-nc" in received[0].error
+        assert state_machine.state == AppState.IDLE
+        use_case.set_engine.assert_not_called()
 
 
 class TestWarmupSafelyErrorClassification:

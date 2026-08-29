@@ -46,6 +46,7 @@ def service() -> MagicMock:
     result.current_draft.return_value = _draft()
     result.engine_candidates_for.return_value = ()
     result.supports_streaming_hardware.return_value = True
+    result.license_acceptance_required.return_value = False
     return result
 
 
@@ -71,6 +72,7 @@ def streaming_service() -> MagicMock:
     }
     result.supports_streaming_hardware.return_value = True
     result.engine_candidates_for.return_value = ()
+    result.license_acceptance_required.return_value = False
     return result
 
 
@@ -166,6 +168,64 @@ class TestDownloadActions:
         page.request_download(_NEMOTRON)
 
         assert received == [(_NEMOTRON, "unreachable")]
+
+
+class TestLicencePreflightOnDownload:
+    """The model manager refuses to fetch a gated model, and this page is
+    the only surface offering its terms - without a prompt here the model
+    could never be downloaded at all.
+    """
+
+    @pytest.fixture
+    def gated_service(self, service: MagicMock) -> MagicMock:
+        service.license_acceptance_required.side_effect = (
+            lambda name: name == _NEMOTRON
+        )
+        return service
+
+    def test_should_record_acceptance_before_starting_the_download(
+        self, tk_root, gated_service: MagicMock,
+    ) -> None:
+        page = TkTranscriptionPage(
+            tk_root, gated_service, confirm_license=lambda _parent, _terms: True,
+        )
+
+        page.request_download(_NEMOTRON)
+
+        gated_service.accept_license.assert_called_once_with(_NEMOTRON)
+        gated_service.start_download.assert_called_once_with(_NEMOTRON)
+
+        page.destroy()
+
+    def test_should_start_nothing_when_the_licence_is_declined(
+        self, tk_root, gated_service: MagicMock,
+    ) -> None:
+        page = TkTranscriptionPage(
+            tk_root, gated_service, confirm_license=lambda _parent, _terms: False,
+        )
+
+        page.request_download(_NEMOTRON)
+
+        assert gated_service.start_download.called is False
+        assert gated_service.accept_license.called is False
+
+        page.destroy()
+
+    def test_should_not_prompt_for_an_ungated_model(
+        self, tk_root, gated_service: MagicMock,
+    ) -> None:
+        prompted: list[bool] = []
+        page = TkTranscriptionPage(
+            tk_root, gated_service,
+            confirm_license=lambda _parent, _terms: bool(prompted.append(True)),
+        )
+
+        page.request_download(_PARAKEET)
+
+        assert prompted == []
+        gated_service.start_download.assert_called_once_with(_PARAKEET)
+
+        page.destroy()
 
 
 class TestRows:

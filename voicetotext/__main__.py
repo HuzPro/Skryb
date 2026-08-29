@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from voicetotext.core.paths import AppPaths
     from voicetotext.transcription.engine_registry import EngineRegistry
     from voicetotext.transcription.engine_types import HardwareProfile
+    from voicetotext.transcription.license_policy import LicensePolicy
     from voicetotext.transcription.model_manager import ModelManager
 
 
@@ -167,6 +168,7 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
         build_engine_registry,
         create_model_manager,
     )
+    from voicetotext.transcription.license_policy import LicensePolicy
 
     root = tkinter.Tk()
     root.withdraw()
@@ -179,6 +181,11 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
     config.load()
     milestone("config-loaded")
 
+    # The one licence policy for the whole process. First-run setup and
+    # ``build_app`` each build their own model manager, so a second
+    # instance here would give them separate acceptance state.
+    license_policy = LicensePolicy(config)
+
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
         migrate_removed_models,
@@ -189,7 +196,9 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
 
     event_bus = SimpleEventBus()
     download_manager = DownloadManager(event_bus=event_bus)
-    model_manager = create_model_manager(paths.models_dir, download_manager)
+    model_manager = create_model_manager(
+        paths.models_dir, download_manager, license_policy,
+    )
     registry = build_engine_registry()
 
     _consume_torch_prewarm(prewarm)
@@ -208,7 +217,7 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
     ):
         _run_first_time_setup(
             config, model_manager, event_bus, root, registry, hardware,
-            paths.dictionary_path,
+            paths.dictionary_path, license_policy,
         )
 
     if not _configured_model_installed(config, model_manager):
@@ -225,6 +234,7 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
         download_manager=download_manager,
         registry=registry,
         hardware=hardware,
+        license_policy=license_policy,
     )
     app.run()
 
@@ -250,6 +260,7 @@ def _run_first_time_setup(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     dictionary_path: Path,
+    license_policy: LicensePolicy,
 ) -> None:
     from voicetotext.bootstrap import build_first_run_settings_service
     from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
@@ -263,6 +274,7 @@ def _run_first_time_setup(
         registry=registry,
         hardware=hardware,
         dictionary_path=dictionary_path,
+        license_policy=license_policy,
     )
     dispatcher = TkGuiThreadDispatcher(root)
     window = TkSettingsWindow(

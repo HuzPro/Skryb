@@ -21,7 +21,7 @@ os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 import time
 
-_REPO_ID = "Audio8/ARK-ASR-3B"
+_MODEL_NAME = "ark-asr-3b"
 
 
 def log(message: str) -> None:
@@ -40,12 +40,15 @@ def main() -> None:
     from tests.helpers.audio_file_loader import load_audio_file
     from voicetotext.core.paths import AppPaths
     from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
+    from voicetotext.transcription.model_info import get_model_info
 
     audio = load_audio_file(_fixture_path(name))
     log(f"clip={name} duration={audio.duration_seconds:.2f}s")
 
+    model_info = get_model_info(_MODEL_NAME)
     adapter = ArkAsrAdapter(
-        repo_id=_REPO_ID,
+        repo_id=model_info.repo_id,
+        revision=model_info.revision,
         device="cuda",
         model_dir=AppPaths().models_dir,
     )

@@ -18,6 +18,7 @@ from voicetotext.transcription.engine_types import (
     HardwareProfile,
 )
 from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapshot
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     ARK_ASR_MODELS,
@@ -129,6 +130,7 @@ def _build_ark_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
 
     return ArkAsrAdapter(
         repo_id=spec.repo_id,
+        revision=spec.revision,
         device=spec.device,
         model_dir=spec.model_dir,
     )
@@ -225,7 +227,7 @@ def engines_with_model_on_disk(
     installed: set[EngineId] = set()
     for engine_id, repo_id in _engine_repo_ids(model_info):
         repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
-        if repo_has_loadable_snapshot(repo_dir):
+        if repo_has_loadable_snapshot(repo_dir, model_info.revision):
             installed.add(engine_id)
     return frozenset(installed)
 
@@ -245,12 +247,14 @@ def create_engine_for_active_model(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     *,
+    license_policy: LicensePolicy,
     device_override: str | None = None,
 ) -> TranscriptionEngine:
     model_name = config.get(
         "transcription.model_size", DEFAULT_MODEL,
     )
     model_info = get_model_info(model_name)
+    license_policy.assert_accepted(model_info)
     installed = engines_with_model_on_disk(model_info, paths.models_dir)
     engine_id = resolve_engine_id(
         config, model_info, hardware, registry,
@@ -263,6 +267,7 @@ def create_engine_for_active_model(
         language=config.get("transcription.language", "en"),
         beam_size=_resolve_beam_size(config, engine_id),
         model_dir=paths.models_dir,
+        revision=model_info.revision,
         crisperwhisper_mode=_resolve_crisperwhisper_mode(config, engine_id),
     )
     return registry.build(engine_id, spec)
@@ -304,11 +309,13 @@ def _resolve_device(
 def create_model_manager(
     models_dir: Path,
     download_manager: DownloadManager,
+    license_policy: LicensePolicy,
 ) -> ModelManager:
     return build_composite_model_manager(
         models_dir,
         download_manager,
         active_engine_provider=lambda: "nano_parakeet",
+        license_policy=license_policy,
     )
 
 
@@ -316,6 +323,7 @@ def build_composite_model_manager(
     models_dir: Path,
     download_manager: DownloadManager,
     active_engine_provider: Callable[[], EngineId],
+    license_policy: LicensePolicy,
 ) -> ModelManager:
     """Build a Composite ModelManager covering every engine cache.
 
@@ -364,6 +372,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=parakeet_models,
+        license_policy=license_policy,
     )
     nemotron_streaming_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -371,6 +380,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=nemotron_streaming_models,
+        license_policy=license_policy,
     )
     ark_asr_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -378,6 +388,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=ark_asr_models,
+        license_policy=license_policy,
     )
     qwen3_asr_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -385,6 +396,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=qwen3_asr_models,
+        license_policy=license_policy,
     )
     granite_turboctc_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -392,6 +404,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=granite_turboctc_models,
+        license_policy=license_policy,
     )
     crisperwhisper_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -399,6 +412,7 @@ def build_composite_model_manager(
         resolver=resolver,
         file_downloader=file_downloader,
         models=crisperwhisper_models,
+        license_policy=license_policy,
     )
 
     return CompositeModelManager(

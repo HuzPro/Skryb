@@ -38,25 +38,29 @@ def ensure_models_downloaded(
     """Download any (engine, repo) pair not already complete on disk.
 
     Idempotent - repos whose snapshot already has weights are skipped.
-    Every engine resolves its repo through ``ModelInfo.repo_id``.
+    Every engine resolves its repo and pinned commit through
+    ``ModelInfo``, so a pinned engine benchmarks the same commit it
+    ships. ``revision or None`` because HuggingFace reads ``None`` as
+    "default branch" and an empty string resolves nothing.
     """
     from huggingface_hub import snapshot_download
     from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
     from voicetotext.transcription.model_info import ALL_MODELS
 
-    needed: set[tuple[str, str]] = set()
+    needed: set[tuple[str, str, str]] = set()
     for combo in combos:
         info = ALL_MODELS[combo.model_name]
-        needed.add((combo.engine_id, info.repo_id))
+        needed.add((combo.engine_id, info.repo_id, info.revision))
 
-    for engine_id, repo_id in sorted(needed):
-        if _repo_complete(models_dir, repo_id):
+    for engine_id, repo_id, revision in sorted(needed):
+        if _repo_complete(models_dir, repo_id, revision):
             log(f"  [skip] {engine_id:<16} {repo_id} - already on disk")
             continue
         log(f"  [download] {engine_id:<16} {repo_id} - fetching...")
         try:
             snapshot_download(
                 repo_id=repo_id,
+                revision=revision or None,
                 cache_dir=str(models_dir),
                 ignore_patterns=list(_HF_IGNORE_PATTERNS),
                 local_files_only=False,
@@ -75,7 +79,7 @@ def ensure_models_downloaded(
             )
 
 
-def _repo_complete(models_dir: Path, repo_id: str) -> bool:
+def _repo_complete(models_dir: Path, repo_id: str, revision: str) -> bool:
     from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
 
     snapshots = models_dir / f"models--{repo_id.replace('/', '--')}" / "snapshots"
@@ -84,5 +88,5 @@ def _repo_complete(models_dir: Path, repo_id: str) -> bool:
     return any(
         HuggingFaceModelManager._snapshot_has_complete_model(snap)
         for snap in snapshots.iterdir()
-        if snap.is_dir()
+        if snap.is_dir() and revision in ("", snap.name)
     )

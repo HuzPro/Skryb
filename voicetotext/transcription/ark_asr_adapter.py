@@ -17,12 +17,6 @@ from voicetotext.transcription.result import TranscriptionResult
 _logger = logging.getLogger(__name__)
 
 
-# Supply-chain pin: ARK-ASR loads with ``trust_remote_code``, so every
-# load resolves this exact audited commit of ``Audio8/ARK-ASR-3B``. If
-# upstream moves ``main``, the new (un-reviewed) code never executes
-# here - the load fails until the pin is bumped deliberately.
-ARK_ASR_REVISION = "1e28271b79edc97635783bea65abc89195a09ed3"
-
 _SAMPLE_RATE = 16000
 # The model card's reference inference caps audio at 30 s
 # (``audio_max_length=30 * 16000``) - the Whisper-style encoder's
@@ -129,17 +123,26 @@ class ArkAsrAdapter(TranscriptionEngine):
     """ARK-ASR-3B engine backed by HuggingFace Transformers remote code.
 
     Whisper-style RoPE audio encoder -> MLP adapter -> Qwen decoder
-    (``Audio8/ARK-ASR-3B``), pinned to :data:`ARK_ASR_REVISION`. Runs
-    BF16 with SDPA attention on GPU (CUDA/ROCm), FP32 on CPU.
+    (``Audio8/ARK-ASR-3B``). Runs BF16 with SDPA attention on GPU
+    (CUDA/ROCm), FP32 on CPU.
+
+    *revision* is the audited commit from ``ModelInfo.revision`` - the
+    same one the downloader fetched, so load and download can never
+    disagree about which code ``trust_remote_code`` executes. Note what
+    the pin does and does not buy: it selects *which* commit is
+    requested. It does not verify the bytes that arrive, which rest on
+    TLS alone.
     """
 
     def __init__(
         self,
         repo_id: str,
+        revision: str,
         device: str,
         model_dir: Path,
     ) -> None:
         self._repo_id = repo_id
+        self._revision = revision
         self._device = device
         self._model_dir = model_dir
         self._backend: _ArkAsrBackend | None = None
@@ -178,7 +181,7 @@ class ArkAsrAdapter(TranscriptionEngine):
         return str(
             snapshot_download(
                 repo_id=self._repo_id,
-                revision=ARK_ASR_REVISION,
+                revision=self._revision,
                 cache_dir=str(self._model_dir),
                 local_files_only=True,
             )

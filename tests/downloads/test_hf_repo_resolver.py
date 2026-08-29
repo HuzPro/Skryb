@@ -1,6 +1,16 @@
 from unittest.mock import MagicMock
 
-from voicetotext.downloads.hf_repo_resolver import HfRepoResolver, ResolvedFile
+import pytest
+
+from voicetotext.downloads.hf_repo_resolver import (
+    HfRepoResolver,
+    ResolvedFile,
+    RevisionMismatchError,
+)
+
+
+_PINNED_SHA = "1e28271b79edc97635783bea65abc89195a09ed3"
+_OTHER_SHA = "0000000000000000000000000000000000000000"
 
 
 def _fake_sibling(name: str, size: int):
@@ -29,10 +39,10 @@ class TestHfRepoResolverListFiles:
         )
 
         resolver = HfRepoResolver(api=api)
-        commit_sha, files = resolver.resolve("nvidia/parakeet-tdt-0.6b-v3")
+        resolved = resolver.resolve("nvidia/parakeet-tdt-0.6b-v3")
 
-        assert commit_sha == "abc123"
-        assert files == [
+        assert resolved.canonical_commit == "abc123"
+        assert resolved.files == [
             ResolvedFile(
                 filename="config.json",
                 size=1983,
@@ -52,8 +62,73 @@ class TestHfRepoResolverListFiles:
         HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
 
         api.repo_info.assert_called_once_with(
-            "nvidia/parakeet-tdt-0.6b-v3", files_metadata=True
+            "nvidia/parakeet-tdt-0.6b-v3", revision=None, files_metadata=True
         )
+
+
+class TestHfRepoResolverRevision:
+    """An unpinned model tracks ``main``; a pinned one gets exactly the
+    commit it asked for, or an error. HuggingFace reads ``revision=None``
+    as "default branch" - an empty string would select the ``/revision/``
+    endpoint and resolve nothing.
+    """
+
+    def test_should_track_main_when_no_revision_is_requested(self):
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(sha="head", files=[])
+
+        resolved = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
+
+        assert api.repo_info.call_args.kwargs["revision"] is None
+        assert resolved.requested_revision == ""
+        assert resolved.canonical_commit == "head"
+
+    def test_should_request_the_pinned_commit(self):
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(sha=_PINNED_SHA, files=[])
+
+        resolved = HfRepoResolver(api=api).resolve(
+            "Audio8/ARK-ASR-3B", _PINNED_SHA,
+        )
+
+        assert api.repo_info.call_args.kwargs["revision"] == _PINNED_SHA
+        assert resolved.requested_revision == _PINNED_SHA
+        assert resolved.canonical_commit == _PINNED_SHA
+
+    def test_should_point_file_urls_at_the_pinned_commit(self):
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(
+            sha=_PINNED_SHA, files=[_fake_sibling("config.json", 10)],
+        )
+
+        resolved = HfRepoResolver(api=api).resolve(
+            "Audio8/ARK-ASR-3B", _PINNED_SHA,
+        )
+
+        assert resolved.files[0].url == (
+            f"https://huggingface.co/Audio8/ARK-ASR-3B/resolve/"
+            f"{_PINNED_SHA}/config.json"
+        )
+
+    def test_should_raise_when_pinned_commit_resolves_elsewhere(self):
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(sha=_OTHER_SHA, files=[])
+
+        with pytest.raises(RevisionMismatchError) as exc_info:
+            HfRepoResolver(api=api).resolve("Audio8/ARK-ASR-3B", _PINNED_SHA)
+
+        assert _PINNED_SHA in str(exc_info.value)
+        assert _OTHER_SHA in str(exc_info.value)
+
+    def test_should_accept_a_branch_resolving_to_its_head_commit(self):
+        # Only a full 40-hex request is checkable; a branch legitimately
+        # resolves to whatever commit it points at today.
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(sha=_OTHER_SHA, files=[])
+
+        resolved = HfRepoResolver(api=api).resolve("org/repo", "refs/pr/1")
+
+        assert resolved.canonical_commit == _OTHER_SHA
 
 
 class TestHfRepoResolverIgnorePatterns:
@@ -73,7 +148,7 @@ class TestHfRepoResolverIgnorePatterns:
             ],
         )
 
-        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
+        files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3").files
 
         names = [f.filename for f in files]
         assert names == ["config.json", "model.safetensors", "model.bin"]
@@ -89,7 +164,7 @@ class TestHfRepoResolverIgnorePatterns:
             ],
         )
 
-        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
+        files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3").files
 
         assert [f.filename for f in files] == ["config.json"]
 
@@ -104,7 +179,7 @@ class TestHfRepoResolverIgnorePatterns:
             ],
         )
 
-        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
+        files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3").files
 
         assert [f.filename for f in files] == ["model.safetensors"]
 
@@ -115,6 +190,6 @@ class TestHfRepoResolverIgnorePatterns:
         sibling.size = None
         api.repo_info.return_value = _fake_repo_info(sha="sha", files=[sibling])
 
-        _, files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3")
+        files = HfRepoResolver(api=api).resolve("nvidia/parakeet-tdt-0.6b-v3").files
 
         assert files == []

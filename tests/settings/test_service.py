@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
+from tests.fakes.licensing import AllowAllLicensePolicy
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -34,6 +35,9 @@ from voicetotext.settings.service import (
     StateChangeListener,
 )
 from voicetotext.settings.settings_draft import SettingsDraft
+from voicetotext.core.exceptions import LicenseNotAcceptedError
+from voicetotext.transcription.license_policy import LicensePolicy
+from voicetotext.transcription.model_info import ALL_MODELS
 from tests.settings.fakes import FakeConfig, FakeModelManager
 
 
@@ -56,6 +60,7 @@ def _build_service(
     hardware=None,
     models=None,
     dictionary_path: Path | None = None,
+    license_policy=None,
 ):
     config_data = {
         "transcription.model_size": _PARAKEET,
@@ -89,6 +94,7 @@ def _build_service(
         hot_swap=hot_swap,
         state_machine=state_machine,
         dictionary_path=dictionary_path or Path("dictionary.json"),
+        license_policy=license_policy or AllowAllLicensePolicy(),
         registry=registry,
         hardware=hardware,
     )
@@ -435,6 +441,81 @@ class TestTriggerEngineSwap:
         dispatcher.drain_all()
 
 
+class TestLicenceConsent:
+    """The facade exposes the three operations the UI needs - ask, show,
+    record - and refuses a hot-swap onto a model whose terms are not
+    accepted, so persisting a selection cannot smuggle a gated model
+    into the loader.
+    """
+
+    _GATED = "crisperwhisper-2.0-turbo"
+
+    def _gated_service(self, config: FakeConfig):
+        service, *_ = _build_service(
+            config_overrides={"transcription.model_size": self._GATED},
+            installed={self._GATED: True},
+            license_policy=LicensePolicy(config),
+        )
+        return service
+
+    def test_should_report_acceptance_required_for_a_gated_model(self):
+        service = self._gated_service(FakeConfig())
+
+        assert service.license_acceptance_required(self._GATED) is True
+
+    def test_should_report_no_acceptance_required_for_an_ungated_model(self):
+        service = self._gated_service(FakeConfig())
+
+        assert service.license_acceptance_required(_PARAKEET) is False
+
+    def test_should_report_no_acceptance_required_for_an_unknown_model(self):
+        service = self._gated_service(FakeConfig())
+
+        assert service.license_acceptance_required("not-in-the-catalog") is False
+
+    def test_should_expose_the_shipped_terms_for_a_gated_model(self):
+        service = self._gated_service(FakeConfig())
+
+        terms = service.license_terms(self._GATED)
+
+        assert terms.license_id == "crisperwhisper-nc"
+        assert terms.url == ALL_MODELS[self._GATED].license_url
+        assert terms.text.startswith("# CrisperWhisper 2.0")
+
+    def test_should_clear_the_requirement_once_the_licence_is_accepted(self):
+        service = self._gated_service(FakeConfig())
+
+        service.accept_license(self._GATED)
+
+        assert service.license_acceptance_required(self._GATED) is False
+
+    def test_should_refuse_a_hot_swap_onto_an_unaccepted_gated_model(self):
+        service = self._gated_service(FakeConfig())
+
+        with pytest.raises(LicenseNotAcceptedError, match=self._GATED):
+            service.trigger_engine_swap()
+
+    def test_should_allow_a_hot_swap_once_the_licence_is_accepted(self):
+        config = FakeConfig()
+        service = self._gated_service(config)
+        service.accept_license(self._GATED)
+
+        service.trigger_engine_swap()
+
+        assert service.is_engine_swapping() is False
+
+    def test_should_leave_a_hot_swap_onto_an_ungated_model_alone(self):
+        service, _, _, bus, _ = _build_service(
+            license_policy=LicensePolicy(FakeConfig()),
+        )
+        started = []
+        bus.subscribe(EngineLoadStartedEvent, started.append)
+
+        service.trigger_engine_swap()
+
+        assert len(started) == 1
+
+
 class TestListenerFanout:
     def test_should_forward_download_progress_to_listeners(self):
         service, _, _, bus, _ = _build_service()
@@ -535,6 +616,7 @@ class TestIsEngineSwapping:
             hot_swap=hot_swap,
             state_machine=AppStateMachine(bus),
             dictionary_path=Path("dictionary.json"),
+            license_policy=AllowAllLicensePolicy(),
         )
 
         assert service.is_engine_swapping() is False

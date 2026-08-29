@@ -5,4 +5,4 @@
 # machines.
 --extra-index-url https://download.pytorch.org/whl/cpu
 -r requirements-all.txt
-torch>=2.2.0
+torch>=2.5

@@ -22,6 +22,7 @@ from voicetotext.transcription.result import TranscriptionResult
 
 
 _REPO_ID = "Audio8/ARK-ASR-3B"
+_REVISION = "1e28271b79edc97635783bea65abc89195a09ed3"
 _PAD_ID = 0
 _EOS_ID = 5
 _AUDIO_TOKEN_ID = 9
@@ -89,11 +90,12 @@ def _wire_backend() -> tuple[MagicMock, MagicMock, MagicMock]:
     return model, processor, tokenizer
 
 
-def _make_adapter(device: str = "cuda"):
+def _make_adapter(device: str = "cuda", revision: str = _REVISION):
     from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
 
     return ArkAsrAdapter(
         repo_id=_REPO_ID,
+        revision=revision,
         device=device,
         model_dir=Path("/tmp/models"),
     )
@@ -101,19 +103,19 @@ def _make_adapter(device: str = "cuda"):
 
 class TestArkAsrAdapterLoadModel:
     @patch.dict("sys.modules", _mocked_modules())
-    def test_should_resolve_snapshot_pinned_to_audited_revision(self) -> None:
+    def test_should_resolve_snapshot_at_the_injected_revision(self) -> None:
+        # The pin lives on ``ModelInfo.revision`` so downloader and
+        # loader can never disagree about which remote code runs.
         import huggingface_hub
 
-        from voicetotext.transcription.ark_asr_adapter import ARK_ASR_REVISION
-
         _wire_backend()
-        adapter = _make_adapter()
+        adapter = _make_adapter(revision="c0ffee")
 
         adapter.load_model()
 
         huggingface_hub.snapshot_download.assert_called_once_with(
             repo_id=_REPO_ID,
-            revision=ARK_ASR_REVISION,
+            revision="c0ffee",
             cache_dir=str(Path("/tmp/models")),
             local_files_only=True,
         )

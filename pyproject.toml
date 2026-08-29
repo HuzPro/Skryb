@@ -13,7 +13,8 @@ license-files = ["LICENSE.txt", "NOTICE"]
 authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "torch>=2.2.0",
+    # 2.5 is the PyTorch floor transformers 5.16 documents.
+    "torch>=2.5",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
     # Tkinter (stdlib) drives the GUI; Pillow only renders the tray icon
@@ -23,14 +24,16 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
-    # Transformers engines: GraniteSpeech5ForCTC landed in 5.16 (the
+    # Transformers engines: GraniteSpeech5ForCTC landed in 5.16.0 (the
     # highest floor; Qwen3-ASR needs 5.13, ARK-ASR 4.57.6, CrisperWhisper
-    # 4.40). librosa and soundfile are imported by ARK's remote processing
-    # code; torchaudio feeds Granite's log-mel feature extractor.
-    "transformers>=5.16.1",
+    # 4.40), and the upper bound keeps a future major out until an engine
+    # is tested against it. librosa and soundfile are imported by ARK's
+    # remote processing code; torchaudio feeds Granite's log-mel feature
+    # extractor.
+    "transformers>=5.16.0,<6",
     "librosa>=0.10.0",
     "soundfile>=0.12.0",
-    "torchaudio>=2.2.0",
+    "torchaudio>=2.5",
     "text2num>=3.1",
     "jellyfish>=1.0",
 ]
@@ -76,3 +79,10 @@ filterwarnings = ["error"]
 # wheel build errors on the flat layout.
 [tool.setuptools.packages.find]
 include = ["voicetotext*"]
+
+# The gated-model licence texts are runtime resources: the app displays
+# them and hashes them to record consent. Undeclared, they would be
+# absent from the installed wheel and the gate would have no terms to
+# show.
+[tool.setuptools.package-data]
+voicetotext = ["licenses/*.md"]
