@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -28,6 +29,16 @@ _PINNED_MODEL = ModelInfo(
 )
 
 _GATED_MODEL_NAME = "crisperwhisper-2.0-turbo"
+
+_EXAMPLE_MODEL = ModelInfo(
+    name="example-transformers", size_mb=10, description="Example",
+    repo_id="example/transformers", compatible_engines=("nano_parakeet",),
+)
+
+_SHARD_NAMES = (
+    "model-00001-of-00002.safetensors",
+    "model-00002-of-00002.safetensors",
+)
 
 
 def _make_manager(
@@ -66,6 +77,44 @@ def _write_nemo_snapshot(root: Path, *, with_ref: bool = True) -> Path:
     if with_ref:
         _write_refs_main(model_dir)
     return model_dir
+
+
+def _write_transformers_snapshot(root: Path, weight_files: dict[str, str]) -> None:
+    model_dir = root / "models--example--transformers"
+    snapshot = model_dir / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").touch()
+    for filename, content in weight_files.items():
+        (snapshot / filename).write_text(content)
+    _write_refs_main(model_dir)
+
+
+def _shard_index_json(shard_names: tuple[str, ...]) -> str:
+    return json.dumps({
+        "metadata": {"total_size": 8},
+        "weight_map": {
+            f"encoder.layer.{position}.weight": name
+            for position, name in enumerate(shard_names)
+        },
+    })
+
+
+def _write_sharded_snapshot(
+    root: Path, *, shards_on_disk: tuple[str, ...], index_text: str = "",
+) -> None:
+    weight_files = {
+        "model.safetensors.index.json": index_text
+        or _shard_index_json(_SHARD_NAMES),
+    }
+    weight_files.update({shard_name: "" for shard_name in shards_on_disk})
+    _write_transformers_snapshot(root, weight_files)
+
+
+def _example_model_is_installed(tmp_path: Path) -> bool:
+    manager = _make_manager(
+        tmp_path, models={_EXAMPLE_MODEL.name: _EXAMPLE_MODEL},
+    )
+    return manager.is_installed(_EXAMPLE_MODEL.name)
 
 
 def _pinned_manager(tmp_path: Path) -> HuggingFaceModelManager:
@@ -119,23 +168,59 @@ class TestHuggingFaceModelManagerInstallation:
 
         assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
 
-    def test_should_accept_sharded_safetensors_layout(
+    def test_should_accept_single_file_safetensors_layout(
         self, tmp_path: Path,
     ) -> None:
-        info = ModelInfo(
-            name="example-sharded", size_mb=10, description="Example",
-            repo_id="example/sharded", compatible_engines=("nano_parakeet",),
+        _write_transformers_snapshot(tmp_path, {"model.safetensors": ""})
+
+        assert _example_model_is_installed(tmp_path) is True
+
+
+class TestShardedSafetensorsInstallation:
+    """``model.safetensors.index.json`` is a manifest, so its presence
+    proves nothing about the weights: a cancelled 8 GB download leaves
+    the index on disk beside zero shards. Only every shard the index
+    names makes the snapshot loadable.
+    """
+
+    def test_should_accept_snapshot_holding_every_shard(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_sharded_snapshot(tmp_path, shards_on_disk=_SHARD_NAMES)
+
+        assert _example_model_is_installed(tmp_path) is True
+
+    def test_should_reject_index_with_no_shard_on_disk(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_sharded_snapshot(tmp_path, shards_on_disk=())
+
+        assert _example_model_is_installed(tmp_path) is False
+
+    def test_should_reject_index_with_only_some_shards_on_disk(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_sharded_snapshot(tmp_path, shards_on_disk=_SHARD_NAMES[:1])
+
+        assert _example_model_is_installed(tmp_path) is False
+
+    def test_should_reject_unparseable_index(self, tmp_path: Path) -> None:
+        _write_sharded_snapshot(
+            tmp_path, shards_on_disk=_SHARD_NAMES, index_text="{ not json",
         )
-        model_dir = tmp_path / "models--example--sharded"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "config.json").touch()
-        (snapshot / "model.safetensors.index.json").touch()
-        _write_refs_main(model_dir)
 
-        manager = _make_manager(tmp_path, models={info.name: info})
+        assert _example_model_is_installed(tmp_path) is False
 
-        assert manager.is_installed(info.name) is True
+    def test_should_reject_index_without_a_weight_map(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_sharded_snapshot(
+            tmp_path,
+            shards_on_disk=_SHARD_NAMES,
+            index_text=json.dumps({"metadata": {"total_size": 8}}),
+        )
+
+        assert _example_model_is_installed(tmp_path) is False
 
 
 class TestPinnedModelInstallation:
