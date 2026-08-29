@@ -79,7 +79,7 @@ class TestBuildEngineRegistry:
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "ark_asr", "qwen3_asr",
-            "granite_turboctc", "crisperwhisper",
+            "crisperwhisper",
         }
 
     def test_crisperwhisper_should_have_lower_base_priority(self) -> None:
@@ -222,26 +222,6 @@ class TestCreateEngineForActiveModel:
         assert isinstance(engine, Qwen3AsrAdapter)
         assert engine._repo_id == "Qwen/Qwen3-ASR-1.7B-hf"
         assert engine._language == "en"
-
-    def test_should_build_granite_turboctc_adapter(self, tmp_path: Path) -> None:
-        from voicetotext.transcription.granite_turboctc_adapter import (
-            GraniteTurboCtcAdapter,
-        )
-
-        engine = create_engine_for_active_model(
-            _config(
-                model_size="granite-speech-5.0-470m-turboctc",
-                engine="granite_turboctc",
-                device="cpu",
-            ),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, GraniteTurboCtcAdapter)
-        assert engine._repo_id == "ibm-granite/granite-speech-5.0-470m-turboctc"
 
     def test_device_override_should_force_cpu(self, tmp_path: Path) -> None:
         engine = create_engine_for_active_model(
