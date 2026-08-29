@@ -9,7 +9,6 @@ from voicetotext.transcription.model_info import (
     ARK_ASR_MODELS,
     CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
-    GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     QWEN3_ASR_MODELS,
@@ -29,6 +28,7 @@ _REMOVED_MODEL_EXPECTATIONS = (
     ("large-v3", DEFAULT_MODEL),
     ("large-v3-turbo", DEFAULT_MODEL),
     ("granite-speech-4.1-2b", DEFAULT_MODEL),
+    ("granite-speech-5.0-470m-turboctc", DEFAULT_MODEL),
     ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
     ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
 )
@@ -37,6 +37,7 @@ _REMOVED_ENGINES = (
     "faster_whisper",
     "transformers",
     "granite_speech",
+    "granite_turboctc",
 )
 
 
@@ -134,7 +135,6 @@ class TestModelCatalog:
             | set(NEMOTRON_STREAMING_MODELS)
             | set(ARK_ASR_MODELS)
             | set(QWEN3_ASR_MODELS)
-            | set(GRANITE_TURBOCTC_MODELS)
             | set(CRISPERWHISPER_MODELS)
         )
 
