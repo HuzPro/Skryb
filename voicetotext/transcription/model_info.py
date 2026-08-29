@@ -17,10 +17,27 @@ DEFAULT_MODEL = "parakeet-tdt-0.6b-v3"
 
 @dataclass(frozen=True)
 class ModelInfo:
+    """Catalog entry for one downloadable model.
+
+    ``revision`` is the single source of truth for the commit both the
+    downloader fetches and the loader opens. An empty ``revision`` tracks
+    the repo's ``main`` branch, which is what every unpinned entry wants.
+
+    ``license_id`` names the licence a user must accept before this
+    model may be downloaded, built, or loaded; an empty ``license_id``
+    means ungated. It also names the shipped text
+    (``voicetotext/licenses/<license_id>.md``) the acceptance is keyed
+    to, so entries sharing one ``license_id`` share one acceptance.
+    ``license_url`` points at the upstream copy of that text at the
+    pinned revision, never at a moving branch.
+    """
     name: str
     size_mb: int
     description: str
     repo_id: str = ""
+    revision: str = ""
+    license_id: str = ""
+    license_url: str = ""
     compatible_engines: tuple[EngineId, ...] = ()
     engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
 
@@ -76,6 +93,7 @@ ARK_ASR_MODELS: dict[str, ModelInfo] = {
         size_mb=8144,
         description="Top Open ASR leaderboard accuracy (19 languages, GPU)",
         repo_id="Audio8/ARK-ASR-3B",
+        revision="1e28271b79edc97635783bea65abc89195a09ed3",
         compatible_engines=("ark_asr",),
         engine_priorities=_ARK_ASR_ENGINE_PRIORITIES,
     ),
@@ -120,6 +138,11 @@ _CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"crisperwhisper": 40},
 )
 
+# One licence covers both variants: the LICENSE.md bytes at the two
+# pinned commits are byte-identical, so a single acceptance is correct
+# rather than a convenient guess.
+CRISPERWHISPER_LICENSE_ID = "crisperwhisper-nc"
+
 
 CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
     "crisperwhisper-2.0-turbo": ModelInfo(
@@ -130,6 +153,12 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
             "weights/outputs under non-commercial research license"
         ),
         repo_id="nyralabs/CrisperWhisper2.0_turbo",
+        revision="de0369c8a68025b7f6e86387b6eb5a3b369787c8",
+        license_id=CRISPERWHISPER_LICENSE_ID,
+        license_url=(
+            "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/"
+            "de0369c8a68025b7f6e86387b6eb5a3b369787c8/LICENSE.md"
+        ),
         compatible_engines=("crisperwhisper",),
         engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
     ),
@@ -141,6 +170,12 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
             "weights/outputs under non-commercial research license"
         ),
         repo_id="nyralabs/CrisperWhisper2.0_large",
+        revision="f4334f6e8193f2691212d49b20fa12d370e13896",
+        license_id=CRISPERWHISPER_LICENSE_ID,
+        license_url=(
+            "https://huggingface.co/nyralabs/CrisperWhisper2.0_large/blob/"
+            "f4334f6e8193f2691212d49b20fa12d370e13896/LICENSE.md"
+        ),
         compatible_engines=("crisperwhisper",),
         engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
     ),

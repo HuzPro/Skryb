@@ -5,6 +5,7 @@ from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
 from voicetotext.downloads.download_manager import DownloadHandle, DownloadManager
 from voicetotext.downloads.hf_repo_resolver import HfRepoResolver
 from voicetotext.downloads.model_download_job import ModelDownloadJob
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
 
@@ -12,7 +13,7 @@ from voicetotext.transcription.model_manager import ModelManager
 _CONFIG_FILENAME = "config.json"
 
 
-def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
+def repo_has_loadable_snapshot(repo_dir: Path, revision: str = "") -> bool:
     """Whether *repo_dir* holds a snapshot a ``local_files_only`` load can use.
 
     HuggingFace's ``snapshot_download(local_files_only=True)`` resolves the
@@ -28,9 +29,19 @@ def repo_has_loadable_snapshot(repo_dir: Path) -> bool:
     source of truth shared by :meth:`HuggingFaceModelManager.is_installed`
     and :func:`engine_factory.engines_with_model_on_disk`, so the install
     state shown in the UI can never disagree with what the loader can open.
+
+    A non-empty *revision* additionally demands that ``refs/main`` name
+    that exact commit. Going through ``refs/main`` rather than probing
+    ``snapshots/<revision>`` is what keeps the completion barrier intact:
+    the snapshot directory exists from the first byte written, so probing
+    it would report a half-downloaded pinned model as installed. Equality
+    also retires a legacy cache fetched before the pin existed - it sits
+    at a different commit and correctly reads as not installed.
     """
     commit_sha = _resolved_main_revision(repo_dir)
     if commit_sha is None:
+        return False
+    if revision and commit_sha != revision:
         return False
     snapshot = repo_dir / "snapshots" / commit_sha
     return (
@@ -53,6 +64,10 @@ class HuggingFaceModelManager(ModelManager):
     Keeps the existing HuggingFace cache layout
     (``models--org--repo/snapshots/<sha>/...``) so engines can load models
     with ``local_files_only=True`` without knowing how they got on disk.
+
+    ``license_policy`` is required, never defaulted: acquiring weights is
+    one of the paths the licence gate exists to cover, and a permissive
+    default here would be a bypass.
     """
 
     def __init__(
@@ -62,12 +77,14 @@ class HuggingFaceModelManager(ModelManager):
         resolver: HfRepoResolver,
         file_downloader: ChunkedFileDownloader,
         models: dict[str, ModelInfo],
+        license_policy: LicensePolicy,
     ) -> None:
         self._models_dir = models_dir
         self._download_manager = download_manager
         self._resolver = resolver
         self._file_downloader = file_downloader
         self._models = models
+        self._license_policy = license_policy
 
     # ------------------------------------------------------------------
     # Listing / inspection
@@ -82,7 +99,9 @@ class HuggingFaceModelManager(ModelManager):
     def is_installed(self, name: str) -> bool:
         if name not in self._models:
             return False
-        return repo_has_loadable_snapshot(self._model_cache_dir(name))
+        return repo_has_loadable_snapshot(
+            self._model_cache_dir(name), self._models[name].revision,
+        )
 
     @staticmethod
     def _snapshot_has_complete_model(snapshot: Path) -> bool:
@@ -114,12 +133,13 @@ class HuggingFaceModelManager(ModelManager):
 
     def download(self, name: str) -> DownloadHandle:
         info = self._models[name]
-        commit_sha, files = self._resolver.resolve(info.repo_id)
+        self._license_policy.assert_accepted(info)
+        resolved = self._resolver.resolve(info.repo_id, info.revision)
         job = ModelDownloadJob(
             job_id=name,
             repo_id=info.repo_id,
-            commit_sha=commit_sha,
-            files=files,
+            commit_sha=resolved.canonical_commit,
+            files=resolved.files,
             models_dir=self._models_dir,
             file_downloader=self._file_downloader,
         )

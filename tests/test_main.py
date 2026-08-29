@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.__main__ import (
     _apply_hf_cache_env_overrides,
     _apply_torch_env_overrides,
@@ -276,6 +277,66 @@ class TestBindingStartupOrder:
         assert build_app.call_args.kwargs["registry"] is registry
         assert build_app.call_args.kwargs["hardware"] is hardware
         app.run.assert_called_once_with()
+
+
+class TestOneLicensePolicyForTheProcess:
+    """First-run setup and ``build_app`` each build their own model
+    manager. Two policy instances would give them separate acceptance
+    state, so a licence accepted during setup would be asked for again -
+    or worse, silently missing - once the app proper starts.
+    """
+
+    def _run_with_first_time_setup(self, tmp_path: Path) -> tuple:
+        config = MagicMock()
+        config.has_persisted_value.return_value = True
+        config.get.return_value = "parakeet-tdt-0.6b-v3"
+        manager = MagicMock()
+        manager.is_installed.return_value = True
+        paths = SimpleNamespace(
+            config_path=Path("config.json"),
+            models_dir=tmp_path,
+            dictionary_path=tmp_path / "dictionary.json",
+            is_first_run=lambda: True,
+        )
+        future: Future[ModuleType] = Future()
+
+        with (
+            patch("tkinter.Tk", return_value=MagicMock()),
+            patch(
+                "voicetotext.core.json_config_adapter.JsonConfigAdapter",
+                return_value=config,
+            ),
+            patch("voicetotext.transcription.model_info.migrate_removed_models"),
+            patch("voicetotext.transcription.model_info.migrate_engine_field"),
+            patch("voicetotext.downloads.download_manager.DownloadManager"),
+            patch(
+                "voicetotext.transcription.engine_factory.create_model_manager",
+                return_value=manager,
+            ) as create_model_manager,
+            patch("voicetotext.transcription.engine_factory.build_engine_registry"),
+            patch("voicetotext.__main__._consume_torch_prewarm"),
+            patch(
+                "voicetotext.transcription.torch_hardware_detector."
+                "TorchHardwareDetector.detect",
+            ),
+            patch("voicetotext.__main__._run_first_time_setup") as first_run_setup,
+            patch("voicetotext.bootstrap.build_app") as build_app,
+        ):
+            _run(paths, future)
+
+        return create_model_manager, first_run_setup, build_app
+
+    def test_should_hand_the_same_policy_to_every_collaborator(
+        self, tmp_path: Path,
+    ) -> None:
+        create_model_manager, first_run_setup, build_app = (
+            self._run_with_first_time_setup(tmp_path)
+        )
+
+        policy = create_model_manager.call_args.args[2]
+        assert isinstance(policy, LicensePolicy)
+        assert first_run_setup.call_args.args[-1] is policy
+        assert build_app.call_args.kwargs["license_policy"] is policy
 
 
 class TestStderrIsConsole:

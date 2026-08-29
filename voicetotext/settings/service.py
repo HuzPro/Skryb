@@ -36,10 +36,12 @@ from voicetotext.transcription.engine_selector import (
     rank_engines,
 )
 from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
+from voicetotext.transcription.license_policy import LicensePolicy, LicenseTerms
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     DEFAULT_MODEL,
     ModelInfo,
+    get_model_info,
     is_catalog_model as _is_catalog_model,
 )
 from voicetotext.transcription.model_manager import ModelManager
@@ -106,6 +108,7 @@ class SettingsService:
         hot_swap: EngineHotSwap,
         state_machine: AppStateMachine,
         dictionary_path: Path,
+        license_policy: LicensePolicy,
         registry: EngineRegistry | None = None,
         hardware: HardwareProfile | None = None,
     ) -> None:
@@ -117,6 +120,7 @@ class SettingsService:
         self._downloads = downloads
         self._hot_swap = hot_swap
         self._state_machine = state_machine
+        self._license_policy = license_policy
         self._registry = registry
         self._hardware = hardware
         self._download_listeners: list[DownloadEventListener] = []
@@ -325,10 +329,36 @@ class SettingsService:
     def trigger_engine_swap(self) -> None:
         if self._hot_swap.is_busy():
             return
-        self._hot_swap.start_swap(self.selected_model())
+        selected = self.selected_model()
+        self._assert_license_accepted(selected)
+        self._hot_swap.start_swap(selected)
+
+    def _assert_license_accepted(self, model_name: str) -> None:
+        info = ALL_MODELS.get(model_name)
+        if info is not None:
+            self._license_policy.assert_accepted(info)
 
     def is_engine_swapping(self) -> bool:
         return self._hot_swap.is_busy()
+
+    # ------------------------------------------------------------------
+    # Licence consent
+    # ------------------------------------------------------------------
+
+    def license_acceptance_required(self, model_name: str) -> bool:
+        """Whether *model_name* is gated and its terms are not yet accepted.
+
+        The UI calls this before committing a model choice, so consent is
+        collected while a window is still open to collect it on.
+        """
+        info = ALL_MODELS.get(model_name)
+        return info is not None and self._license_policy.requires_acceptance(info)
+
+    def license_terms(self, model_name: str) -> LicenseTerms:
+        return self._license_policy.terms(get_model_info(model_name))
+
+    def accept_license(self, model_name: str) -> None:
+        self._license_policy.accept(get_model_info(model_name))
 
     # ------------------------------------------------------------------
     # App-state guard

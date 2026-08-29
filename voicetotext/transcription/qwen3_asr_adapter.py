@@ -191,7 +191,8 @@ def _import_backend() -> tuple[object, object]:
         raise make_engine_dependency_error(
             package_name="transformers",
             install_hint=(
-                'transformers not installed: pip install "transformers>=5.13"'
+                "transformers not installed: "
+                'pip install "transformers>=5.16.0,<6"'
             ),
             underlying=exc,
         ) from exc

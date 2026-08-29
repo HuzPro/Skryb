@@ -2,6 +2,11 @@ import logging
 import tkinter
 from tkinter import ttk
 
+from voicetotext.settings.license_consent import (
+    LicenseConsentPrompt,
+    ask_license_consent,
+    collect_license_acceptance,
+)
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.signal import Signal
 from voicetotext.settings.theme import HEADING_STYLE
@@ -36,9 +41,15 @@ class TkTranscriptionPage(ttk.Frame):
     so the window can build a :class:`SettingsDraft` on Save.
     """
 
-    def __init__(self, parent: tkinter.Misc, service: SettingsService) -> None:
+    def __init__(
+        self,
+        parent: tkinter.Misc,
+        service: SettingsService,
+        confirm_license: LicenseConsentPrompt = ask_license_consent,
+    ) -> None:
         super().__init__(parent)
         self._service = service
+        self._confirm_license = confirm_license
         self.download_error = Signal()
         self.delete_error = Signal()
         self.model_auto_switched = Signal()
@@ -219,6 +230,12 @@ class TkTranscriptionPage(ttk.Frame):
 
     def request_download(self, name: str) -> None:
         _logger.info("tk transcription page: download requested for '%s'", name)
+        # Consent precedes acquisition: the manager refuses to download a
+        # gated model, and this is the only surface offering the terms.
+        if not collect_license_acceptance(
+            self._service, name, self, self._confirm_license,
+        ):
+            return
         try:
             self._service.start_download(name)
         except Exception as exc:  # noqa: BLE001 - surface anything to the user

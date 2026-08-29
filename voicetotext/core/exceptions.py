@@ -53,5 +53,17 @@ class ConfigurationError(VoiceToTextError):
     pass
 
 
+class LicenseNotAcceptedError(VoiceToTextError):
+    """A gated model was acquired or used without a current acceptance.
+
+    Raised by
+    :meth:`~voicetotext.transcription.license_policy.LicensePolicy.assert_accepted`
+    from every path that downloads, builds, or loads weights whose licence
+    the user has not agreed to at the digest the app displays. The message
+    is surfaced verbatim to the user, so it names the model and the terms.
+    """
+    pass
+
+
 class HotkeyError(VoiceToTextError):
     pass

@@ -277,7 +277,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
                 package_name="transformers",
                 install_hint=(
                     "Transformers not installed: pip install "
-                    "'transformers>=5.16.1,<6'"
+                    "'transformers>=5.16.0,<6'"
                 ),
                 underlying=exc,
             ) from exc

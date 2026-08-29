@@ -88,3 +88,16 @@ class TestEngineSpec:
         )
 
         assert spec.repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+
+    def test_revision_should_default_to_tracking_main(self):
+        assert _spec().revision == ""
+
+    def test_should_carry_a_pinned_revision(self):
+        spec = EngineSpec(
+            model_name="ark-asr-3b",
+            repo_id="Audio8/ARK-ASR-3B",
+            device="cuda", language="en", beam_size=1, model_dir=Path("/m"),
+            revision="1e28271b79edc97635783bea65abc89195a09ed3",
+        )
+
+        assert spec.revision == "1e28271b79edc97635783bea65abc89195a09ed3"

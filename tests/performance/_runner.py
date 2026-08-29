@@ -133,6 +133,7 @@ def _build_spec(combo: BenchmarkCombo, models_dir: Path) -> EngineSpec:
         language=_LANGUAGE,
         beam_size=_DEFAULT_BEAM_SIZE_BY_ENGINE[combo.engine_id],
         model_dir=models_dir,
+        revision=info.revision,
     )
 
 

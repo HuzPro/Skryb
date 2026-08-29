@@ -92,7 +92,7 @@ class GraniteTurboCtcAdapter(TranscriptionEngine):
                 package_name="transformers",
                 install_hint=(
                     "transformers not installed: "
-                    "pip install 'transformers>=5.16.1' 'torchaudio>=2.2'"
+                    "pip install 'transformers>=5.16.0,<6' 'torchaudio>=2.5'"
                 ),
                 underlying=exc,
             ) from exc

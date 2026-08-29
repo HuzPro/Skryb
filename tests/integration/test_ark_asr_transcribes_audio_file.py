@@ -20,14 +20,14 @@ import pytest
 
 from tests.helpers.gpu import require_cuda
 from tests.helpers.model_cache import models_dir
-from voicetotext.transcription.ark_asr_adapter import ARK_ASR_REVISION
+from voicetotext.transcription.model_info import get_model_info
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = _REPO_ROOT / "scripts" / "bench_ark_asr.py"
-_REPO_ID = "Audio8/ARK-ASR-3B"
+_ARK_ASR = get_model_info("ark-asr-3b")
 _OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -41,12 +41,14 @@ def _skip_unless_ark_asr_ready() -> None:
         pytest.skip("models dir unavailable")
     snapshot = (
         directory
-        / f"models--{_REPO_ID.replace('/', '--')}"
+        / f"models--{_ARK_ASR.repo_id.replace('/', '--')}"
         / "snapshots"
-        / ARK_ASR_REVISION
+        / _ARK_ASR.revision
     )
     if not (snapshot / "model.safetensors.index.json").exists():
-        pytest.skip(f"ARK-ASR pinned snapshot not installed: {_REPO_ID}")
+        pytest.skip(
+            f"ARK-ASR pinned snapshot not installed: {_ARK_ASR.repo_id}"
+        )
 
 
 def _transcribe_fixture(name: str, *, timeout: float) -> dict[str, str]:
