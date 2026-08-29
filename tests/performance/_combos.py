@@ -6,6 +6,12 @@ any engine that cannot run on this hardware is captured in the JSON as
 ``status='error'`` rather than skipped, so the report still reflects
 what's possible on this hardware.
 
+The matrix stays the full catalog, licence-gated entries included. The
+gate belongs on the two paths that actually acquire and run weights
+(``_pre_download`` and ``_runner``), which both refuse a gated model
+nobody has accepted; filtering here instead would either abort every
+sweep at import time or drop a model from the report in silence.
+
 The list is computed once at module load. Importing :mod:`model_info`
 is safe - it pulls only ABC/Literal definitions, no torch or HF.
 """

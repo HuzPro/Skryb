@@ -55,17 +55,24 @@ class CrisperWhisperAdapter(TranscriptionEngine):
     The model and processor are loaded once from the app-managed Hugging Face
     cache and reused across utterances. No CrisperWhisper package, CT2, CUDA
     graph, or attention-capture path is involved.
+
+    *revision* is the audited commit from ``ModelInfo.revision``, the same
+    one the downloader fetched. The licence text this build gates on was
+    audited at that commit, so loading any other one would show terms the
+    weights no longer match.
     """
 
     def __init__(
         self,
         repo_id: str,
+        revision: str,
         device: str,
         model_dir: Path,
         language: str,
         mode: CrisperWhisperMode = "intended",
     ) -> None:
         self._repo_id = repo_id
+        self._revision = revision
         self._device = device
         self._model_dir = model_dir
         self._language = language
@@ -85,11 +92,13 @@ class CrisperWhisperAdapter(TranscriptionEngine):
 
         processor = processor_type.from_pretrained(
             self._repo_id,
+            revision=self._revision,
             cache_dir=cache_dir,
             local_files_only=True,
         )
         model = model_type.from_pretrained(
             self._repo_id,
+            revision=self._revision,
             cache_dir=cache_dir,
             local_files_only=True,
             dtype=dtype,

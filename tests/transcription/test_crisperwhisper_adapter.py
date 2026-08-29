@@ -22,6 +22,7 @@ from voicetotext.transcription.result import TranscriptionResult
 
 
 _REPO_ID = "nyralabs/CrisperWhisper2.0_turbo"
+_REVISION = "de0369c8a68025b7f6e86387b6eb5a3b369787c8"
 _MODE_IDS = [10, 11, 12, 13, 14]
 _WHISPER_IDS = [100, 101, 102, 103]
 
@@ -34,10 +35,14 @@ def _audio() -> AudioSegment:
 
 
 def _adapter(
-    *, mode: str = "intended", device: str = "cpu",
+    *,
+    mode: str = "intended",
+    device: str = "cpu",
+    revision: str = _REVISION,
 ) -> CrisperWhisperAdapter:
     return CrisperWhisperAdapter(
         repo_id=_REPO_ID,
+        revision=revision,
         device=device,
         model_dir=Path("/app/models"),
         language="en",
@@ -104,7 +109,7 @@ def _load_with_fakes(
 class TestCrisperWhisperModeValidation:
     def test_should_default_adapter_to_intended_mode(self) -> None:
         adapter = CrisperWhisperAdapter(
-            _REPO_ID, "cpu", Path("/models"), "en",
+            _REPO_ID, _REVISION, "cpu", Path("/models"), "en",
         )
 
         assert adapter._mode == "intended"
@@ -127,11 +132,13 @@ class TestCrisperWhisperLoadModel:
 
         processor_type.from_pretrained.assert_called_once_with(
             _REPO_ID,
+            revision=_REVISION,
             cache_dir=str(Path("/app/models")),
             local_files_only=True,
         )
         model_type.from_pretrained.assert_called_once_with(
             _REPO_ID,
+            revision=_REVISION,
             cache_dir=str(Path("/app/models")),
             local_files_only=True,
             dtype=sentinel.float32,
@@ -141,6 +148,23 @@ class TestCrisperWhisperLoadModel:
         model.to.assert_called_once_with("cpu")
         model.eval.assert_called_once_with()
         assert adapter.is_model_loaded() is True
+
+    def test_should_open_the_injected_revision_not_the_default_branch(
+        self,
+    ) -> None:
+        # The pin lives on ``ModelInfo.revision``, so the commit the
+        # loader opens is the one the downloader fetched and the one the
+        # audited licence text belongs to.
+        adapter = _adapter(revision="c0ffee")
+
+        _, model_type, processor_type, _ = _load_with_fakes(adapter)
+
+        assert processor_type.from_pretrained.call_args.kwargs[
+            "revision"
+        ] == "c0ffee"
+        assert model_type.from_pretrained.call_args.kwargs[
+            "revision"
+        ] == "c0ffee"
 
     def test_should_use_bfloat16_for_gpu_safetensors(self) -> None:
         adapter = _adapter(device="cuda")

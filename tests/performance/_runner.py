@@ -6,6 +6,9 @@ with ``status="error"``. The caller is responsible for recording the
 failure into the JSON history.
 
 Sequence per combo:
+    0. Refuse the combo outright when its licence has not been accepted
+       in the app - the licence covers use and outputs, not only the
+       download, so a benchmark run is a use
     1. Build engine via the registry
     2. Time ``load_model()``
     3. Time ``warmup()`` (one silent-audio inference)
@@ -29,7 +32,8 @@ from typing import Literal
 
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine_registry import EngineRegistry, EngineSpec
-from voicetotext.transcription.engine_types import EngineId
+from voicetotext.transcription.license_policy import LicensePolicy
+from voicetotext.transcription.model_info import ALL_MODELS, ModelInfo
 
 from tests.performance._combos import BenchmarkCombo
 
@@ -38,10 +42,7 @@ _logger = logging.getLogger(__name__)
 
 
 _LANGUAGE = "en"
-_DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
-    "nano_parakeet": 1,
-    "nemotron_streaming": 1,
-}
+_GREEDY_BEAM_SIZE = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,10 +88,13 @@ def run_benchmark(
     n_timed_runs: int,
     registry: EngineRegistry,
     models_dir: Path,
+    license_policy: LicensePolicy,
 ) -> BenchmarkResult:
-    spec = _build_spec(combo, models_dir)
     engine = None
     try:
+        info = ALL_MODELS[combo.model_name]
+        license_policy.assert_accepted(info)
+        spec = _build_spec(combo, info, models_dir)
         engine = registry.build(combo.engine_id, spec)
         load_seconds = _timed(engine.load_model)
         warmup_seconds = _timed(engine.warmup)
@@ -122,16 +126,15 @@ def run_benchmark(
         _teardown(engine, combo.device)
 
 
-def _build_spec(combo: BenchmarkCombo, models_dir: Path) -> EngineSpec:
-    from voicetotext.transcription.model_info import ALL_MODELS
-
-    info = ALL_MODELS[combo.model_name]
+def _build_spec(
+    combo: BenchmarkCombo, info: ModelInfo, models_dir: Path,
+) -> EngineSpec:
     return EngineSpec(
         model_name=combo.model_name,
         repo_id=info.repo_id,
         device=combo.device,
         language=_LANGUAGE,
-        beam_size=_DEFAULT_BEAM_SIZE_BY_ENGINE[combo.engine_id],
+        beam_size=_GREEDY_BEAM_SIZE,
         model_dir=models_dir,
         revision=info.revision,
     )

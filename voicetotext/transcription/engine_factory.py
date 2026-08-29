@@ -178,6 +178,7 @@ def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
 
     return CrisperWhisperAdapter(
         repo_id=spec.repo_id,
+        revision=spec.revision,
         device=spec.device,
         model_dir=spec.model_dir,
         language=spec.language,
