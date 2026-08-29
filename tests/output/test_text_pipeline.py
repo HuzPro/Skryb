@@ -86,7 +86,7 @@ class TestFillerRemoval:
 
         result = _batch("I was, um.", options=options)
 
-        assert result == "I was."
+        assert result == "I was. "
 
     def test_should_preserve_text_when_the_module_is_off(self) -> None:
         assert _batch("I um agree") == "I um agree"
@@ -157,7 +157,7 @@ class TestSpokenCommands:
 
         result = _batch("literal question mark then period", options=options)
 
-        assert result == "question mark then."
+        assert result == "question mark then. "
 
     def test_should_keep_literal_and_the_next_word_when_no_command_follows(
         self,
@@ -186,6 +186,32 @@ class TestSpokenCommands:
 
     def test_should_preserve_commands_when_the_module_is_off(self) -> None:
         assert _batch("hello comma world") == "hello comma world"
+
+
+class TestTrailingSentenceSpace:
+    @pytest.mark.parametrize("terminator", [".", "?", "!"])
+    def test_should_append_a_space_after_a_sentence_terminator(
+        self, terminator: str,
+    ) -> None:
+        assert _batch(f"testing 1 2 3{terminator}") == f"testing 1 2 3{terminator} "
+
+    def test_should_separate_back_to_back_dictations(self) -> None:
+        first = _batch("testing one two three.")
+        second = _batch("and then I stopped.")
+
+        assert first + second == "testing one two three. and then I stopped. "
+
+    def test_should_not_append_a_space_without_a_terminator(self) -> None:
+        assert _batch("no terminator here") == "no terminator here"
+
+    def test_should_not_double_an_existing_trailing_space(self) -> None:
+        assert _batch("already spaced. ") == "already spaced. "
+
+    def test_should_leave_a_comma_ended_phrase_alone(self) -> None:
+        assert _batch("a clause,") == "a clause,"
+
+    def test_should_leave_empty_text_alone(self) -> None:
+        assert _batch("") == ""
 
 
 class TestRuleStage:

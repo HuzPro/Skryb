@@ -50,7 +50,7 @@ class TestTextFilterDecorator:
 
         handler.output("café 猫.")
 
-        assert inner.values == ["Café 貓."]
+        assert inner.values == ["Café 貓. "]
 
     def test_should_match_longest_overlapping_key(self) -> None:
         handler, inner = _filter((
