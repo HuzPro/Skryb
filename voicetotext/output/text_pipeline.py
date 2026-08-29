@@ -65,6 +65,7 @@ class _Command:
     capitalize_after: bool = False
 
 
+_SENTENCE_ENDINGS = (".", "?", "!")
 _TOKEN_PATTERN = re.compile(r"\w+|\s+|[^\w\s]+", re.UNICODE)
 _FILLER_PATTERN = re.compile(r"(?<!\w)(?:um+|uh+|erm+)(?!\w)", re.IGNORECASE)
 _COMMA_BEFORE_FILLER = re.compile(r",[ \t]*$")
@@ -147,6 +148,7 @@ class TextPipeline:
         stages.append(_RuleStage(config.rules).apply)
         if config.options.numbers:
             stages.append(format_numbers)
+        stages.append(add_trailing_sentence_space)
         return cls(tuple(stages))
 
     @classmethod
@@ -217,6 +219,10 @@ def apply_spoken_commands(text: str) -> str:
         cursor = action.end
     formatter.append_text(text[cursor:])
     return formatter.value()
+
+
+def add_trailing_sentence_space(text: str) -> str:
+    return text + " " if text.endswith(_SENTENCE_ENDINGS) else text
 
 
 def format_numbers(text: str) -> str:
