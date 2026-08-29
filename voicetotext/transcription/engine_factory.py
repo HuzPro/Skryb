@@ -24,7 +24,6 @@ from voicetotext.transcription.model_info import (
     ARK_ASR_MODELS,
     CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
-    GRANITE_TURBOCTC_MODELS,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     QWEN3_ASR_MODELS,
@@ -75,20 +74,11 @@ _QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 )
 
 
-_GRANITE_TURBOCTC_DESCRIPTOR = EngineDescriptor(
-    engine_id="granite_turboctc",
-    display_name="Granite TurboCTC (English, fastest)",
-    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
-    base_priority=80,
-)
-
-
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "ark_asr": 1,
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
     "qwen3_asr": 1,
-    "granite_turboctc": 1,
     "crisperwhisper": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
@@ -102,7 +92,6 @@ def build_engine_registry() -> EngineRegistry:
             _NEMOTRON_STREAMING_DESCRIPTOR,
             _ARK_ASR_DESCRIPTOR,
             _QWEN3_ASR_DESCRIPTOR,
-            _GRANITE_TURBOCTC_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
         ],
         builders={
@@ -110,7 +99,6 @@ def build_engine_registry() -> EngineRegistry:
             "nemotron_streaming": _build_nemotron_streaming_engine,
             "ark_asr": _build_ark_asr_engine,
             "qwen3_asr": _build_qwen3_asr_engine,
-            "granite_turboctc": _build_granite_turboctc_engine,
             "crisperwhisper": _build_crisperwhisper_engine,
         },
     )
@@ -156,18 +144,6 @@ def _build_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
         device=spec.device,
         model_dir=spec.model_dir,
         language=spec.language,
-    )
-
-
-def _build_granite_turboctc_engine(spec: EngineSpec) -> TranscriptionEngine:
-    from voicetotext.transcription.granite_turboctc_adapter import (
-        GraniteTurboCtcAdapter,
-    )
-
-    return GraniteTurboCtcAdapter(
-        repo_id=spec.repo_id,
-        device=spec.device,
-        model_dir=spec.model_dir,
     )
 
 
@@ -360,9 +336,6 @@ def build_composite_model_manager(
     qwen3_asr_models = {
         name: info for name, info in QWEN3_ASR_MODELS.items() if info.repo_id
     }
-    granite_turboctc_models = {
-        name: info for name, info in GRANITE_TURBOCTC_MODELS.items() if info.repo_id
-    }
     crisperwhisper_models = {
         name: info for name, info in CRISPERWHISPER_MODELS.items() if info.repo_id
     }
@@ -399,14 +372,6 @@ def build_composite_model_manager(
         models=qwen3_asr_models,
         license_policy=license_policy,
     )
-    granite_turboctc_manager = HuggingFaceModelManager(
-        models_dir=models_dir,
-        download_manager=download_manager,
-        resolver=resolver,
-        file_downloader=file_downloader,
-        models=granite_turboctc_models,
-        license_policy=license_policy,
-    )
     crisperwhisper_manager = HuggingFaceModelManager(
         models_dir=models_dir,
         download_manager=download_manager,
@@ -422,7 +387,6 @@ def build_composite_model_manager(
             "nemotron_streaming": nemotron_streaming_manager,
             "ark_asr": ark_asr_manager,
             "qwen3_asr": qwen3_asr_manager,
-            "granite_turboctc": granite_turboctc_manager,
             "crisperwhisper": crisperwhisper_manager,
         },
         active_engine_provider=active_engine_provider,

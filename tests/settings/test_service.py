@@ -45,7 +45,6 @@ _PARAKEET = "parakeet-tdt-0.6b-v3"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _ARK_ASR = "ark-asr-3b"
 _QWEN = "qwen3-asr-1.7b"
-_GRANITE = "granite-speech-5.0-470m-turboctc"
 _CRISPERWHISPER = {
     "crisperwhisper-2.0-turbo",
     "crisperwhisper-2.0-large",
@@ -161,7 +160,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, _NEMOTRON, _ARK_ASR, _QWEN, _GRANITE, *_CRISPERWHISPER,
+            _PARAKEET, _NEMOTRON, _ARK_ASR, _QWEN, *_CRISPERWHISPER,
         }
 
     def test_should_mark_installed_status_on_view(self):

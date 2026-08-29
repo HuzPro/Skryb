@@ -3,8 +3,8 @@ from typing import Literal
 
 
 EngineId = Literal[
-    "ark_asr", "crisperwhisper", "granite_turboctc", "nano_parakeet",
-    "nemotron_streaming", "qwen3_asr",
+    "ark_asr", "crisperwhisper", "nano_parakeet", "nemotron_streaming",
+    "qwen3_asr",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 CrisperWhisperMode = Literal["intended", "verbatim"]

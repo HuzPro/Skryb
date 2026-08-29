@@ -117,23 +117,6 @@ QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
 }
 
 
-_GRANITE_TURBOCTC_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"granite_turboctc": 100},
-)
-
-
-GRANITE_TURBOCTC_MODELS: dict[str, ModelInfo] = {
-    "granite-speech-5.0-470m-turboctc": ModelInfo(
-        name="granite-speech-5.0-470m-turboctc",
-        size_mb=946,
-        description="Fastest, lowest latency (English only, greedy CTC)",
-        repo_id="ibm-granite/granite-speech-5.0-470m-turboctc",
-        compatible_engines=("granite_turboctc",),
-        engine_priorities=_GRANITE_TURBOCTC_ENGINE_PRIORITIES,
-    ),
-}
-
-
 _CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"crisperwhisper": 40},
 )
@@ -184,7 +167,7 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
 
 ALL_MODELS: dict[str, ModelInfo] = {
     **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **ARK_ASR_MODELS,
-    **QWEN3_ASR_MODELS, **GRANITE_TURBOCTC_MODELS, **CRISPERWHISPER_MODELS,
+    **QWEN3_ASR_MODELS, **CRISPERWHISPER_MODELS,
 }
 
 
@@ -211,6 +194,7 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "large-v3": DEFAULT_MODEL,
     "large-v3-turbo": DEFAULT_MODEL,
     "granite-speech-4.1-2b": DEFAULT_MODEL,
+    "granite-speech-5.0-470m-turboctc": DEFAULT_MODEL,
     "parakeet-tdt-0.6b-v2": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
 }
@@ -231,6 +215,7 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
 _REMOVED_ENGINES: frozenset[str] = frozenset({
     "faster_whisper",
     "granite_speech",
+    "granite_turboctc",
     "transformers",
 })
 
