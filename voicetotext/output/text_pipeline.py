@@ -26,6 +26,11 @@ _logger = logging.getLogger(__name__)
 class PipelineMode(Enum):
     BATCH = "batch"
     STREAMING = "streaming"
+    # Verbatim transcription is a request for what was actually said, so
+    # every cleanup stage below would be working against it: filler
+    # removal deletes the disfluencies it exists to keep, and the
+    # dictionary rewrites the words it captured.
+    VERBATIM = "verbatim"
 
 
 class TokenKind(Enum):
@@ -152,6 +157,10 @@ class TextPipeline:
         return cls(tuple(stages))
 
     @classmethod
+    def passthrough(cls) -> "TextPipeline":
+        return cls(())
+
+    @classmethod
     def for_streaming(cls, config: DictionaryConfig) -> "TextPipeline":
         stages: list[Callable[[str], str]] = []
         if config.options.remove_fillers:
@@ -177,6 +186,8 @@ def build_pipeline(
     punctuation_backend: PunctuationBackend | None = None,
     models_dir: Path | None = None,
 ) -> TextPipeline:
+    if mode is PipelineMode.VERBATIM:
+        return TextPipeline.passthrough()
     if mode is PipelineMode.STREAMING:
         return TextPipeline.for_streaming(config)
     return TextPipeline.for_batch(config, punctuation_backend, models_dir)

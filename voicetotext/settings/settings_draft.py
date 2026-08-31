@@ -22,6 +22,7 @@ class SettingsDraft:
     hotkey_mode: str
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
+    crisperwhisper_mode: str = "intended"
 
 
 @dataclass(frozen=True)
@@ -40,19 +41,30 @@ class ChangeSet:
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
+        # The intended/verbatim tags are baked into the decoder prefix at
+        # load time, and verbatim also switches the output pipeline off,
+        # so a mode change has to reload the engine and rebuild output.
+        crisperwhisper_mode_changed = (
+            original.crisperwhisper_mode != updated.crisperwhisper_mode
+        )
         engine_reload_required = (
             original.model_size != updated.model_size
             or original.device != updated.device
             or original.language != updated.language
             or original.engine != updated.engine
             or original.transcription_mode != updated.transcription_mode
+            or crisperwhisper_mode_changed
         )
         hotkey_changed = (
             original.hotkey_combination != updated.hotkey_combination
             or original.hotkey_mode != updated.hotkey_mode
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
-        output_changed = original.output_mode != updated.output_mode or mode_changed
+        output_changed = (
+            original.output_mode != updated.output_mode
+            or mode_changed
+            or crisperwhisper_mode_changed
+        )
         return cls(
             engine_reload_required=engine_reload_required,
             hotkey_changed=hotkey_changed,
