@@ -3,7 +3,7 @@ import json
 import threading
 from pathlib import Path
 
-from voicetotext.core.config import ConfigValue, ConfigurationStore
+from voicetotext.core.config import ConfigurationStore, ConfigValue
 
 DEFAULT_CONFIG = {
     "hotkey": {
@@ -25,6 +25,10 @@ DEFAULT_CONFIG = {
     },
     "audio": {
         "sample_rate": 16000,
+    },
+    "diagnostics": {
+        "enabled": True,
+        "retain_sessions": 50,
     },
 }
 

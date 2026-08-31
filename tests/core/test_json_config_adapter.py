@@ -1,6 +1,5 @@
 import json
 
-
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 
@@ -29,6 +28,8 @@ class TestJsonConfigAdapterDefaults:
         assert config.get("overlay.enabled") is True
         assert config.get("transcription.device") == "auto"
         assert config.get("audio.sample_rate") == 16000
+        assert config.get("diagnostics.enabled") is True
+        assert config.get("diagnostics.retain_sessions") == 50
 
 
 class TestJsonConfigAdapterDotNotation:

@@ -1,4 +1,5 @@
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 
 from voicetotext.core.startup_log import (
@@ -17,9 +18,9 @@ def _file_handlers() -> list[logging.Handler]:
 
 class TestStartupLog:
     def test_should_write_session_id_and_named_milestones(self, tmp_path) -> None:
-        path = tmp_path / "session.log"
         begin_startup_timing()
-        initialize_session_log(path)
+        session_dir = initialize_session_log(tmp_path)
+        path = session_dir / "session.log"
         milestone("Tk-created")
         milestone("config-loaded")
         milestone("tray-visible")
@@ -43,6 +44,9 @@ class TestStartupLog:
                 "warm-ready",
             ):
                 assert f"milestone={name}" in text
+            assert re.fullmatch(
+                r"\d{8}T\d{6}Z-[0-9a-f]{8}", session_dir.name,
+            )
         finally:
             for handler in handlers:
                 logger.removeHandler(handler)
@@ -53,8 +57,8 @@ class TestStartupLog:
     ) -> None:
         logger = logging.getLogger("voicetotext")
         try:
-            initialize_session_log(tmp_path / "first.log", console=True)
-            initialize_session_log(tmp_path / "second.log", console=True)
+            initialize_session_log(tmp_path / "first", console=True)
+            initialize_session_log(tmp_path / "second", console=True)
             assert len(_file_handlers()) == 1
             console_handlers = [
                 handler for handler in logger.handlers

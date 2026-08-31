@@ -1,19 +1,6 @@
-import numpy as np
+from unittest.mock import MagicMock
 
-from voicetotext.core.events import (
-    RecordingStartedEvent,
-    RecordingStoppedEvent,
-    TranscriptionCompletedEvent,
-    TranscriptionFailedEvent,
-)
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription.streaming.live_streaming_controller import (
-    LiveStreamingController,
-)
-from voicetotext.transcription.streaming.streaming_engine import StreamingUpdate
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+import numpy as np
 
 from tests.fakes import (
     FakeAudioRecorder,
@@ -22,6 +9,21 @@ from tests.fakes import (
     InlineActionDispatcher,
     RecordingEventBus,
 )
+from voicetotext.core.events import (
+    RecordingStartedEvent,
+    RecordingStoppedEvent,
+    TranscriptionCompletedEvent,
+    TranscriptionFailedEvent,
+)
+from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.transcription.result import TranscriptionResult
+from voicetotext.transcription.streaming.live_streaming_controller import (
+    LiveStreamingController,
+)
+from voicetotext.transcription.streaming.streaming_engine import StreamingUpdate
+from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 
 class _StubController:
@@ -58,7 +60,9 @@ class _StubController:
         self.stop_calls += 1
         self._active = False
         if self._on_complete is not None:
-            self._on_complete(self._complete_result, self._complete_error)
+            self._on_complete(
+                self._complete_result, self._complete_error, None,
+            )
 
 
 class _FakeStreamingEngine:
@@ -83,6 +87,7 @@ def _make(controller, streaming: bool = True):
         state_machine=state_machine,
         event_bus=bus,
         action_dispatcher=InlineActionDispatcher(),
+        diagnostics=MagicMock(spec=SessionDiagnostics),
         streaming_controller=controller,
         is_streaming_mode=lambda: streaming,
     )
@@ -157,6 +162,8 @@ class TestStreamingRouting:
 
         assert len(failures) == 1
         assert state_machine.state is AppState.IDLE
+        outcome = use_case._diagnostics.transcription_finished.call_args.args[1]
+        assert isinstance(outcome, RuntimeError)
 
     def test_should_publish_streamed_transcript_and_duration_on_completion(self):
         # Streaming used to publish an empty completion event (text="",
@@ -179,7 +186,7 @@ class TestStreamingRouting:
         assert completed[0].transcription_seconds == 1.23
         assert state_machine.state is AppState.IDLE
 
-    def test_should_log_streaming_duration_without_transcript(self, app_caplog):
+    def test_should_record_streaming_result(self) -> None:
         result = TranscriptionResult(
             text="hello world", language="en",
             language_probability=0.0, transcription_seconds=1.23,
@@ -190,8 +197,9 @@ class TestStreamingRouting:
         use_case.on_hotkey_activated()
         use_case.on_hotkey_activated()
 
-        assert "Streaming transcription completed" in app_caplog.text
-        assert "hello world" not in app_caplog.text
+        diagnostics = use_case._diagnostics
+        diagnostics.transcription_finished.assert_called_once()
+        assert diagnostics.transcription_finished.call_args.args[1] is result
 
     def test_should_recover_streaming_state_when_worker_fails_mid_run(self):
         # The worker can fail mid-run (e.g. a decode error) and call
@@ -218,6 +226,7 @@ class TestStreamingRouting:
             state_machine=state_machine,
             event_bus=bus,
             action_dispatcher=InlineActionDispatcher(),
+            diagnostics=MagicMock(spec=SessionDiagnostics),
             streaming_controller=controller,
             is_streaming_mode=lambda: mode["streaming"],
         )
@@ -226,7 +235,7 @@ class TestStreamingRouting:
 
         use_case.on_hotkey_activated()  # streaming starts
         # Worker dies mid-run and reports the error out-of-band.
-        controller._on_complete(None, RuntimeError("decode failed"))
+        controller._on_complete(None, RuntimeError("decode failed"), None)
 
         assert len(failures) == 1
         assert state_machine.state is AppState.IDLE
@@ -301,6 +310,7 @@ class TestRealControllerIntegration:
             state_machine=state_machine,
             event_bus=bus,
             action_dispatcher=InlineActionDispatcher(),
+            diagnostics=MagicMock(spec=SessionDiagnostics),
             streaming_controller=controller,
             is_streaming_mode=lambda: True,
         )
