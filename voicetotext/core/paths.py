@@ -1,5 +1,8 @@
+import logging
 import os
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 
 class AppPaths:
@@ -9,6 +12,7 @@ class AppPaths:
             base = Path(os.environ["APPDATA"]) / "VoiceToText"
         self.base = base
         self._session_dir: Path | None = None
+        self._diagnostics_root: Path | None = None
 
     @property
     def config_path(self) -> Path:
@@ -23,8 +27,38 @@ class AppPaths:
         return self.base / "dictionary.json"
 
     @property
-    def diagnostics_dir(self) -> Path:
+    def default_diagnostics_dir(self) -> Path:
         return self.base / "diagnostics"
+
+    @property
+    def diagnostics_dir(self) -> Path:
+        if self._diagnostics_root is None:
+            return self.default_diagnostics_dir
+        return self._diagnostics_root
+
+    def use_diagnostics_root(self, configured: object) -> None:
+        """Point diagnostics at a user-chosen folder, if one is set."""
+        if not isinstance(configured, str) or not configured.strip():
+            self._diagnostics_root = None
+            return
+        self._diagnostics_root = Path(configured.strip()).expanduser()
+
+    def load_configured_diagnostics_root(self) -> None:
+        """Apply the saved diagnostics folder before any logging starts.
+
+        The session log opens before the app's config store is built, so
+        this reads the one key it needs straight from disk. A missing or
+        unreadable config leaves diagnostics at the default location.
+        """
+        from voicetotext.core.json_config_adapter import JsonConfigAdapter
+
+        config = JsonConfigAdapter(self.config_path)
+        try:
+            config.load()
+        except (OSError, ValueError):
+            self._diagnostics_root = None
+            return
+        self.use_diagnostics_root(config.get("diagnostics.directory", ""))
 
     @property
     def session_dir(self) -> Path:
@@ -42,7 +76,20 @@ class AppPaths:
     def ensure_dirs(self) -> None:
         self.base.mkdir(parents=True, exist_ok=True)
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_diagnostics_dir()
+
+    def _ensure_diagnostics_dir(self) -> None:
+        try:
+            self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            if self._diagnostics_root is None:
+                raise
+            _logger.warning(
+                "Diagnostics folder '%s' is unusable (%s); falling back to '%s'.",
+                self._diagnostics_root, exc, self.default_diagnostics_dir,
+            )
+            self._diagnostics_root = None
+            self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
     def is_first_run(self) -> bool:
         return not self.config_path.exists()

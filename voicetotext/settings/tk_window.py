@@ -205,10 +205,33 @@ class TkSettingsWindow(tkinter.Toplevel):
         )
         self._import_settings_button.pack(side="right", padx=(0, 8))
 
+        self._logs_folder_button = ttk.Button(
+            footer,
+            text="Logs folder...",
+            command=self._on_choose_logs_folder,
+        )
+        self._logs_folder_button.pack(side="right", padx=(0, 8))
+
     def _apply_initial_draft(self, draft: SettingsDraft) -> None:
         self._hotkeys_page.set_combination(draft.hotkey_combination)
         self._hotkeys_page.set_mode(draft.hotkey_mode)
         self._output_page.set_mode(draft.output_mode)
+
+    def _on_choose_logs_folder(self) -> None:
+        selected = filedialog.askdirectory(
+            parent=self,
+            title="Choose where session logs are saved",
+            initialdir=self._service.diagnostics_directory() or None,
+            mustexist=False,
+        )
+        if not selected:
+            return
+        try:
+            self._service.set_diagnostics_directory(selected)
+        except Exception as exc:  # noqa: BLE001
+            self._show_status(f"Could not set logs folder: {exc}", error=True)
+            return
+        self._show_status("Logs folder applies from the next launch.")
 
     def _on_export_settings(self) -> None:
         selected = filedialog.asksaveasfilename(
