@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -6,19 +7,16 @@ from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
-    ARK_ASR_MODELS,
     CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
-    QWEN3_ASR_MODELS,
     ModelInfo,
     get_model_info,
     is_catalog_model,
     migrate_engine_field,
     migrate_removed_models,
 )
-
 
 _REMOVED_MODEL_EXPECTATIONS = (
     ("tiny", DEFAULT_MODEL),
@@ -29,15 +27,19 @@ _REMOVED_MODEL_EXPECTATIONS = (
     ("large-v3-turbo", DEFAULT_MODEL),
     ("granite-speech-4.1-2b", DEFAULT_MODEL),
     ("granite-speech-5.0-470m-turboctc", DEFAULT_MODEL),
+    ("ark-asr-3b", DEFAULT_MODEL),
+    ("qwen3-asr-1.7b", DEFAULT_MODEL),
     ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
     ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
 )
 
 _REMOVED_ENGINES = (
+    "ark_asr",
     "faster_whisper",
     "transformers",
     "granite_speech",
     "granite_turboctc",
+    "qwen3_asr",
 )
 
 
@@ -72,13 +74,11 @@ class TestModelInfo:
 
 
 class TestPinnedRevisions:
-    """ARK-ASR runs remote code and CrisperWhisper ships a licence keyed
-    to the exact text at its commit, so all three resolve one audited
+    """CrisperWhisper ships a licence keyed to each exact commit, so both resolve one audited
     commit instead of whatever ``main`` points at today.
     """
 
-    _EXPECTED_PINS = {
-        "ark-asr-3b": "1e28271b79edc97635783bea65abc89195a09ed3",
+    _EXPECTED_PINS: ClassVar[dict[str, str]] = {
         "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
         "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
     }
@@ -133,8 +133,6 @@ class TestModelCatalog:
         assert set(ALL_MODELS) == (
             set(PARAKEET_MODELS)
             | set(NEMOTRON_STREAMING_MODELS)
-            | set(ARK_ASR_MODELS)
-            | set(QWEN3_ASR_MODELS)
             | set(CRISPERWHISPER_MODELS)
         )
 

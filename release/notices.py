@@ -16,13 +16,12 @@ installed environment is isolated in a thin ``importlib.metadata``
 adapter at the bottom of the file.
 """
 
-import importlib.metadata as metadata
 import sys
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 
 from release import APP_NAME
-
 
 # Distributions that may be present in the environment the tool runs in
 # (the user's install, or a dev venv) without being shipped app
@@ -137,8 +136,8 @@ def _render_header(packages: list[PackageLicense]) -> str:
             "property of its respective authors and is provided under the",
             "license reproduced with it.",
             "",
-            "Machine-learning model weights (Parakeet, Nemotron, ARK-ASR,",
-            "Qwen3-ASR, CrisperWhisper) are NOT included in this distribution;",
+            "Machine-learning model weights (Parakeet, Nemotron, and",
+            "CrisperWhisper) are NOT included in this distribution;",
             "they are downloaded from their original sources at runtime, so",
             "their model licenses are not reproduced here.",
             "",

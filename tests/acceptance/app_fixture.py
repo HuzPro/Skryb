@@ -10,20 +10,7 @@ as a first-class DSL step.
 """
 
 from pathlib import Path
-
-from voicetotext.core.events import (
-    DomainEvent,
-    EngineLoadCompletedEvent,
-)
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.output.clipboard_preserving_decorator import (
-    ClipboardPreservingDecorator,
-)
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
-from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.engine_install import make_engine_installer
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+from unittest.mock import MagicMock
 
 from tests.builders import a_transcription_result, an_audio_segment
 from tests.fakes import (
@@ -35,6 +22,19 @@ from tests.fakes import (
     InstantSleeper,
     RecordingEventBus,
 )
+from voicetotext.core.events import (
+    DomainEvent,
+    EngineLoadCompletedEvent,
+)
+from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.output.clipboard_preserving_decorator import (
+    ClipboardPreservingDecorator,
+)
+from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
+from voicetotext.transcription.engine_install import make_engine_installer
+from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
 
 class VoiceToTextApp:
@@ -67,6 +67,7 @@ class VoiceToTextApp:
             state_machine=self._state_machine,
             event_bus=self._bus,
             action_dispatcher=self._dispatcher,
+            diagnostics=MagicMock(spec=SessionDiagnostics),
         )
         self._next_engine: FakeTranscriptionEngine | None = None
         self._hot_swap = EngineHotSwapCoordinator(

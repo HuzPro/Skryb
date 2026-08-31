@@ -1,7 +1,8 @@
 import tkinter
 from collections.abc import Callable
 from dataclasses import replace
-from tkinter import ttk
+from pathlib import Path
+from tkinter import filedialog, ttk
 
 from voicetotext.core.color_scheme import ColorScheme, detect_color_scheme
 from voicetotext.core.events import (
@@ -190,10 +191,64 @@ class TkSettingsWindow(tkinter.Toplevel):
         )
         self._save_button.pack(side="right")
 
+        self._export_settings_button = ttk.Button(
+            footer,
+            text="Export...",
+            command=self._on_export_settings,
+        )
+        self._export_settings_button.pack(side="right", padx=(0, 8))
+
+        self._import_settings_button = ttk.Button(
+            footer,
+            text="Import...",
+            command=self._on_import_settings,
+        )
+        self._import_settings_button.pack(side="right", padx=(0, 8))
+
     def _apply_initial_draft(self, draft: SettingsDraft) -> None:
         self._hotkeys_page.set_combination(draft.hotkey_combination)
         self._hotkeys_page.set_mode(draft.hotkey_mode)
         self._output_page.set_mode(draft.output_mode)
+
+    def _on_export_settings(self) -> None:
+        selected = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export settings",
+            defaultextension=".json",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+        )
+        if not selected:
+            return
+        try:
+            self._service.export_settings(Path(selected))
+        except Exception as exc:  # noqa: BLE001
+            self._show_status(f"Could not export settings: {exc}", error=True)
+            return
+        self._show_status("Settings exported.")
+
+    def _on_import_settings(self) -> None:
+        selected = filedialog.askopenfilename(
+            parent=self,
+            title="Import settings",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+        )
+        if not selected:
+            return
+        try:
+            self._service.import_settings(Path(selected))
+        except Exception as exc:  # noqa: BLE001
+            self._show_status(f"Could not import settings: {exc}", error=True)
+            return
+        self._apply_imported_draft()
+        self._show_status("Settings imported.")
+
+    def _apply_imported_draft(self) -> None:
+        draft = self._service.current_draft()
+        self._transcription_page.apply_mode(draft.transcription_mode)
+        self._transcription_page.set_model(draft.model_size)
+        self._transcription_page.set_language(draft.language)
+        self._transcription_page.set_engine(draft.engine)
+        self._apply_initial_draft(draft)
 
     def _on_sidebar_select(self, _event: tkinter.Event) -> None:
         selection = self._sidebar.curselection()
@@ -455,6 +510,12 @@ class TkSettingsWindow(tkinter.Toplevel):
 
     def save_button(self) -> ttk.Button:
         return self._save_button
+
+    def export_settings_button(self) -> ttk.Button:
+        return self._export_settings_button
+
+    def import_settings_button(self) -> ttk.Button:
+        return self._import_settings_button
 
     def status_label(self) -> ttk.Label:
         return self._status_label

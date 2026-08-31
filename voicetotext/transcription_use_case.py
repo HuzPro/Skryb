@@ -1,6 +1,7 @@
 import logging
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from voicetotext.core.action_dispatcher import ActionDispatcher
 from voicetotext.core.event_bus import EventBus
@@ -16,8 +17,9 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
 )
 from voicetotext.core.exceptions import EngineSwapError
-from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.recorder import AudioRecorder
@@ -30,7 +32,6 @@ from voicetotext.transcription.streaming.live_streaming_controller import (
 from voicetotext.transcription.streaming.streaming_engine import (
     StreamingTranscriptionEngine,
 )
-
 
 _logger = logging.getLogger(__name__)
 _MIN_DURATION_SECONDS = 0.1
@@ -47,6 +48,7 @@ class RecordAndTranscribeUseCase:
         state_machine: AppStateMachine,
         event_bus: EventBus,
         action_dispatcher: ActionDispatcher,
+        diagnostics: SessionDiagnostics,
         max_recording_seconds: float = _DEFAULT_MAX_RECORDING_SECONDS,
         streaming_controller: LiveStreamingController | None = None,
         is_streaming_mode: Callable[[], bool] | None = None,
@@ -57,10 +59,12 @@ class RecordAndTranscribeUseCase:
         self._state_machine = state_machine
         self._event_bus = event_bus
         self._dispatcher = action_dispatcher
+        self._diagnostics = diagnostics
         self._max_recording_seconds = max_recording_seconds
         self._streaming = streaming_controller
         self._is_streaming_mode = is_streaming_mode or (lambda: False)
         self._streaming_active = False
+        self._stream_requested_at: datetime | None = None
         self._action_lock = threading.Lock()
         # Latched signal: did the user press the hotkey while the
         # engine was still loading? On ``LOADING → IDLE`` we replay
@@ -153,6 +157,7 @@ class RecordAndTranscribeUseCase:
             self._streaming.set_output(output)
 
     def dispose(self) -> None:
+        self._diagnostics.dispose()
         self.dispose_current_engine()
         if self._streaming is not None:
             self._streaming.set_engine(None)
@@ -202,6 +207,7 @@ class RecordAndTranscribeUseCase:
         _logger.info("Streaming started.")
 
     def _stop_streaming(self) -> None:
+        self._stream_requested_at = datetime.now(UTC)
         self._finish_streaming()
         self._state_machine.transition_to(AppState.TRANSCRIBING)
         self._event_bus.publish(RecordingStoppedEvent())
@@ -224,9 +230,15 @@ class RecordAndTranscribeUseCase:
         self,
         result: TranscriptionResult | None,
         error: Exception | None,
+        audio: AudioSegment | None,
     ) -> None:
         self._finish_streaming()
+        requested_at = self._stream_requested_at or datetime.now(UTC)
+        self._stream_requested_at = None
         if error is not None:
+            self._diagnostics.transcription_finished(
+                audio, error, requested_at,
+            )
             self._report_error(
                 "Streaming failed",
                 error,
@@ -239,7 +251,10 @@ class RecordAndTranscribeUseCase:
         # The committed text was already pasted live by the streaming
         # writer; this only mirrors the batch path's terminal log and
         # completion event so streaming has the same observability.
-        self._log_streaming_result(result)
+        self._diagnostics.transcription_finished(
+            audio, result, requested_at,
+        )
+        self._announce_streaming_empty(result)
         self._state_machine.transition_to(AppState.IDLE)
         self._event_bus.publish(
             TranscriptionCompletedEvent(
@@ -248,14 +263,9 @@ class RecordAndTranscribeUseCase:
             )
         )
 
-    def _log_streaming_result(self, result: TranscriptionResult) -> None:
+    def _announce_streaming_empty(self, result: TranscriptionResult) -> None:
         if result.is_empty:
             self._announce_empty_transcription(result)
-            return
-        _logger.info(
-            "Streaming transcription completed in %.2fs",
-            result.transcription_seconds,
-        )
 
     def _schedule_cap_timer(self) -> None:
         self._cap_timer = threading.Timer(
@@ -295,6 +305,7 @@ class RecordAndTranscribeUseCase:
             self._end_capture()
 
     def _stop_and_transcribe(self) -> None:
+        requested_at = datetime.now(UTC)
         self._cancel_cap_timer()
         try:
             audio = self._recorder.stop_recording()
@@ -314,7 +325,9 @@ class RecordAndTranscribeUseCase:
             "Recording stopped: %.1fs of audio. Transcribing...",
             audio.duration_seconds,
         )
-        self._dispatcher.dispatch(lambda: self._do_transcription(audio))
+        self._dispatcher.dispatch(
+            lambda: self._do_transcription(audio, requested_at),
+        )
 
     def _audio_is_skippable(self, audio: AudioSegment | None) -> bool:
         if audio is None:
@@ -327,19 +340,29 @@ class RecordAndTranscribeUseCase:
             return True
         return False
 
-    def _do_transcription(self, audio: AudioSegment) -> None:
+    def _do_transcription(
+        self, audio: AudioSegment, requested_at: datetime,
+    ) -> None:
         try:
-            self._transcribe_and_publish(audio)
+            self._transcribe_and_publish(audio, requested_at)
         except Exception as exc:
+            self._diagnostics.transcription_finished(
+                audio, exc, requested_at,
+            )
             self._report_error(
                 "Transcription failed",
                 exc,
                 lambda message: TranscriptionFailedEvent(error=message),
             )
 
-    def _transcribe_and_publish(self, audio: AudioSegment) -> None:
+    def _transcribe_and_publish(
+        self, audio: AudioSegment, requested_at: datetime,
+    ) -> None:
         result = self._engine.transcribe(audio)
         self._deliver_transcribed_text(result)
+        self._diagnostics.transcription_finished(
+            audio, result, requested_at,
+        )
         self._state_machine.transition_to(AppState.IDLE)
         _logger.debug("post-transcribe: state -> IDLE")
         self._event_bus.publish(
@@ -354,10 +377,6 @@ class RecordAndTranscribeUseCase:
         if result.is_empty:
             self._announce_empty_transcription(result)
             return
-        _logger.info(
-            "Transcription completed in %.2fs",
-            result.transcription_seconds,
-        )
         _logger.debug("output.output: calling")
         try:
             self._output.output(result.text)
@@ -366,10 +385,6 @@ class RecordAndTranscribeUseCase:
         _logger.debug("output.output: returned")
 
     def _announce_empty_transcription(self, result: TranscriptionResult) -> None:
-        _logger.info(
-            "Transcription in %.2fs: (empty, no speech detected)",
-            result.transcription_seconds,
-        )
         self._event_bus.publish(
             TranscriptionEmptyEvent(
                 transcription_seconds=result.transcription_seconds,

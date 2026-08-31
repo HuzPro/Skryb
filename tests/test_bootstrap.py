@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -26,8 +26,8 @@ from voicetotext.core.exceptions import (
     EngineWarmupError,
     LicenseNotAcceptedError,
 )
-from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -42,11 +42,12 @@ from voicetotext.output.text_pipeline import PipelineMode
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
-
+from voicetotext.transcription.license_policy import LicensePolicy
 
 _HARDWARE = MagicMock()
 _REGISTRY = MagicMock()
 _ALLOW_ALL_LICENCES = AllowAllLicensePolicy()
+_DIAGNOSTICS = MagicMock(spec=SessionDiagnostics)
 
 _ROCM_PROFILE = HardwareProfile(
     kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
@@ -87,13 +88,16 @@ class TestLoadEngineWithFallback:
     def test_should_return_engine_when_first_attempt_succeeds(self, mock_create):
         engine = MagicMock()
         mock_create.return_value = engine
+        diagnostics = MagicMock(spec=SessionDiagnostics)
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, diagnostics,
         )
 
         assert result is engine
         engine.load_model.assert_called_once()
+        diagnostics.engine_loaded.assert_called_once()
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_retry_on_cpu_when_default_load_fails(self, mock_create):
@@ -106,6 +110,7 @@ class TestLoadEngineWithFallback:
 
         result = _load_engine_with_fallback(
             config, paths, _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            _DIAGNOSTICS,
         )
 
         assert result is cpu_engine
@@ -121,7 +126,8 @@ class TestLoadEngineWithFallback:
         mock_create.side_effect = [broken_engine, cpu_engine]
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
         )
 
         assert result is cpu_engine
@@ -133,11 +139,14 @@ class TestLoadEngineWithFallback:
         cpu_engine = MagicMock()
         cpu_engine.load_model.side_effect = RuntimeError("fail")
         mock_create.side_effect = [gpu_engine, cpu_engine]
+        diagnostics = MagicMock(spec=SessionDiagnostics)
 
         with pytest.raises(RuntimeError):
             _load_engine_with_fallback(
-                MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+                MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+                _ALLOW_ALL_LICENCES, diagnostics,
             )
+        diagnostics.engine_load_failed.assert_called_once()
 
     @patch("voicetotext.bootstrap.create_engine_for_active_model")
     def test_should_warm_engine_up_after_successful_load(self, mock_create):
@@ -150,7 +159,8 @@ class TestLoadEngineWithFallback:
         mock_create.return_value = engine
 
         _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
         )
 
         engine.load_model.assert_called_once()
@@ -173,7 +183,8 @@ class TestLoadEngineWithFallback:
         mock_create.return_value = engine
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
         )
 
         assert result is engine
@@ -188,7 +199,8 @@ class TestLoadEngineWithFallback:
         mock_create.side_effect = [gpu_engine, cpu_engine]
 
         result = _load_engine_with_fallback(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
         )
 
         assert result is cpu_engine
@@ -212,6 +224,7 @@ class TestLoadEngineWithFallback:
 
         _load_engine_with_fallback(
             config, paths, _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            _DIAGNOSTICS,
         )
 
         # Both calls go through the SAME factory function, which routes
@@ -241,7 +254,8 @@ class TestLoadEngineAndAttach:
         use_case = MagicMock()
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=use_case,
             state_machine=state_machine,
             event_bus=bus,
@@ -256,7 +270,8 @@ class TestLoadEngineAndAttach:
         mock_create.return_value = MagicMock()
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -280,7 +295,8 @@ class TestLoadEngineAndAttach:
         use_case = MagicMock()
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=use_case,
             state_machine=state_machine,
             event_bus=bus,
@@ -304,7 +320,8 @@ class TestLoadEngineAndAttach:
         mock_create.side_effect = [broken, broken]
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -338,7 +355,8 @@ class TestLoadEngineAndAttachFailureSurface:
         bus.subscribe(EngineLoadFailedEvent, received.append)
 
         _load_engine_and_attach(
-            config, MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            config, MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -370,7 +388,8 @@ class TestLoadEngineAndAttachFailureSurface:
         )
 
         _load_engine_and_attach(
-            config, MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            config, MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -390,7 +409,8 @@ class TestLoadEngineAndAttachFailureSurface:
         bus.subscribe(EngineLoadFailedEvent, received.append)
 
         _load_engine_and_attach(
-            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE, _ALLOW_ALL_LICENCES,
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
             use_case=MagicMock(),
             state_machine=state_machine,
             event_bus=bus,
@@ -419,7 +439,7 @@ class TestLicenceGateAtStartupLoad:
         with pytest.raises(LicenseNotAcceptedError, match=self._GATED):
             _load_streaming_engine(
                 self._gated_config(), paths, _HARDWARE,
-                LicensePolicy(FakeConfig()),
+                LicensePolicy(FakeConfig()), _DIAGNOSTICS,
             )
 
     def test_streaming_load_should_leave_an_ungated_model_alone(
@@ -433,13 +453,15 @@ class TestLicenceGateAtStartupLoad:
         config = FakeConfig(
             {"transcription.model_size": "nemotron-speech-streaming-en-0.6b"},
         )
+        diagnostics = MagicMock(spec=SessionDiagnostics)
 
         loaded = _load_streaming_engine(
             config, SimpleNamespace(models_dir=tmp_path), _HARDWARE,
-            LicensePolicy(FakeConfig()),
+            LicensePolicy(FakeConfig()), diagnostics,
         )
 
         assert loaded is engine
+        diagnostics.engine_loaded.assert_called_once()
 
     def test_batch_load_should_publish_the_licence_failure_and_recover(
         self, tmp_path: Path,
@@ -456,6 +478,7 @@ class TestLicenceGateAtStartupLoad:
             build_engine_registry(),
             _ROCM_PROFILE,
             LicensePolicy(FakeConfig()),
+            _DIAGNOSTICS,
             use_case=use_case,
             state_machine=state_machine,
             event_bus=bus,
