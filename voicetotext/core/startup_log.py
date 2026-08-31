@@ -69,3 +69,7 @@ def process_started_at() -> datetime:
 
 def process_uptime_seconds() -> float:
     return time.perf_counter() - _started_at
+
+
+def session_id() -> str:
+    return _session_id

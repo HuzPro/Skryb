@@ -16,6 +16,11 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
     StateChangedEvent,
 )
+from voicetotext.core.json_config_adapter import (
+    DEFAULT_CONFIG,
+    deep_merge_config,
+    load_json_object,
+)
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
@@ -276,6 +281,21 @@ class SettingsService:
         """
         if original.engine != updated.engine:
             self._install_cache.clear()
+
+    def export_settings(self, path: Path) -> None:
+        path.write_text(
+            json.dumps(
+                self._config.get_all(),
+                ensure_ascii=False,
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
+
+    def import_settings(self, path: Path) -> None:
+        imported = load_json_object(path)
+        self._config.replace_all(deep_merge_config(DEFAULT_CONFIG, imported))
+        self._config.save()
 
     # ------------------------------------------------------------------
     # Personal dictionary

@@ -25,3 +25,7 @@ class ConfigurationStore(ABC):
     @abstractmethod
     def get_all(self) -> dict[str, object]:
         pass
+
+    @abstractmethod
+    def replace_all(self, data: dict[str, object]) -> None:
+        pass
