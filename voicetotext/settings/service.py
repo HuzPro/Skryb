@@ -292,6 +292,14 @@ class SettingsService:
             encoding="utf-8",
         )
 
+    def diagnostics_directory(self) -> str:
+        configured = self._config.get("diagnostics.directory", "")
+        return configured if isinstance(configured, str) else ""
+
+    def set_diagnostics_directory(self, directory: str) -> None:
+        self._config.set("diagnostics.directory", directory)
+        self._config.save()
+
     def import_settings(self, path: Path) -> None:
         imported = load_json_object(path)
         self._config.replace_all(deep_merge_config(DEFAULT_CONFIG, imported))

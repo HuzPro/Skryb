@@ -11,7 +11,8 @@ and share the output without needing extra diagnostic skill.
 import importlib
 import os
 import sys
-from pathlib import Path
+
+from voicetotext.core.paths import AppPaths
 
 _BACKEND_INSTALL_HINTS: dict[str, str] = {
     "nano_parakeet": "pip install nano-parakeet",
@@ -132,13 +133,11 @@ def _probe_hf_cache() -> list[str]:
 
 
 def _probe_diagnostics_path() -> list[str]:
-    appdata = os.environ.get("APPDATA")
-    path = (
-        Path(appdata) / "VoiceToText" / "diagnostics"
-        if appdata is not None
-        else None
-    )
+    if os.environ.get("APPDATA") is None:
+        return ["[Session diagnostics]", "  directory: (APPDATA not set)"]
+    paths = AppPaths()
+    paths.load_configured_diagnostics_root()
     return [
         "[Session diagnostics]",
-        f"  directory: {path if path is not None else '(APPDATA not set)'}",
+        f"  directory: {paths.diagnostics_dir}",
     ]
