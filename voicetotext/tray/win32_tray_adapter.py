@@ -33,7 +33,7 @@ _WM_APP_TRAY = 0x0400 + 1  # WM_APP + 1: our tray callback message
 _WM_RBUTTONUP = 0x0205
 _WM_CONTEXTMENU = 0x007B
 _WM_LBUTTONDBLCLK = 0x0203
-_HWND_MESSAGE = -3
+_WS_EX_TOOLWINDOW = 0x80
 _MF_STRING = 0x0
 _MF_SEPARATOR = 0x800
 _MF_GRAYED = 0x1
@@ -46,6 +46,11 @@ _ID_QUIT = 3
 
 _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(_LRESULT, _wt.HWND, _wt.UINT, _wt.WPARAM, _wt.LPARAM)
+
+_user32.RegisterWindowMessageW.argtypes = [_wt.LPCWSTR]
+_user32.RegisterWindowMessageW.restype = _wt.UINT
+# Broadcast by the shell after Explorer restarts, once per surviving app.
+_WM_TASKBAR_CREATED = _user32.RegisterWindowMessageW("TaskbarCreated")
 
 
 class _BITMAPINFOHEADER(ctypes.Structure):
@@ -224,11 +229,15 @@ class TrayBackend(Protocol):
 
 
 class Win32TrayBackend:
-    """Native ``Shell_NotifyIconW`` tray icon on a message-only window.
+    """Native ``Shell_NotifyIconW`` tray icon on a hidden top-level window.
 
     Created on the main thread so Tk's ``mainloop`` pumps its window
-    messages. NOT unit-tested end-to-end (it needs a live shell); the
-    :class:`Win32TrayAdapter` orchestration is tested with a fake backend.
+    messages. The window is deliberately unowned rather than message-only:
+    ``HWND_MESSAGE`` windows are excluded from broadcasts, and the
+    ``TaskbarCreated`` broadcast is the only notice we get that Explorer
+    restarted and dropped our icon. NOT unit-tested end-to-end (it needs a
+    live shell); the :class:`Win32TrayAdapter` orchestration is tested with
+    a fake backend.
     """
 
     def __init__(
@@ -242,21 +251,21 @@ class Win32TrayBackend:
         self._on_quit_clicked = on_quit_clicked
         self._added = False
         self._wndproc = _WNDPROC(self._window_proc)  # pinned: GC would crash us
-        self._hwnd = self._create_message_window()
+        self._hwnd = self._create_tray_window()
         self._nid = self._build_nid()
 
-    def _create_message_window(self) -> int:
+    def _create_tray_window(self) -> int:
         wndclass = _WNDCLASSW()
         wndclass.lpfnWndProc = self._wndproc
         wndclass.hInstance = _kernel32.GetModuleHandleW(None)
         wndclass.lpszClassName = "VoiceToTextTray"
         self._class_atom = _user32.RegisterClassW(ctypes.byref(wndclass))
         hwnd = _user32.CreateWindowExW(
-            0, wndclass.lpszClassName, "VoiceToText", 0,
-            0, 0, 0, 0, _HWND_MESSAGE, None, wndclass.hInstance, None,
+            _WS_EX_TOOLWINDOW, wndclass.lpszClassName, "VoiceToText", 0,
+            0, 0, 0, 0, None, None, wndclass.hInstance, None,
         )
         if not hwnd:
-            raise OSError("CreateWindowExW failed for the tray message window.")
+            raise OSError("CreateWindowExW failed for the tray window.")
         return hwnd
 
     def _build_nid(self) -> _NOTIFYICONDATAW:
@@ -312,7 +321,16 @@ class Win32TrayBackend:
         if msg == _WM_APP_TRAY:
             self._handle_tray_event(lparam & 0xFFFF)
             return 0
+        if msg == _WM_TASKBAR_CREATED:
+            self._readd_after_explorer_restart()
+            return 0
         return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    def _readd_after_explorer_restart(self) -> None:
+        if not self._added:
+            return
+        self._added = False
+        self.show()
 
     def _handle_tray_event(self, mouse_message: int) -> None:
         if mouse_message in (_WM_RBUTTONUP, _WM_CONTEXTMENU):
