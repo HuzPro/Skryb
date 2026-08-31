@@ -39,6 +39,7 @@ DEFAULT_CONFIG = {
     "diagnostics": {
         "enabled": True,
         "retain_sessions": 50,
+        "directory": "",
     },
 }
 
