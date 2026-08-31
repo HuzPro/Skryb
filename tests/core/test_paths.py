@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -81,3 +82,73 @@ class TestAppPathsFirstRunDetection:
         paths = AppPaths(base=tmp_path)
 
         assert paths.is_first_run() is False
+
+
+class TestAppPathsDiagnosticsDirectory:
+    def test_should_default_to_a_folder_under_the_app_base(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+
+        assert paths.diagnostics_dir == tmp_path / "diagnostics"
+
+    def test_should_use_a_configured_folder(self, tmp_path: Path) -> None:
+        paths = AppPaths(base=tmp_path)
+
+        paths.use_diagnostics_root(str(tmp_path / "elsewhere" / "logs"))
+
+        assert paths.diagnostics_dir == tmp_path / "elsewhere" / "logs"
+
+    @pytest.mark.parametrize("configured", ["", "   ", None, 7])
+    def test_should_ignore_a_blank_or_non_text_folder(
+        self, tmp_path: Path, configured: object,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+
+        paths.use_diagnostics_root(configured)
+
+        assert paths.diagnostics_dir == tmp_path / "diagnostics"
+
+    def test_should_create_the_configured_folder(self, tmp_path: Path) -> None:
+        paths = AppPaths(base=tmp_path)
+        paths.use_diagnostics_root(str(tmp_path / "elsewhere" / "logs"))
+
+        paths.ensure_dirs()
+
+        assert (tmp_path / "elsewhere" / "logs").is_dir()
+
+    def test_should_fall_back_when_the_configured_folder_is_unusable(
+        self, tmp_path: Path,
+    ) -> None:
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+        paths = AppPaths(base=tmp_path)
+        paths.use_diagnostics_root(str(blocker / "logs"))
+
+        paths.ensure_dirs()
+
+        assert paths.diagnostics_dir == tmp_path / "diagnostics"
+        assert paths.diagnostics_dir.is_dir()
+
+    def test_should_read_the_folder_from_the_saved_config(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+        paths.config_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.config_path.write_text(
+            json.dumps({"diagnostics": {"directory": str(tmp_path / "logs")}}),
+            encoding="utf-8",
+        )
+
+        paths.load_configured_diagnostics_root()
+
+        assert paths.diagnostics_dir == tmp_path / "logs"
+
+    def test_should_default_when_no_config_is_saved(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+
+        paths.load_configured_diagnostics_root()
+
+        assert paths.diagnostics_dir == tmp_path / "diagnostics"

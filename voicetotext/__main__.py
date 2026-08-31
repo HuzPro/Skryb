@@ -97,6 +97,7 @@ def main() -> None:
         raise SystemExit(0)
 
     try:
+        paths.load_configured_diagnostics_root()
         paths.ensure_dirs()
         from voicetotext.core.startup_log import initialize_session_log
 
