@@ -9,6 +9,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
+import numpy as np
+
 from voicetotext.core.config import ConfigValue
 from voicetotext.core.exceptions import (
     ConfigurationError,
@@ -34,9 +36,74 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 _CPU_DEVICE = "cpu"
-_MAX_NEW_TOKENS = 256
+# ``WhisperFeatureExtractor`` truncates to ``chunk_length`` seconds by
+# default, so audio past this never reaches the encoder. Longer
+# recordings are split rather than silently losing their tail.
+_ENCODER_WINDOW_SECONDS = 30.0
+# Boundaries are nudged onto the quietest frame in this trailing slice of
+# the window so a split lands between words instead of inside one.
+_BOUNDARY_SEARCH_SECONDS = 2.0
+_BOUNDARY_FRAME_SECONDS = 0.02
+_FALLBACK_MAX_NEW_TOKENS = 256
 _MODE_TAG_COUNT = 5
 _VALID_MODES = frozenset({"intended", "verbatim"})
+
+
+def split_into_encoder_windows(audio: AudioSegment) -> list[AudioSegment]:
+    """Slice *audio* into windows the encoder will accept whole."""
+    window_samples = int(_ENCODER_WINDOW_SECONDS * audio.sample_rate)
+    windows: list[AudioSegment] = []
+    start = 0
+    while start < audio.sample_count:
+        end = _window_end(audio, start, window_samples)
+        windows.append(
+            AudioSegment(
+                data=audio.data[start:end],
+                sample_rate=audio.sample_rate,
+            ),
+        )
+        start = end
+    return windows
+
+
+def _window_end(audio: AudioSegment, start: int, window_samples: int) -> int:
+    limit = start + window_samples
+    if limit >= audio.sample_count:
+        return audio.sample_count
+    return _quietest_split_point(audio, start, limit)
+
+
+def _quietest_split_point(audio: AudioSegment, start: int, limit: int) -> int:
+    """Index of the quietest frame boundary near *limit*, else *limit*.
+
+    Cutting on the loudest part of a syllable mangles a word at every
+    seam, so the split moves to the lowest-energy frame in the trailing
+    search slice. The returned index always advances past *start*, so a
+    caller looping on it terminates.
+    """
+    frame = int(_BOUNDARY_FRAME_SECONDS * audio.sample_rate)
+    if frame < 1:
+        return limit
+    search_samples = int(_BOUNDARY_SEARCH_SECONDS * audio.sample_rate)
+    search_start = max(start + frame, limit - search_samples)
+    frame_count = (limit - search_start) // frame
+    if frame_count < 2:
+        return limit
+    frames = audio.data[search_start:search_start + frame_count * frame]
+    energy = np.abs(frames.reshape(frame_count, frame)).mean(axis=1)
+    # The last of the quietest frames, not the first: on a silent gap
+    # that keeps the whole gap with this window so the next one opens on
+    # speech, and on flat audio it splits as late as possible.
+    quietest = int(np.flatnonzero(energy == energy.min())[-1])
+    return search_start + (quietest + 1) * frame
+
+
+def _decode_budget(model: WhisperForConditionalGeneration, prefix_length: int) -> int:
+    """How many tokens generation may still emit after the prefix."""
+    positions = getattr(model.config, "max_target_positions", None)
+    if not isinstance(positions, int) or positions <= prefix_length + 1:
+        return _FALLBACK_MAX_NEW_TOKENS
+    return positions - prefix_length - 1
 
 
 def resolve_crisperwhisper_mode(value: ConfigValue) -> CrisperWhisperMode:
@@ -131,13 +198,20 @@ class CrisperWhisperAdapter(TranscriptionEngine):
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         self._raise_if_not_loaded()
         started_at = time.monotonic()
-        text = self._generate_text(audio)
+        text = self._transcribe_every_window(audio)
         return TranscriptionResult(
             text=text,
             language=self._language,
             language_probability=0.0,
             transcription_seconds=time.monotonic() - started_at,
         )
+
+    def _transcribe_every_window(self, audio: AudioSegment) -> str:
+        parts = [
+            self._generate_text(window).strip()
+            for window in split_into_encoder_windows(audio)
+        ]
+        return " ".join(part for part in parts if part)
 
     def _generate_text(self, audio: AudioSegment) -> str:
         model = self._model
@@ -173,7 +247,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
             generated = model.generate(
                 input_features,
                 decoder_input_ids=decoder_input_ids,
-                max_new_tokens=_MAX_NEW_TOKENS,
+                max_new_tokens=_decode_budget(model, len(prefix)),
                 num_beams=1,
                 do_sample=False,
                 use_cache=True,
