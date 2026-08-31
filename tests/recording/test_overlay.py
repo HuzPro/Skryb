@@ -16,7 +16,7 @@ from voicetotext.recording.overlay import (
 )
 
 
-_WIDTH = 148
+_WIDTH = 128
 _HEIGHT = 44
 
 
@@ -83,7 +83,7 @@ class TestRecordingOverlayLifecycle:
 
         overlay.show()
 
-        assert api.shown_at == [(526, 770)]
+        assert api.shown_at == [(536, 770)]
         assert len(api.frames) == 1
         assert len(api.frames[0]) == _WIDTH * _HEIGHT * 4
         root.after.assert_called_once()
