@@ -16,6 +16,20 @@ from voicetotext.settings.transcription_mode import TranscriptionMode
 
 _logger = logging.getLogger(__name__)
 
+_STYLE_LABELS: dict[str, str] = {
+    "intended": "Intended (clean up what I meant)",
+    "verbatim": "Verbatim (exactly what I said)",
+}
+_VERBATIM_NOTE = (
+    "Verbatim keeps fillers and skips the dictionary, "
+    "spoken commands, and number formatting."
+)
+_UNSUPPORTED_NOTE = "Only CrisperWhisper models have speech styles."
+
+
+def _style_note(supported: bool) -> str:
+    return _VERBATIM_NOTE if supported else _UNSUPPORTED_NOTE
+
 _SUPPORTED_LANGUAGES = [
     "en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh",
 ]
@@ -106,13 +120,30 @@ class TkTranscriptionPage(ttk.Frame):
         self._engine_combo = ttk.Combobox(form, state="readonly", values=[])
         self._engine_reason = ttk.Label(form, text="")
 
+        self._speech_style_var = tkinter.StringVar(
+            master=self, value=_STYLE_LABELS[draft.crisperwhisper_mode],
+        )
+        self._speech_style_combo = ttk.Combobox(
+            form,
+            textvariable=self._speech_style_var,
+            values=list(_STYLE_LABELS.values()),
+            state="readonly",
+        )
+        self._speech_style_note = ttk.Label(form, text="")
+
         ttk.Label(form, text="Language:").grid(row=0, column=0, sticky="w", pady=2)
         self._language_combo.grid(row=0, column=1, sticky="ew", pady=2)
         ttk.Label(form, text="Engine:").grid(row=1, column=0, sticky="w", pady=2)
         self._engine_combo.grid(row=1, column=1, sticky="ew", pady=2)
         self._engine_reason.grid(row=2, column=1, sticky="w")
+        ttk.Label(form, text="Speech style:").grid(
+            row=3, column=0, sticky="w", pady=2,
+        )
+        self._speech_style_combo.grid(row=3, column=1, sticky="ew", pady=2)
+        self._speech_style_note.grid(row=4, column=1, sticky="w")
 
         self._populate_engine_combo(draft.model_size, current_engine=draft.engine)
+        self._refresh_speech_style(draft.model_size)
 
     # ------------------------------------------------------------------
     # Accessors used by the window / tests
@@ -199,6 +230,25 @@ class TkTranscriptionPage(ttk.Frame):
 
     def _on_model_selected(self, name: str) -> None:
         self._populate_engine_combo(name)
+        self._refresh_speech_style(name)
+
+    def current_crisperwhisper_mode(self) -> str:
+        for mode, label in _STYLE_LABELS.items():
+            if label == self._speech_style_var.get():
+                return mode
+        return "intended"
+
+    def set_crisperwhisper_mode(self, mode: str) -> None:
+        self._speech_style_var.set(
+            _STYLE_LABELS.get(mode, _STYLE_LABELS["intended"]),
+        )
+
+    def _refresh_speech_style(self, model_name: str) -> None:
+        supported = self._service.model_has_crisperwhisper_modes(model_name)
+        self._speech_style_combo.configure(
+            state="readonly" if supported else "disabled",
+        )
+        self._speech_style_note.configure(text=_style_note(supported))
 
     def _populate_engine_combo(
         self, model_name: str, current_engine: str = "auto",

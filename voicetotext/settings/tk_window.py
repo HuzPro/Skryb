@@ -271,6 +271,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._transcription_page.set_model(draft.model_size)
         self._transcription_page.set_language(draft.language)
         self._transcription_page.set_engine(draft.engine)
+        self._transcription_page.set_crisperwhisper_mode(draft.crisperwhisper_mode)
         self._apply_initial_draft(draft)
 
     def _on_sidebar_select(self, _event: tkinter.Event) -> None:
@@ -308,6 +309,9 @@ class TkSettingsWindow(tkinter.Toplevel):
             hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
             transcription_mode=self._transcription_page.current_mode(),
+            crisperwhisper_mode=(
+                self._transcription_page.current_crisperwhisper_mode()
+            ),
         )
 
     def _on_save_clicked(self) -> None:
