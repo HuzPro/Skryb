@@ -9,7 +9,7 @@ is wrapped so a missing or broken module degrades to an
 """
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from voicetotext.diagnostics.doctor import run_doctor
 
@@ -41,6 +41,12 @@ class TestDoctorReportShape:
         report = run_doctor()
 
         assert "HuggingFace" in report or "HF_HUB_CACHE" in report
+
+    def test_should_include_session_diagnostics_directory(self) -> None:
+        report = run_doctor()
+
+        assert "[Session diagnostics]" in report
+        assert "diagnostics" in report.lower()
 
 
 class TestDoctorReportsMissingBackends:

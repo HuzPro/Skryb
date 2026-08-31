@@ -6,7 +6,9 @@ import pytest
 from tests.fakes.config import FakeConfig
 from tests.fakes.licensing import AllowAllLicensePolicy
 from voicetotext.core.exceptions import ConfigurationError, LicenseNotAcceptedError
-from voicetotext.transcription.license_policy import LicensePolicy
+from voicetotext.transcription.crisperwhisper_adapter import (
+    CrisperWhisperAdapter,
+)
 from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
     build_engine_registry,
@@ -16,18 +18,14 @@ from voicetotext.transcription.engine_factory import (
     resolve_engine_id,
 )
 from voicetotext.transcription.engine_types import HardwareProfile
+from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
     DEFAULT_MODEL,
     PARAKEET_MODELS,
     ModelInfo,
 )
-from voicetotext.transcription.ark_asr_adapter import ArkAsrAdapter
 from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
-from voicetotext.transcription.qwen3_asr_adapter import Qwen3AsrAdapter
-from voicetotext.transcription.crisperwhisper_adapter import (
-    CrisperWhisperAdapter,
-)
 
 
 def _config(
@@ -78,8 +76,7 @@ class TestBuildEngineRegistry:
         registry = build_engine_registry()
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
-            "nano_parakeet", "nemotron_streaming", "ark_asr", "qwen3_asr",
-            "crisperwhisper",
+            "nano_parakeet", "nemotron_streaming", "crisperwhisper",
         }
 
     def test_crisperwhisper_should_have_lower_base_priority(self) -> None:
@@ -190,38 +187,6 @@ class TestCreateEngineForActiveModel:
 
         assert isinstance(engine, NanoParakeetAdapter)
         assert engine._repo_id == "nvidia/parakeet-tdt-0.6b-v3"
-
-    def test_should_build_ark_asr_adapter_pinned_to_the_catalog_revision(
-        self, tmp_path: Path,
-    ) -> None:
-        engine = create_engine_for_active_model(
-            _config(model_size="ark-asr-3b", engine="ark_asr", device="cpu"),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, ArkAsrAdapter)
-        assert engine._repo_id == "Audio8/ARK-ASR-3B"
-        assert engine._revision == ALL_MODELS["ark-asr-3b"].revision
-
-    def test_should_build_qwen3_asr_adapter(self, tmp_path: Path) -> None:
-        engine = create_engine_for_active_model(
-            _config(
-                model_size="qwen3-asr-1.7b",
-                engine="qwen3_asr",
-                device="cpu",
-            ),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, Qwen3AsrAdapter)
-        assert engine._repo_id == "Qwen/Qwen3-ASR-1.7B-hf"
-        assert engine._language == "en"
 
     def test_device_override_should_force_cpu(self, tmp_path: Path) -> None:
         engine = create_engine_for_active_model(

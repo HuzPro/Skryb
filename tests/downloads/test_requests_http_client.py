@@ -1,6 +1,4 @@
-from unittest.mock import MagicMock
 
-import pytest
 
 from voicetotext.downloads.requests_http_client import RequestsHttpClient
 

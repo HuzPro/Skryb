@@ -24,17 +24,10 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
-    # Transformers engines (ARK-ASR, Qwen3-ASR, CrisperWhisper). 5.16.0 is
-    # the version the three are validated against, not an API requirement
-    # any one of them makes: their own floors are lower (Qwen3-ASR 5.13,
-    # ARK-ASR 4.57.6, CrisperWhisper 4.40), and nothing has been tested
-    # below 5.16.0. The upper bound keeps a future major out until an
-    # engine is tested against it. librosa and soundfile are imported by
-    # ARK's remote processing code; torchaudio is the decode backend
-    # transformers' audio loader falls back to.
+    # CrisperWhisper requires transformers 4.40. The app is validated with
+    # 5.16.0, and the upper bound keeps a future major out until tested.
+    # torchaudio is the decode backend transformers' audio loader uses.
     "transformers>=5.16.0,<6",
-    "librosa>=0.10.0",
-    "soundfile>=0.12.0",
     "torchaudio>=2.5",
     "text2num>=3.1",
     "jellyfish>=1.0",

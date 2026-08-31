@@ -1,10 +1,14 @@
+import json
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
 from tests.fakes.licensing import AllowAllLicensePolicy
+from tests.settings.fakes import FakeConfig, FakeModelManager
+from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -17,6 +21,8 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
     StateChangedEvent,
 )
+from voicetotext.core.exceptions import LicenseNotAcceptedError
+from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
@@ -35,16 +41,11 @@ from voicetotext.settings.service import (
     StateChangeListener,
 )
 from voicetotext.settings.settings_draft import SettingsDraft
-from voicetotext.core.exceptions import LicenseNotAcceptedError
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ALL_MODELS
-from tests.settings.fakes import FakeConfig, FakeModelManager
-
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-_ARK_ASR = "ark-asr-3b"
-_QWEN = "qwen3-asr-1.7b"
 _CRISPERWHISPER = {
     "crisperwhisper-2.0-turbo",
     "crisperwhisper-2.0-large",
@@ -58,6 +59,7 @@ def _build_service(
     registry=None,
     hardware=None,
     models=None,
+    config_store: ConfigurationStore | None = None,
     dictionary_path: Path | None = None,
     license_policy=None,
 ):
@@ -71,7 +73,7 @@ def _build_service(
     }
     config_data.update(config_overrides or {})
 
-    config = FakeConfig(config_data)
+    config = config_store if config_store is not None else FakeConfig(config_data)
     manager = FakeModelManager(installed=installed or {}, models=models)
     bus = SimpleEventBus()
     cache = ModelInstallationCache(manager, bus)
@@ -160,7 +162,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, _NEMOTRON, _ARK_ASR, _QWEN, *_CRISPERWHISPER,
+            _PARAKEET, _NEMOTRON, *_CRISPERWHISPER,
         }
 
     def test_should_mark_installed_status_on_view(self):
@@ -239,7 +241,7 @@ class TestDeleteModel:
         assert manager.delete_calls == []
 
     def test_should_invalidate_cache_entry_after_delete(self):
-        service, _, manager, *_ = _build_service(
+        service, _, _manager, *_ = _build_service(
             config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
             installed={"test-model": True},
         )
@@ -411,6 +413,77 @@ class TestApplyDraft:
 
         # Cache preserved → stale True still returned.
         assert service.is_installed("parakeet-tdt-0.6b-v3") is True
+
+
+class TestSettingsTransfer:
+    def test_should_export_current_config_as_json(self, tmp_path: Path) -> None:
+        service, *_ = _build_service()
+        path = tmp_path / "settings.json"
+
+        service.export_settings(path)
+
+        exported = json.loads(path.read_text(encoding="utf-8"))
+        assert exported["transcription"]["model_size"] == _PARAKEET
+        assert exported["hotkey"]["mode"] == "toggle"
+
+    def test_should_import_unknown_keys_and_fill_missing_defaults(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service, config, *_ = _build_service()
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps({
+                "transcription": {"language": "fr"},
+                "future": {"nested": {"option": "enabled"}},
+            }),
+            encoding="utf-8",
+        )
+
+        service.import_settings(path)
+
+        assert config.get("transcription.language") == "fr"
+        assert config.get("transcription.device") == "auto"
+        assert config.get("hotkey.mode") == "toggle"
+        assert config.get("future.nested.option") == "enabled"
+        assert config.save_count == 1
+
+    def test_should_record_import_in_config_history(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.json"
+        config = JsonConfigAdapter(config_path)
+        config.load()
+        config.save()
+        service, *_ = _build_service(config_store=config)
+        import_path = tmp_path / "settings.json"
+        import_path.write_text(
+            json.dumps({"hotkey": {"mode": "push_to_talk"}}),
+            encoding="utf-8",
+        )
+
+        service.import_settings(import_path)
+
+        history_lines = config_path.with_name("config-history.jsonl").read_text(
+            encoding="utf-8",
+        ).splitlines()
+        entry = cast(dict[str, object], json.loads(history_lines[-1]))
+        assert entry["changes"] == [
+            {"key": "hotkey.mode", "from": "toggle", "to": "push_to_talk"}
+        ]
+
+    @pytest.mark.parametrize("value", [[], "settings", 1, None])
+    def test_should_reject_import_when_json_is_not_an_object(
+        self,
+        tmp_path: Path,
+        value: object,
+    ) -> None:
+        service, config, *_ = _build_service()
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+        with pytest.raises(TypeError, match="JSON object"):
+            service.import_settings(path)
+
+        assert config.save_count == 0
 
 
 class TestTriggerEngineSwap:

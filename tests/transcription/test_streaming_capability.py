@@ -82,17 +82,6 @@ class TestModelSupportsBatch:
             get_model_info("parakeet-tdt-0.6b-v3"), _descriptors(),
         ) is True
 
-    def test_should_report_ark_asr_batch_capable(self):
-        assert model_supports_batch(
-            get_model_info("ark-asr-3b"), _descriptors(),
-        ) is True
-
-    def test_should_report_ark_asr_not_streaming_capable(self):
-        assert model_supports_streaming(
-            get_model_info("ark-asr-3b"), _descriptors(),
-        ) is False
-
-
 class TestSelectorUnaffectedByStreamingFlag:
     def test_streaming_flag_should_not_change_ranking_order(self):
         # rank_engines must order purely by priority and hardware, never by

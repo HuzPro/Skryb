@@ -129,6 +129,7 @@ class TkTranscriptionPage(ttk.Frame):
 
     def set_model(self, name: str) -> None:
         self._model_list.set_selected(name)
+        self._populate_engine_combo(name)
 
     def current_mode(self) -> TranscriptionMode:
         return self._mode_selector.current_mode()
@@ -176,7 +177,6 @@ class TkTranscriptionPage(ttk.Frame):
             return
         replacement = self._default_model_for(mode)
         self.set_model(replacement)
-        self._populate_engine_combo(replacement)
         self.model_auto_switched.emit(current, replacement)
 
     def _model_fits_mode(self, name: str, mode: TranscriptionMode) -> bool:

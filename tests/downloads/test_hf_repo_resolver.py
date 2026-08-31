@@ -9,7 +9,8 @@ from voicetotext.downloads.hf_repo_resolver import (
 )
 
 
-_PINNED_SHA = "1e28271b79edc97635783bea65abc89195a09ed3"
+_PINNED_SHA = "de0369c8a68025b7f6e86387b6eb5a3b369787c8"
+_PINNED_REPO = "nyralabs/CrisperWhisper2.0_turbo"
 _OTHER_SHA = "0000000000000000000000000000000000000000"
 
 
@@ -88,7 +89,7 @@ class TestHfRepoResolverRevision:
         api.repo_info.return_value = _fake_repo_info(sha=_PINNED_SHA, files=[])
 
         resolved = HfRepoResolver(api=api).resolve(
-            "Audio8/ARK-ASR-3B", _PINNED_SHA,
+            _PINNED_REPO, _PINNED_SHA,
         )
 
         assert api.repo_info.call_args.kwargs["revision"] == _PINNED_SHA
@@ -102,11 +103,11 @@ class TestHfRepoResolverRevision:
         )
 
         resolved = HfRepoResolver(api=api).resolve(
-            "Audio8/ARK-ASR-3B", _PINNED_SHA,
+            _PINNED_REPO, _PINNED_SHA,
         )
 
         assert resolved.files[0].url == (
-            f"https://huggingface.co/Audio8/ARK-ASR-3B/resolve/"
+            f"https://huggingface.co/{_PINNED_REPO}/resolve/"
             f"{_PINNED_SHA}/config.json"
         )
 
@@ -115,7 +116,7 @@ class TestHfRepoResolverRevision:
         api.repo_info.return_value = _fake_repo_info(sha=_OTHER_SHA, files=[])
 
         with pytest.raises(RevisionMismatchError) as exc_info:
-            HfRepoResolver(api=api).resolve("Audio8/ARK-ASR-3B", _PINNED_SHA)
+            HfRepoResolver(api=api).resolve(_PINNED_REPO, _PINNED_SHA)
 
         assert _PINNED_SHA in str(exc_info.value)
         assert _OTHER_SHA in str(exc_info.value)

@@ -12,7 +12,6 @@ adapter that reads license files from the live environment via
 ``importlib.metadata`` is a thin I/O boundary, exercised manually.
 """
 
-import pytest
 
 from release.notices import (
     PackageLicense,

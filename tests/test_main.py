@@ -158,6 +158,9 @@ class TestDoctorCli:
             main()
 
         mock_run.assert_called_once()
+        paths = mock_run.call_args.args[0]
+        assert paths.session_log_path.parent.parent == paths.diagnostics_dir
+        assert paths.session_log_path.exists()
         mutex.release.assert_called_once()
 
 

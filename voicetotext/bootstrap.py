@@ -1,3 +1,4 @@
+import atexit
 import functools
 import logging
 import threading
@@ -6,7 +7,10 @@ import tkinter
 from collections.abc import Callable
 from pathlib import Path
 
-from voicetotext.core.action_dispatcher import ActionDispatcher, ThreadedActionDispatcher
+from voicetotext.core.action_dispatcher import (
+    ActionDispatcher,
+    ThreadedActionDispatcher,
+)
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
 from voicetotext.core.events import EngineLoadFailedEvent
 from voicetotext.core.exceptions import (
@@ -17,18 +21,19 @@ from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.startup_log import milestone
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
-from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
+from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
-from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 from voicetotext.output.dictionary_config import DictionaryConfig
+from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 from voicetotext.output.gui_thread_output_decorator import (
     GuiThreadOutputDecorator,
 )
@@ -38,21 +43,21 @@ from voicetotext.output.modifier_release_waiting_key_sender import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
-from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
+from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
 from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
-from voicetotext.output.sleeper import TimeSleeper
+from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
 from voicetotext.output.win32_key_sender import Win32KeySender
 from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
-from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.overlay import RecordingOverlay
+from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.settings.download_coordinator import DownloadCoordinator
@@ -61,10 +66,10 @@ from voicetotext.settings.engine_hot_swap import (
     NullEngineHotSwap,
 )
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
-from voicetotext.settings.tk_window import TkSettingsWindow
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
+from voicetotext.settings.tk_window import TkSettingsWindow
+from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
@@ -84,18 +89,17 @@ from voicetotext.transcription.model_info import (
     ModelInfo,
     get_model_info,
 )
-from voicetotext.transcription.streaming.streaming_engine import (
-    StreamingTranscriptionEngine,
-)
+from voicetotext.transcription.model_manager import ModelManager
+from voicetotext.transcription.placeholder_engine import PlaceholderEngine
 from voicetotext.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
 )
-from voicetotext.transcription.model_manager import ModelManager
-from voicetotext.transcription.placeholder_engine import PlaceholderEngine
+from voicetotext.transcription.streaming.streaming_engine import (
+    StreamingTranscriptionEngine,
+)
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
 from voicetotext.tray.win32_tray_adapter import build_win32_tray_adapter
-
 
 _logger = logging.getLogger(__name__)
 
@@ -205,6 +209,7 @@ def _load_engine_with_fallback(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
 ) -> TranscriptionEngine:
     """Try the active engine on its preferred device, falling back to CPU.
 
@@ -214,13 +219,36 @@ def _load_engine_with_fallback(
     different model files. CPU-fallback within the same engine is the
     only automatic step.
     """
+    started_at = time.monotonic()
+    device = _configured_device(config, hardware)
     try:
-        return _load_engine(config, paths, registry, hardware, license_policy)
-    except (RuntimeError, OSError) as exc:
-        _logger.warning("load_engine: primary device failed: %s", exc)
+        try:
+            engine = _load_engine(
+                config, paths, registry, hardware, license_policy,
+            )
+        except (RuntimeError, OSError) as exc:
+            _logger.warning("load_engine: primary device failed: %s", exc)
+            _logger.info("load_engine: retrying on CPU")
+            device = "cpu"
+            engine = _load_engine_on_cpu(
+                config, paths, registry, hardware, license_policy,
+            )
+    except Exception as exc:
+        diagnostics.engine_load_failed(
+            time.monotonic() - started_at, exc, device,
+        )
+        raise
+    diagnostics.engine_loaded(time.monotonic() - started_at, device)
+    return engine
 
-    _logger.info("load_engine: retrying on CPU")
-    return _load_engine_on_cpu(config, paths, registry, hardware, license_policy)
+
+def _configured_device(
+    config: JsonConfigAdapter, hardware: HardwareProfile,
+) -> str:
+    configured = config.get("transcription.device", "auto")
+    if isinstance(configured, str) and configured != "auto":
+        return configured
+    return "cpu" if hardware.kind == "cpu" else "cuda"
 
 
 def _load_engine(
@@ -264,20 +292,31 @@ def _load_streaming_engine(
     paths: AppPaths,
     hardware: HardwareProfile,
     license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
 ) -> StreamingTranscriptionEngine:
     """Build, load, and warm the GPU-only streaming engine for the active model.
 
     Streaming bypasses ``engine_factory`` entirely, so it asserts the
     licence itself rather than inheriting the factory's check.
     """
-    model_info = get_model_info(
-        config.get("transcription.model_size", DEFAULT_MODEL)
+    started_at = time.monotonic()
+    try:
+        model_info = get_model_info(
+            config.get("transcription.model_size", DEFAULT_MODEL)
+        )
+        license_policy.assert_accepted(model_info)
+        engine = _build_streaming_engine_for(model_info, paths)
+        engine.load_model()
+        milestone("model-loaded")
+        _warmup_safely(engine)
+    except Exception as exc:
+        diagnostics.engine_load_failed(
+            time.monotonic() - started_at, exc, _STREAMING_DEVICE,
+        )
+        raise
+    diagnostics.engine_loaded(
+        time.monotonic() - started_at, _STREAMING_DEVICE,
     )
-    license_policy.assert_accepted(model_info)
-    engine = _build_streaming_engine_for(model_info, paths)
-    engine.load_model()
-    milestone("model-loaded")
-    _warmup_safely(engine)
     return engine
 
 
@@ -322,6 +361,7 @@ def _load_active_engine_installer(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
 ) -> EngineInstaller:
     """Load the engine for the active mode and return its installer.
 
@@ -329,12 +369,14 @@ def _load_active_engine_installer(
     CPU fallback inside ``_load_engine_with_fallback``.
     """
     if config.get("transcription.mode", "batch") == "streaming":
-        engine = _load_streaming_engine(config, paths, hardware, license_policy)
+        engine = _load_streaming_engine(
+            config, paths, hardware, license_policy, diagnostics,
+        )
         return make_engine_installer(
             engine, lambda use_case, loaded: use_case.set_streaming_engine(loaded),
         )
     engine = _load_engine_with_fallback(
-        config, paths, registry, hardware, license_policy,
+        config, paths, registry, hardware, license_policy, diagnostics,
     )
     return make_engine_installer(
         engine, lambda use_case, loaded: use_case.set_engine(loaded),
@@ -347,6 +389,7 @@ def _load_engine_and_attach(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
     *,
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
@@ -363,7 +406,7 @@ def _load_engine_and_attach(
     milestone("engine-load-started")
     try:
         installer = _load_active_engine_installer(
-            config, paths, registry, hardware, license_policy,
+            config, paths, registry, hardware, license_policy, diagnostics,
         )
         installer(use_case)
     except Exception as exc:
@@ -414,6 +457,7 @@ def _spawn_engine_load_thread(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
     *,
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
@@ -421,7 +465,9 @@ def _spawn_engine_load_thread(
 ) -> None:
     thread = threading.Thread(
         target=_load_engine_and_attach,
-        args=(config, paths, registry, hardware, license_policy),
+        args=(
+            config, paths, registry, hardware, license_policy, diagnostics,
+        ),
         kwargs={
             "use_case": use_case,
             "state_machine": state_machine,
@@ -511,6 +557,7 @@ def _build_settings_service(
     registry: EngineRegistry,
     hardware: HardwareProfile,
     license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
 ) -> SettingsService:
     install_cache = ModelInstallationCache(model_manager, event_bus)
     downloads = DownloadCoordinator(model_manager)
@@ -518,7 +565,7 @@ def _build_settings_service(
         use_case=use_case,
         event_bus=event_bus,
         loader=lambda: _load_active_engine_installer(
-            config, paths, registry, hardware, license_policy,
+            config, paths, registry, hardware, license_policy, diagnostics,
         ),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
@@ -614,6 +661,8 @@ def build_app(
     EngineReadyBeeper(event_bus, cue_player)
 
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
+    diagnostics = SessionDiagnostics(paths, config, hardware)
+    atexit.register(diagnostics.dispose)
 
     _logger.info(
         "Detected hardware: %s (%s, gfx=%s)",
@@ -659,6 +708,7 @@ def build_app(
         state_machine=state_machine,
         event_bus=event_bus,
         action_dispatcher=action_dispatcher,
+        diagnostics=diagnostics,
         max_recording_seconds=config.get(
             "recording.max_duration_seconds", 600.0,
         ),
@@ -689,6 +739,7 @@ def build_app(
         registry=registry,
         hardware=hardware,
         license_policy=license_policy,
+        diagnostics=diagnostics,
     )
 
     settings_window_ref: dict[str, TkSettingsWindow | None] = {"current": None}
@@ -741,7 +792,7 @@ def build_app(
     )
 
     _spawn_engine_load_thread(
-        config, paths, registry, hardware, license_policy,
+        config, paths, registry, hardware, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,

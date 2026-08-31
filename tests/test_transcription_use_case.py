@@ -1,3 +1,4 @@
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -16,8 +17,9 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
 )
 from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
-from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
@@ -38,31 +40,6 @@ def _make_result(
     )
 
 
-def _capture_use_case_info_logs(caplog, action) -> list:
-    """Capture INFO records emitted by the use case's logger.
-
-    ``voicetotext.core.debug_logger`` disables propagation on the
-    ``voicetotext`` subtree at import time, which makes caplog's
-    root-attached handler blind to records from the use case once any
-    other test has imported bootstrap. Attaching caplog's handler
-    directly to the use case's logger sidesteps that for the duration
-    of one assertion.
-    """
-    import logging as stdlib_logging
-    from voicetotext import transcription_use_case
-
-    logger = transcription_use_case._logger
-    previous_level = logger.level
-    logger.setLevel(stdlib_logging.INFO)
-    logger.addHandler(caplog.handler)
-    try:
-        action()
-    finally:
-        logger.removeHandler(caplog.handler)
-        logger.setLevel(previous_level)
-    return [r for r in caplog.records if r.levelno >= stdlib_logging.INFO]
-
-
 def _build_use_case(
     dispatcher: ActionDispatcher | None = None,
     initial_state: AppState = AppState.IDLE,
@@ -80,6 +57,7 @@ def _build_use_case(
         state_machine=state_machine,
         event_bus=event_bus,
         action_dispatcher=dispatcher or InlineActionDispatcher(),
+        diagnostics=MagicMock(spec=SessionDiagnostics),
         max_recording_seconds=max_recording_seconds,
     )
     return use_case, recorder, engine, output, event_bus, state_machine
@@ -198,61 +176,39 @@ class TestActivateFromRecording:
         assert received[0].text == "hello"
 
 
-class TestTranscriptionLogging:
-    """The use case logs the transcription processing time once the
-    engine returns so the user can see how long every model/engine
-    took, not just how long the recording was. The value comes from
-    ``TranscriptionResult.transcription_seconds`` so it is engine-
-    agnostic - every adapter sets it via ``time.monotonic()`` around
-    inference.
-    """
-
-    def test_should_log_transcription_time_without_text_when_completed(
-        self, caplog,
-    ):
+class TestTranscriptionDiagnostics:
+    def test_should_record_result_after_output_is_delivered(self) -> None:
         use_case, recorder, engine, _, _, _ = _build_use_case()
-        recorder.stop_recording.return_value = _make_audio()
-        engine.transcribe.return_value = _make_result(
+        audio = _make_audio()
+        result = _make_result(
             text="hello", seconds=0.42,
         )
+        recorder.stop_recording.return_value = audio
+        engine.transcribe.return_value = result
 
-        records = _capture_use_case_info_logs(
-            caplog,
-            lambda: (
-                use_case.on_hotkey_activated(),
-                use_case.on_hotkey_activated(),
-            ),
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        diagnostics = use_case._diagnostics
+        recorded_audio, recorded_result, requested_at = (
+            diagnostics.transcription_finished.call_args.args
         )
+        assert recorded_audio is audio
+        assert recorded_result is result
+        assert requested_at.tzinfo is UTC
 
-        transcription_logs = [
-            r.getMessage() for r in records
-            if r.getMessage().startswith("Transcription")
-        ]
-        assert any("0.42" in msg for msg in transcription_logs)
-        assert all("hello" not in msg for msg in transcription_logs)
-
-    def test_should_log_transcription_time_when_result_is_empty(
-        self, caplog,
-    ):
+    def test_should_record_empty_result(self) -> None:
         use_case, recorder, engine, _, _, _ = _build_use_case()
-        recorder.stop_recording.return_value = _make_audio()
-        engine.transcribe.return_value = _make_result(text="", seconds=0.31)
+        audio = _make_audio()
+        result = _make_result(text="", seconds=0.31)
+        recorder.stop_recording.return_value = audio
+        engine.transcribe.return_value = result
 
-        records = _capture_use_case_info_logs(
-            caplog,
-            lambda: (
-                use_case.on_hotkey_activated(),
-                use_case.on_hotkey_activated(),
-            ),
-        )
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
 
-        transcription_logs = [
-            r.getMessage() for r in records
-            if r.getMessage().startswith("Transcription")
-        ]
-        assert any(
-            "0.31" in msg and "empty" in msg for msg in transcription_logs
-        ), f"Expected log with time and empty marker; got: {transcription_logs}"
+        use_case._diagnostics.transcription_finished.assert_called_once()
+        assert use_case._diagnostics.transcription_finished.call_args.args[1] is result
 
 
 class TestActivateFromTranscribing:
@@ -314,6 +270,8 @@ class TestTranscriptionError:
 
         assert len(received) == 1
         assert "model crashed" in received[0].error
+        outcome = use_case._diagnostics.transcription_finished.call_args.args[1]
+        assert isinstance(outcome, RuntimeError)
 
 
 class TestClipboardWriteFailure:
@@ -722,4 +680,5 @@ class TestDispose:
 
         use_case.dispose()
 
+        use_case._diagnostics.dispose.assert_called_once()
         engine.dispose.assert_called_once()

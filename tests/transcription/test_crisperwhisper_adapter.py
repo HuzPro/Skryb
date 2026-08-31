@@ -16,6 +16,7 @@ from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.crisperwhisper_adapter import (
     CrisperWhisperAdapter,
     resolve_crisperwhisper_mode,
+    split_into_encoder_windows,
 )
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.result import TranscriptionResult
@@ -321,3 +322,127 @@ class TestCrisperWhisperInterfaceAndDependencies:
         message = str(exc_info.value).lower()
         assert "transformers" in message
         assert "pip install" in message
+
+
+_SAMPLE_RATE = 16000
+_GAP_START_SECONDS = 29.0
+_GAP_SECONDS = 0.2
+
+
+def _speech_with_gap(total_seconds: float) -> AudioSegment:
+    """Loud throughout except one silent gap just before the 30 s edge."""
+    data = np.full(
+        int(total_seconds * _SAMPLE_RATE), 0.5, dtype=np.float32,
+    )
+    gap_start = int(_GAP_START_SECONDS * _SAMPLE_RATE)
+    gap_end = gap_start + int(_GAP_SECONDS * _SAMPLE_RATE)
+    data[gap_start:gap_end] = 0.0
+    return AudioSegment(data=data, sample_rate=_SAMPLE_RATE)
+
+
+class TestCrisperWhisperEncoderWindows:
+    def test_should_keep_audio_within_the_encoder_window_whole(self) -> None:
+        audio = _speech_with_gap(12.0)
+
+        windows = split_into_encoder_windows(audio)
+
+        assert len(windows) == 1
+        assert np.array_equal(windows[0].data, audio.data)
+
+    def test_should_split_audio_longer_than_the_encoder_window(self) -> None:
+        windows = split_into_encoder_windows(_speech_with_gap(75.0))
+
+        assert len(windows) > 1
+
+    def test_should_preserve_every_sample_across_windows(self) -> None:
+        audio = _speech_with_gap(75.0)
+
+        windows = split_into_encoder_windows(audio)
+
+        rejoined = np.concatenate([window.data for window in windows])
+        assert np.array_equal(rejoined, audio.data)
+
+    def test_should_split_on_the_quietest_point_near_the_boundary(self) -> None:
+        windows = split_into_encoder_windows(_speech_with_gap(75.0))
+
+        gap_start = int(_GAP_START_SECONDS * _SAMPLE_RATE)
+        gap_end = gap_start + int(_GAP_SECONDS * _SAMPLE_RATE)
+        assert gap_start <= windows[0].sample_count <= gap_end
+
+    def test_should_never_exceed_the_encoder_window(self) -> None:
+        windows = split_into_encoder_windows(_speech_with_gap(75.0))
+
+        longest = max(window.duration_seconds for window in windows)
+        assert longest <= 30.0
+
+
+class TestCrisperWhisperLongAudio:
+    def test_should_generate_once_for_short_audio(self) -> None:
+        adapter = _adapter()
+        _, _, _, model = _load_with_fakes(adapter)
+
+        adapter.transcribe(_audio())
+
+        assert model.generate.call_count == 1
+
+    def test_should_generate_for_every_window_of_long_audio(self) -> None:
+        adapter = _adapter()
+        _, _, _, model = _load_with_fakes(adapter)
+
+        adapter.transcribe(_speech_with_gap(75.0))
+
+        assert model.generate.call_count == 3
+
+    def test_should_join_the_text_of_every_window(self) -> None:
+        adapter = _adapter()
+        _, _, processor_type, _ = _load_with_fakes(adapter)
+        processor = processor_type.from_pretrained.return_value
+        processor.tokenizer.decode.side_effect = ["one", "two", "three"]
+
+        result = adapter.transcribe(_speech_with_gap(75.0))
+
+        assert result.text == "one two three"
+
+    def test_should_feed_every_sample_to_the_processor(self) -> None:
+        adapter = _adapter()
+        _, _, processor_type, _ = _load_with_fakes(adapter)
+        audio = _speech_with_gap(75.0)
+
+        adapter.transcribe(audio)
+
+        processor = processor_type.from_pretrained.return_value
+        fed = np.concatenate(
+            [call.args[0] for call in processor.call_args_list],
+        )
+        assert np.array_equal(fed, audio.data)
+
+    def test_should_time_the_whole_transcription_not_one_window(self) -> None:
+        adapter = _adapter()
+        _load_with_fakes(adapter)
+
+        result = adapter.transcribe(_speech_with_gap(75.0))
+
+        assert result.transcription_seconds >= 0.0
+
+
+class TestCrisperWhisperDecodeBudget:
+    def test_should_budget_tokens_from_the_model_position_limit(self) -> None:
+        adapter = _adapter()
+        _, _, _, model = _load_with_fakes(adapter)
+        model.config.max_target_positions = 448
+
+        adapter.transcribe(_audio())
+
+        prefix_length = len(_MODE_IDS + _WHISPER_IDS)
+        assert model.generate.call_args.kwargs["max_new_tokens"] == (
+            448 - prefix_length - 1
+        )
+
+    def test_should_fall_back_when_the_limit_is_unavailable(self) -> None:
+        adapter = _adapter()
+        _, _, _, model = _load_with_fakes(adapter)
+        model.config.max_target_positions = None
+
+        adapter.transcribe(_audio())
+
+        assert model.generate.call_args.kwargs["max_new_tokens"] == 256

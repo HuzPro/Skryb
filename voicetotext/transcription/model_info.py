@@ -7,7 +7,6 @@ from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.transcription.engine_types import EngineId
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -82,41 +81,6 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 }
 
 
-_ARK_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"ark_asr": 100},
-)
-
-
-ARK_ASR_MODELS: dict[str, ModelInfo] = {
-    "ark-asr-3b": ModelInfo(
-        name="ark-asr-3b",
-        size_mb=8144,
-        description="Top Open ASR leaderboard accuracy (19 languages, GPU)",
-        repo_id="Audio8/ARK-ASR-3B",
-        revision="1e28271b79edc97635783bea65abc89195a09ed3",
-        compatible_engines=("ark_asr",),
-        engine_priorities=_ARK_ASR_ENGINE_PRIORITIES,
-    ),
-}
-
-
-_QWEN3_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"qwen3_asr": 100},
-)
-
-
-QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
-    "qwen3-asr-1.7b": ModelInfo(
-        name="qwen3-asr-1.7b",
-        size_mb=4088,
-        description="Qwen3-ASR 1.7B, multilingual with hotword biasing (GPU)",
-        repo_id="Qwen/Qwen3-ASR-1.7B-hf",
-        compatible_engines=("qwen3_asr",),
-        engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
-    ),
-}
-
-
 _CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"crisperwhisper": 40},
 )
@@ -166,8 +130,7 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
 
 
 ALL_MODELS: dict[str, ModelInfo] = {
-    **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **ARK_ASR_MODELS,
-    **QWEN3_ASR_MODELS, **CRISPERWHISPER_MODELS,
+    **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **CRISPERWHISPER_MODELS,
 }
 
 
@@ -195,6 +158,8 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "large-v3-turbo": DEFAULT_MODEL,
     "granite-speech-4.1-2b": DEFAULT_MODEL,
     "granite-speech-5.0-470m-turboctc": DEFAULT_MODEL,
+    "ark-asr-3b": DEFAULT_MODEL,
+    "qwen3-asr-1.7b": DEFAULT_MODEL,
     "parakeet-tdt-0.6b-v2": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
 }
@@ -213,9 +178,11 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
 
 
 _REMOVED_ENGINES: frozenset[str] = frozenset({
+    "ark_asr",
     "faster_whisper",
     "granite_speech",
     "granite_turboctc",
+    "qwen3_asr",
     "transformers",
 })
 

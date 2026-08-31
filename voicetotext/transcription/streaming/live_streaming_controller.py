@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from voicetotext.core.exceptions import TranscriptionError
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription.streaming.streaming_engine import (
@@ -14,14 +15,15 @@ from voicetotext.transcription.streaming.streaming_output_writer import (
     StreamingOutputWriter,
 )
 
-
 _logger = logging.getLogger(__name__)
 _SENTINEL = object()
 
 # The worker hands back the finalized transcript on success (``error`` None)
 # or the failure (``result`` None) so the use case can log it and publish a
 # completion event carrying the real text and duration.
-OnComplete = Callable[[TranscriptionResult | None, Exception | None], None]
+OnComplete = Callable[
+    [TranscriptionResult | None, Exception | None, AudioSegment | None], None
+]
 
 
 class LiveStreamingController:
@@ -43,7 +45,8 @@ class LiveStreamingController:
         self._session: object | None = None
         self._queue: queue.Queue | None = None
         self._worker: threading.Thread | None = None
-        self._on_complete: OnComplete = lambda _result, _error: None
+        self._on_complete: OnComplete = lambda _result, _error, _audio: None
+        self._audio: AudioSegment | None = None
         self._active = False
         self._lock = threading.Lock()
 
@@ -72,6 +75,7 @@ class LiveStreamingController:
             self._session = self._engine.start_session()
             self._writer.reset()
             self._queue = queue.Queue()
+            self._audio = None
             self._worker = threading.Thread(
                 target=self._run, name="stream-worker", daemon=True,
             )
@@ -87,7 +91,7 @@ class LiveStreamingController:
             worker = self._worker
             frame_queue = self._queue
         # Stop the mic BEFORE the sentinel so no late frame lands after it.
-        self._recorder.stop_recording()
+        self._audio = self._recorder.stop_recording()
         frame_queue.put(_SENTINEL)
         if worker is not None:
             worker.join()
@@ -98,13 +102,14 @@ class LiveStreamingController:
         error: Exception | None = None
         try:
             result = self._consume_until_sentinel()
-        except Exception as exc:  # noqa: BLE001 - surfaced via on_complete
+        except Exception as exc:
             _logger.exception("streaming worker failed")
             error = exc
-            self._stop_recorder_quietly()
+            self._audio = self._stop_recorder_quietly()
         finally:
+            audio = self._audio
             self._reset()
-        on_complete(result, error)
+        on_complete(result, error, audio)
 
     def _consume_until_sentinel(self) -> TranscriptionResult:
         while True:
@@ -117,11 +122,12 @@ class LiveStreamingController:
         self._writer.emit(result.text)
         return result
 
-    def _stop_recorder_quietly(self) -> None:
+    def _stop_recorder_quietly(self) -> AudioSegment | None:
         try:
-            self._recorder.stop_recording()
-        except Exception:  # noqa: BLE001 - best-effort mic teardown on failure
+            return self._recorder.stop_recording()
+        except Exception:
             _logger.debug("recorder stop during cleanup failed", exc_info=True)
+            return None
 
     def _reset(self) -> None:
         with self._lock:
@@ -129,3 +135,4 @@ class LiveStreamingController:
             self._worker = None
             self._queue = None
             self._session = None
+            self._audio = None
