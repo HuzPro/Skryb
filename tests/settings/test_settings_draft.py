@@ -128,3 +128,26 @@ class TestChangeSetFromDrafts:
 
         assert no_change.any_changed is False
         assert with_change.any_changed is True
+
+
+class TestCrisperWhisperModeChanges:
+    def test_should_require_an_engine_reload(self) -> None:
+        original = _make_draft(crisperwhisper_mode="intended")
+        updated = _make_draft(crisperwhisper_mode="verbatim")
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.engine_reload_required
+
+    def test_should_rebuild_output_so_the_pipeline_follows(self) -> None:
+        original = _make_draft(crisperwhisper_mode="intended")
+        updated = _make_draft(crisperwhisper_mode="verbatim")
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.output_changed
+
+    def test_should_report_nothing_when_the_mode_is_unchanged(self) -> None:
+        draft = _make_draft(crisperwhisper_mode="verbatim")
+
+        assert not ChangeSet.between(draft, draft).any_changed

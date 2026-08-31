@@ -134,6 +134,11 @@ ALL_MODELS: dict[str, ModelInfo] = {
 }
 
 
+def has_crisperwhisper_modes(name: str) -> bool:
+    """Whether *name* is decoded with an intended/verbatim prefix."""
+    return name in CRISPERWHISPER_MODELS
+
+
 def is_catalog_model(name: str) -> bool:
     """Whether *name* should appear in the user-facing model catalog."""
     return name in ALL_MODELS

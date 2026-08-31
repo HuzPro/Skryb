@@ -14,6 +14,7 @@ from voicetotext.bootstrap import (
     _load_engine_with_fallback,
     _load_streaming_engine,
     _make_active_engine_provider,
+    _resolve_pipeline_mode,
     _warmup_safely,
     apply_settings,
     migrate_language,
@@ -26,6 +27,7 @@ from voicetotext.core.exceptions import (
     EngineWarmupError,
     LicenseNotAcceptedError,
 )
+from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
@@ -825,3 +827,36 @@ class TestBuildStreamingEngineRouting:
         engine = _build_streaming_engine_for(model_info, paths)
 
         assert isinstance(engine, CacheAwareStreamingEngine)
+
+
+class TestPipelineModeForVerbatimTranscription:
+    @staticmethod
+    def _config(model: str, mode: str, transcription_mode: str = "batch"):
+        config = JsonConfigAdapter(Path("unused.json"))
+        config.load()
+        config.set("transcription.model_size", model)
+        config.set("transcription.crisperwhisper_mode", mode)
+        config.set("transcription.mode", transcription_mode)
+        return config
+
+    def test_should_bypass_the_pipeline_for_verbatim_crisperwhisper(self) -> None:
+        config = self._config("crisperwhisper-2.0-turbo", "verbatim")
+
+        assert _resolve_pipeline_mode(config) is PipelineMode.VERBATIM
+
+    def test_should_keep_the_pipeline_for_intended_crisperwhisper(self) -> None:
+        config = self._config("crisperwhisper-2.0-turbo", "intended")
+
+        assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
+
+    def test_should_ignore_a_stale_verbatim_value_on_another_model(self) -> None:
+        config = self._config("parakeet-tdt-0.6b-v3", "verbatim")
+
+        assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
+
+    def test_should_ignore_a_stale_verbatim_value_when_streaming(self) -> None:
+        config = self._config(
+            "nemotron-speech-streaming-en-0.6b", "verbatim", "streaming",
+        )
+
+        assert _resolve_pipeline_mode(config) is PipelineMode.STREAMING

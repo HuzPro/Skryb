@@ -88,6 +88,7 @@ from voicetotext.transcription.model_info import (
     DEFAULT_MODEL,
     ModelInfo,
     get_model_info,
+    has_crisperwhisper_modes,
 )
 from voicetotext.transcription.model_manager import ModelManager
 from voicetotext.transcription.placeholder_engine import PlaceholderEngine
@@ -182,9 +183,25 @@ def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
 
 
 def _resolve_pipeline_mode(config: JsonConfigAdapter) -> PipelineMode:
+    if _transcribes_verbatim(config):
+        return PipelineMode.VERBATIM
     if config.get("transcription.mode", "batch") == "streaming":
         return PipelineMode.STREAMING
     return PipelineMode.BATCH
+
+
+def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
+    """Whether the active model is decoding in verbatim mode.
+
+    The mode key is engine-specific, so it only suppresses cleanup while
+    a CrisperWhisper model is selected. A value left behind from an
+    earlier model must not silently disable the pipeline for engines
+    that never had modes.
+    """
+    model = config.get("transcription.model_size", DEFAULT_MODEL)
+    if not isinstance(model, str) or not has_crisperwhisper_modes(model):
+        return False
+    return config.get("transcription.crisperwhisper_mode", "intended") == "verbatim"
 
 
 def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscribeUseCase) -> HotkeyListener:

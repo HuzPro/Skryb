@@ -56,6 +56,7 @@ class _TrackingService:
         self.is_installed = MagicMock(return_value=True)
         self.can_apply_now = MagicMock(return_value=True)
         self.is_engine_swapping = MagicMock(return_value=False)
+        self.model_has_crisperwhisper_modes = MagicMock(return_value=False)
         self.apply_draft = MagicMock(
             return_value=ChangeSet(
                 engine_reload_required=False,
