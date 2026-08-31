@@ -9,7 +9,6 @@ from concurrent.futures import Future
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     import tkinter
     from pathlib import Path
@@ -101,7 +100,10 @@ def main() -> None:
         paths.ensure_dirs()
         from voicetotext.core.startup_log import initialize_session_log
 
-        initialize_session_log(paths.session_log_path, console=_stderr_is_console())
+        session_dir = initialize_session_log(
+            paths.diagnostics_dir, console=_stderr_is_console(),
+        )
+        paths.activate_session(session_dir)
         from voicetotext.core.torch_prewarm import start_torch_prewarm
 
         prewarm = start_torch_prewarm()

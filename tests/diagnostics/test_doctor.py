@@ -42,6 +42,12 @@ class TestDoctorReportShape:
 
         assert "HuggingFace" in report or "HF_HUB_CACHE" in report
 
+    def test_should_include_session_diagnostics_directory(self) -> None:
+        report = run_doctor()
+
+        assert "[Session diagnostics]" in report
+        assert "diagnostics" in report.lower()
+
 
 class TestDoctorReportsMissingBackends:
     """A missing optional backend is the friend's symptom; the doctor

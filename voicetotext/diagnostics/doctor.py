@@ -11,7 +11,7 @@ and share the output without needing extra diagnostic skill.
 import importlib
 import os
 import sys
-
+from pathlib import Path
 
 _BACKEND_INSTALL_HINTS: dict[str, str] = {
     "nano_parakeet": "pip install nano-parakeet",
@@ -28,6 +28,7 @@ def run_doctor() -> str:
         _probe_engine_backends(),
         _probe_audio(),
         _probe_hf_cache(),
+        _probe_diagnostics_path(),
     ]
     return "\n".join(_join_sections(sections))
 
@@ -127,4 +128,17 @@ def _probe_hf_cache() -> list[str]:
     return [
         "[HuggingFace cache]",
         f"  HF_HUB_CACHE: {cache or '(not set)'}",
+    ]
+
+
+def _probe_diagnostics_path() -> list[str]:
+    appdata = os.environ.get("APPDATA")
+    path = (
+        Path(appdata) / "VoiceToText" / "diagnostics"
+        if appdata is not None
+        else None
+    )
+    return [
+        "[Session diagnostics]",
+        f"  directory: {path if path is not None else '(APPDATA not set)'}",
     ]

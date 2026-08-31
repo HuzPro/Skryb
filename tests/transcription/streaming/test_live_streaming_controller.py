@@ -3,7 +3,9 @@ import threading
 import numpy as np
 import pytest
 
+from tests.fakes import FakeAudioRecorder, FakeTextOutputHandler
 from voicetotext.core.exceptions import TranscriptionError
+from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
@@ -12,8 +14,6 @@ from voicetotext.transcription.streaming.streaming_engine import (
     StreamingTranscriptionEngine,
     StreamingUpdate,
 )
-
-from tests.fakes import FakeAudioRecorder, FakeTextOutputHandler
 
 
 class _FakeSession:
@@ -81,18 +81,27 @@ class TestHappyPath:
     def test_should_emit_committed_deltas_and_complete(self):
         session = _FakeSession(["", "hello", "hello world"], "hello world done")
         controller, recorder, out = _controller(session)
+        audio = AudioSegment(
+            data=np.zeros(30, dtype=np.float32), sample_rate=16000,
+        )
+        recorder.will_return(audio)
         completions: list = []
 
-        controller.start(lambda result, error: completions.append((result, error)))
+        controller.start(
+            lambda result, error, audio: completions.append(
+                (result, error, audio),
+            )
+        )
         for _ in range(3):
             recorder.captured_on_frame(_frame())
         controller.stop()
 
         assert "".join(out.outputs) == "hello world done"
         assert len(completions) == 1
-        result, error = completions[0]
+        result, error, recorded_audio = completions[0]
         assert error is None
         assert result.text == "hello world done"  # finalized transcript handed back
+        assert recorded_audio is audio
         assert recorder.stop_calls == 1
         assert controller.is_active() is False
 
@@ -107,7 +116,7 @@ class TestHappyPath:
         )
         controller, recorder, out = _controller(session)
 
-        controller.start(lambda _r, _e: None)
+        controller.start(lambda _r, _e, _a: None)
         for _ in range(3):
             recorder.captured_on_frame(_frame())
         controller.stop()
@@ -117,7 +126,7 @@ class TestHappyPath:
     def test_is_active_between_start_and_stop(self):
         controller, recorder, out = _controller(_FakeSession(["x"], "x"))
 
-        controller.start(lambda _r, _e: None)
+        controller.start(lambda _r, _e, _a: None)
         assert controller.is_active() is True
         controller.stop()
 
@@ -128,8 +137,8 @@ class TestReentrancy:
     def test_double_start_is_a_noop(self):
         controller, recorder, out = _controller(_FakeSession(["x"], "x"))
 
-        controller.start(lambda _r, _e: None)
-        controller.start(lambda _r, _e: None)
+        controller.start(lambda _r, _e, _a: None)
+        controller.start(lambda _r, _e, _a: None)
 
         assert recorder.start_calls == 1
         controller.stop()
@@ -142,7 +151,9 @@ class TestErrors:
         done = threading.Event()
         errors: list = []
 
-        controller.start(lambda result, error: (errors.append(error), done.set()))
+        controller.start(
+            lambda _result, error, _audio: (errors.append(error), done.set())
+        )
         recorder.captured_on_frame(_frame())
         recorder.captured_on_frame(_frame())
 
@@ -158,11 +169,15 @@ class TestErrors:
         controller, recorder, out = _controller(session)
         completions: list = []
 
-        controller.start(lambda result, error: completions.append((result, error)))
+        controller.start(
+            lambda result, error, audio: completions.append(
+                (result, error, audio),
+            )
+        )
         recorder.captured_on_frame(_frame())
         controller.stop()
 
-        result, error = completions[0]
+        result, error, _audio = completions[0]
         assert result is None
         assert isinstance(error, RuntimeError)
         assert controller.is_active() is False
@@ -194,4 +209,4 @@ class TestEngineSlot:
         controller, recorder, out = _controller()
 
         with pytest.raises(TranscriptionError, match="no streaming engine"):
-            controller.start(lambda _r, _e: None)
+            controller.start(lambda _r, _e, _a: None)

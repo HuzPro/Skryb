@@ -17,6 +17,29 @@ class TestAppPathsResolution:
 
         assert paths.models_dir == tmp_path / "models"
 
+    def test_should_resolve_diagnostics_dir(self, tmp_path) -> None:
+        paths = AppPaths(base=tmp_path)
+
+        assert paths.diagnostics_dir == tmp_path / "diagnostics"
+
+    def test_should_resolve_session_log_inside_active_session(
+        self, tmp_path,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+        session_dir = tmp_path / "diagnostics" / "session"
+
+        paths.activate_session(session_dir)
+
+        assert paths.session_log_path == session_dir / "session.log"
+
+    def test_should_reject_session_path_before_initialization(
+        self, tmp_path,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+
+        with pytest.raises(RuntimeError, match="not been initialized"):
+            _ = paths.session_log_path
+
     @pytest.mark.skipif(
         sys.platform != "win32",
         reason="APPDATA + backslash path semantics are Windows-only",
@@ -38,6 +61,7 @@ class TestAppPathsEnsureDirs:
 
         assert base.exists()
         assert (base / "models").exists()
+        assert (base / "diagnostics").exists()
 
     def test_should_not_fail_if_dirs_already_exist(self, tmp_path):
         paths = AppPaths(base=tmp_path)
