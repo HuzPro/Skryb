@@ -1,7 +1,21 @@
 import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import cast
 
+import pytest
+
+from voicetotext.core import json_config_adapter
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
+
+
+def _history_entries(config_path: Path) -> list[dict[str, object]]:
+    history_path = config_path.with_name("config-history.jsonl")
+    return [
+        cast(dict[str, object], json.loads(line))
+        for line in history_path.read_text(encoding="utf-8").splitlines()
+    ]
 
 
 class TestJsonConfigAdapterDefaults:
@@ -105,6 +119,94 @@ class TestJsonConfigAdapterPersistence:
         raw = json.loads(path.read_text())
         assert "hotkey" in raw
         assert "transcription" in raw
+
+
+class TestJsonConfigAdapterHistory:
+    def test_should_record_generic_nested_changes_with_session_and_version(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def current_session_id() -> str:
+            return "session-123"
+
+        def current_version(_distribution: str) -> str:
+            return "9.8.7"
+
+        monkeypatch.setattr(json_config_adapter, "session_id", current_session_id)
+        monkeypatch.setattr(json_config_adapter, "version", current_version)
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+        config.save()
+        config.set("future.nested.option", "enabled")
+
+        config.save()
+
+        entry = _history_entries(path)[-1]
+        assert set(entry) == {"at", "session", "app_version", "changes"}
+        assert entry["session"] == "session-123"
+        assert entry["app_version"] == "9.8.7"
+        recorded_at = datetime.fromisoformat(str(entry["at"]))
+        assert recorded_at.tzinfo is UTC
+        assert entry["changes"] == [
+            {
+                "key": "future.nested.option",
+                "from": None,
+                "to": "enabled",
+            }
+        ]
+
+    def test_should_skip_history_when_config_is_unchanged(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+        config.save()
+
+        config.save()
+
+        assert len(_history_entries(path)) == 1
+
+    def test_should_retain_only_the_newest_history_entries(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(json_config_adapter, "_HISTORY_LINE_LIMIT", 3)
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+        for sample_rate in range(16_000, 16_005):
+            config.set("audio.sample_rate", sample_rate)
+            config.save()
+
+        entries = _history_entries(path)
+        assert len(entries) == 3
+        assert entries[-1]["changes"] == [
+            {"key": "audio.sample_rate", "from": 16_003, "to": 16_004}
+        ]
+
+    def test_should_save_config_when_history_write_fails(
+        self,
+        tmp_path: Path,
+        app_caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        path = tmp_path / "config.json"
+        history_path = path.with_name("config-history.jsonl")
+        history_path.mkdir()
+        config = JsonConfigAdapter(path)
+        config.load()
+        config.set("hotkey.mode", "push_to_talk")
+
+        config.save()
+
+        assert json.loads(path.read_text(encoding="utf-8"))["hotkey"]["mode"] == (
+            "push_to_talk"
+        )
+        assert "Config history write failed" in app_caplog.text
 
 
 class TestJsonConfigAdapterGetAll:

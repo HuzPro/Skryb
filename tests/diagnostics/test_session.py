@@ -12,6 +12,7 @@ from voicetotext.core.paths import AppPaths
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine_types import HardwareProfile
+from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.result import TranscriptionResult
 
 pytestmark = pytest.mark.integration
@@ -50,6 +51,48 @@ def _audio() -> AudioSegment:
 
 
 class TestSessionEvents:
+    def test_should_record_app_started_for_unknown_model(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        config = FakeConfig({
+            "transcription.model_size": "some-model-i-typed-wrong",
+        })
+
+        SessionDiagnostics(paths, config, _HARDWARE)
+
+        started = _events(paths)[0]
+        assert started["event"] == "app_started"
+        assert started["model"] == "some-model-i-typed-wrong"
+        assert started["engine"] == "unknown"
+
+    def test_should_record_unknown_engine_when_catalog_entry_has_none(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        config = FakeConfig({"transcription.model_size": "model-without-engine"})
+
+        def model_without_engine(_name: str) -> ModelInfo:
+            return ModelInfo(
+                name="model-without-engine",
+                size_mb=1,
+                description="Test model",
+            )
+
+        monkeypatch.setattr(
+            "voicetotext.diagnostics.session.get_model_info",
+            model_without_engine,
+        )
+
+        SessionDiagnostics(paths, config, _HARDWARE)
+
+        started = _events(paths)[0]
+        assert started["event"] == "app_started"
+        assert started["engine"] == "unknown"
+
     def test_should_record_app_engine_transcription_and_stop_events(
         self,
         tmp_path: Path,

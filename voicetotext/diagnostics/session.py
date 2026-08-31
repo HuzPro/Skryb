@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from voicetotext.core.config import ConfigurationStore
+from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.startup_log import (
     process_started_at,
@@ -228,12 +229,17 @@ class SessionDiagnostics:
 
     def _model_context(self) -> tuple[str, str]:
         model = str(self._config.get("transcription.model_size", DEFAULT_MODEL))
-        model_info = get_model_info(model)
+        try:
+            model_info = get_model_info(model)
+        except ConfigurationError:
+            return model, "unknown"
         configured_engine = self._config.get("transcription.engine", "auto")
+        if isinstance(configured_engine, str) and configured_engine != "auto":
+            return model, configured_engine
         engine = (
-            configured_engine
-            if isinstance(configured_engine, str) and configured_engine != "auto"
-            else model_info.compatible_engines[0]
+            model_info.compatible_engines[0]
+            if model_info.compatible_engines
+            else "unknown"
         )
         return model, engine
 

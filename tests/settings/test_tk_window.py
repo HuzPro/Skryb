@@ -1,3 +1,5 @@
+from pathlib import Path
+from tkinter import filedialog
 from unittest.mock import MagicMock
 
 import pytest
@@ -130,6 +132,52 @@ class TestInitial:
         assert isinstance(state_listener, TkStateBridge)
         assert isinstance(download_listener, TkDownloadBridge)
         assert service.subscribe_model_deleted.called
+
+
+class TestSettingsTransfer:
+    def test_should_export_settings_to_selected_file(
+        self,
+        window: TkSettingsWindow,
+        service: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "settings.json"
+
+        def choose_export_path(**_options: object) -> str:
+            return str(path)
+
+        monkeypatch.setattr(
+            filedialog,
+            "asksaveasfilename",
+            choose_export_path,
+        )
+
+        window.export_settings_button().invoke()
+
+        service.export_settings.assert_called_once_with(path)
+
+    def test_should_import_settings_from_selected_file(
+        self,
+        window: TkSettingsWindow,
+        service: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "settings.json"
+
+        def choose_import_path(**_options: object) -> str:
+            return str(path)
+
+        monkeypatch.setattr(
+            filedialog,
+            "askopenfilename",
+            choose_import_path,
+        )
+
+        window.import_settings_button().invoke()
+
+        service.import_settings.assert_called_once_with(path)
 
 
 class TestCollectDraft:
