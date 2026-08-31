@@ -1,3 +1,4 @@
+from tests.settings.test_service import _build_service
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
@@ -5,13 +6,8 @@ from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.model_info import ALL_MODELS
 
-from tests.settings.test_service import _build_service
-
-
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-_ARK_ASR = "ark-asr-3b"
-_QWEN = "qwen3-asr-1.7b"
 _CRISPERWHISPER = {
     "crisperwhisper-2.0-turbo",
     "crisperwhisper-2.0-large",
@@ -75,7 +71,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, _ARK_ASR, _QWEN, *_CRISPERWHISPER,
+            _PARAKEET, *_CRISPERWHISPER,
         }
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
@@ -133,7 +129,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, _ARK_ASR, _QWEN, *_CRISPERWHISPER,
+            _PARAKEET, *_CRISPERWHISPER,
         }
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):

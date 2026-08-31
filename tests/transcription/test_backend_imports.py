@@ -12,7 +12,6 @@ between two distinct failure modes:
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from voicetotext.core.exceptions import EngineDependencyMissingError
 from voicetotext.transcription.backend_imports import (

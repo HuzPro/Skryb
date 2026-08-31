@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
-
 EngineId = Literal[
-    "ark_asr", "crisperwhisper", "nano_parakeet", "nemotron_streaming",
-    "qwen3_asr",
+    "crisperwhisper", "nano_parakeet", "nemotron_streaming",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 CrisperWhisperMode = Literal["intended", "verbatim"]

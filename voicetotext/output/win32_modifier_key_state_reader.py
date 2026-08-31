@@ -1,5 +1,4 @@
 import ctypes
-import ctypes.wintypes as _wt
 
 from voicetotext.output.modifier_key_state_reader import ModifierKeyStateReader
 

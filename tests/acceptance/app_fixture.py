@@ -21,7 +21,6 @@ from voicetotext.output.clipboard_preserving_decorator import (
 )
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
-from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_install import make_engine_installer
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 
