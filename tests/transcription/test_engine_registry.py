@@ -8,7 +8,6 @@ from voicetotext.transcription.engine_registry import EngineRegistry, EngineSpec
 from voicetotext.transcription.engine_types import EngineDescriptor
 from voicetotext.transcription.result import TranscriptionResult
 
-
 _DESCRIPTOR = EngineDescriptor(
     engine_id="nano_parakeet",
     display_name="nano-parakeet",
@@ -94,10 +93,10 @@ class TestEngineSpec:
 
     def test_should_carry_a_pinned_revision(self):
         spec = EngineSpec(
-            model_name="ark-asr-3b",
-            repo_id="Audio8/ARK-ASR-3B",
+            model_name="crisperwhisper-2.0-turbo",
+            repo_id="nyralabs/CrisperWhisper2.0_turbo",
             device="cuda", language="en", beam_size=1, model_dir=Path("/m"),
-            revision="1e28271b79edc97635783bea65abc89195a09ed3",
+            revision="de0369c8a68025b7f6e86387b6eb5a3b369787c8",
         )
 
-        assert spec.revision == "1e28271b79edc97635783bea65abc89195a09ed3"
+        assert spec.revision == "de0369c8a68025b7f6e86387b6eb5a3b369787c8"

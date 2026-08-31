@@ -1,13 +1,10 @@
 import threading
 
-import pytest
 
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
 from voicetotext.core.events import (
-    DomainEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
-    TranscriptionCompletedEvent,
 )
 
 

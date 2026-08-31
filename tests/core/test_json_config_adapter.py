@@ -1,6 +1,5 @@
 import json
 
-import pytest
 
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.json_config_adapter import JsonConfigAdapter

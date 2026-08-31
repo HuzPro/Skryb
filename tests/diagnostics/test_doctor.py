@@ -9,7 +9,7 @@ is wrapped so a missing or broken module degrades to an
 """
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from voicetotext.diagnostics.doctor import run_doctor
 

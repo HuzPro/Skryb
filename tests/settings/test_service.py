@@ -5,6 +5,7 @@ import pytest
 
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
 from tests.fakes.licensing import AllowAllLicensePolicy
+from tests.settings.fakes import FakeConfig, FakeModelManager
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -17,6 +18,7 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
     StateChangedEvent,
 )
+from voicetotext.core.exceptions import LicenseNotAcceptedError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
@@ -35,16 +37,11 @@ from voicetotext.settings.service import (
     StateChangeListener,
 )
 from voicetotext.settings.settings_draft import SettingsDraft
-from voicetotext.core.exceptions import LicenseNotAcceptedError
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ALL_MODELS
-from tests.settings.fakes import FakeConfig, FakeModelManager
-
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-_ARK_ASR = "ark-asr-3b"
-_QWEN = "qwen3-asr-1.7b"
 _CRISPERWHISPER = {
     "crisperwhisper-2.0-turbo",
     "crisperwhisper-2.0-large",
@@ -160,7 +157,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, _NEMOTRON, _ARK_ASR, _QWEN, *_CRISPERWHISPER,
+            _PARAKEET, _NEMOTRON, *_CRISPERWHISPER,
         }
 
     def test_should_mark_installed_status_on_view(self):
@@ -239,7 +236,7 @@ class TestDeleteModel:
         assert manager.delete_calls == []
 
     def test_should_invalidate_cache_entry_after_delete(self):
-        service, _, manager, *_ = _build_service(
+        service, _, _manager, *_ = _build_service(
             config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
             installed={"test-model": True},
         )

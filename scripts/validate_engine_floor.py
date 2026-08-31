@@ -3,7 +3,7 @@
 Every real-engine integration test skips itself when a GPU, an audio
 fixture, or a downloaded model is missing, so a green pytest exit says
 nothing about whether a single engine ever ran. This driver pins the
-exact floor, runs the three engine tests, and fails unless every engine
+exact floor, runs the CrisperWhisper engine tests, and fails unless the engine
 leaves behind at least one result that actually executed.
 
     venv\\Scripts\\python.exe scripts/validate_engine_floor.py
@@ -20,13 +20,10 @@ import tempfile
 from pathlib import Path
 from xml.etree import ElementTree
 
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _EXPECTED_TRANSFORMERS = "5.16.0"
 _OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
 _ENGINE_TEST_MODULES: dict[str, str] = {
-    "ark_asr": "tests.integration.test_ark_asr_transcribes_audio_file",
-    "qwen3_asr": "tests.integration.test_qwen3_asr_transcribes_audio_file",
     "crisperwhisper": (
         "tests.integration.test_crisperwhisper_transcribes_audio_file"
     ),
@@ -72,7 +69,10 @@ def _run_engine_tests(report: Path) -> "subprocess.CompletedProcess[bytes]":
     ]
     print(f"$ {' '.join(command)}", flush=True)
     return subprocess.run(
-        command, cwd=str(_REPO_ROOT), env=os.environ | {_OPT_IN: "1"},
+        command,
+        cwd=str(_REPO_ROOT),
+        env=os.environ | {_OPT_IN: "1"},
+        check=False,
     )
 
 

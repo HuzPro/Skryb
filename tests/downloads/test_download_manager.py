@@ -1,10 +1,9 @@
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (

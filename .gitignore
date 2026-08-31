@@ -7,6 +7,8 @@ build/
 .eggs/
 *.egg
 .pytest_cache/
+.tmp/
+pytest-temp/
 .coverage
 htmlcov/
 .venv/
