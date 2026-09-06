@@ -115,7 +115,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         apply_theme(self, self._theme)
         set_titlebar_dark(self, dark=self._theme.is_dark)
         if sys.platform == "win32":
-            self._ime_composition_hook = Win32ImeCompositionHook(self)
+            self._install_ime_composition_hook()
 
         self._service.subscribe_engine(self._engine_bridge)
         self._service.subscribe_state_changes(self._state_bridge)
@@ -124,6 +124,13 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._download_bridge.on_model_deleted,
         )
         self._refresh_save_enabled()
+
+    def _install_ime_composition_hook(self) -> None:
+        """Best-effort: the settings window still opens without the hook."""
+        try:
+            self._ime_composition_hook = Win32ImeCompositionHook(self)
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # UI construction
