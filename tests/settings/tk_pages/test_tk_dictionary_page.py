@@ -112,7 +112,9 @@ class TestAdd:
         assert page.dictionary().rules == (
             LiteralRule((" underscore ", " under score "), "_"),
         )
-        assert page.rule_labels() == ['[literal] " underscore, under score "  ->  _']
+        assert page.rule_labels() == [
+            '[literal] " underscore ", " under score "  ->  _'
+        ]
 
     def test_should_treat_a_glued_alias_as_a_duplicate_of_the_plain_one(
         self, page: TkDictionaryPage,
@@ -136,6 +138,17 @@ class TestAdd:
         page.add_button().invoke()
 
         assert page.dictionary().rules == (RegexRule(r"\bum+\b", ""),)
+
+    def test_should_keep_edge_spaces_in_a_regex_pattern(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.regex_radio().invoke()
+        _type_rule(page, r" \d+ ", "N")
+
+        page.add_button().invoke()
+
+        assert page.dictionary().rules == (RegexRule(r" \d+ ", "N"),)
+        assert page.rule_labels() == [r'[regex] " \d+ "  ->  N']
 
     def test_should_stage_a_phonetic_literal_rule(
         self, page: TkDictionaryPage,
@@ -248,6 +261,20 @@ class TestEdit:
         page.select_rule(0)
 
         assert page.spoken_entry().get() == " underscore, under score "
+
+    def test_should_normalise_mixed_glue_to_whole_rule_glue_on_update(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.set_dictionary(DictionaryConfig(rules=(
+            LiteralRule(("underscore ", " under score"), "_"),
+        )))
+
+        page.select_rule(0)
+        page.update_button().invoke()
+
+        assert page.dictionary().rules == (
+            LiteralRule(("underscore", "under score"), "_"),
+        )
 
     def test_should_disable_phonetic_for_regex_rules(
         self, page: TkDictionaryPage,

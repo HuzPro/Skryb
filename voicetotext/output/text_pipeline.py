@@ -105,7 +105,7 @@ _COMMAND_PATTERN = re.compile(
 )
 _LITERAL_PATTERN = re.compile(r"(?<!\w)literal(?!\w)\s+", re.IGNORECASE)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
-_GLUE_PATTERN = r"[ 	]*"
+_GLUE_PATTERN = r"[ \t]*"
 _NUMBER = r"\d+(?:\.\d+)?"
 _PERCENT_PATTERN = re.compile(
     rf"\b({_NUMBER})\s+percent\b", re.IGNORECASE,
@@ -412,6 +412,7 @@ def _literal_finder(
             )
             for pattern in patterns
             for match in pattern.finditer(text)
+            if match.start() != match.end()
         ]
 
     return find
@@ -569,6 +570,8 @@ def _literal_pattern(alias: str, whole_words: bool) -> str:
     pattern = "".join(parts)
     if whole_words:
         pattern = r"(?<!\w)(?:" + pattern + r")(?!\w)"
+    # ponytail: adjacent glued matches share one space, so the second is dropped
+    # as an overlap; carry the core span on _Replacement and compare cores to fix.
     glue_left = _GLUE_PATTERN if alias[:1].isspace() else ""
     glue_right = _GLUE_PATTERN if alias[-1:].isspace() else ""
     return glue_left + pattern + glue_right
@@ -586,7 +589,7 @@ def _streaming_rule(rule: DictionaryRule) -> DictionaryRule | None:
     if isinstance(rule, RegexRule):
         return rule
     safe_aliases = tuple(
-        alias.strip() for alias in rule.spoken if len(alias.split()) == 1
+        alias for alias in rule.spoken if len(alias.split()) == 1
     )
     if not safe_aliases:
         return None

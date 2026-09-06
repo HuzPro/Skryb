@@ -16,15 +16,14 @@ from voicetotext.settings.theme import HEADING_STYLE
 
 _HINT = (
     "Replace spoken words or phrases with typed text. Separate literal aliases "
-    "with commas; regex rules use one pattern. A space at either end of the "
-    "aliases glues the replacement to the neighbouring words."
+    "with commas; regex rules use one pattern. A space at the start or end of "
+    "the aliases box glues every alias to the neighbouring text."
 )
 _EMPTY_SPOKEN_ERROR = "At least one spoken alias or regex pattern is required."
 _INVALID_REGEX_ERROR = "The regex pattern or replacement is invalid: {}"
 _NO_SELECTION_ERROR = "Select a rule from the list first."
 _DUPLICATE_ERROR = "Another literal rule already uses one of those aliases."
 _NOTHING_SELECTED = -1
-_ALIAS_SEPARATOR = re.compile(r"\s*,\s*")
 _PUNCTUATION_INSTALL_MESSAGE = (
     "Punctuation restoration requires the optional package: "
     "pip install voicetotext[punct]"
@@ -236,11 +235,11 @@ class TkDictionaryPage(ttk.Frame):
     ) -> bool:
         if not isinstance(candidate, LiteralRule):
             return False
-        aliases = {alias.strip() for alias in candidate.spoken}
+        aliases = _plain_aliases(candidate)
         duplicate = any(
             index != ignored_index
             and isinstance(rule, LiteralRule)
-            and bool(aliases.intersection(alias.strip() for alias in rule.spoken))
+            and bool(aliases & _plain_aliases(rule))
             for index, rule in enumerate(self._dictionary.rules)
         )
         if duplicate:
@@ -388,18 +387,21 @@ class TkDictionaryPage(ttk.Frame):
 
 def _rule_label(rule: DictionaryRule) -> str:
     if isinstance(rule, LiteralRule):
-        source = _quote_if_glued(_join_aliases(rule.spoken))
+        source = ", ".join(_quote_if_glued(alias) for alias in rule.spoken)
         return f"[literal] {source}  ->  {rule.replacement}"
-    return f"[regex] {rule.pattern}  ->  {rule.replacement}"
+    return f"[regex] {_quote_if_glued(rule.pattern)}  ->  {rule.replacement}"
+
+
+def _plain_aliases(rule: LiteralRule) -> set[str]:
+    return {alias.strip() for alias in rule.spoken}
 
 
 def _split_aliases(spoken: str) -> tuple[str, ...]:
-    """Split on commas; spaces at either end of the field glue every alias."""
     glue_left, glue_right = _edge_whitespace(spoken)
     return tuple(
-        glue_left + alias + glue_right
-        for alias in _ALIAS_SEPARATOR.split(spoken.strip())
-        if alias
+        glue_left + alias.strip() + glue_right
+        for alias in spoken.split(",")
+        if alias.strip()
     )
 
 
@@ -410,10 +412,7 @@ def _join_aliases(aliases: tuple[str, ...]) -> str:
 
 
 def _edge_whitespace(text: str) -> tuple[str, str]:
-    stripped = text.strip()
-    if not stripped:
-        return "", ""
-    return text[: text.index(stripped)], text[text.index(stripped) + len(stripped):]
+    return text[: len(text) - len(text.lstrip())], text[len(text.rstrip()):]
 
 
 def _quote_if_glued(source: str) -> str:
