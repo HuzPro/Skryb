@@ -36,7 +36,8 @@ from voicetotext.core.state_machine import AppStateMachine
 # Desktop/Windows-only test modules, dropped from collection off-Windows
 # because they fail to *import* there (collection runs before marker
 # deselection, so a marker alone cannot save them). Two causes:
-#   * ``ctypes.windll`` - the ``win32_clipboard_*`` / ``win32_key_sender``
+#   * ``ctypes.windll`` / ``ctypes.WINFUNCTYPE`` - the ``win32_clipboard_*`` /
+#     ``win32_key_sender`` / ``recording.overlay``
 #     modules, and ``voicetotext.bootstrap`` (which imports them at module
 #     top, so any test that imports bootstrap is affected), touch this
 #     Windows-only attribute.
@@ -55,6 +56,7 @@ if sys.platform != "win32":
         "output/test_win32_modifier_key_state_reader.py",
         "hotkeys/test_win32_keyboard_hook.py",
         "hotkeys/test_win32_hook_adapter.py",
+        "recording/test_overlay.py",
         "settings/test_win32_capture_bridge.py",
         "tray/test_win32_tray_adapter.py",
         "performance",
