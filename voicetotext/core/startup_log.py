@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from voicetotext.core.debug_logger import VoiceToTextConsoleHandler
+
 _LOGGER_NAME = "voicetotext"
 _FORMAT = "%(asctime)s [%(levelname)-5s] %(name)s: %(message)s"
 _started_at = time.perf_counter()
@@ -41,11 +43,9 @@ def initialize_session_log(
     _session_handler.setFormatter(logging.Formatter(_FORMAT))
     logger.addHandler(_session_handler)
     if console and not any(
-        isinstance(item, logging.StreamHandler)
-        and not isinstance(item, logging.FileHandler)
-        for item in logger.handlers
+        isinstance(item, VoiceToTextConsoleHandler) for item in logger.handlers
     ):
-        console_handler = logging.StreamHandler()
+        console_handler = VoiceToTextConsoleHandler()
         console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
     logger.propagate = False
