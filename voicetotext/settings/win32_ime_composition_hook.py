@@ -4,11 +4,11 @@ import ctypes
 import functools
 import logging
 import tkinter
-from tkinter import ttk
 
 _logger = logging.getLogger(__name__)
 
 _WM_IME_COMPOSITION = 0x010F
+_WM_UNICHAR = 0x0109
 _GCS_RESULTSTR = 0x0800
 _GWLP_WNDPROC = -4
 _MESSAGE_HANDLED = 0
@@ -19,17 +19,19 @@ _LRESULT = ctypes.c_ssize_t
 _ULONG_PTR = ctypes.c_size_t
 
 
-def insert_as_typed(entry: ttk.Entry, text: str) -> None:
-    """Insert text at the caret, replacing any selection, as a keypress would."""
-    entry.tk.call("ttk::entry::Insert", entry, text)
-
-
 def contains_non_bmp_characters(text: str) -> bool:
     return any(ord(char) > _HIGHEST_BMP_CODEPOINT for char in text)
 
 
+def unichar_reposts(text: str) -> tuple[int, ...]:
+    """Code points to repost as WM_UNICHAR, empty when Tk handles the text itself."""
+    if not contains_non_bmp_characters(text):
+        return ()
+    return tuple(ord(char) for char in text)
+
+
 class Win32ImeCompositionHook:
-    """Inserts emoji IME results; keep the instance alive to pin the window proc."""
+    """Reposts emoji IME results as keys; keep the instance alive to pin the window proc."""
 
     # Tk 8.6 HandleIMEComposition (tkWinX.c) exits at the first UTF-16
     # surrogate, so emoji from the Windows emoji panel never reach the widget.
@@ -52,13 +54,15 @@ class Win32ImeCompositionHook:
             )
         window.bind("<Destroy>", self._on_destroy, add="+")
 
+    # This runs inside Tcl_DoOneEvent, so it must not touch tkinter: _tkinter keeps
+    # one global interpreter state that a nested call clears, aborting the next callback.
     def _window_proc(
         self, hwnd: int, message: int, w_param: int, l_param: int,
     ) -> int:
         if (
             message == _WM_IME_COMPOSITION
             and l_param & _GCS_RESULTSTR
-            and self._inserted_composition_result(hwnd)
+            and self._reposted_composition_result(hwnd)
         ):
             return _MESSAGE_HANDLED
         return int(
@@ -67,22 +71,12 @@ class Win32ImeCompositionHook:
             ),
         )
 
-    def _inserted_composition_result(self, hwnd: int) -> bool:
+    def _reposted_composition_result(self, hwnd: int) -> bool:
         try:
-            return self._insert_non_bmp_result(hwnd)
+            return _repost_as_unichars(hwnd, _composition_result(hwnd))
         except Exception:
-            _logger.exception("IME composition result could not be inserted")
+            _logger.exception("IME composition result could not be reposted")
             return False
-
-    def _insert_non_bmp_result(self, hwnd: int) -> bool:
-        text = _composition_result(hwnd)
-        if not contains_non_bmp_characters(text):
-            return False
-        focused = self._window.focus_get()
-        if not isinstance(focused, ttk.Entry):
-            return False
-        insert_as_typed(focused, text)
-        return True
 
     def _on_destroy(self, event: "tkinter.Event[tkinter.Misc]") -> None:
         if event.widget is self._window:
@@ -95,6 +89,14 @@ class Win32ImeCompositionHook:
         _user32().SetWindowLongPtrW(
             self._hwnd, _GWLP_WNDPROC, self._original_proc,
         )
+
+
+def _repost_as_unichars(hwnd: int, text: str) -> bool:
+    code_points = unichar_reposts(text)
+    post_message = _user32().PostMessageW
+    for code_point in code_points:
+        post_message(hwnd, _WM_UNICHAR, code_point, 0)
+    return bool(code_points)
 
 
 def _composition_result(hwnd: int) -> str:
@@ -131,6 +133,10 @@ def _user32() -> ctypes.CDLL:
         _LRESULT,
     ]
     user32.CallWindowProcW.restype = _LRESULT
+    user32.PostMessageW.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint, _ULONG_PTR, _LRESULT,
+    ]
+    user32.PostMessageW.restype = ctypes.c_int
     return user32
 
 
