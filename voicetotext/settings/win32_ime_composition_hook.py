@@ -56,9 +56,10 @@ class Win32ImeCompositionHook:
             if needs_surrogate_pairs(text) and isinstance(focused, ttk.Entry):
                 insert_as_typed(focused, text)
                 return _MESSAGE_HANDLED
-        return _user32().CallWindowProcW(
+        result = _user32().CallWindowProcW(
             self._original_proc, hwnd, message, w_param, l_param,
         )
+        return int(result)
 
 
 def _composition_result(hwnd: int) -> str:
