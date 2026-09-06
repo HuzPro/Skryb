@@ -1,5 +1,4 @@
-"""``insert_as_typed`` is the Tk half of the IME composition hook; the Win32
-window-procedure half is checked by the manual Windows emoji-panel smoke."""
+"""Tk-side checks for the IME composition hook; the Win32 half is manual."""
 
 import tkinter
 from collections.abc import Iterator
@@ -8,8 +7,8 @@ from tkinter import ttk
 import pytest
 
 from voicetotext.settings.win32_ime_composition_hook import (
+    contains_non_bmp_characters,
     insert_as_typed,
-    needs_surrogate_pairs,
 )
 
 GRINNING_FACE = "\U0001F600"
@@ -36,6 +35,19 @@ def test_should_insert_at_caret_replacing_selection(
     assert entry.index("insert") == entry.index("end") - 1
 
 
+def test_should_insert_at_caret_without_a_selection(
+    window: tkinter.Toplevel,
+) -> None:
+    entry = ttk.Entry(window)
+    entry.insert(0, "helo")
+    entry.icursor(3)
+
+    insert_as_typed(entry, GRINNING_FACE)
+
+    assert entry.get() == f"hel{GRINNING_FACE}o"
+    assert entry.index("insert") == entry.index("end") - 1
+
+
 def test_should_leave_readonly_entries_untouched(
     window: tkinter.Toplevel,
 ) -> None:
@@ -48,5 +60,5 @@ def test_should_leave_readonly_entries_untouched(
 
 
 def test_should_detect_characters_outside_the_bmp() -> None:
-    assert needs_surrogate_pairs(f"ok {GRINNING_FACE}")
-    assert not needs_surrogate_pairs("plain \u00e9 text")
+    assert contains_non_bmp_characters(f"ok {GRINNING_FACE}")
+    assert not contains_non_bmp_characters("plain \u00e9 text")
