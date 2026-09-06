@@ -16,13 +16,15 @@ from voicetotext.settings.theme import HEADING_STYLE
 
 _HINT = (
     "Replace spoken words or phrases with typed text. Separate literal aliases "
-    "with commas; regex rules use one pattern."
+    "with commas; regex rules use one pattern. A space at either end of the "
+    "aliases glues the replacement to the neighbouring words."
 )
 _EMPTY_SPOKEN_ERROR = "At least one spoken alias or regex pattern is required."
 _INVALID_REGEX_ERROR = "The regex pattern or replacement is invalid: {}"
 _NO_SELECTION_ERROR = "Select a rule from the list first."
 _DUPLICATE_ERROR = "Another literal rule already uses one of those aliases."
 _NOTHING_SELECTED = -1
+_ALIAS_SEPARATOR = re.compile(r"\s*,\s*")
 _PUNCTUATION_INSTALL_MESSAGE = (
     "Punctuation restoration requires the optional package: "
     "pip install voicetotext[punct]"
@@ -201,8 +203,8 @@ class TkDictionaryPage(ttk.Frame):
     def _rule_from_editor(
         self, original: DictionaryRule | None = None,
     ) -> DictionaryRule | None:
-        spoken = self._spoken_var.get().strip()
-        if not spoken:
+        spoken = self._spoken_var.get()
+        if not spoken.strip():
             self._message_var.set(_EMPTY_SPOKEN_ERROR)
             return None
         replacement = self._replacement_var.get()
@@ -215,7 +217,7 @@ class TkDictionaryPage(ttk.Frame):
                 return None
             enabled = original.enabled if isinstance(original, RegexRule) else True
             return RegexRule(spoken, replacement, enabled)
-        aliases = tuple(alias.strip() for alias in spoken.split(",") if alias.strip())
+        aliases = _split_aliases(spoken)
         if not aliases:
             self._message_var.set(_EMPTY_SPOKEN_ERROR)
             return None
@@ -234,11 +236,11 @@ class TkDictionaryPage(ttk.Frame):
     ) -> bool:
         if not isinstance(candidate, LiteralRule):
             return False
-        aliases = set(candidate.spoken)
+        aliases = {alias.strip() for alias in candidate.spoken}
         duplicate = any(
             index != ignored_index
             and isinstance(rule, LiteralRule)
-            and bool(aliases.intersection(rule.spoken))
+            and bool(aliases.intersection(alias.strip() for alias in rule.spoken))
             for index, rule in enumerate(self._dictionary.rules)
         )
         if duplicate:
@@ -296,7 +298,7 @@ class TkDictionaryPage(ttk.Frame):
         rule = self._dictionary.rules[index]
         if isinstance(rule, LiteralRule):
             self._rule_type_var.set("literal")
-            self._spoken_var.set(", ".join(rule.spoken))
+            self._spoken_var.set(_join_aliases(rule.spoken))
             self._case_sensitive_var.set(rule.case_sensitive)
             self._whole_words_var.set(rule.whole_words)
             self._phonetic_var.set(rule.phonetic)
@@ -386,6 +388,33 @@ class TkDictionaryPage(ttk.Frame):
 
 def _rule_label(rule: DictionaryRule) -> str:
     if isinstance(rule, LiteralRule):
-        source = ", ".join(rule.spoken)
+        source = _quote_if_glued(_join_aliases(rule.spoken))
         return f"[literal] {source}  ->  {rule.replacement}"
     return f"[regex] {rule.pattern}  ->  {rule.replacement}"
+
+
+def _split_aliases(spoken: str) -> tuple[str, ...]:
+    """Split on commas; spaces at either end of the field glue every alias."""
+    glue_left, glue_right = _edge_whitespace(spoken)
+    return tuple(
+        glue_left + alias + glue_right
+        for alias in _ALIAS_SEPARATOR.split(spoken.strip())
+        if alias
+    )
+
+
+def _join_aliases(aliases: tuple[str, ...]) -> str:
+    glue_left, _ = _edge_whitespace(aliases[0])
+    _, glue_right = _edge_whitespace(aliases[-1])
+    return glue_left + ", ".join(alias.strip() for alias in aliases) + glue_right
+
+
+def _edge_whitespace(text: str) -> tuple[str, str]:
+    stripped = text.strip()
+    if not stripped:
+        return "", ""
+    return text[: text.index(stripped)], text[text.index(stripped) + len(stripped):]
+
+
+def _quote_if_glued(source: str) -> str:
+    return source if source == source.strip() else f'"{source}"'

@@ -240,6 +240,23 @@ class TestRuleStage:
 
         assert _batch("concatenate cat", rules) == "condogenate dog"
 
+    def test_should_glue_aliases_with_edge_spaces_to_their_neighbours(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("hello underscore world", rules) == "hello_world"
+        assert _batch("underscore world", rules) == "_world"
+        assert _batch("hello underscore", rules) == "hello_"
+
+    def test_should_glue_only_across_horizontal_whitespace(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("foo\n\nunderscore bar", rules) == "foo\n\n_bar"
+
+    def test_should_keep_whole_word_matching_for_glued_aliases(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("hello underscored world", rules) == "hello underscored world"
+
     def test_should_apply_regex_capture_replacements(self) -> None:
         rules = (RegexRule(r"(\d{2})-(\d{2})", r"\2/\1"),)
 
@@ -363,6 +380,17 @@ class TestStreamingPipeline:
         )
 
         assert result == "Git hub #42 comma"
+
+    def test_should_not_glue_aliases_because_deltas_end_at_word_boundaries(
+        self,
+    ) -> None:
+        config = DictionaryConfig(rules=(LiteralRule((" underscore ",), "_"),))
+
+        result = build_pipeline(config, PipelineMode.STREAMING).process(
+            " underscore"
+        )
+
+        assert result == " _"
 
     def test_should_keep_phrase_rules_and_commands_in_batch(self) -> None:
         config = DictionaryConfig(

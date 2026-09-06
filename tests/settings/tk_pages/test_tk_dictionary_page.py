@@ -102,6 +102,31 @@ class TestAdd:
             ),
         )
 
+    def test_should_keep_edge_spaces_as_glue_on_every_alias(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        _type_rule(page, " underscore, under score ", "_")
+
+        page.add_button().invoke()
+
+        assert page.dictionary().rules == (
+            LiteralRule((" underscore ", " under score "), "_"),
+        )
+        assert page.rule_labels() == ['[literal] " underscore, under score "  ->  _']
+
+    def test_should_treat_a_glued_alias_as_a_duplicate_of_the_plain_one(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.set_dictionary(
+            DictionaryConfig(rules=(LiteralRule(("underscore",), "_"),))
+        )
+        _type_rule(page, " underscore ", "_")
+
+        page.add_button().invoke()
+
+        assert len(page.dictionary().rules) == 1
+        assert "another" in page.message().lower()
+
     def test_should_stage_a_regex_rule_with_an_empty_replacement(
         self, page: TkDictionaryPage,
     ) -> None:
@@ -212,6 +237,17 @@ class TestEdit:
         assert page.case_check().instate(["selected"])
         assert not page.whole_words_check().instate(["selected"])
         assert page.phonetic_check().instate(["selected"])
+
+    def test_should_show_glued_aliases_as_typed(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.set_dictionary(DictionaryConfig(rules=(
+            LiteralRule((" underscore ", " under score "), "_"),
+        )))
+
+        page.select_rule(0)
+
+        assert page.spoken_entry().get() == " underscore, under score "
 
     def test_should_disable_phonetic_for_regex_rules(
         self, page: TkDictionaryPage,

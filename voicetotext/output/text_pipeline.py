@@ -105,6 +105,7 @@ _COMMAND_PATTERN = re.compile(
 )
 _LITERAL_PATTERN = re.compile(r"(?<!\w)literal(?!\w)\s+", re.IGNORECASE)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
+_GLUE_PATTERN = r"[ 	]*"
 _NUMBER = r"\d+(?:\.\d+)?"
 _PERCENT_PATTERN = re.compile(
     rf"\b({_NUMBER})\s+percent\b", re.IGNORECASE,
@@ -563,12 +564,14 @@ def _replacements_overlap(left: _Replacement, right: _Replacement) -> bool:
 def _literal_pattern(alias: str, whole_words: bool) -> str:
     parts = [
         r"\s+" if token.kind is TokenKind.WHITESPACE else re.escape(token.text)
-        for token in tokenize(alias)
+        for token in tokenize(alias.strip())
     ]
     pattern = "".join(parts)
     if whole_words:
-        return r"(?<!\w)(?:" + pattern + r")(?!\w)"
-    return pattern
+        pattern = r"(?<!\w)(?:" + pattern + r")(?!\w)"
+    glue_left = _GLUE_PATTERN if alias[:1].isspace() else ""
+    glue_right = _GLUE_PATTERN if alias[-1:].isspace() else ""
+    return glue_left + pattern + glue_right
 
 
 def _token_kind(text: str) -> TokenKind:
@@ -582,7 +585,9 @@ def _token_kind(text: str) -> TokenKind:
 def _streaming_rule(rule: DictionaryRule) -> DictionaryRule | None:
     if isinstance(rule, RegexRule):
         return rule
-    safe_aliases = tuple(alias for alias in rule.spoken if len(alias.split()) == 1)
+    safe_aliases = tuple(
+        alias.strip() for alias in rule.spoken if len(alias.split()) == 1
+    )
     if not safe_aliases:
         return None
     return LiteralRule(
