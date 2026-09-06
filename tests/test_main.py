@@ -22,6 +22,11 @@ from voicetotext.__main__ import (
     _run,
 )
 
+windows_startup_only = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="drives the Windows startup chain: %APPDATA% and ctypes.windll",
+)
+
 
 class TestConfiguredModelInstalled:
     def test_should_return_true_when_model_present_on_disk(self):
@@ -111,6 +116,7 @@ class TestApplyTorchEnvOverrides:
             )
 
 
+@windows_startup_only
 class TestDoctorCli:
     """``voicetotext --doctor`` must print the diagnostic report and
     exit before any Qt or engine code runs, so a user whose engine
@@ -165,6 +171,7 @@ class TestDoctorCli:
 
 
 class TestMaintenanceStartupIsolation:
+    @windows_startup_only
     @pytest.mark.parametrize(
         ("flag", "target"),
         [
@@ -202,6 +209,7 @@ class TestMaintenanceStartupIsolation:
         assert exit_info.value.code == 2
 
 
+@windows_startup_only
 class TestBindingStartupOrder:
     def test_should_overlap_hardware_independent_setup_before_detection(self) -> None:
         timeline: list[str] = []
@@ -282,6 +290,7 @@ class TestBindingStartupOrder:
         app.run.assert_called_once_with()
 
 
+@windows_startup_only
 class TestOneLicensePolicyForTheProcess:
     """First-run setup and ``build_app`` each build their own model
     manager. Two policy instances would give them separate acceptance
