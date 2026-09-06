@@ -22,7 +22,9 @@ def window(tk_root: tkinter.Tk) -> Iterator[tkinter.Toplevel]:
     top.destroy()
 
 
-def test_should_insert_at_caret_replacing_selection(window: tkinter.Toplevel):
+def test_should_insert_at_caret_replacing_selection(
+    window: tkinter.Toplevel,
+) -> None:
     entry = ttk.Entry(window)
     entry.insert(0, "hello")
     entry.selection_range(1, 4)
@@ -34,7 +36,9 @@ def test_should_insert_at_caret_replacing_selection(window: tkinter.Toplevel):
     assert entry.index("insert") == entry.index("end") - 1
 
 
-def test_should_leave_readonly_entries_untouched(window: tkinter.Toplevel):
+def test_should_leave_readonly_entries_untouched(
+    window: tkinter.Toplevel,
+) -> None:
     combo = ttk.Combobox(window, values=["a", "b"], state="readonly")
     combo.set("a")
 
@@ -43,6 +47,6 @@ def test_should_leave_readonly_entries_untouched(window: tkinter.Toplevel):
     assert combo.get() == "a"
 
 
-def test_should_detect_characters_outside_the_bmp():
+def test_should_detect_characters_outside_the_bmp() -> None:
     assert needs_surrogate_pairs(f"ok {GRINNING_FACE}")
     assert not needs_surrogate_pairs("plain \u00e9 text")
