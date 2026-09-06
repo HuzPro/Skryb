@@ -2,6 +2,7 @@ import logging
 import re
 from logging.handlers import RotatingFileHandler
 
+from voicetotext.core.debug_logger import VoiceToTextConsoleHandler
 from voicetotext.core.startup_log import (
     begin_startup_timing,
     initialize_session_log,
@@ -13,6 +14,13 @@ def _file_handlers() -> list[logging.Handler]:
     return [
         handler for handler in logging.getLogger("voicetotext").handlers
         if isinstance(handler, RotatingFileHandler)
+    ]
+
+
+def _console_handlers() -> list[logging.Handler]:
+    return [
+        handler for handler in logging.getLogger("voicetotext").handlers
+        if isinstance(handler, VoiceToTextConsoleHandler)
     ]
 
 
@@ -60,13 +68,8 @@ class TestStartupLog:
             initialize_session_log(tmp_path / "first", console=True)
             initialize_session_log(tmp_path / "second", console=True)
             assert len(_file_handlers()) == 1
-            console_handlers = [
-                handler for handler in logger.handlers
-                if isinstance(handler, logging.StreamHandler)
-                and not isinstance(handler, logging.FileHandler)
-            ]
-            assert len(console_handlers) == 1
+            assert len(_console_handlers()) == 1
         finally:
-            for handler in list(logger.handlers):
+            for handler in _file_handlers() + _console_handlers():
                 logger.removeHandler(handler)
                 handler.close()
