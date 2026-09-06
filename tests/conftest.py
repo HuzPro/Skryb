@@ -33,21 +33,21 @@ from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.state_machine import AppStateMachine
 
 
-# Desktop/Windows-only test modules, dropped from collection off-Windows
-# because they fail to *import* there (collection runs before marker
-# deselection, so a marker alone cannot save them). Two causes:
-#   * ``ctypes.windll`` / ``ctypes.WINFUNCTYPE`` - the ``win32_clipboard_*`` /
-#     ``win32_key_sender`` / ``recording.overlay``
-#     modules, and ``voicetotext.bootstrap`` (which imports them at module
-#     top, so any test that imports bootstrap is affected), touch this
-#     Windows-only attribute.
-#   * ``APPDATA`` - ``tests/performance/conftest.py`` reads this
-#     Windows-only environment variable at import time.
+# Test modules dropped from collection off-Windows because they fail to
+# *import* there (collection runs before marker deselection, so a marker
+# alone cannot save them). Modules that import cleanly and only fail when
+# a Windows-only test *runs* belong under ``skipif`` instead, not here.
+# Two import-time causes:
+#   * ``ctypes.windll`` / ``ctypes.WINFUNCTYPE`` - the ``win32_*`` modules
+#     and ``recording.overlay`` touch these Windows-only attributes at
+#     module top, as does ``voicetotext.bootstrap`` by importing them.
+#   * ``APPDATA`` - ``tests/performance/conftest.py`` constructs
+#     ``AppPaths``, which reads this Windows-only environment variable,
+#     at import time.
 collect_ignore: list[str] = []
 if sys.platform != "win32":
     collect_ignore = [
         "test_bootstrap.py",
-        "test_main.py",
         "test_mode_aware_loader.py",
         "integration/test_config_persistence.py",
         "output/test_win32_clipboard_open.py",
