@@ -47,6 +47,7 @@ collect_ignore: list[str] = []
 if sys.platform != "win32":
     collect_ignore = [
         "test_bootstrap.py",
+        "test_main.py",
         "test_mode_aware_loader.py",
         "integration/test_config_persistence.py",
         "output/test_win32_clipboard_open.py",
