@@ -79,7 +79,7 @@ def _composition_result(hwnd: int) -> str:
 
 
 @functools.cache
-def _user32() -> ctypes.WinDLL:
+def _user32() -> ctypes.CDLL:
     user32 = ctypes.windll.user32
     user32.SetWindowLongPtrW.argtypes = [
         ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p,
@@ -97,7 +97,7 @@ def _user32() -> ctypes.WinDLL:
 
 
 @functools.cache
-def _imm32() -> ctypes.WinDLL:
+def _imm32() -> ctypes.CDLL:
     imm32 = ctypes.windll.imm32
     imm32.ImmGetContext.argtypes = [ctypes.c_void_p]
     imm32.ImmGetContext.restype = ctypes.c_void_p
