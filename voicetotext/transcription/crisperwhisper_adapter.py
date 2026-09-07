@@ -9,8 +9,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
-import numpy as np
-
 from voicetotext.core.config import ConfigValue
 from voicetotext.core.exceptions import (
     ConfigurationError,
@@ -24,6 +22,9 @@ from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_diagnostics import vram_snapshot
 from voicetotext.transcription.engine_types import CrisperWhisperMode
 from voicetotext.transcription.result import TranscriptionResult
+from voicetotext.transcription.whisper_features import (
+    split_into_encoder_windows,
+)
 
 
 if TYPE_CHECKING:
@@ -36,66 +37,9 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 _CPU_DEVICE = "cpu"
-# ``WhisperFeatureExtractor`` truncates to ``chunk_length`` seconds by
-# default, so audio past this never reaches the encoder. Longer
-# recordings are split rather than silently losing their tail.
-_ENCODER_WINDOW_SECONDS = 30.0
-# Boundaries are nudged onto the quietest frame in this trailing slice of
-# the window so a split lands between words instead of inside one.
-_BOUNDARY_SEARCH_SECONDS = 2.0
-_BOUNDARY_FRAME_SECONDS = 0.02
 _FALLBACK_MAX_NEW_TOKENS = 256
 _MODE_TAG_COUNT = 5
 _VALID_MODES = frozenset({"intended", "verbatim"})
-
-
-def split_into_encoder_windows(audio: AudioSegment) -> list[AudioSegment]:
-    """Slice *audio* into windows the encoder will accept whole."""
-    window_samples = int(_ENCODER_WINDOW_SECONDS * audio.sample_rate)
-    windows: list[AudioSegment] = []
-    start = 0
-    while start < audio.sample_count:
-        end = _window_end(audio, start, window_samples)
-        windows.append(
-            AudioSegment(
-                data=audio.data[start:end],
-                sample_rate=audio.sample_rate,
-            ),
-        )
-        start = end
-    return windows
-
-
-def _window_end(audio: AudioSegment, start: int, window_samples: int) -> int:
-    limit = start + window_samples
-    if limit >= audio.sample_count:
-        return audio.sample_count
-    return _quietest_split_point(audio, start, limit)
-
-
-def _quietest_split_point(audio: AudioSegment, start: int, limit: int) -> int:
-    """Index of the quietest frame boundary near *limit*, else *limit*.
-
-    Cutting on the loudest part of a syllable mangles a word at every
-    seam, so the split moves to the lowest-energy frame in the trailing
-    search slice. The returned index always advances past *start*, so a
-    caller looping on it terminates.
-    """
-    frame = int(_BOUNDARY_FRAME_SECONDS * audio.sample_rate)
-    if frame < 1:
-        return limit
-    search_samples = int(_BOUNDARY_SEARCH_SECONDS * audio.sample_rate)
-    search_start = max(start + frame, limit - search_samples)
-    frame_count = (limit - search_start) // frame
-    if frame_count < 2:
-        return limit
-    frames = audio.data[search_start:search_start + frame_count * frame]
-    energy = np.abs(frames.reshape(frame_count, frame)).mean(axis=1)
-    # The last of the quietest frames, not the first: on a silent gap
-    # that keeps the whole gap with this window so the next one opens on
-    # speech, and on flat audio it splits as late as possible.
-    quietest = int(np.flatnonzero(energy == energy.min())[-1])
-    return search_start + (quietest + 1) * frame
 
 
 def _decode_budget(model: WhisperForConditionalGeneration, prefix_length: int) -> int:
