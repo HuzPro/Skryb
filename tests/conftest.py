@@ -33,17 +33,17 @@ from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.state_machine import AppStateMachine
 
 
-# Desktop/Windows-only test modules, dropped from collection off-Windows
-# because they fail to *import* there (collection runs before marker
-# deselection, so a marker alone cannot save them). Two causes:
-#   * ``ctypes.windll`` - the ``win32_clipboard_*`` / ``win32_key_sender``
-#     modules, and ``voicetotext.bootstrap`` (which imports them at module
-#     top, so any test that imports bootstrap is affected), touch this
-#     Windows-only attribute.
-#   * ``ctypes.WINFUNCTYPE`` - ``recording/overlay.py`` builds a window
-#     procedure at module top; the name only exists on Windows.
-#   * ``APPDATA`` - ``tests/performance/conftest.py`` reads this
-#     Windows-only environment variable at import time.
+# Test modules dropped from collection off-Windows because they fail to
+# *import* there (collection runs before marker deselection, so a marker
+# alone cannot save them). Modules that import cleanly and only fail when
+# a Windows-only test *runs* belong under ``skipif`` instead, not here.
+# Two import-time causes:
+#   * ``ctypes.windll`` / ``ctypes.WINFUNCTYPE`` - the ``win32_*`` modules
+#     and ``recording.overlay`` touch these Windows-only attributes at
+#     module top, as does ``voicetotext.bootstrap`` by importing them.
+#   * ``APPDATA`` - ``tests/performance/conftest.py`` constructs
+#     ``AppPaths``, which reads this Windows-only environment variable,
+#     at import time.
 collect_ignore: list[str] = []
 if sys.platform != "win32":
     collect_ignore = [
@@ -53,7 +53,6 @@ if sys.platform != "win32":
         "edit_capture/test_observer.py",
         "edit_capture/test_win32_foreground.py",
         "edit_capture/test_win32_input.py",
-        "recording/test_overlay.py",
         "output/test_win32_clipboard_open.py",
         "output/test_win32_clipboard_preserver.py",
         "output/test_win32_clipboard_writer.py",
@@ -61,6 +60,7 @@ if sys.platform != "win32":
         "output/test_win32_modifier_key_state_reader.py",
         "hotkeys/test_win32_keyboard_hook.py",
         "hotkeys/test_win32_hook_adapter.py",
+        "recording/test_overlay.py",
         "settings/test_win32_capture_bridge.py",
         "tray/test_win32_tray_adapter.py",
         "performance",
