@@ -7,6 +7,7 @@ from voicetotext.core.debug_logger import VoiceToTextConsoleHandler
 from voicetotext.core.startup_log import (
     begin_startup_timing,
     initialize_session_log,
+    is_owned_session,
     milestone,
 )
 
@@ -29,6 +30,7 @@ class TestStartupLog:
     def test_should_write_session_id_and_named_milestones(self, tmp_path) -> None:
         begin_startup_timing()
         session_dir = initialize_session_log(tmp_path)
+        assert is_owned_session(session_dir)
         path = session_dir / "session.log"
         milestone("Tk-created")
         milestone("config-loaded")

@@ -24,12 +24,10 @@ leaving the box.
 
 ## Install
 
-Grab `VoiceToText-Setup-<version>.exe` from
-[Releases](https://github.com/HuzPro/VoiceToText/releases): it detects your
-GPU and installs the matching PyTorch runtime for you.
-
-To run from source (Windows, and what to pick for NVIDIA / AMD / CPU), see
-[INSTALL.md](INSTALL.md).
+Install from source on Windows using
+[INSTALL.md](https://github.com/HuzPro/VoiceToText/blob/main/INSTALL.md).
+It covers Python setup and the NVIDIA, AMD, and CPU dependency options.
+No packaged installer has been published yet.
 
 ## Quickstart
 
@@ -48,9 +46,30 @@ Then dictate anywhere: hit the hotkey, talk, hit it again, and the text is
 typed into the active window. If anything misbehaves, run
 `python -m voicetotext --doctor` and read the report.
 
+## Privacy
+
+Audio and transcripts are not saved by default. Settings > Output > Privacy
+lets you opt into saving them in the logs folder. Changes apply when you save.
+Ordinary logs contain timing and status information, without transcript text.
+
+The default folder is `%APPDATA%\VoiceToText\diagnostics`. Use a local folder
+that is not synced or shared. Turning recording off keeps existing files;
+delete those files separately if you no longer want them. Automatic cleanup
+keeps 50 marked sessions. Older, unmarked folders remain for manual cleanup.
+
+Edit capture is also off by default. It requires recording consent and the
+separate `diagnostics.capture_edits=true` configuration setting before launch.
+It saves edits and window titles for dictation, so only enable it deliberately.
+Disabling recording consent stops further edit writes too.
+
 ## License
 
-[Apache-2.0](LICENSE.txt).
+The application is licensed under
+[Apache-2.0](https://github.com/HuzPro/VoiceToText/blob/main/LICENSE.txt).
+Downloaded models have their own licenses. CrisperWhisper weights and outputs
+have non-commercial restrictions and require acceptance before download or use.
+Commercial or production use requires separate permission under its
+[model license](https://github.com/HuzPro/VoiceToText/blob/main/voicetotext/licenses/crisperwhisper-nc.md).
 
 ## Sponsorship
 

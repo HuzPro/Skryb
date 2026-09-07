@@ -956,7 +956,10 @@ class TestEditCaptureSwitch:
         assert not (paths.session_dir / "edits.jsonl").exists()
 
     def test_should_start_when_explicitly_enabled(self, tmp_path: Path):
-        config = FakeConfig({"diagnostics.capture_edits": True})
+        config = FakeConfig({
+            "diagnostics.capture_edits": True,
+            "diagnostics.capture_content": True,
+        })
 
         capture = _build_edit_capture(config, self._paths(tmp_path))
 
