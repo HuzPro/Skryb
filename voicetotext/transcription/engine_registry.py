@@ -69,13 +69,18 @@ class EngineRegistry:
         Answered from the descriptors alone - importing an engine's
         backend to find out is exactly the cost startup is trying to
         avoid. An id with no descriptor answers True, so an engine that
-        forgot to register cannot talk startup out of the import it needs.
+        forgot to register cannot talk startup out of the import it needs,
+        and so does an empty list, which means selection failed rather
+        than that nothing needs torch.
         """
+        candidates = tuple(engine_ids)
+        if not candidates:
+            return True
         return any(
             self._descriptors[engine_id].requires_torch
             if engine_id in self._descriptors
             else True
-            for engine_id in engine_ids
+            for engine_id in candidates
         )
 
     def build(

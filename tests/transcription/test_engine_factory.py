@@ -87,7 +87,14 @@ class TestBuildEngineRegistry:
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "crisperwhisper",
+            "crisperwhisper_ct2",
         }
+
+    def test_should_declare_the_ct2_engine_torch_free(self) -> None:
+        registry = build_engine_registry()
+
+        assert registry.requires_torch(("crisperwhisper_ct2",)) is False
+        assert registry.requires_torch(("crisperwhisper",)) is True
 
     def test_crisperwhisper_should_have_lower_base_priority(self) -> None:
         by_id = {d.engine_id: d for d in build_engine_registry().all_descriptors()}

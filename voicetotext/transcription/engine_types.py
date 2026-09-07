@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from typing import Literal, get_args
 
 EngineId = Literal[
-    "crisperwhisper", "nano_parakeet", "nemotron_streaming",
+    "crisperwhisper", "crisperwhisper_ct2", "nano_parakeet",
+    "nemotron_streaming",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 ALL_HARDWARE_KINDS: frozenset[HardwareKind] = frozenset(get_args(HardwareKind))
