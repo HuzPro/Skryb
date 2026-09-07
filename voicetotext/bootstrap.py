@@ -20,14 +20,22 @@ from voicetotext.core.exceptions import (
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.startup_log import milestone
+from voicetotext.core.timestamps import utc_now
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.diagnostics.jsonl import JsonlWriter
 from voicetotext.downloads.download_manager import DownloadManager
+from voicetotext.edit_capture.delivery_recording_decorator import (
+    DeliveryRecordingDecorator,
+)
+from voicetotext.edit_capture.observer import Win32EditObserver
+from voicetotext.edit_capture.recorder import EditRecorder
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
+from voicetotext.hotkeys.win32_keyboard_hook import KeyObserver, ignore_key_event
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -131,12 +139,67 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     config.save()
 
 
+def _ignore_delivery(text: str) -> None:
+    return None
+
+
+# Folders that a sync client uploads. Edit capture records what the user
+# typed, so a session log inside one leaves the machine.
+_SYNCED_FOLDER_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive")
+
+
+def _warn_if_synced_folder(directory: Path) -> None:
+    lowered = str(directory).casefold()
+    if not any(marker in lowered for marker in _SYNCED_FOLDER_MARKERS):
+        return
+    _logger.warning(
+        "Edit capture is writing keystrokes to '%s', which looks like a "
+        "synced folder. Move diagnostics.directory somewhere local.",
+        directory,
+    )
+
+
+def _build_edit_capture(
+    config: JsonConfigAdapter, paths: AppPaths,
+) -> Win32EditObserver | None:
+    """The keystroke watcher, or nothing unless it was explicitly asked for.
+
+    Off by default and deliberately config-only: it records what the user
+    types into the window a transcription was pasted into.
+    """
+    if config.get("diagnostics.capture_edits", False) is not True:
+        return None
+    if config.get("diagnostics.enabled", True) is not True:
+        return None
+    _warn_if_synced_folder(paths.diagnostics_dir)
+    writer = JsonlWriter(paths.session_dir / "edits.jsonl")
+    _logger.info("Edit capture is on; writing to %s", paths.session_dir)
+    return Win32EditObserver(EditRecorder(writer.append, utc_now))
+
+
+def _delivery_reporter(
+    capture: Win32EditObserver | None,
+    pipeline_mode: PipelineMode,
+    output_mode: OutputMode,
+) -> Callable[[str], None]:
+    if capture is None:
+        return _ignore_delivery
+    return lambda text: capture.observe_delivery(
+        text, pipeline_mode.value, output_mode.value,
+    )
+
+
+def _key_observer(capture: Win32EditObserver | None) -> KeyObserver:
+    return ignore_key_event if capture is None else capture.observe_key
+
+
 def _build_output(
     mode: OutputMode,
     gui_dispatcher: GuiThreadDispatcher,
     dictionary_path: Path | None = None,
     pipeline_mode: PipelineMode = PipelineMode.BATCH,
     models_dir: Path | None = None,
+    on_delivered: Callable[[str], None] = _ignore_delivery,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -148,15 +211,24 @@ def _build_output(
         modifier_state=Win32ModifierKeyStateReader(),
         sleeper=sleeper,
     )
-    builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
-        OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
-        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(
-            sleeper=sleeper, writer=writer, key_sender=key_sender,
-        ),
-        OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
+    # Reporting the delivery from directly above the adapter that injects
+    # Ctrl+V is what keeps edit capture's pairing sound. The report and the
+    # keystroke then happen on the same thread in the same order, and a mode
+    # or a failure that never pastes reports nothing at all, so a later paste
+    # can never claim an earlier dictation's text.
+    def pasting_adapter() -> TextOutputHandler:
+        return DeliveryRecordingDecorator(
             inner=PasteAndClipboardAdapter(
                 sleeper=sleeper, writer=writer, key_sender=key_sender,
             ),
+            record=on_delivered,
+        )
+
+    builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
+        OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
+        OutputMode.PASTE_AND_CLIPBOARD: pasting_adapter,
+        OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
+            inner=pasting_adapter(),
             preserver=Win32ClipboardPreserver(sleeper=sleeper),
             sleeper=sleeper,
         ),
@@ -204,7 +276,11 @@ def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
     return config.get("transcription.crisperwhisper_mode", "intended") == "verbatim"
 
 
-def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscribeUseCase) -> HotkeyListener:
+def _build_hotkey_listener(
+    config: JsonConfigAdapter,
+    use_case: RecordAndTranscribeUseCase,
+    observer: KeyObserver = ignore_key_event,
+) -> HotkeyListener:
     combo_string = config.get("hotkey.combination", "ctrl+alt+m")
     keys = parse_hotkey_combo(combo_string)
 
@@ -213,7 +289,7 @@ def _build_hotkey_listener(config: JsonConfigAdapter, use_case: RecordAndTranscr
     else:
         strategy = ToggleStrategy(keys=keys)
 
-    listener = Win32HookAdapter(strategy)
+    listener = Win32HookAdapter(strategy, observer)
     listener.set_on_activate(use_case.on_hotkey_activated)
     listener.set_on_deactivate(use_case.on_hotkey_deactivated)
     return listener
@@ -680,6 +756,10 @@ def build_app(
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
     diagnostics = SessionDiagnostics(paths, config, hardware)
     atexit.register(diagnostics.dispose)
+    edit_capture = _build_edit_capture(config, paths)
+    if edit_capture is not None:
+        edit_capture.start()
+        atexit.register(edit_capture.stop)
 
     _logger.info(
         "Detected hardware: %s (%s, gfx=%s)",
@@ -695,9 +775,12 @@ def build_app(
     # ``root`` (the main thread), and it is injected everywhere output
     # handlers are constructed.
     gui_dispatcher = TkGuiThreadDispatcher(root)
+    output_mode = _resolve_output_mode(config)
+    pipeline_mode = _resolve_pipeline_mode(config)
     output = _build_output(
-        _resolve_output_mode(config), gui_dispatcher, paths.dictionary_path,
-        _resolve_pipeline_mode(config), paths.models_dir,
+        output_mode, gui_dispatcher, paths.dictionary_path,
+        pipeline_mode, paths.models_dir,
+        _delivery_reporter(edit_capture, pipeline_mode, output_mode),
     )
     overlay = (
         RecordingOverlay(
@@ -735,7 +818,9 @@ def build_app(
         ),
     )
 
-    listener = _build_hotkey_listener(config, record_and_transcribe_use_case)
+    listener = _build_hotkey_listener(
+        config, record_and_transcribe_use_case, _key_observer(edit_capture),
+    )
 
     active_engine_provider = _make_active_engine_provider(
         config, hardware, registry, paths.models_dir,
@@ -776,6 +861,7 @@ def build_app(
                 gui_dispatcher=gui_dispatcher,
                 dictionary_path=paths.dictionary_path,
                 models_dir=paths.models_dir,
+                edit_capture=edit_capture,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
@@ -826,6 +912,7 @@ def apply_settings(
     gui_dispatcher: GuiThreadDispatcher,
     dictionary_path: Path | None = None,
     models_dir: Path | None = None,
+    edit_capture: Win32EditObserver | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -834,13 +921,18 @@ def apply_settings(
     UI; this callback only handles the lightweight dispatches.
     """
     if changes.output_changed:
+        output_mode = _resolve_output_mode(config)
+        pipeline_mode = _resolve_pipeline_mode(config)
         use_case.set_output(
             _build_output(
-                _resolve_output_mode(config), gui_dispatcher, dictionary_path,
-                _resolve_pipeline_mode(config), models_dir,
+                output_mode, gui_dispatcher, dictionary_path,
+                pipeline_mode, models_dir,
+                _delivery_reporter(edit_capture, pipeline_mode, output_mode),
             )
         )
 
     if changes.hotkey_changed:
-        new_listener = _build_hotkey_listener(config, use_case)
+        new_listener = _build_hotkey_listener(
+            config, use_case, _key_observer(edit_capture),
+        )
         app.set_hotkey_listener(new_listener)

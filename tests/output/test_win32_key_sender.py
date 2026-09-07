@@ -35,6 +35,21 @@ class TestWin32KeySenderSendCtrlV:
         ]
 
     @patch.object(wks, "_user32")
+    def test_should_tag_every_injected_event_as_ours(self, mock_user32):
+        mock_user32.SendInput.return_value = 4
+
+        Win32KeySender().send_ctrl_v()
+
+        _, events, _ = mock_user32.SendInput.call_args.args
+        tags = [events[i].union.ki.dwExtraInfo for i in range(4)]
+        assert tags == [wks.VOICETOTEXT_INPUT_TAG] * 4
+
+    def test_should_keep_the_tag_inside_thirty_two_bits(self):
+        # dwExtraInfo is an ULONG_PTR; a wider value would not survive a
+        # 32-bit build.
+        assert 0 < wks.VOICETOTEXT_INPUT_TAG <= 0xFFFFFFFF
+
+    @patch.object(wks, "_user32")
     def test_should_pass_the_real_input_struct_size(self, mock_user32):
         mock_user32.SendInput.return_value = 4
 
