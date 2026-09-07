@@ -60,10 +60,17 @@ class ChangeSet:
             or original.hotkey_mode != updated.hotkey_mode
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
+        # The pipeline runs in passthrough only while a CrisperWhisper model
+        # is selected AND its mode is verbatim, so changing the model alone
+        # can turn the dictionary, filler removal and number formatting back
+        # on or off. That resolution lives in the composition root; rebuilding
+        # output for any model change is what keeps this from having to hold a
+        # second copy of it that can drift.
         output_changed = (
             original.output_mode != updated.output_mode
             or mode_changed
             or crisperwhisper_mode_changed
+            or original.model_size != updated.model_size
         )
         return cls(
             engine_reload_required=engine_reload_required,
