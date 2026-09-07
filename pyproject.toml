@@ -35,6 +35,12 @@ dependencies = [
 
 [project.optional-dependencies]
 punct = ["sherpa-onnx>=1.10"]
+# CTranslate2 runs CrisperWhisper without importing transformers, which is
+# the difference between a 15.5 s and a 3.4 s launch. PyPI publishes only
+# the CPU/CUDA build; AMD GPUs need the ROCm wheel from CTranslate2's
+# GitHub release, which is on no index and carries the same version
+# number, so this extra cannot express it. See INSTALL.md.
+ct2 = ["ctranslate2>=4.8.2,<5"]
 dev = [
     "pytest>=7.4.0",
     "pytest-mock>=3.11.0",
