@@ -56,10 +56,20 @@ _CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
 )
 
 
+_CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
+    engine_id="crisperwhisper_ct2",
+    display_name="CrisperWhisper 2.0 (CTranslate2)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=45,
+    requires_torch=False,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
     "crisperwhisper": 1,
+    "crisperwhisper_ct2": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -71,11 +81,13 @@ def build_engine_registry() -> EngineRegistry:
             _NANO_PARAKEET_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
+            _CRISPERWHISPER_CT2_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
             "crisperwhisper": _build_crisperwhisper_engine,
+            "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
         },
     )
 
@@ -111,6 +123,27 @@ def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
         revision=spec.revision,
         device=spec.device,
         model_dir=spec.model_dir,
+        language=spec.language,
+        mode=spec.crisperwhisper_mode,
+    )
+
+
+def _build_crisperwhisper_ct2_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.crisperwhisper_ct2_adapter import (
+        CrisperWhisperCt2Adapter,
+    )
+    from voicetotext.transcription.ct2_conversion import ct2_model_dir
+    from voicetotext.transcription.hf_model_manager import (
+        loadable_snapshot_dir,
+    )
+
+    return CrisperWhisperCt2Adapter(
+        model_dir=ct2_model_dir(
+            loadable_snapshot_dir(
+                spec.model_dir, spec.repo_id, spec.revision,
+            ),
+        ),
+        device=spec.device,
         language=spec.language,
         mode=spec.crisperwhisper_mode,
     )
@@ -344,7 +377,7 @@ def _resolve_crisperwhisper_mode(
     config: ConfigurationStore,
     engine_id: EngineId,
 ) -> CrisperWhisperMode:
-    if engine_id != "crisperwhisper":
+    if engine_id not in ("crisperwhisper", "crisperwhisper_ct2"):
         return "intended"
     from voicetotext.transcription.crisperwhisper_adapter import (
         resolve_crisperwhisper_mode,
@@ -436,6 +469,7 @@ def build_composite_model_manager(
             "nano_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
             "crisperwhisper": crisperwhisper_manager,
+            "crisperwhisper_ct2": crisperwhisper_manager,
         },
         active_engine_provider=active_engine_provider,
     )
