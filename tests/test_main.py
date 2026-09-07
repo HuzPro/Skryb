@@ -10,6 +10,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from voicetotext.transcription.license_policy import LicensePolicy
+
+# These reach the real startup path: it builds ``AppPaths`` from ``APPDATA``
+# and imports ``voicetotext.bootstrap``, which touches ``ctypes.windll`` at
+# module level. Neither exists off Windows.
+windows_only = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="startup builds AppPaths from APPDATA and imports the Win32 bootstrap",
+)
 from voicetotext.__main__ import (
     _apply_hf_cache_env_overrides,
     _apply_torch_env_overrides,
@@ -117,6 +125,7 @@ class TestDoctorCli:
     can't load can still get a usable report from the command line.
     """
 
+    @windows_only
     def test_should_print_doctor_report_when_doctor_flag_in_argv(self):
         captured = io.StringIO()
         with (
@@ -165,6 +174,7 @@ class TestDoctorCli:
 
 
 class TestMaintenanceStartupIsolation:
+    @windows_only
     @pytest.mark.parametrize(
         ("flag", "target"),
         [
@@ -203,6 +213,7 @@ class TestMaintenanceStartupIsolation:
 
 
 class TestBindingStartupOrder:
+    @windows_only
     def test_should_overlap_hardware_independent_setup_before_detection(self) -> None:
         timeline: list[str] = []
         root = MagicMock()
@@ -329,6 +340,7 @@ class TestOneLicensePolicyForTheProcess:
 
         return create_model_manager, first_run_setup, build_app
 
+    @windows_only
     def test_should_hand_the_same_policy_to_every_collaborator(
         self, tmp_path: Path,
     ) -> None:
