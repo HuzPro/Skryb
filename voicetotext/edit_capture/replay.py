@@ -6,6 +6,8 @@ class EditFlag(StrEnum):
     """A reason the replayed buffer may not match what the box really holds."""
 
     MOUSE_CLICK = "mouse_click"
+    EXTERNAL_INPUT = "external_input"
+    FOCUS_CHANGED = "focus_changed"
     UNDO = "undo"
     FOREIGN_PASTE = "foreign_paste"
     SPLIT_PASTE = "split_paste"
@@ -24,6 +26,8 @@ class EditFlag(StrEnum):
 # reached outside our own span.
 UNRELIABLE_FLAGS = frozenset({
     EditFlag.MOUSE_CLICK,
+    EditFlag.EXTERNAL_INPUT,
+    EditFlag.FOCUS_CHANGED,
     EditFlag.UNDO,
     EditFlag.FOREIGN_PASTE,
     EditFlag.SPLIT_PASTE,
@@ -132,6 +136,12 @@ class EditReplay:
             self._flags.add(EditFlag.MOUSE_CLICK)
         if stroke.vk == VK_PROCESSKEY:
             self._flags.add(EditFlag.IME)
+        elif stroke.vk in (VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT):
+            self._flags.add(EditFlag.VERTICAL_ARROW)
+        elif stroke.vk == VK_TAB:
+            self._flags.add(EditFlag.TAB)
+        elif stroke.vk == VK_ESCAPE:
+            self._flags.add(EditFlag.ESCAPE)
         elif stroke.vk == VK_RETURN:
             return self._apply_return(stroke)
         elif stroke.ctrl and not stroke.alt:
@@ -210,12 +220,6 @@ class EditReplay:
             self._move_by_character(stroke)
         elif stroke.vk in (VK_HOME, VK_END):
             self._move_to_line_edge(stroke)
-        elif stroke.vk in (VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT):
-            self._flags.add(EditFlag.VERTICAL_ARROW)
-        elif stroke.vk == VK_TAB:
-            self._flags.add(EditFlag.TAB)
-        elif stroke.vk == VK_ESCAPE:
-            self._flags.add(EditFlag.ESCAPE)
         elif stroke.char:
             self._insert(stroke.char, TYPED_ORIGIN)
 

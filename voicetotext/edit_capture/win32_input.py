@@ -9,6 +9,8 @@ _KEY_DOWN_FLAG = 0x80
 _VK_SHIFT = 0x10
 _VK_CONTROL = 0x11
 _VK_MENU = 0x12
+_VK_CAPITAL = 0x14
+_TOGGLED_ON = 0x01
 
 _MAPVK_VK_TO_VSC = 0
 _TRANSLATION_BUFFER_CHARS = 8
@@ -52,9 +54,17 @@ _user32.ToUnicodeEx.argtypes = [
 _user32.ToUnicodeEx.restype = ctypes.c_int
 _user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 _user32.GetAsyncKeyState.restype = ctypes.c_short
+_user32.GetKeyState.argtypes = [ctypes.c_int]
+_user32.GetKeyState.restype = ctypes.c_short
 
 
-def key_character(vk: int, shift: bool, ctrl: bool, alt: bool) -> str:
+def caps_lock_enabled() -> bool:
+    return bool(_user32.GetKeyState(_VK_CAPITAL) & _TOGGLED_ON)
+
+
+def key_character(
+    vk: int, shift: bool, ctrl: bool, alt: bool, *, caps_lock: bool = False,
+) -> str:
     """The character this key would type on the focused window's layout.
 
     Empty when the key types nothing: a dead key awaiting its base letter,
@@ -66,7 +76,7 @@ def key_character(vk: int, shift: bool, ctrl: bool, alt: bool) -> str:
     written = _user32.ToUnicodeEx(
         vk,
         _user32.MapVirtualKeyExW(vk, _MAPVK_VK_TO_VSC, layout),
-        _key_state(shift, ctrl, alt),
+        _key_state(shift, ctrl, alt, caps_lock=caps_lock),
         buffer,
         _TRANSLATION_BUFFER_CHARS,
         _LEAVE_KERNEL_KEY_STATE_ALONE,
@@ -74,19 +84,20 @@ def key_character(vk: int, shift: bool, ctrl: bool, alt: bool) -> str:
     )
     if written <= 0:
         return ""
-    typed = buffer[:written]
+    typed = "".join(buffer[:written])
     if typed[0] < _FIRST_PRINTABLE_CHARACTER:
         return ""
     return typed
 
 
 def _key_state(
-    shift: bool, ctrl: bool, alt: bool,
+    shift: bool, ctrl: bool, alt: bool, *, caps_lock: bool = False,
 ) -> ctypes.Array[ctypes.c_ubyte]:
     # Built from the recorded modifiers rather than read with
     # GetKeyboardState, so a key the user happens to be holding right now
     # cannot change what a past keystroke is said to have typed.
     state = (ctypes.c_ubyte * _KEY_STATE_SIZE)()
+    state[_VK_CAPITAL] = _TOGGLED_ON if caps_lock else 0
     for held, modifier in ((shift, _VK_SHIFT), (ctrl, _VK_CONTROL), (alt, _VK_MENU)):
         if held:
             state[modifier] = _KEY_DOWN_FLAG
@@ -98,7 +109,7 @@ def _foreground_keyboard_layout() -> int:
     thread_id = _user32.GetWindowThreadProcessId(
         _user32.GetForegroundWindow(), ctypes.byref(pid),
     )
-    return _user32.GetKeyboardLayout(thread_id)
+    return int(_user32.GetKeyboardLayout(thread_id))
 
 
 def clicked_since_last_check() -> bool:

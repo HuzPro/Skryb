@@ -131,18 +131,18 @@ def build(options: _Options) -> None:
     if not options.logs_dir.is_dir():
         raise SystemExit(f"no such logs directory: {options.logs_dir}")
     corpus = _join_sessions(options)
+    copied = _copy_audio(corpus.rows, options)
     manifest = [
         _manifest_entry(row)
         for row in corpus.rows
-        if _trains_the_acoustic_model(row)
+        if _trains_the_acoustic_model(row) and row.audio_path in copied
     ]
     _write_jsonl(
         options.output_dir / "dataset.jsonl",
         [asdict(row) for row in corpus.rows],
     )
     _write_jsonl(options.output_dir / "manifest.jsonl", manifest)
-    copied = _copy_audio(corpus.rows, options)
-    _print_summary(corpus, len(manifest), copied)
+    _print_summary(corpus, len(manifest), len(copied))
 
 
 def _parse_options() -> _Options:
@@ -347,7 +347,7 @@ def _manifest_entry(row: _Row) -> _Event:
     }
 
 
-def _copy_audio(rows: list[_Row], options: _Options) -> int:
+def _copy_audio(rows: list[_Row], options: _Options) -> set[str]:
     sources = {
         row.audio_path: options.logs_dir
         / row.session
@@ -356,14 +356,14 @@ def _copy_audio(rows: list[_Row], options: _Options) -> int:
         for row in rows
         if row.audio_path
     }
-    copied = 0
+    copied: set[str] = set()
     for relative, source in sources.items():
         if not source.is_file():
             continue
         destination = options.output_dir / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-        copied += 1
+        copied.add(relative)
     return copied
 
 

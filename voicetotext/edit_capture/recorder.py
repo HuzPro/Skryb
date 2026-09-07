@@ -1,11 +1,12 @@
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from voicetotext.core.timestamps import utc_iso
 from voicetotext.edit_capture.replay import (
     VK_ESCAPE,
     VK_TAB,
+    EditFlag,
     EditReplay,
     EditState,
     KeyStroke,
@@ -160,6 +161,9 @@ class EditRecorder:
         block = self._block
         if block is None or hwnd != block.window.hwnd:
             return
+        if stroke.click_since_last:
+            self.abandon(EditFlag.MOUSE_CLICK)
+            return
         block.last_at = self._now()
         block.key_count += 1
         state = block.replay.apply_key(stroke)
@@ -169,6 +173,13 @@ class EditRecorder:
         finally:
             if ending:
                 self._finish(block, state, ending)
+
+    def abandon(self, flag: EditFlag) -> None:
+        block = self._block
+        if block is None:
+            return
+        state = block.replay.snapshot()
+        self._finish(block, replace(state, flags=state.flags | {flag}), "focus_left")
 
     def _write_key(self, block: _Block, stroke: KeyStroke) -> None:
         self._write({
