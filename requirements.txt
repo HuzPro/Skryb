@@ -13,4 +13,6 @@ nano-parakeet>=0.2.1
 # CrisperWhisper requires transformers 4.40. The app is validated with
 # 5.16.0; torchaudio is the decode backend transformers' audio loader uses.
 transformers>=5.16.0,<6
+# Whisper prompt building and decoding go straight to the Rust tokenizer.
+tokenizers>=0.23.1
 torchaudio>=2.5
