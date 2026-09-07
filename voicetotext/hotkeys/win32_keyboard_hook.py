@@ -82,7 +82,7 @@ KeyEventHandler = Callable[[bool, int], bool]
 KeyObserver = Callable[[bool, int, int, int], None]
 
 
-def _ignore_key_event(is_key_down: bool, vk: int, flags: int, extra: int) -> None:
+def ignore_key_event(is_key_down: bool, vk: int, flags: int, extra: int) -> None:
     return None
 
 
@@ -103,7 +103,7 @@ class Win32KeyboardHook:
     def __init__(
         self,
         handler: KeyEventHandler,
-        observer: KeyObserver = _ignore_key_event,
+        observer: KeyObserver = ignore_key_event,
     ) -> None:
         self._handler = handler
         self._observer = observer

@@ -14,6 +14,10 @@ from voicetotext.bootstrap import (
     _load_engine_with_fallback,
     _load_streaming_engine,
     _make_active_engine_provider,
+    _build_edit_capture,
+    _delivery_reporter,
+    _ignore_delivery,
+    _key_observer,
     _resolve_pipeline_mode,
     _warmup_safely,
     apply_settings,
@@ -28,8 +32,13 @@ from voicetotext.core.exceptions import (
     LicenseNotAcceptedError,
 )
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
+from voicetotext.core.paths import AppPaths
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.edit_capture.delivery_recording_decorator import (
+    DeliveryRecordingDecorator,
+)
+from voicetotext.hotkeys.win32_keyboard_hook import ignore_key_event
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -637,7 +646,8 @@ class TestBuildOutput:
         result = _build_output(OutputMode.DIRECT_PASTE, dispatcher)
 
         assert isinstance(result, TextFilterDecorator)
-        gui_output = result._inner
+        assert isinstance(result._inner, DeliveryRecordingDecorator)
+        gui_output = result._inner._inner
         assert isinstance(gui_output, GuiThreadOutputDecorator)
         clipboard_preserving = gui_output._inner
         assert isinstance(clipboard_preserving, ClipboardPreservingDecorator)
@@ -653,8 +663,9 @@ class TestBuildOutput:
         result = _build_output(OutputMode.PASTE_AND_CLIPBOARD, dispatcher)
 
         assert isinstance(result, TextFilterDecorator)
-        assert isinstance(result._inner, GuiThreadOutputDecorator)
-        assert isinstance(result._inner._inner, PasteAndClipboardAdapter)
+        assert isinstance(result._inner, DeliveryRecordingDecorator)
+        assert isinstance(result._inner._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner._inner._inner, PasteAndClipboardAdapter)
 
     def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
         dispatcher = MagicMock()
@@ -662,15 +673,16 @@ class TestBuildOutput:
         result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
 
         assert isinstance(result, TextFilterDecorator)
-        assert isinstance(result._inner, GuiThreadOutputDecorator)
-        assert isinstance(result._inner._inner, ClipboardAdapter)
+        assert isinstance(result._inner, DeliveryRecordingDecorator)
+        assert isinstance(result._inner._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner._inner._inner, ClipboardAdapter)
 
     def test_should_wrap_inner_with_gui_thread_dispatcher(self):
         dispatcher = MagicMock()
 
         result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
 
-        assert result._inner._dispatcher is dispatcher
+        assert result._inner._inner._dispatcher is dispatcher
 
     def test_should_build_reduced_pipeline_for_streaming_mode(
         self, tmp_path: Path,
@@ -726,7 +738,8 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_output.assert_called_once_with(
-            OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None
+            OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None,
+            _ignore_delivery,
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
@@ -774,7 +787,9 @@ class TestApplySettings:
 
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
-        mock_build_listener.assert_called_once_with(config, use_case)
+        mock_build_listener.assert_called_once_with(
+            config, use_case, ignore_key_event,
+        )
         app.set_hotkey_listener.assert_called_once_with(
             mock_build_listener.return_value
         )
@@ -860,3 +875,61 @@ class TestPipelineModeForVerbatimTranscription:
         )
 
         assert _resolve_pipeline_mode(config) is PipelineMode.STREAMING
+
+
+class TestEditCaptureSwitch:
+    """Edit capture records keystrokes, so it must stay off unless asked for."""
+
+    def _paths(self, tmp_path: Path) -> AppPaths:
+        paths = AppPaths(base=tmp_path)
+        paths.ensure_dirs()
+        session = paths.diagnostics_dir / "session"
+        session.mkdir()
+        paths.activate_session(session)
+        return paths
+
+    def test_should_stay_off_when_the_setting_is_absent(self, tmp_path: Path):
+        capture = _build_edit_capture(FakeConfig(), self._paths(tmp_path))
+
+        assert capture is None
+
+    def test_should_stay_off_when_the_setting_is_merely_truthy(
+        self, tmp_path: Path,
+    ):
+        config = FakeConfig({"diagnostics.capture_edits": "yes"})
+
+        capture = _build_edit_capture(config, self._paths(tmp_path))
+
+        assert capture is None
+
+    def test_should_stay_off_when_diagnostics_are_disabled(self, tmp_path: Path):
+        config = FakeConfig({
+            "diagnostics.capture_edits": True,
+            "diagnostics.enabled": False,
+        })
+
+        capture = _build_edit_capture(config, self._paths(tmp_path))
+
+        assert capture is None
+
+    def test_should_write_nothing_while_it_is_off(self, tmp_path: Path):
+        paths = self._paths(tmp_path)
+
+        _build_edit_capture(FakeConfig(), paths)
+
+        assert not (paths.session_dir / "edits.jsonl").exists()
+
+    def test_should_start_when_explicitly_enabled(self, tmp_path: Path):
+        config = FakeConfig({"diagnostics.capture_edits": True})
+
+        capture = _build_edit_capture(config, self._paths(tmp_path))
+
+        assert capture is not None
+
+    def test_should_hand_the_hotkey_hook_a_no_op_watcher_while_off(self):
+        assert _key_observer(None) is ignore_key_event
+
+    def test_should_hand_the_output_chain_a_no_op_reporter_while_off(self):
+        reporter = _delivery_reporter(None, PipelineMode.BATCH, OutputMode.DIRECT_PASTE)
+
+        assert reporter is _ignore_delivery

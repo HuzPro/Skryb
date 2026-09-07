@@ -3,7 +3,11 @@ from collections.abc import Callable
 from voicetotext.hotkeys import keys
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.strategy import HotkeyStrategy
-from voicetotext.hotkeys.win32_keyboard_hook import Win32KeyboardHook
+from voicetotext.hotkeys.win32_keyboard_hook import (
+    KeyObserver,
+    Win32KeyboardHook,
+    ignore_key_event,
+)
 
 
 class Win32HookAdapter(HotkeyListener):
@@ -14,9 +18,13 @@ class Win32HookAdapter(HotkeyListener):
     must not swallow the user's keystrokes.
     """
 
-    def __init__(self, strategy: HotkeyStrategy) -> None:
+    def __init__(
+        self,
+        strategy: HotkeyStrategy,
+        observer: KeyObserver = ignore_key_event,
+    ) -> None:
         self._strategy = strategy
-        self._hook = Win32KeyboardHook(self._handle_key)
+        self._hook = Win32KeyboardHook(self._handle_key, observer)
         self._on_activate: Callable[[], None] | None = None
         self._on_deactivate: Callable[[], None] | None = None
         self._paused: bool = False
