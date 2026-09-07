@@ -1,19 +1,19 @@
-# Install VoiceToText (Windows / Linux)
+# Install VoiceToText on Windows
 
 ## Prerequisites
 
 - **Python 3.12** (required for the AMD Windows path; 3.11+ works for everything else)
 - Git
+- Windows 10 or 11, 64-bit. The tray, hotkeys, and text output require Windows.
 
 ## Pick a requirements file
 
 | File | Use when |
 |------|----------|
 | `requirements-amd.txt`       | Windows AMD GPU. Installs PyTorch ROCm 7.2.1 + AMD's TheRock runtime from `repo.radeon.com`. |
-| `requirements-amd-linux.txt` | Linux AMD GPU. Same ROCm version, AMD's manylinux index. |
-| `requirements-nvidia.txt`    | NVIDIA GPU (Windows or Linux). Installs PyTorch CUDA build. |
+| `requirements-nvidia.txt`    | Windows NVIDIA GPU. Installs PyTorch CUDA build. |
 | `requirements-cpu.txt`       | No GPU (or smaller download). Installs CPU-only PyTorch. |
-| `requirements-all.txt`       | You already have PyTorch installed and just want the rest of the deps. |
+| `requirements-all.txt`       | Core dependencies for an environment with a matching PyTorch runtime. |
 | `requirements.txt`           | Core dependencies, including the `nano-parakeet` engine, without PyTorch. |
 
 The GPU files use `--find-links` (AMD's index is a flat HTML directory) or `--extra-index-url` (PyTorch's CUDA index is a PEP 503 index) to pull the right wheel without disturbing PyPI lookups for everything else.
@@ -21,20 +21,20 @@ The GPU files use `--find-links` (AMD's index is a flat HTML directory) or `--ex
 ## Steps
 
 ```powershell
-git clone <repo-url> VoiceToText
+git clone https://github.com/HuzPro/VoiceToText.git
 cd VoiceToText
 
 py -3.12 -m venv .venv             # Python 3.12 explicitly for AMD Windows
 .\.venv\Scripts\Activate.ps1       # Windows
-# source .venv/bin/activate        # Linux / macOS
 
-pip install -r requirements-amd.txt   # or -amd-linux / -nvidia / -cpu / -all
+pip install -r requirements-amd.txt   # or requirements-nvidia.txt / requirements-cpu.txt
+pip install --no-deps -e .
 python -m voicetotext
 ```
 
 First run opens a setup window where you pick a model and download it.
 
-For an editable development install, `pip install -e .` installs both the
+The editable install above adds both the
 console command and a console-free `voicetotext-gui.exe`. Run
 `voicetotext --create-shortcut` to add **VoiceToText (Dev)** to the Start
 Menu. `voicetotext --enable-autostart` and `--disable-autostart` manage the
@@ -57,7 +57,7 @@ Streaming mode types text live as you speak, instead of recording first and tran
 ## CTranslate2 (fast CrisperWhisper launch, optional)
 
 CrisperWhisper runs on PyTorch + Transformers out of the box. Importing
-Transformers costs 10.5 s of a 15.5 s cold start on this machine. The same
+Transformers costs 10.5 s of a 15.5 s cold start in a development benchmark. The same
 model under CTranslate2 reaches ready in 3.4 s and produces byte-identical
 transcripts in both intended and verbatim modes, so this is worth
 installing if you dictate with CrisperWhisper.
@@ -137,14 +137,9 @@ launch about 9 s slower.
 
 - **Python 3.12 only.** AMD does not publish cp310 / cp311 / cp313 Windows ROCm wheels yet. If your venv uses a different interpreter, pip will refuse - recreate it with `py -3.12 -m venv .venv`.
 - **AMD Adrenalin driver 26.2.2 or newer** is required for the 7.2.1 wheel.
-- ROCm 7.2.1 is the latest stable Windows release (March 2026). To upgrade later, update the version strings inside `requirements-amd.txt` to the new `rocm-rel-X.Y.Z` directory at https://repo.radeon.com/rocm/windows/.
+- The AMD requirements use ROCm 7.2.1. Keep PyTorch and torchaudio on matching ROCm builds when upgrading.
 - One wheel covers all RDNA archs - no per-gfx selection needed.
 - **`torch.distributed` is unavailable** on the Windows ROCm wheel. Packages that require it at module load will crash on Windows AMD. Don't add `torchao`, `bitsandbytes`, `flash-attn`, `deepspeed`, or `triton` to the project - none of them have Windows ROCm support.
-
-### Linux AMD
-
-- Python 3.10 / 3.11 / 3.12 / 3.13 all supported.
-- Linux ROCm wheels carry a `.lw.git<sha>` local-version suffix on top of `+rocm7.2.1`, so the Linux file pins `torch>=2.9.1,<2.10` instead of an exact `==` match.
 
 ### NVIDIA
 
@@ -152,7 +147,7 @@ launch about 9 s slower.
 
 ### "I already have a custom torch installed"
 
-Use `requirements-all.txt` - it leaves torch alone and only installs the rest of the deps. This is what to do if you have a nightly ROCm / CUDA build, or an internal corporate index, that the GPU-specific files would clobber.
+Use matching PyTorch and torchaudio builds, then install `requirements-all.txt` with a constraints file pinning those versions. Although that file does not list torch directly, torchaudio depends on it and pip may otherwise replace your runtime.
 
 ## Troubleshooting
 
@@ -166,7 +161,7 @@ Output lists Python / PyTorch versions, which engine backends are installed, CUD
 
 ### "Cannot install torch>=X because these package versions have conflicting dependencies"
 
-You have a custom torch already (different ROCm / CUDA / nightly version) and you're using the wrong file. Switch to `requirements-all.txt` so pip leaves torch alone.
+Check that PyTorch and torchaudio use matching versions and runtimes. Use the matching platform requirements in a fresh environment, or provide constraints for your custom builds.
 
 ### The app dies with no traceback, or `OMP: Error #15`
 

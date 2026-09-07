@@ -30,6 +30,10 @@ DELIVERY_TIMEOUT = timedelta(seconds=5)
 # editing this dictation, so the block ends rather than logging them.
 FOCUS_LEAVING_KEYS = frozenset({VK_TAB, VK_ESCAPE})
 
+
+def _recording_allowed() -> bool:
+    return True
+
 DENIED_PROCESSES = frozenset({
     "windowsterminal.exe",
     "wt.exe",
@@ -83,8 +87,10 @@ class EditRecorder:
         self,
         write: Callable[[dict[str, object]], None],
         now: Callable[[], datetime],
+        enabled: Callable[[], bool] = _recording_allowed,
     ) -> None:
-        self._write = write
+        self._write_event = write
+        self._enabled = enabled
         self._now = now
         # One slot, not a queue. The GUI thread runs report, clipboard
         # write, settle and SendInput as one sequence, so only one
@@ -96,6 +102,13 @@ class EditRecorder:
         self._block: _Block | None = None
         self._deliveries = 0
         self._blocks = 0
+
+    def _write(self, event: dict[str, object]) -> None:
+        if self._enabled():
+            self._write_event(event)
+        else:
+            self._pending = None
+            self._block = None
 
     def delivered(self, text: str, pipeline_mode: str, output_mode: str) -> None:
         self._deliveries += 1

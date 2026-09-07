@@ -36,3 +36,6 @@ tests/performance/.results/
 
 # Local spike/scratch output (extracted checkpoints, weight-key dumps, reports)
 scripts/_spike_out/
+
+/PLAN.md
+/PLAN-REVIEW-LOG.md

@@ -22,7 +22,7 @@ from voicetotext.core.paths import AppPaths
 from voicetotext.core.startup_log import milestone
 from voicetotext.core.timestamps import utc_now
 from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.diagnostics.session import SessionDiagnostics, content_recording_enabled
 from voicetotext.diagnostics.jsonl import JsonlWriter
 from voicetotext.downloads.download_manager import DownloadManager
 from voicetotext.edit_capture.delivery_recording_decorator import (
@@ -172,12 +172,16 @@ def _build_edit_capture(
     """
     if config.get("diagnostics.capture_edits", False) is not True:
         return None
-    if config.get("diagnostics.enabled", True) is not True:
+    if not content_recording_enabled(config):
         return None
     _warn_if_synced_folder(paths.diagnostics_dir)
     writer = JsonlWriter(paths.session_dir / "edits.jsonl")
     _logger.info("Edit capture is on; writing to %s", paths.session_dir)
-    return Win32EditObserver(EditRecorder(writer.append, utc_now))
+    return Win32EditObserver(EditRecorder(
+        writer.append, utc_now,
+        lambda: content_recording_enabled(config)
+        and config.get("diagnostics.capture_edits", False) is True,
+    ))
 
 
 def _delivery_reporter(

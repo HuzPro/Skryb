@@ -284,9 +284,7 @@ class _RuleStage:
         for replacement in selected:
             if replacement.priority >= _PHONETIC_PRIORITY_BASE:
                 _logger.info(
-                    "phonetic: '%s' -> '%s'",
-                    text[replacement.start:replacement.end],
-                    replacement.value,
+                    "phonetic replacement applied",
                 )
         return _render_replacements(text, selected)
 

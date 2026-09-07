@@ -16,6 +16,7 @@ from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.timestamps import utc_iso, utc_now
 from voicetotext.core.startup_log import (
+    is_owned_session,
     process_started_at,
     process_uptime_seconds,
 )
@@ -39,6 +40,13 @@ _logger = logging.getLogger(__name__)
 # noisy room after the fact.
 _LEVEL_FRAME_SECONDS = 0.02
 _NOISE_FLOOR_QUANTILE = 0.1
+
+
+def content_recording_enabled(config: ConfigurationStore) -> bool:
+    return (
+        config.get("diagnostics.enabled", True) is True
+        and config.get("diagnostics.capture_content", False) is True
+    )
 
 
 @dataclass(frozen=True)
@@ -81,7 +89,6 @@ class SessionDiagnostics:
         self._config = config
         self._registry = registry
         self._hardware_detector = hardware_detector
-        self._enabled = config.get("diagnostics.enabled", True) is True
         retain_sessions = config.get("diagnostics.retain_sessions", 50)
         self._retain_sessions = (
             retain_sessions
@@ -158,12 +165,13 @@ class SessionDiagnostics:
         )
         audio_path = Path("audio") / f"{index:04d}.wav"
         transcript_path = Path("transcripts") / f"{index:04d}.txt"
-        if self._enabled and audio is not None:
+        capture_content = content_recording_enabled(self._config)
+        if capture_content and audio is not None:
             self._attempt_write(
                 f"audio {index}",
                 lambda: self._save_audio(self._paths.session_dir / audio_path, audio),
             )
-        if self._enabled:
+        if capture_content:
             self._attempt_write(
                 f"transcript {index}",
                 lambda: self._save_transcript(
@@ -171,6 +179,7 @@ class SessionDiagnostics:
                     text,
                 ),
             )
+        if self._config.get("diagnostics.enabled", True) is True:
             self._write_event(
                 {
                     "event": "transcription",
@@ -190,9 +199,11 @@ class SessionDiagnostics:
                     "audio_peak": levels.peak,
                     "audio_noise_floor": levels.noise_floor,
                     "language_probability": language_probability,
-                    "audio_path": audio_path.as_posix() if audio is not None else "",
-                    "text": text,
-                    "transcript_path": transcript_path.as_posix(),
+                    "audio_path": audio_path.as_posix()
+                    if capture_content and audio is not None else "",
+                    "text": text if capture_content else "",
+                    "transcript_path": transcript_path.as_posix()
+                    if capture_content else "",
                     "char_count": len(text),
                     "word_count": len(text.split()),
                     "is_empty": not text.strip(),
@@ -201,13 +212,12 @@ class SessionDiagnostics:
             )
         _logger.info(
             "transcription index=%d audio_seconds=%.3f engine_seconds=%s "
-            "char_count=%d word_count=%d text=%r",
+            "char_count=%d word_count=%d",
             index,
             audio.duration_seconds if audio is not None else 0.0,
             f"{engine_seconds:.3f}" if engine_seconds is not None else "n/a",
             len(text),
             len(text.split()),
-            text,
         )
 
     def dispose(self) -> None:
@@ -243,7 +253,7 @@ class SessionDiagnostics:
         )
 
     def _write_event(self, event: dict[str, object]) -> None:
-        if not self._enabled:
+        if self._config.get("diagnostics.enabled", True) is not True:
             return
         self._attempt_write(
             str(event["event"]),
@@ -262,7 +272,7 @@ class SessionDiagnostics:
             previous = sorted(
                 path
                 for path in self._paths.diagnostics_dir.iterdir()
-                if path.is_dir() and path != self._paths.session_dir
+                if path != self._paths.session_dir and is_owned_session(path)
             )
         except Exception as exc:  # noqa: BLE001
             _logger.warning("Diagnostics session scan failed: %s", exc)
