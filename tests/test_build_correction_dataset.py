@@ -343,3 +343,66 @@ class TestAcousticManifestScope:
 
         assert len(_records(output_dir / "dataset.jsonl")) == 1
         assert _records(output_dir / "manifest.jsonl") == []
+
+
+class TestDeliveryOrdering:
+    """A batch delivery is reported after its transcription event, not before."""
+
+    def test_should_match_a_delivery_reported_after_the_transcription(
+        self, tmp_path: Path,
+    ) -> None:
+        _session(
+            tmp_path / "logs",
+            "afterwards",
+            [_transcription(1, 10, "the quick brown fox")],
+            [
+                _delivered(1, 11, "the quick brown fox"),
+                _sent(1, [_span(1, "the quick brown fox", "the quick brown fox")]),
+            ],
+        )
+
+        output_dir = _build(tmp_path)
+
+        rows = _records(output_dir / "dataset.jsonl")
+        assert [row["transcription_index"] for row in rows] == [1]
+
+    def test_should_match_a_delivery_reported_before_the_transcription(
+        self, tmp_path: Path,
+    ) -> None:
+        _session(
+            tmp_path / "logs",
+            "beforehand",
+            [_transcription(1, 10, "the quick brown fox")],
+            [
+                _delivered(1, 9, "the quick brown fox"),
+                _sent(1, [_span(1, "the quick brown fox", "the quick brown fox")]),
+            ],
+        )
+
+        output_dir = _build(tmp_path)
+
+        rows = _records(output_dir / "dataset.jsonl")
+        assert [row["transcription_index"] for row in rows] == [1]
+
+    def test_should_pick_the_nearer_of_two_transcriptions(
+        self, tmp_path: Path,
+    ) -> None:
+        _session(
+            tmp_path / "logs",
+            "twice",
+            [
+                _transcription(1, 10, "first clip"),
+                _transcription(2, 60, "second clip"),
+            ],
+            [
+                _delivered(1, 11, "first clip"),
+                _delivered(2, 61, "second clip"),
+                _sent(1, [_span(1, "first clip", "first clip")]),
+                _sent(2, [_span(2, "second clip", "second clip")]),
+            ],
+        )
+
+        output_dir = _build(tmp_path)
+
+        rows = _records(output_dir / "dataset.jsonl")
+        assert [row["transcription_index"] for row in rows] == [1, 2]
