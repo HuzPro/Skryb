@@ -40,6 +40,8 @@ from voicetotext.core.state_machine import AppStateMachine
 #     modules, and ``voicetotext.bootstrap`` (which imports them at module
 #     top, so any test that imports bootstrap is affected), touch this
 #     Windows-only attribute.
+#   * ``ctypes.WINFUNCTYPE`` - ``recording/overlay.py`` builds a window
+#     procedure at module top; the name only exists on Windows.
 #   * ``APPDATA`` - ``tests/performance/conftest.py`` reads this
 #     Windows-only environment variable at import time.
 collect_ignore: list[str] = []
@@ -51,6 +53,7 @@ if sys.platform != "win32":
         "edit_capture/test_observer.py",
         "edit_capture/test_win32_foreground.py",
         "edit_capture/test_win32_input.py",
+        "recording/test_overlay.py",
         "output/test_win32_clipboard_open.py",
         "output/test_win32_clipboard_preserver.py",
         "output/test_win32_clipboard_writer.py",
