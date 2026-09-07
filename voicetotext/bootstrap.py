@@ -211,15 +211,24 @@ def _build_output(
         modifier_state=Win32ModifierKeyStateReader(),
         sleeper=sleeper,
     )
-    builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
-        OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
-        OutputMode.PASTE_AND_CLIPBOARD: lambda: PasteAndClipboardAdapter(
-            sleeper=sleeper, writer=writer, key_sender=key_sender,
-        ),
-        OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
+    # Reporting the delivery from directly above the adapter that injects
+    # Ctrl+V is what keeps edit capture's pairing sound. The report and the
+    # keystroke then happen on the same thread in the same order, and a mode
+    # or a failure that never pastes reports nothing at all, so a later paste
+    # can never claim an earlier dictation's text.
+    def pasting_adapter() -> TextOutputHandler:
+        return DeliveryRecordingDecorator(
             inner=PasteAndClipboardAdapter(
                 sleeper=sleeper, writer=writer, key_sender=key_sender,
             ),
+            record=on_delivered,
+        )
+
+    builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
+        OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
+        OutputMode.PASTE_AND_CLIPBOARD: pasting_adapter,
+        OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
+            inner=pasting_adapter(),
             preserver=Win32ClipboardPreserver(sleeper=sleeper),
             sleeper=sleeper,
         ),
@@ -229,10 +238,7 @@ def _build_output(
     # ``SendInput`` calls require a UI thread, and the use case runs
     # on a daemon worker. Wrapping every concrete handler with this
     # decorator means the worker never touches Win32 directly.
-    gui_output = DeliveryRecordingDecorator(
-        inner=GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher),
-        record=on_delivered,
-    )
+    gui_output = GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
     dictionary = (
         load_dictionary(dictionary_path)
         if dictionary_path is not None
