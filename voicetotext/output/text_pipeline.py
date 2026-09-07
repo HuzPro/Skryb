@@ -53,6 +53,8 @@ class _Replacement:
     end: int
     value: str
     priority: int
+    glue_left: bool = False
+    glue_right: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,6 @@ _COMMAND_PATTERN = re.compile(
 )
 _LITERAL_PATTERN = re.compile(r"(?<!\w)literal(?!\w)\s+", re.IGNORECASE)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
-_GLUE_PATTERN = r"[ \t]*"
 _NUMBER = r"\d+(?:\.\d+)?"
 _PERCENT_PATTERN = re.compile(
     rf"\b({_NUMBER})\s+percent\b", re.IGNORECASE,
@@ -171,7 +172,7 @@ class TextPipeline:
             for rule in config.rules
             if (safe_rule := _streaming_rule(rule)) is not None
         )
-        stages.append(_RuleStage(safe_rules).apply)
+        stages.append(_RuleStage(safe_rules).apply_streaming)
         return cls(tuple(stages))
 
     def process(self, text: str) -> str:
@@ -246,6 +247,7 @@ def format_numbers(text: str) -> str:
 
 class _RuleStage:
     def __init__(self, rules: tuple[DictionaryRule, ...]) -> None:
+        self._glue_next = False
         self._finders = tuple(
             finder
             for index, rule in enumerate(rules)
@@ -257,6 +259,15 @@ class _RuleStage:
             if (phonetic_rule := _make_phonetic_rule(rule, index)) is not None
         )
 
+    def apply_streaming(self, text: str) -> str:
+        if not text:
+            return ""
+        if self._glue_next:
+            text = text.lstrip(" \t")
+            if not text:
+                return ""
+        return self.apply(text)
+
     def apply(self, text: str) -> str:
         replacements = [
             replacement
@@ -265,6 +276,11 @@ class _RuleStage:
         ]
         replacements.extend(_phonetic_replacements(text, self._phonetic_rules))
         selected = _select_replacements(replacements)
+        self._glue_next = bool(
+            selected
+            and selected[-1].glue_right
+            and not text[selected[-1].end:].strip(" \t")
+        )
         for replacement in selected:
             if replacement.priority >= _PHONETIC_PRIORITY_BASE:
                 _logger.info(
@@ -409,8 +425,10 @@ def _literal_finder(
                 match.end(),
                 rule.replacement,
                 rule_index,
+                glue_left=alias[:1].isspace(),
+                glue_right=alias[-1:].isspace(),
             )
-            for pattern in patterns
+            for alias, pattern in zip(rule.spoken, patterns)
             for match in pattern.finditer(text)
             if match.start() != match.end()
         ]
@@ -551,9 +569,13 @@ def _render_replacements(text: str, replacements: list[_Replacement]) -> str:
     parts: list[str] = []
     cursor = 0
     for replacement in replacements:
-        parts.append(text[cursor:replacement.start])
+        gap = text[cursor:replacement.start]
+        parts.append(gap.rstrip(" \t") if replacement.glue_left else gap)
         parts.append(replacement.value)
         cursor = replacement.end
+        if replacement.glue_right:
+            while cursor < len(text) and text[cursor] in " \t":
+                cursor += 1
     parts.append(text[cursor:])
     return "".join(parts)
 
@@ -570,11 +592,7 @@ def _literal_pattern(alias: str, whole_words: bool) -> str:
     pattern = "".join(parts)
     if whole_words:
         pattern = r"(?<!\w)(?:" + pattern + r")(?!\w)"
-    # ponytail: adjacent glued matches share one space, so the second is dropped
-    # as an overlap; carry the core span on _Replacement and compare cores to fix.
-    glue_left = _GLUE_PATTERN if alias[:1].isspace() else ""
-    glue_right = _GLUE_PATTERN if alias[-1:].isspace() else ""
-    return glue_left + pattern + glue_right
+    return pattern
 
 
 def _token_kind(text: str) -> TokenKind:
