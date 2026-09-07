@@ -40,7 +40,8 @@ from voicetotext.transcription.engine_selector import (
     model_supports_streaming as _model_supports_streaming,
     rank_engines,
 )
-from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
+from voicetotext.transcription.engine_types import EngineCandidate
+from voicetotext.transcription.hardware_detector import HardwareDetector
 from voicetotext.transcription.license_policy import LicensePolicy, LicenseTerms
 from voicetotext.transcription.model_info import (
     ALL_MODELS,
@@ -118,7 +119,7 @@ class SettingsService:
         dictionary_path: Path,
         license_policy: LicensePolicy,
         registry: EngineRegistry | None = None,
-        hardware: HardwareProfile | None = None,
+        hardware_detector: HardwareDetector | None = None,
     ) -> None:
         self._config = config
         self._dictionary_path = dictionary_path
@@ -130,7 +131,7 @@ class SettingsService:
         self._state_machine = state_machine
         self._license_policy = license_policy
         self._registry = registry
-        self._hardware = hardware
+        self._hardware_detector = hardware_detector
         self._download_listeners: list[DownloadEventListener] = []
         self._engine_listeners: list[EngineEventListener] = []
         self._state_listeners: list[StateChangeListener] = []
@@ -351,12 +352,16 @@ class SettingsService:
         Otherwise a ranked tuple - the first entry has
         ``is_recommended=True`` and the reason string says why.
         """
-        if self._registry is None or self._hardware is None:
+        if self._registry is None or self._hardware_detector is None:
             return ()
         info = ALL_MODELS.get(model_name)
         if info is None:
             return ()
-        return rank_engines(info, self._hardware, self._registry.all_descriptors())
+        return rank_engines(
+            info,
+            self._hardware_detector.detect(),
+            self._registry.all_descriptors(),
+        )
 
     def supports_streaming_hardware(self) -> bool:
         """Whether the detected hardware can run the GPU-only streaming engine.
@@ -365,7 +370,10 @@ class SettingsService:
         hardware hasn't been probed yet) cannot load a streaming model, so the
         UI uses this to keep the Streaming mode from being selected there.
         """
-        return self._hardware is not None and self._hardware.kind != "cpu"
+        return (
+            self._hardware_detector is not None
+            and self._hardware_detector.detect().kind != "cpu"
+        )
 
     # ------------------------------------------------------------------
     # Engine hot-swap

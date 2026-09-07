@@ -12,6 +12,17 @@ class ModelDownloadError(Exception):
     """Raised when a model job cannot complete (individual file failures bubble up here)."""
 
 
+# A step that runs once every file is on disk and the snapshot is
+# complete, receiving the snapshot directory. Engines whose runtime needs
+# a format the repo does not ship build it here rather than on a
+# transcription path.
+PostInstallStep = Callable[[Path], None]
+
+
+def _no_post_install(snapshot: Path) -> None:
+    """Default for models usable exactly as downloaded."""
+
+
 class _FileDownloader(Protocol):
     def download(
         self,
@@ -29,6 +40,12 @@ class ModelDownloadJob:
     The job knows how to translate a list of :class:`ResolvedFile` objects
     into the HuggingFace cache layout (``models--org--repo/snapshots/<sha>/``
     plus ``refs/main`` pointing at the commit sha).
+
+    ``post_install`` runs last, after ``refs/main`` makes the snapshot
+    loadable. Running it *after* the completion barrier rather than
+    before it keeps a failing step from discarding gigabytes of correctly
+    downloaded weights: the snapshot stays installed and the step is
+    retried by whoever needs its output.
     """
 
     job_id: str
@@ -37,6 +54,7 @@ class ModelDownloadJob:
     files: list[ResolvedFile]
     models_dir: Path
     file_downloader: _FileDownloader
+    post_install: PostInstallStep = _no_post_install
     _bytes_done: int = field(default=0, init=False)
     _progress_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
@@ -91,6 +109,7 @@ class ModelDownloadJob:
                 ) from exc
 
         self._write_refs_main()
+        self.post_install(snapshot)
 
     def _on_file_progress(
         self,

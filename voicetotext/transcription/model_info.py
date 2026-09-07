@@ -82,7 +82,7 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 
 
 _CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"crisperwhisper": 40},
+    {"crisperwhisper": 40, "crisperwhisper_ct2": 45},
 )
 
 # One licence covers both variants: the LICENSE.md bytes at the two
@@ -106,7 +106,7 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
             "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/"
             "de0369c8a68025b7f6e86387b6eb5a3b369787c8/LICENSE.md"
         ),
-        compatible_engines=("crisperwhisper",),
+        compatible_engines=("crisperwhisper", "crisperwhisper_ct2"),
         engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
     ),
     "crisperwhisper-2.0-large": ModelInfo(
