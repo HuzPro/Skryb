@@ -54,6 +54,83 @@ Streaming mode types text live as you speak, instead of recording first and tran
 - **Parakeet is a core dependency.** Every supported requirements path and a plain `pip install -e .` install `nano-parakeet` (which pulls `sentencepiece`).
 - **Models:** `parakeet-tdt-0.6b-v3` (windowed) and `nemotron-speech-streaming-en-0.6b` (cache-aware, lowest latency). Choose **Streaming** on the Transcription page, then download a streaming model.
 
+## CTranslate2 (fast CrisperWhisper launch, optional)
+
+CrisperWhisper runs on PyTorch + Transformers out of the box. Importing
+Transformers costs 10.5 s of a 15.5 s cold start on this machine. The same
+model under CTranslate2 reaches ready in 3.4 s and produces byte-identical
+transcripts in both intended and verbatim modes, so this is worth
+installing if you dictate with CrisperWhisper.
+
+Installing it changes nothing else: no other engine uses CTranslate2, and
+without it CrisperWhisper keeps working on Transformers.
+
+**Uninstall any CTranslate2 you already have first.**
+
+```powershell
+pip uninstall -y ctranslate2
+```
+
+Two reasons, both real. A CPU/CUDA CTranslate2 in a ROCm PyTorch venv
+aborts the process (`OMP: Error #15`, no Python traceback) the moment it
+loads a model, because it brings its own Intel OpenMP alongside PyTorch's
+LLVM one. And every build carries the same `4.8.2` version, so pip
+considers an already-installed wrong wheel to satisfy the requirement and
+leaves it in place.
+
+### NVIDIA and CPU
+
+```powershell
+pip install "ctranslate2>=4.8.2,<5"      # or: pip install -e .[ct2]
+```
+
+### AMD (Windows)
+
+The ROCm build is not on PyPI. It ships as a release asset on
+CTranslate2's GitHub release, `rocm-python-wheels-Windows.zip` under
+https://github.com/OpenNMT/CTranslate2/releases/tag/v4.8.2, holding one
+wheel: `temp-windows/ctranslate2-4.8.2-cp312-cp312-win_amd64.whl`. Python
+3.12 only, same as the AMD PyTorch wheels.
+
+```powershell
+# after downloading and extracting the zip
+pip install .\temp-windows\ctranslate2-4.8.2-cp312-cp312-win_amd64.whl
+```
+
+The wheel needs `amdhip64_7.dll` and `hipblas.dll`, which
+`requirements-amd.txt` already installs via `rocm-sdk-core` and
+`rocm-sdk-libraries-custom`. Nothing else to wire up.
+
+### Check you got the right wheel
+
+```powershell
+python -m voicetotext --doctor
+```
+
+The `[ctranslate2]` section must report at least one GPU device on a GPU
+machine:
+
+```
+[ctranslate2]
+  version: 4.8.2
+  gpu devices: 1
+  gpu compute types: bfloat16, float16, float32, int8, ...
+```
+
+`gpu devices: 0` on a machine where the `[torch]` section lists a GPU
+means the wrong wheel is installed. Uninstall and repeat.
+
+### Disk cost
+
+The first time a CrisperWhisper model is downloaded, the app builds a
+CTranslate2 copy of it next to the weights (about 9 s of CPU work, once).
+That copy is a second full set of weights: roughly 1.6 GB for
+`crisperwhisper-2.0-turbo` and 3.1 GB for `crisperwhisper-2.0-large`, on
+top of the download. Deleting the model in Settings deletes both. If you
+already downloaded a CrisperWhisper model before installing CTranslate2,
+the copy is built on the next engine load instead, which makes that one
+launch about 9 s slower.
+
 ## Notes per platform
 
 ### Windows AMD (RDNA3 / RDNA4)
@@ -90,6 +167,13 @@ Output lists Python / PyTorch versions, which engine backends are installed, CUD
 ### "Cannot install torch>=X because these package versions have conflicting dependencies"
 
 You have a custom torch already (different ROCm / CUDA / nightly version) and you're using the wrong file. Switch to `requirements-all.txt` so pip leaves torch alone.
+
+### The app dies with no traceback, or `OMP: Error #15`
+
+A CTranslate2 built for the wrong runtime is installed next to a ROCm
+PyTorch. Run `pip uninstall -y ctranslate2`, then reinstall following the
+CTranslate2 section above. `python -m voicetotext --doctor` tells you
+which build you have.
 
 ### "Could not find a version that satisfies the requirement torch==2.9.1+rocm7.2.1"
 

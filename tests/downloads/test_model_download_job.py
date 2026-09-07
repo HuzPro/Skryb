@@ -111,6 +111,58 @@ class TestModelDownloadJobHappyPath:
         assert job.total_bytes == 400
 
 
+class TestModelDownloadJobPostInstall:
+    def test_should_run_the_post_install_step_on_the_finished_snapshot(
+        self, tmp_path,
+    ):
+        refs_main = tmp_path / "models--org--repo" / "refs" / "main"
+        seen: list[tuple[str, bool]] = []
+        job = ModelDownloadJob(
+            job_id="x",
+            repo_id="org/repo",
+            commit_sha="sha123",
+            files=[ResolvedFile(filename="config.json", size=3, url="u/c")],
+            models_dir=tmp_path,
+            file_downloader=_FakeDownloader(payloads={"config.json": b"{}"}),
+            post_install=lambda snapshot: seen.append(
+                (snapshot.name, refs_main.exists())
+            ),
+        )
+
+        job.run(
+            on_progress=lambda done, total: None,
+            cancel_event=threading.Event(),
+            pause_event=threading.Event(),
+        )
+
+        assert seen == [("sha123", True)]
+
+    def test_should_not_run_the_post_install_step_on_a_failed_download(
+        self, tmp_path,
+    ):
+        downloader = MagicMock()
+        downloader.download.side_effect = RuntimeError("boom")
+        calls: list[object] = []
+        job = ModelDownloadJob(
+            job_id="x",
+            repo_id="r",
+            commit_sha="s",
+            files=[ResolvedFile(filename="a", size=1, url="u/a")],
+            models_dir=tmp_path,
+            file_downloader=downloader,
+            post_install=calls.append,
+        )
+
+        with pytest.raises(ModelDownloadError):
+            job.run(
+                on_progress=lambda d, t: None,
+                cancel_event=threading.Event(),
+                pause_event=threading.Event(),
+            )
+
+        assert calls == []
+
+
 class TestModelDownloadJobErrors:
     def test_should_wrap_file_downloader_errors(self, tmp_path):
         resolved = [ResolvedFile(filename="a", size=1, url="u/a")]

@@ -1,4 +1,5 @@
-from collections.abc import Callable
+import importlib.util
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from voicetotext.core.config import ConfigurationStore
@@ -12,11 +13,13 @@ from voicetotext.transcription.engine_registry import (
 )
 from voicetotext.transcription.engine_selector import rank_engines
 from voicetotext.transcription.engine_types import (
+    ALL_HARDWARE_KINDS,
     CrisperWhisperMode,
     EngineDescriptor,
     EngineId,
     HardwareProfile,
 )
+from voicetotext.transcription.hardware_detector import HardwareDetector
 from voicetotext.transcription.hf_model_manager import repo_has_loadable_snapshot
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
@@ -54,10 +57,20 @@ _CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
 )
 
 
+_CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
+    engine_id="crisperwhisper_ct2",
+    display_name="CrisperWhisper 2.0 (CTranslate2)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=45,
+    requires_torch=False,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
     "crisperwhisper": 1,
+    "crisperwhisper_ct2": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -69,11 +82,13 @@ def build_engine_registry() -> EngineRegistry:
             _NANO_PARAKEET_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
+            _CRISPERWHISPER_CT2_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
             "crisperwhisper": _build_crisperwhisper_engine,
+            "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
         },
     )
 
@@ -114,10 +129,137 @@ def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
     )
 
 
+def _build_crisperwhisper_ct2_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.crisperwhisper_ct2_adapter import (
+        CrisperWhisperCt2Adapter,
+    )
+    from voicetotext.transcription.ct2_conversion import ensure_ct2_model
+    from voicetotext.transcription.hf_model_manager import (
+        loadable_snapshot_dir,
+    )
+
+    return CrisperWhisperCt2Adapter(
+        model_dir=ensure_ct2_model(
+            loadable_snapshot_dir(
+                spec.model_dir, spec.repo_id, spec.revision,
+            ),
+        ),
+        device=spec.device,
+        language=spec.language,
+        mode=spec.crisperwhisper_mode,
+    )
+
+
+def selectable_engine_ids(
+    config: ConfigurationStore,
+    registry: EngineRegistry,
+    models_dir: Path | None = None,
+) -> tuple[EngineId, ...]:
+    """Engine ids this config could end up running, read from config alone.
+
+    An explicit ``transcription.engine`` names exactly one. ``"auto"``
+    narrows to the configured model's ``compatible_engines``. Neither
+    path touches hardware or an engine backend, which is what lets
+    startup decide about torch before importing anything.
+
+    A model name the catalogue no longer knows (a config that predates a
+    migration) widens to every registered engine, so the answer stays on
+    the safe side of "might need torch".
+    """
+    explicit = config.get("transcription.engine", "auto")
+    if isinstance(explicit, str) and explicit != "auto":
+        return (explicit,)  # type: ignore[return-value]
+    try:
+        model_info = get_model_info(
+            str(config.get("transcription.model_size", DEFAULT_MODEL))
+        )
+    except ConfigurationError:
+        return tuple(d.engine_id for d in registry.all_descriptors())
+    if models_dir is None:
+        return model_info.compatible_engines
+    return _auto_selection(model_info, registry, models_dir)
+
+
+def _auto_selection(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+    models_dir: Path,
+) -> tuple[EngineId, ...]:
+    """The single engine ``auto`` will load, when that is knowable here.
+
+    ``resolve_engine_id`` makes the same choice from the same ranking and
+    the same installed set, so the torch question is answered about the
+    engine that actually loads rather than about every candidate - which
+    would report "needs torch" whenever any alternative did.
+
+    Falls back to every candidate when the ranking needs a hardware
+    probe, because probing is the import this is trying to avoid.
+    """
+    ranked = _ranking_that_ignores_hardware(model_info, registry)
+    if not ranked:
+        return model_info.compatible_engines
+    installed = engines_with_model_on_disk(model_info, models_dir)
+    for engine_id in ranked:
+        if engine_id in installed:
+            return (engine_id,)
+    return (ranked[0],)
+
+
+def startup_requires_torch(
+    config: ConfigurationStore,
+    registry: EngineRegistry,
+    models_dir: Path | None = None,
+) -> bool:
+    """Whether this launch will load an engine built on torch."""
+    return registry.requires_torch(
+        selectable_engine_ids(config, registry, models_dir),
+    )
+
+
+UNPROBED_HARDWARE_KIND = "unprobed"
+
+
+def probed_hardware_kind(
+    config: ConfigurationStore,
+    registry: EngineRegistry,
+    hardware_detector: HardwareDetector,
+) -> str:
+    """The hardware kind for diagnostics, or ``unprobed`` if none was taken.
+
+    Probing costs a torch import. A launch that runs a torch-free engine
+    has no reason to pay it, and a diagnostics field is not reason
+    enough - so it records that no probe happened rather than forcing one.
+    """
+    if not startup_requires_torch(config, registry):
+        return UNPROBED_HARDWARE_KIND
+    return hardware_detector.detect().kind
+
+
+def resolve_device(
+    config: ConfigurationStore,
+    registry: EngineRegistry,
+    hardware_detector: HardwareDetector,
+    engine_ids: Iterable[EngineId],
+) -> str:
+    """The device string to hand an engine drawn from *engine_ids*.
+
+    A torch-free engine gets the configured value unchanged - ``"auto"``
+    included - and picks its own device from its own runtime. Asking
+    torch on its behalf would import torch to answer a question about a
+    GPU torch is not going to drive.
+    """
+    configured = config.get("transcription.device", "auto")
+    if isinstance(configured, str) and configured != "auto":
+        return configured
+    if not registry.requires_torch(engine_ids):
+        return "auto"
+    return "cpu" if hardware_detector.detect().kind == "cpu" else "cuda"
+
+
 def resolve_engine_id(
     config: ConfigurationStore,
     model_info: ModelInfo,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     registry: EngineRegistry,
     *,
     installed_engines: frozenset[EngineId] = frozenset(),
@@ -125,20 +267,70 @@ def resolve_engine_id(
     explicit = config.get("transcription.engine", "auto")
     if explicit and explicit != "auto":
         return explicit  # type: ignore[return-value]
-    candidates = rank_engines(model_info, hardware, registry.all_descriptors())
+    ranked = _ranking_that_ignores_hardware(model_info, registry)
+    if not ranked:
+        ranked = _ranking_for_detected_hardware(
+            model_info, registry, hardware_detector,
+        )
+    installed = [
+        engine_id for engine_id in ranked if engine_id in installed_engines
+    ]
+    return installed[0] if installed else ranked[0]
+
+
+# Any profile ranks the same once every candidate runs on every hardware
+# kind, so this one stands in for the probe that is being skipped.
+_UNPROBED_HARDWARE = HardwareProfile(
+    kind="cpu", device_name="unprobed", gfx_arch=None,
+)
+
+
+def _ranking_that_ignores_hardware(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+) -> tuple[EngineId, ...]:
+    """Ranked engine ids when hardware cannot change the order.
+
+    ``rank_engines`` consults hardware only to drop engines that do not
+    support it. When every engine compatible with *model_info* runs on
+    every hardware kind, nothing is ever dropped and the order is the
+    priority order alone - so the GPU never has to be probed. Returns
+    empty when hardware could matter, which sends the caller to the
+    probe.
+    """
+    compatible = [
+        descriptor for descriptor in registry.all_descriptors()
+        if descriptor.engine_id in model_info.compatible_engines
+    ]
+    runs_anywhere = all(
+        ALL_HARDWARE_KINDS <= set(descriptor.supported_hardware)
+        for descriptor in compatible
+    )
+    if not compatible or not runs_anywhere:
+        return ()
+    return tuple(
+        candidate.engine_id
+        for candidate in rank_engines(
+            model_info, _UNPROBED_HARDWARE, registry.all_descriptors(),
+        )
+    )
+
+
+def _ranking_for_detected_hardware(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+    hardware_detector: HardwareDetector,
+) -> tuple[EngineId, ...]:
+    hardware = hardware_detector.detect()
+    candidates = rank_engines(
+        model_info, hardware, registry.all_descriptors(),
+    )
     if not candidates:
         raise ConfigurationError(
             f"No engine compatible with model "
             f"'{model_info.name}' on hardware '{hardware.kind}'"
         )
-    if installed_engines:
-        installed_candidate = next(
-            (c for c in candidates if c.engine_id in installed_engines),
-            None,
-        )
-        if installed_candidate is not None:
-            return installed_candidate.engine_id
-    return candidates[0].engine_id
+    return tuple(candidate.engine_id for candidate in candidates)
 
 
 def engines_with_model_on_disk(
@@ -156,9 +348,21 @@ def engines_with_model_on_disk(
     installed: set[EngineId] = set()
     for engine_id, repo_id in _engine_repo_ids(model_info):
         repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
-        if repo_has_loadable_snapshot(repo_dir, model_info.revision):
-            installed.add(engine_id)
+        if not repo_has_loadable_snapshot(repo_dir, model_info.revision):
+            continue
+        if engine_id == "crisperwhisper_ct2" and not _ctranslate2_installed():
+            continue
+        installed.add(engine_id)
     return frozenset(installed)
+
+
+def _ctranslate2_installed() -> bool:
+    """Whether the CTranslate2 runtime is importable, without importing it.
+
+    Selection runs before startup decides about torch, so this has to
+    answer from the module finder rather than by loading a backend.
+    """
+    return importlib.util.find_spec("ctranslate2") is not None
 
 
 def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
@@ -174,7 +378,7 @@ def create_engine_for_active_model(
     config: ConfigurationStore,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     *,
     license_policy: LicensePolicy,
     device_override: str | None = None,
@@ -186,13 +390,15 @@ def create_engine_for_active_model(
     license_policy.assert_accepted(model_info)
     installed = engines_with_model_on_disk(model_info, paths.models_dir)
     engine_id = resolve_engine_id(
-        config, model_info, hardware, registry,
+        config, model_info, hardware_detector, registry,
         installed_engines=installed,
     )
     spec = EngineSpec(
         model_name=model_name,
         repo_id=model_info.repo_id,
-        device=device_override or _resolve_device(config, hardware),
+        device=device_override or resolve_device(
+            config, registry, hardware_detector, (engine_id,),
+        ),
         language=config.get("transcription.language", "en"),
         beam_size=_resolve_beam_size(config, engine_id),
         model_dir=paths.models_dir,
@@ -215,7 +421,7 @@ def _resolve_crisperwhisper_mode(
     config: ConfigurationStore,
     engine_id: EngineId,
 ) -> CrisperWhisperMode:
-    if engine_id != "crisperwhisper":
+    if engine_id not in ("crisperwhisper", "crisperwhisper_ct2"):
         return "intended"
     from voicetotext.transcription.crisperwhisper_adapter import (
         resolve_crisperwhisper_mode,
@@ -224,15 +430,6 @@ def _resolve_crisperwhisper_mode(
     return resolve_crisperwhisper_mode(
         config.get("transcription.crisperwhisper_mode", "intended")
     )
-
-
-def _resolve_device(
-    config: ConfigurationStore, hardware: HardwareProfile,
-) -> str:
-    configured = config.get("transcription.device", "auto")
-    if configured and configured != "auto":
-        return configured  # type: ignore[return-value]
-    return "cpu" if hardware.kind == "cpu" else "cuda"
 
 
 def create_model_manager(
@@ -316,6 +513,7 @@ def build_composite_model_manager(
             "nano_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
             "crisperwhisper": crisperwhisper_manager,
+            "crisperwhisper_ct2": crisperwhisper_manager,
         },
         active_engine_provider=active_engine_provider,
     )

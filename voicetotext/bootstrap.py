@@ -83,14 +83,17 @@ from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
     create_engine_for_active_model,
     engines_with_model_on_disk,
+    resolve_device,
     resolve_engine_id,
+    selectable_engine_ids,
 )
 from voicetotext.transcription.engine_install import (
     EngineInstaller,
     make_engine_installer,
 )
 from voicetotext.transcription.engine_registry import EngineRegistry
-from voicetotext.transcription.engine_types import EngineId, HardwareProfile
+from voicetotext.transcription.engine_types import EngineId
+from voicetotext.transcription.hardware_detector import HardwareDetector
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
     DEFAULT_MODEL,
@@ -300,7 +303,7 @@ def _load_engine_with_fallback(
     config: JsonConfigAdapter,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
 ) -> TranscriptionEngine:
@@ -313,18 +316,21 @@ def _load_engine_with_fallback(
     only automatic step.
     """
     started_at = time.monotonic()
-    device = _configured_device(config, hardware)
+    device = resolve_device(
+        config, registry, hardware_detector,
+        selectable_engine_ids(config, registry, paths.models_dir),
+    )
     try:
         try:
             engine = _load_engine(
-                config, paths, registry, hardware, license_policy,
+                config, paths, registry, hardware_detector, license_policy,
             )
         except (RuntimeError, OSError) as exc:
             _logger.warning("load_engine: primary device failed: %s", exc)
             _logger.info("load_engine: retrying on CPU")
             device = "cpu"
             engine = _load_engine_on_cpu(
-                config, paths, registry, hardware, license_policy,
+                config, paths, registry, hardware_detector, license_policy,
             )
     except Exception as exc:
         diagnostics.engine_load_failed(
@@ -335,24 +341,15 @@ def _load_engine_with_fallback(
     return engine
 
 
-def _configured_device(
-    config: JsonConfigAdapter, hardware: HardwareProfile,
-) -> str:
-    configured = config.get("transcription.device", "auto")
-    if isinstance(configured, str) and configured != "auto":
-        return configured
-    return "cpu" if hardware.kind == "cpu" else "cuda"
-
-
 def _load_engine(
     config: JsonConfigAdapter,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
 ) -> TranscriptionEngine:
     engine = create_engine_for_active_model(
-        config, paths, registry, hardware, license_policy=license_policy,
+        config, paths, registry, hardware_detector, license_policy=license_policy,
     )
     engine.load_model()
     milestone("model-loaded")
@@ -364,11 +361,11 @@ def _load_engine_on_cpu(
     config: JsonConfigAdapter,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
 ) -> TranscriptionEngine:
     engine = create_engine_for_active_model(
-        config, paths, registry, hardware,
+        config, paths, registry, hardware_detector,
         license_policy=license_policy, device_override="cpu",
     )
     engine.load_model()
@@ -383,7 +380,7 @@ _STREAMING_DEVICE = "cuda"
 def _load_streaming_engine(
     config: JsonConfigAdapter,
     paths: AppPaths,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
 ) -> StreamingTranscriptionEngine:
@@ -452,7 +449,7 @@ def _load_active_engine_installer(
     config: JsonConfigAdapter,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
 ) -> EngineInstaller:
@@ -463,13 +460,13 @@ def _load_active_engine_installer(
     """
     if config.get("transcription.mode", "batch") == "streaming":
         engine = _load_streaming_engine(
-            config, paths, hardware, license_policy, diagnostics,
+            config, paths, hardware_detector, license_policy, diagnostics,
         )
         return make_engine_installer(
             engine, lambda use_case, loaded: use_case.set_streaming_engine(loaded),
         )
     engine = _load_engine_with_fallback(
-        config, paths, registry, hardware, license_policy, diagnostics,
+        config, paths, registry, hardware_detector, license_policy, diagnostics,
     )
     return make_engine_installer(
         engine, lambda use_case, loaded: use_case.set_engine(loaded),
@@ -480,7 +477,7 @@ def _load_engine_and_attach(
     config: JsonConfigAdapter,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
     *,
@@ -499,7 +496,7 @@ def _load_engine_and_attach(
     milestone("engine-load-started")
     try:
         installer = _load_active_engine_installer(
-            config, paths, registry, hardware, license_policy, diagnostics,
+            config, paths, registry, hardware_detector, license_policy, diagnostics,
         )
         installer(use_case)
     except Exception as exc:
@@ -548,7 +545,7 @@ def _spawn_engine_load_thread(
     config: JsonConfigAdapter,
     paths: AppPaths,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
     *,
@@ -559,7 +556,7 @@ def _spawn_engine_load_thread(
     thread = threading.Thread(
         target=_load_engine_and_attach,
         args=(
-            config, paths, registry, hardware, license_policy, diagnostics,
+            config, paths, registry, hardware_detector, license_policy, diagnostics,
         ),
         kwargs={
             "use_case": use_case,
@@ -607,7 +604,7 @@ def _run_warmup(engine: TranscriptionEngine) -> None:
 
 def _make_active_engine_provider(
     config: JsonConfigAdapter,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     registry: EngineRegistry,
     models_dir: Path,
 ) -> Callable[[], EngineId]:
@@ -628,7 +625,7 @@ def _make_active_engine_provider(
         )
         model_info = get_model_info(model_name)
         return resolve_engine_id(
-            config, model_info, hardware, registry,
+            config, model_info, hardware_detector, registry,
             installed_engines=engines_with_model_on_disk(
                 model_info, models_dir,
             ),
@@ -648,7 +645,7 @@ def _build_settings_service(
     action_dispatcher: ActionDispatcher,
     state_machine: AppStateMachine,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
 ) -> SettingsService:
@@ -658,7 +655,7 @@ def _build_settings_service(
         use_case=use_case,
         event_bus=event_bus,
         loader=lambda: _load_active_engine_installer(
-            config, paths, registry, hardware, license_policy, diagnostics,
+            config, paths, registry, hardware_detector, license_policy, diagnostics,
         ),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,
@@ -674,7 +671,7 @@ def _build_settings_service(
         dictionary_path=paths.dictionary_path,
         license_policy=license_policy,
         registry=registry,
-        hardware=hardware,
+        hardware_detector=hardware_detector,
     )
     # Populate the cache on a background thread so the first settings
     # open doesn't pay the filesystem-scan cost.
@@ -691,7 +688,7 @@ def build_first_run_settings_service(
     event_bus: SimpleEventBus,
     model_manager: ModelManager,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     dictionary_path: Path,
     license_policy: LicensePolicy,
 ) -> SettingsService:
@@ -716,7 +713,7 @@ def build_first_run_settings_service(
         dictionary_path=dictionary_path,
         license_policy=license_policy,
         registry=registry,
-        hardware=hardware,
+        hardware_detector=hardware_detector,
     )
 
 
@@ -728,7 +725,7 @@ def build_app(
     download_manager: DownloadManager | None = None,
     *,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
 ) -> SystemTrayApp:
     from voicetotext.transcription.model_info import (
@@ -754,17 +751,13 @@ def build_app(
     EngineReadyBeeper(event_bus, cue_player)
 
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
-    diagnostics = SessionDiagnostics(paths, config, hardware)
+    diagnostics = SessionDiagnostics(paths, config, registry, hardware_detector)
     atexit.register(diagnostics.dispose)
     edit_capture = _build_edit_capture(config, paths)
     if edit_capture is not None:
         edit_capture.start()
         atexit.register(edit_capture.stop)
 
-    _logger.info(
-        "Detected hardware: %s (%s, gfx=%s)",
-        hardware.kind, hardware.device_name, hardware.gfx_arch,
-    )
     recorder = SoundDeviceAdapter(
         sample_rate=config.get("audio.sample_rate", 16000),
     )
@@ -823,7 +816,7 @@ def build_app(
     )
 
     active_engine_provider = _make_active_engine_provider(
-        config, hardware, registry, paths.models_dir,
+        config, hardware_detector, registry, paths.models_dir,
     )
     model_manager = build_composite_model_manager(
         paths.models_dir, download_manager, active_engine_provider,
@@ -839,7 +832,7 @@ def build_app(
         action_dispatcher=action_dispatcher,
         state_machine=state_machine,
         registry=registry,
-        hardware=hardware,
+        hardware_detector=hardware_detector,
         license_policy=license_policy,
         diagnostics=diagnostics,
     )
@@ -895,7 +888,7 @@ def build_app(
     )
 
     _spawn_engine_load_thread(
-        config, paths, registry, hardware, license_policy, diagnostics,
+        config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,

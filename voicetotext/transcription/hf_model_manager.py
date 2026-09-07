@@ -3,10 +3,12 @@ import shutil
 from pathlib import Path
 from typing import cast
 
+from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
 from voicetotext.downloads.download_manager import DownloadHandle, DownloadManager
 from voicetotext.downloads.hf_repo_resolver import HfRepoResolver
 from voicetotext.downloads.model_download_job import ModelDownloadJob
+from voicetotext.transcription.ct2_conversion import prebuild_ct2_model
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
@@ -51,6 +53,23 @@ def repo_has_loadable_snapshot(repo_dir: Path, revision: str = "") -> bool:
         snapshot.is_dir()
         and HuggingFaceModelManager._snapshot_has_complete_model(snapshot)
     )
+
+
+def loadable_snapshot_dir(
+    models_dir: Path, repo_id: str, revision: str = "",
+) -> Path:
+    """The snapshot directory a ``local_files_only`` load would open.
+
+    Resolves through ``refs/main`` for the same reason
+    :func:`repo_has_loadable_snapshot` does: the snapshot directory
+    exists from the first byte written, so naming it directly would hand
+    back a half-downloaded model.
+    """
+    repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
+    commit_sha = _resolved_main_revision(repo_dir)
+    if commit_sha is None or (revision and commit_sha != revision):
+        raise ConfigurationError(f"{repo_id} is not installed")
+    return repo_dir / "snapshots" / commit_sha
 
 
 def _resolved_main_revision(repo_dir: Path) -> str | None:
@@ -179,6 +198,7 @@ class HuggingFaceModelManager(ModelManager):
             files=resolved.files,
             models_dir=self._models_dir,
             file_downloader=self._file_downloader,
+            post_install=prebuild_ct2_model,
         )
         return self._download_manager.enqueue(job)
 

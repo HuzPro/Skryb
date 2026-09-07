@@ -6,11 +6,13 @@ import os
 import sys
 import traceback
 from concurrent.futures import Future
+from dataclasses import dataclass
 from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import tkinter
+    from collections.abc import Callable
     from pathlib import Path
 
     from voicetotext.core.config import ConfigurationStore
@@ -18,7 +20,7 @@ if TYPE_CHECKING:
     from voicetotext.core.json_config_adapter import JsonConfigAdapter
     from voicetotext.core.paths import AppPaths
     from voicetotext.transcription.engine_registry import EngineRegistry
-    from voicetotext.transcription.engine_types import HardwareProfile
+    from voicetotext.transcription.hardware_detector import HardwareDetector
     from voicetotext.transcription.license_policy import LicensePolicy
     from voicetotext.transcription.model_manager import ModelManager
 
@@ -105,10 +107,8 @@ def main() -> None:
             paths.diagnostics_dir, console=_stderr_is_console(),
         )
         paths.activate_session(session_dir)
-        from voicetotext.core.torch_prewarm import start_torch_prewarm
-
-        prewarm = start_torch_prewarm()
-        _run(paths, prewarm)
+        startup = _prepare_startup(paths)
+        _run(paths, startup)
     except Exception:
         logging.getLogger(__name__).exception("Startup failed")
         _show_error(traceback.format_exc())
@@ -160,22 +160,32 @@ def _consume_torch_prewarm(prewarm: Future[ModuleType]) -> None:
     )
 
 
-def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
-    import tkinter
+@dataclass(frozen=True)
+class _Startup:
+    """What ``main`` settles before the GUI thread has anything to build."""
 
-    from voicetotext.core.event_bus import SimpleEventBus
+    config: JsonConfigAdapter
+    model_was_configured: bool
+    registry: EngineRegistry
+    await_torch_prewarm: Callable[[], None]
+
+
+def _prepare_startup(paths: AppPaths) -> _Startup:
+    """Load the config and decide about torch before the GUI work starts.
+
+    The prewarm wants to start as early as possible so the import
+    overlaps everything after it, but only the config can say whether
+    this launch needs torch at all. So the config and the engine
+    registry come first: together they cost about 0.2s and both are
+    needed moments later regardless.
+    """
     from voicetotext.core.json_config_adapter import JsonConfigAdapter
     from voicetotext.core.startup_log import milestone
-    from voicetotext.downloads.download_manager import DownloadManager
-    from voicetotext.transcription.engine_factory import (
-        build_engine_registry,
-        create_model_manager,
+    from voicetotext.transcription.engine_factory import build_engine_registry
+    from voicetotext.transcription.model_info import (
+        migrate_engine_field,
+        migrate_removed_models,
     )
-    from voicetotext.transcription.license_policy import LicensePolicy
-
-    root = tkinter.Tk()
-    root.withdraw()
-    milestone("Tk-created")
 
     config = JsonConfigAdapter(paths.config_path)
     model_was_configured = config.has_persisted_value(
@@ -183,44 +193,96 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
     )
     config.load()
     milestone("config-loaded")
+    migrate_removed_models(config)
+    migrate_engine_field(config)
+    registry = build_engine_registry()
+    return _Startup(
+        config=config,
+        model_was_configured=model_was_configured,
+        registry=registry,
+        await_torch_prewarm=_start_torch_prewarm_if_needed(
+            config, registry, paths.models_dir,
+        ),
+    )
+
+
+def _start_torch_prewarm_if_needed(
+    config: ConfigurationStore,
+    registry: EngineRegistry,
+    models_dir: Path,
+) -> Callable[[], None]:
+    """Warm torch on a background thread, unless nothing will use it.
+
+    Returns the call that waits for that import to finish. A launch
+    whose engine does not use torch waits for nothing and never loads
+    torch at all - that is the whole saving. The engine descriptor
+    declares the dependency, because importing the engine to ask it
+    would cost the very second this is protecting.
+    """
+    from voicetotext.transcription.engine_factory import startup_requires_torch
+
+    if not startup_requires_torch(config, registry, models_dir):
+        logging.getLogger(__name__).info(
+            "Torch prewarm skipped: no engine this launch can select needs it",
+        )
+        return _nothing_to_await
+
+    from voicetotext.core.torch_prewarm import start_torch_prewarm
+
+    prewarm = start_torch_prewarm()
+    return lambda: _consume_torch_prewarm(prewarm)
+
+
+def _nothing_to_await() -> None:
+    return None
+
+
+def _run(paths: AppPaths, startup: _Startup) -> None:
+    import tkinter
+
+    from voicetotext.core.event_bus import SimpleEventBus
+    from voicetotext.core.startup_log import milestone
+    from voicetotext.downloads.download_manager import DownloadManager
+    from voicetotext.transcription.engine_factory import create_model_manager
+    from voicetotext.transcription.license_policy import LicensePolicy
+
+    root = tkinter.Tk()
+    root.withdraw()
+    milestone("Tk-created")
+
+    config = startup.config
+    registry = startup.registry
 
     # The one licence policy for the whole process. First-run setup and
     # ``build_app`` each build their own model manager, so a second
     # instance here would give them separate acceptance state.
     license_policy = LicensePolicy(config)
 
-    from voicetotext.transcription.model_info import (
-        migrate_engine_field,
-        migrate_removed_models,
-    )
-
-    migrate_removed_models(config)
-    migrate_engine_field(config)
-
     event_bus = SimpleEventBus()
     download_manager = DownloadManager(event_bus=event_bus)
     model_manager = create_model_manager(
         paths.models_dir, download_manager, license_policy,
     )
-    registry = build_engine_registry()
 
-    _consume_torch_prewarm(prewarm)
+    startup.await_torch_prewarm()
     from voicetotext.transcription.torch_hardware_detector import (
         TorchHardwareDetector,
     )
 
-    hardware = TorchHardwareDetector().detect()
+    # Held, not called: the GPU probe imports torch, so only the code
+    # that actually needs an answer gets to pay for one.
+    hardware_detector = TorchHardwareDetector()
     from voicetotext.transcription.model_info import DEFAULT_MODEL
 
-    if not model_was_configured:
+    if not startup.model_was_configured:
         config.set("transcription.model_size", DEFAULT_MODEL)
 
     if paths.is_first_run() or not _configured_model_installed(
         config, model_manager,
     ):
         _run_first_time_setup(
-            config, model_manager, event_bus, root, registry, hardware,
-            paths.dictionary_path, license_policy,
+            config, model_manager, event_bus, root, registry,
+            hardware_detector, paths.dictionary_path, license_policy,
         )
 
     if not _configured_model_installed(config, model_manager):
@@ -236,7 +298,7 @@ def _run(paths: AppPaths, prewarm: Future[ModuleType]) -> None:
         event_bus=event_bus,
         download_manager=download_manager,
         registry=registry,
-        hardware=hardware,
+        hardware_detector=hardware_detector,
         license_policy=license_policy,
     )
     app.run()
@@ -261,7 +323,7 @@ def _run_first_time_setup(
     event_bus: SimpleEventBus,
     root: tkinter.Misc,
     registry: EngineRegistry,
-    hardware: HardwareProfile,
+    hardware_detector: HardwareDetector,
     dictionary_path: Path,
     license_policy: LicensePolicy,
 ) -> None:
@@ -275,7 +337,7 @@ def _run_first_time_setup(
         event_bus=event_bus,
         model_manager=model_manager,
         registry=registry,
-        hardware=hardware,
+        hardware_detector=hardware_detector,
         dictionary_path=dictionary_path,
         license_policy=license_policy,
     )
