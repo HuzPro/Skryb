@@ -8,10 +8,10 @@ from voicetotext.hotkeys import win32_keyboard_hook as wkh
 from voicetotext.hotkeys.win32_keyboard_hook import Win32KeyboardHook
 
 
-def _lparam(vk: int):
+def _lparam(vk: int, flags: int = 0, extra: int = 0):
     # Returned struct must stay referenced by the caller so its address
     # remains valid for the duration of the call under test.
-    info = wkh._KBDLLHOOKSTRUCT(vkCode=vk)
+    info = wkh._KBDLLHOOKSTRUCT(vkCode=vk, flags=flags, dwExtraInfo=extra)
     return info, ctypes.addressof(info)
 
 
@@ -52,6 +52,53 @@ class TestWin32KeyboardHookDispatch:
         hook._dispatch(wkh._WM_SYSKEYUP, lparam)
 
         handler.assert_called_once_with(False, 0xA4)
+
+
+class TestWin32KeyboardHookObserver:
+    def test_should_report_key_down_with_flags_and_extra_info(self):
+        observer = MagicMock()
+        hook = Win32KeyboardHook(MagicMock(return_value=False), observer)
+        info, lparam = _lparam(0x4D, flags=0x10, extra=0x56325458)
+
+        hook._dispatch(wkh._WM_KEYDOWN, lparam)
+
+        observer.assert_called_once_with(True, 0x4D, 0x10, 0x56325458)
+
+    def test_should_report_key_up_with_flags_and_extra_info(self):
+        observer = MagicMock()
+        hook = Win32KeyboardHook(MagicMock(return_value=False), observer)
+        info, lparam = _lparam(0x4D, flags=0x90, extra=7)
+
+        hook._dispatch(wkh._WM_KEYUP, lparam)
+
+        observer.assert_called_once_with(False, 0x4D, 0x90, 7)
+
+    def test_should_observe_after_the_handler_has_decided(self):
+        calls = []
+        handler = MagicMock(side_effect=lambda *_: calls.append("handler") or False)
+        observer = MagicMock(side_effect=lambda *_: calls.append("observer"))
+        hook = Win32KeyboardHook(handler, observer)
+        info, lparam = _lparam(0x4D)
+
+        hook._dispatch(wkh._WM_KEYDOWN, lparam)
+
+        assert calls == ["handler", "observer"]
+
+    def test_should_keep_suppression_when_the_observer_raises(self):
+        observer = MagicMock(side_effect=RuntimeError("observer is broken"))
+        hook = Win32KeyboardHook(MagicMock(return_value=True), observer)
+        info, lparam = _lparam(0x4D)
+
+        assert hook._dispatch(wkh._WM_KEYDOWN, lparam) is True
+
+    def test_should_not_observe_keys_when_no_observer_was_given(self):
+        handler = MagicMock(return_value=False)
+        hook = Win32KeyboardHook(handler)
+        info, lparam = _lparam(0x4D)
+
+        hook._dispatch(wkh._WM_KEYDOWN, lparam)
+
+        handler.assert_called_once_with(True, 0x4D)
 
 
 class TestWin32KeyboardHookProc:
