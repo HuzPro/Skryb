@@ -229,6 +229,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._hotkeys_page.set_combination(draft.hotkey_combination)
         self._hotkeys_page.set_mode(draft.hotkey_mode)
         self._output_page.set_mode(draft.output_mode)
+        self._output_page.set_capture_content(draft.capture_content)
 
     def _on_choose_logs_folder(self) -> None:
         selected = filedialog.askdirectory(
@@ -321,6 +322,7 @@ class TkSettingsWindow(tkinter.Toplevel):
             hotkey_combination=self._hotkeys_page.current_combination(),
             hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
+            capture_content=self._output_page.captures_content(),
             transcription_mode=self._transcription_page.current_mode(),
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()

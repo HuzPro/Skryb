@@ -19,6 +19,7 @@ class TkOutputPage(ttk.Frame):
             master=self, value=OutputMode.DIRECT_PASTE.value,
         )
         self._buttons: dict[OutputMode, ttk.Radiobutton] = {}
+        self._capture_content = tkinter.BooleanVar(master=self, value=False)
         self._build()
         self.set_mode(OutputMode.DIRECT_PASTE)
 
@@ -34,6 +35,29 @@ class TkOutputPage(ttk.Frame):
             )
             button.pack(anchor="w", pady=2)
             self._buttons[mode] = button
+
+        ttk.Label(self, text="Privacy", style=HEADING_STYLE).pack(
+            anchor="w", pady=(24, 8),
+        )
+        ttk.Checkbutton(
+            self, text="Save recordings and transcripts for diagnostics",
+            variable=self._capture_content,
+        ).pack(anchor="w")
+        ttk.Label(
+            self,
+            text=(
+                "Off by default. Saves speech and text in the logs folder.\n"
+                "Applies when you save. Existing recordings are kept.\n"
+                "Use a local folder that is not synced or shared."
+            ),
+            wraplength=560,
+        ).pack(anchor="w", pady=(4, 0))
+
+    def captures_content(self) -> bool:
+        return self._capture_content.get()
+
+    def set_capture_content(self, enabled: bool) -> None:
+        self._capture_content.set(enabled)
 
     def current_mode(self) -> OutputMode:
         return OutputMode(self._var.get())

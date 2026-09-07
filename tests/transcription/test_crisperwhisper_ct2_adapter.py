@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +13,15 @@ from voicetotext.transcription.crisperwhisper_ct2_adapter import (
 
 
 _MODEL_DIR = Path("/models/ct2")
+
+
+@pytest.fixture(autouse=True)
+def fake_storage_view() -> Iterator[None]:
+    with patch(
+        "voicetotext.transcription.crisperwhisper_ct2_adapter._storage_view",
+        side_effect=lambda features: features,
+    ):
+        yield
 
 
 def _audio(seconds: float = 1.0) -> AudioSegment:

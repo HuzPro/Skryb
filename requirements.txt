@@ -16,3 +16,5 @@ transformers>=5.16.0,<6
 # Whisper prompt building and decoding go straight to the Rust tokenizer.
 tokenizers>=0.23.1
 torchaudio>=2.5
+text2num>=3.1
+jellyfish>=1.0

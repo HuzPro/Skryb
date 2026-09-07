@@ -36,26 +36,10 @@ def _extract_member(nemo_path: Path, suffix: str, dest_dir: Path) -> Path:
     return dest
 
 
-def _torch_load(ckpt_path: Path, map_location: str, weights_only: bool) -> object:
-    return torch.load(
-        str(ckpt_path), map_location=map_location, weights_only=weights_only,
-    )
-
-
 def _load_checkpoint(ckpt_path: Path, map_location: str) -> object:
-    """Load the ckpt, trying ``weights_only=True`` then falling back to False.
-
-    No mmap: on Windows, reading data from an mmap-backed torch.load tensor
-    segfaults. ``map_location`` streams each storage straight to the target
-    device as it deserializes, so the CPU never holds the whole ~2.4GB blob at
-    once (the box has little free RAM); GPU has ample VRAM.
-    """
-    for weights_only in (True, False):
-        try:
-            return _torch_load(ckpt_path, map_location, weights_only)
-        except Exception:  # noqa: BLE001 - try the next load strategy
-            continue
-    raise RuntimeError(f"could not torch.load {ckpt_path}")
+    return torch.load(
+        str(ckpt_path), map_location=map_location, weights_only=True,
+    )
 
 
 def _raw_state_dict(ckpt_path: Path, map_location: str) -> dict:

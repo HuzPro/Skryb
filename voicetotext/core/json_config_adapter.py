@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     },
     "diagnostics": {
         "enabled": True,
+        "capture_content": False,
         "retain_sessions": 50,
         "directory": "",
     },

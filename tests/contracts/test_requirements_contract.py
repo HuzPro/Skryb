@@ -106,3 +106,9 @@ def test_editable_install_declares_console_free_gui_launcher() -> None:
     assert pyproject["project"]["gui-scripts"]["voicetotext-gui"] == (
         "voicetotext.__main__:main"
     )
+
+
+def test_requirements_include_every_non_torch_runtime_dependency() -> None:
+    required = _packages_in_pyproject_dependencies() - {"torch"}
+
+    assert required <= _packages_in_requirements_file("requirements.txt")

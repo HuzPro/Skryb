@@ -256,6 +256,10 @@ class SettingsService:
                 self._config.get("transcription.mode")
             ),
             crisperwhisper_mode=self._crisperwhisper_mode(),
+            capture_content=(
+                self._config.get("diagnostics.enabled", True) is True
+                and self._config.get("diagnostics.capture_content", False) is True
+            ),
         )
 
     def _crisperwhisper_mode(self) -> str:
@@ -270,6 +274,9 @@ class SettingsService:
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
         original = self.current_draft()
+        self._config.set("diagnostics.capture_content", draft.capture_content)
+        if draft.capture_content:
+            self._config.set("diagnostics.enabled", True)
         self._config.set("transcription.model_size", draft.model_size)
         self._config.set("transcription.language", draft.language)
         self._config.set("transcription.device", draft.device)

@@ -23,6 +23,7 @@ class SettingsDraft:
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
     crisperwhisper_mode: str = "intended"
+    capture_content: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class ChangeSet:
     hotkey_changed: bool
     output_changed: bool
     mode_changed: bool = False
+    diagnostics_changed: bool = False
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
@@ -77,6 +79,7 @@ class ChangeSet:
             hotkey_changed=hotkey_changed,
             output_changed=output_changed,
             mode_changed=mode_changed,
+            diagnostics_changed=original.capture_content != updated.capture_content,
         )
 
     @property
@@ -86,4 +89,5 @@ class ChangeSet:
             or self.hotkey_changed
             or self.output_changed
             or self.mode_changed
+            or self.diagnostics_changed
         )

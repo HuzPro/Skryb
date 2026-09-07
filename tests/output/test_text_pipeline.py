@@ -310,7 +310,9 @@ class TestPhoneticRules:
         result = _batch("open get hub now", rules)
 
         assert result == "open GitHub now"
-        assert "phonetic: 'get hub' -> 'GitHub'" in app_caplog.messages
+        assert "phonetic replacement applied" in app_caplog.messages
+        assert "get hub" not in app_caplog.text
+        assert "GitHub" not in app_caplog.text
 
     def test_should_use_alias_and_replacement_metaphone_keys(self) -> None:
         rules = (LiteralRule(("repository",), "GitHub", phonetic=True),)
