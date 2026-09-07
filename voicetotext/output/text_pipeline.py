@@ -53,6 +53,8 @@ class _Replacement:
     end: int
     value: str
     priority: int
+    glue_left: bool = False
+    glue_right: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,7 +172,7 @@ class TextPipeline:
             for rule in config.rules
             if (safe_rule := _streaming_rule(rule)) is not None
         )
-        stages.append(_RuleStage(safe_rules).apply)
+        stages.append(_RuleStage(safe_rules).apply_streaming)
         return cls(tuple(stages))
 
     def process(self, text: str) -> str:
@@ -245,6 +247,7 @@ def format_numbers(text: str) -> str:
 
 class _RuleStage:
     def __init__(self, rules: tuple[DictionaryRule, ...]) -> None:
+        self._glue_next = False
         self._finders = tuple(
             finder
             for index, rule in enumerate(rules)
@@ -256,6 +259,15 @@ class _RuleStage:
             if (phonetic_rule := _make_phonetic_rule(rule, index)) is not None
         )
 
+    def apply_streaming(self, text: str) -> str:
+        if not text:
+            return ""
+        if self._glue_next:
+            text = text.lstrip(" \t")
+            if not text:
+                return ""
+        return self.apply(text)
+
     def apply(self, text: str) -> str:
         replacements = [
             replacement
@@ -264,6 +276,11 @@ class _RuleStage:
         ]
         replacements.extend(_phonetic_replacements(text, self._phonetic_rules))
         selected = _select_replacements(replacements)
+        self._glue_next = bool(
+            selected
+            and selected[-1].glue_right
+            and not text[selected[-1].end:].strip(" \t")
+        )
         for replacement in selected:
             if replacement.priority >= _PHONETIC_PRIORITY_BASE:
                 _logger.info(
@@ -408,9 +425,12 @@ def _literal_finder(
                 match.end(),
                 rule.replacement,
                 rule_index,
+                glue_left=alias[:1].isspace(),
+                glue_right=alias[-1:].isspace(),
             )
-            for pattern in patterns
+            for alias, pattern in zip(rule.spoken, patterns)
             for match in pattern.finditer(text)
+            if match.start() != match.end()
         ]
 
     return find
@@ -549,9 +569,13 @@ def _render_replacements(text: str, replacements: list[_Replacement]) -> str:
     parts: list[str] = []
     cursor = 0
     for replacement in replacements:
-        parts.append(text[cursor:replacement.start])
+        gap = text[cursor:replacement.start]
+        parts.append(gap.rstrip(" \t") if replacement.glue_left else gap)
         parts.append(replacement.value)
         cursor = replacement.end
+        if replacement.glue_right:
+            while cursor < len(text) and text[cursor] in " \t":
+                cursor += 1
     parts.append(text[cursor:])
     return "".join(parts)
 
@@ -563,11 +587,11 @@ def _replacements_overlap(left: _Replacement, right: _Replacement) -> bool:
 def _literal_pattern(alias: str, whole_words: bool) -> str:
     parts = [
         r"\s+" if token.kind is TokenKind.WHITESPACE else re.escape(token.text)
-        for token in tokenize(alias)
+        for token in tokenize(alias.strip())
     ]
     pattern = "".join(parts)
     if whole_words:
-        return r"(?<!\w)(?:" + pattern + r")(?!\w)"
+        pattern = r"(?<!\w)(?:" + pattern + r")(?!\w)"
     return pattern
 
 
@@ -582,7 +606,9 @@ def _token_kind(text: str) -> TokenKind:
 def _streaming_rule(rule: DictionaryRule) -> DictionaryRule | None:
     if isinstance(rule, RegexRule):
         return rule
-    safe_aliases = tuple(alias for alias in rule.spoken if len(alias.split()) == 1)
+    safe_aliases = tuple(
+        alias for alias in rule.spoken if len(alias.split()) == 1
+    )
     if not safe_aliases:
         return None
     return LiteralRule(

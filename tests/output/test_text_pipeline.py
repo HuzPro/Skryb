@@ -240,6 +240,43 @@ class TestRuleStage:
 
         assert _batch("concatenate cat", rules) == "condogenate dog"
 
+    def test_should_glue_aliases_with_edge_spaces_to_their_neighbours(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("hello underscore world", rules) == "hello_world"
+        assert _batch("underscore world", rules) == "_world"
+        assert _batch("hello underscore", rules) == "hello_"
+
+    def test_should_glue_only_across_horizontal_whitespace(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("foo\n\nunderscore bar", rules) == "foo\n\n_bar"
+
+    def test_should_glue_only_the_side_the_alias_marks(self) -> None:
+        assert (
+            _batch("hello underscore world", (LiteralRule(("underscore ",), "_"),))
+            == "hello _world"
+        )
+        assert (
+            _batch("hello underscore world", (LiteralRule((" underscore",), "_"),))
+            == "hello_ world"
+        )
+
+    def test_should_glue_across_tabs(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("hello \t underscore \t world", rules) == "hello_world"
+
+    def test_should_keep_whole_word_matching_for_glued_aliases(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_"),)
+
+        assert _batch("hello underscored world", rules) == "hello underscored world"
+
+    def test_should_glue_mid_word_when_whole_words_is_off(self) -> None:
+        rules = (LiteralRule((" underscore ",), "_", whole_words=False),)
+
+        assert _batch("hello underscored world", rules) == "hello_d world"
+
     def test_should_apply_regex_capture_replacements(self) -> None:
         rules = (RegexRule(r"(\d{2})-(\d{2})", r"\2/\1"),)
 
@@ -349,6 +386,40 @@ class TestNumbers:
 
 
 class TestStreamingPipeline:
+    def test_should_keep_right_glue_between_writer_updates(self) -> None:
+        from tests.fakes import FakeTextOutputHandler
+        from voicetotext.output.text_filter_decorator import TextFilterDecorator
+        from voicetotext.transcription.streaming.streaming_output_writer import (
+            StreamingOutputWriter,
+        )
+
+        config = DictionaryConfig(rules=(LiteralRule((" underscore ",), "_"),))
+        output = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(TextFilterDecorator(
+            output, TextPipeline.for_streaming(config),
+        ))
+
+        for text in ("foo", "foo underscore", "foo underscore bar"):
+            writer.emit(text)
+
+        assert "".join(output.outputs) == "foo_bar"
+        writer.emit("foo underscore bar underscore")
+        writer.reset()
+        writer.emit("new")
+        writer.emit("new dictation")
+        assert "".join(output.outputs) == "foo_bar_new dictation"
+
+    @pytest.mark.parametrize("spoken", ["underscore underscore", "underscore dash"])
+    def test_should_replace_adjacent_glued_aliases(self, spoken: str) -> None:
+        config = DictionaryConfig(rules=(
+            LiteralRule((" underscore ",), "_"),
+            LiteralRule((" dash ",), "-"),
+        ))
+
+        expected = "__" if spoken.endswith("underscore") else "_-"
+        for mode in (PipelineMode.BATCH, PipelineMode.STREAMING):
+            assert build_pipeline(config, mode).process(spoken) == expected
+
     def test_should_keep_fillers_single_token_literals_and_regex(self) -> None:
         config = DictionaryConfig(
             options=DictionaryOptions(remove_fillers=True, spoken_commands=True),
@@ -363,6 +434,15 @@ class TestStreamingPipeline:
         )
 
         assert result == "Git hub #42 comma"
+
+    def test_should_keep_alias_glue_in_streaming(self) -> None:
+        config = DictionaryConfig(rules=(LiteralRule((" underscore ",), "_"),))
+
+        result = build_pipeline(config, PipelineMode.STREAMING).process(
+            " underscore"
+        )
+
+        assert result == "_"
 
     def test_should_keep_phrase_rules_and_commands_in_batch(self) -> None:
         config = DictionaryConfig(

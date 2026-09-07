@@ -153,6 +153,24 @@ class TestLoadDictionary:
             ),
         )
 
+    def test_should_keep_glue_spaces_on_v2_aliases(self, tmp_path: Path) -> None:
+        path = tmp_path / "dictionary.json"
+        path.write_text(json.dumps({
+            "version": 2,
+            "options": {},
+            "rules": [{
+                "type": "literal",
+                "spoken": [" underscore "],
+                "replacement": "_",
+                "case_sensitive": False,
+                "whole_words": True,
+                "phonetic": False,
+                "enabled": True,
+            }],
+        }), encoding="utf-8")
+
+        assert load_dictionary(path).rules == (LiteralRule((" underscore ",), "_"),)
+
     def test_should_skip_invalid_v2_rules(self, tmp_path: Path) -> None:
         path = tmp_path / "dictionary.json"
         path.write_text(json.dumps({
