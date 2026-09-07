@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 EngineId = Literal[
     "crisperwhisper", "nano_parakeet", "nemotron_streaming",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
+ALL_HARDWARE_KINDS: frozenset[HardwareKind] = frozenset(get_args(HardwareKind))
 CrisperWhisperMode = Literal["intended", "verbatim"]
 
 
@@ -25,6 +26,10 @@ class EngineDescriptor:
     # True for engines that ONLY do live streaming (no batch transcription),
     # so the batch model picker can hide their models.
     streaming_only: bool = False
+    # Declared, never probed: startup reads this to decide whether to import
+    # torch at all, and importing torch to find out would defeat the point.
+    # Defaults to True so an engine that skips the import must say so.
+    requires_torch: bool = True
 
 
 @dataclass(frozen=True)

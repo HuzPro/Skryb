@@ -1,8 +1,11 @@
+import logging
 from collections.abc import Callable
 
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.hardware_detector import HardwareDetector
 
+
+_logger = logging.getLogger(__name__)
 
 TorchLoader = Callable[[], object | None]
 
@@ -19,11 +22,31 @@ def _import_torch() -> object | None:
 
 
 class TorchHardwareDetector(HardwareDetector):
+    """Probes the GPU through torch, on the first call and only then.
+
+    Importing torch costs over a second, so callers hold the detector and
+    ask it when they need an answer rather than probing at startup. The
+    first probe's result is kept: the app used to pass one profile
+    around, and every consumer still expects the same answer for the
+    life of the process.
+    """
 
     def __init__(self, torch_loader: TorchLoader = _import_torch) -> None:
         self._torch_loader = torch_loader
+        self._detected: HardwareProfile | None = None
 
     def detect(self) -> HardwareProfile:
+        if self._detected is None:
+            self._detected = self._detect_once()
+            _logger.info(
+                "Detected hardware: %s (%s, gfx=%s)",
+                self._detected.kind,
+                self._detected.device_name,
+                self._detected.gfx_arch,
+            )
+        return self._detected
+
+    def _detect_once(self) -> HardwareProfile:
         try:
             return self._probe()
         except Exception:

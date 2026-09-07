@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
+from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.settings.fakes import FakeConfig, FakeModelManager
 from voicetotext.core.config import ConfigurationStore
@@ -97,7 +98,9 @@ def _build_service(
         dictionary_path=dictionary_path or Path("dictionary.json"),
         license_policy=license_policy or AllowAllLicensePolicy(),
         registry=registry,
-        hardware=hardware,
+        hardware_detector=(
+            None if hardware is None else FakeHardwareDetector(hardware)
+        ),
     )
     return service, config, manager, bus, hot_swap
 

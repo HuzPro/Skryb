@@ -11,6 +11,7 @@ from tests.fakes.config import FakeConfig
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
 from tests.fakes.downloads import FakeHttpClient
 from tests.fakes.events import RecordingEventBus
+from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.hotkeys import FakeHotkeyListener
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
@@ -24,6 +25,7 @@ __all__ = [
     "FakeAudioRecorder",
     "FakeClipboardPreserver",
     "FakeConfig",
+    "FakeHardwareDetector",
     "FakeHotkeyListener",
     "FakeHttpClient",
     "FakeModelManager",
