@@ -114,3 +114,27 @@ class TestStreamingOutputWriter:
         writer.emit("the issue")
 
         assert "".join(out.outputs) == "the iss"
+
+    def test_should_keep_its_place_when_the_output_is_swapped(self):
+        # A settings save rebuilds the output chain mid-dictation. Counting
+        # from zero again would re-paste everything already committed.
+        first = FakeTextOutputHandler()
+        second = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(first)
+        writer.emit("hello")
+
+        writer.set_output(second)
+        writer.emit("hello world")
+
+        assert first.outputs == ["hello"]
+        assert second.outputs == [" world"]
+
+    def test_should_start_again_from_nothing_after_a_reset(self):
+        out = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(out)
+        writer.emit("hello")
+
+        writer.reset()
+        writer.emit("hello again")
+
+        assert out.outputs == ["hello", "hello again"]

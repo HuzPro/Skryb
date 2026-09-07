@@ -57,7 +57,7 @@ class LiveStreamingController:
             old.dispose()
 
     def set_output(self, output: TextOutputHandler) -> None:
-        self._writer = StreamingOutputWriter(output)
+        self._writer.set_output(output)
 
     def has_engine(self) -> bool:
         return self._engine is not None
