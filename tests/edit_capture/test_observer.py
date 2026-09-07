@@ -17,6 +17,7 @@ _VK_SHIFT = 0xA0
 _VK_V = 0x56
 _VK_RETURN = 0x0D
 _UNTAGGED = 0
+_LLKHF_INJECTED = 0x10
 
 
 def _fake_character(vk: int, shift: bool, ctrl: bool, alt: bool) -> str:
@@ -61,6 +62,9 @@ class _Capture:
 
     def press(self, vk: int, down: bool = True) -> None:
         self.observer.observe_key(down, vk, 0, _UNTAGGED)
+
+    def press_injected(self, vk: int) -> None:
+        self.observer.observe_key(True, vk, _LLKHF_INJECTED, _UNTAGGED)
 
     def type_text(self, text: str) -> None:
         for char in text:
@@ -110,6 +114,15 @@ class TestWin32EditObserver:
             capture.type_text("a")
 
         assert capture.of_kind("key")[0]["ctrl"] is False
+
+    def test_should_ignore_keystrokes_injected_by_another_program(self):
+        # Password-manager auto-type and macro tools inject keys the user
+        # never typed. Recording them would write a password to the log.
+        with _Capture() as capture:
+            capture.paste("hi")
+            capture.press_injected(ord("A"))
+
+        assert capture.of_kind("key") == []
 
     def test_should_ignore_keys_typed_while_no_dictation_is_open(self):
         with _Capture() as capture:

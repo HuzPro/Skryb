@@ -19,6 +19,9 @@ _OTHER = ForegroundWindow(hwnd=22, pid=200, process="discord.exe", title="Discor
 _TERMINAL = ForegroundWindow(
     hwnd=33, pid=300, process="windowsterminal.exe", title="pwsh",
 )
+_UNREADABLE = ForegroundWindow()
+_VK_TAB = 0x09
+_VK_ESCAPE = 0x1B
 
 
 class _Clock:
@@ -210,3 +213,79 @@ class TestClosingABlock:
         recording.recorder.dispose()
 
         assert recording.events == []
+
+
+class TestPairingADictationWithItsPaste:
+    """A wrong pairing labels real audio with the wrong words, silently."""
+
+    def test_should_not_hand_a_paste_the_dictation_before_it(self):
+        recording = _Recording()
+        recording.recorder.delivered("never pasted", "batch", "direct_paste")
+
+        recording.recorder.delivered("actually pasted", "batch", "direct_paste")
+        recording.recorder.pasted(_CHAT)
+        recording.press(_VK_RETURN)
+
+        spans = recording.of_kind("sent")[0]["spans"]
+        assert [span["pasted_text"] for span in spans] == ["actually pasted"]
+
+    def test_should_refuse_a_window_it_cannot_identify(self):
+        recording = _Recording()
+
+        recording.paste("into an elevated window", window=_UNREADABLE)
+
+        assert recording.of_kind("paste") == []
+        assert recording.of_kind("skipped")[0]["reason"] == "unknown_window"
+        assert recording.recorder.watching_hwnd == 0
+
+    def test_should_not_merge_two_windows_it_cannot_identify(self):
+        recording = _Recording()
+
+        recording.paste("first", window=_UNREADABLE)
+        recording.paste("second", window=_UNREADABLE)
+
+        assert recording.of_kind("sent") == []
+
+
+class TestLosingTheTextBox:
+    def test_should_end_the_dictation_when_focus_tabs_away(self):
+        recording = _Recording()
+        recording.paste("hello")
+
+        recording.press(_VK_TAB)
+
+        sent = recording.of_kind("sent")[0]
+        assert sent["reason"] == "focus_left"
+        assert recording.recorder.watching_hwnd == 0
+
+    def test_should_end_the_dictation_when_escape_is_pressed(self):
+        recording = _Recording()
+        recording.paste("hello")
+
+        recording.press(_VK_ESCAPE)
+
+        assert recording.of_kind("sent")[0]["reason"] == "focus_left"
+
+    def test_should_stop_recording_keys_after_focus_leaves(self):
+        recording = _Recording()
+        recording.paste("hello")
+        recording.press(_VK_TAB)
+
+        recording.type_text("a password maybe")
+
+        assert len(recording.of_kind("key")) == 1
+
+    def test_should_close_the_block_even_when_the_log_write_fails(self):
+        recording = _Recording()
+        recording.paste("hello")
+
+        def explode(_event: dict[str, object]) -> None:
+            raise OSError("disk full")
+
+        recording.recorder._write = explode
+        try:
+            recording.press(_VK_RETURN)
+        except OSError:
+            pass
+
+        assert recording.recorder.watching_hwnd == 0

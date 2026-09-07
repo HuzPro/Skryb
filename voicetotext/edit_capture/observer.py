@@ -23,6 +23,12 @@ _VK_CONTROL = 0xA2, 0xA3, 0x11
 _VK_ALT = 0xA4, 0xA5, 0x12
 _MODIFIER_KEYS = frozenset(_VK_SHIFT + _VK_CONTROL + _VK_ALT)
 
+# ``LLKHF_INJECTED``. Set for our own paste, which the tag identifies, and
+# for every other synthetic key: password-manager auto-type, AutoHotkey,
+# the on-screen keyboard, a remote session. None of those are the user
+# editing a dictation, and auto-type would write a password to the log.
+_INJECTED = 0x10
+
 # How long the worker waits for a key before checking whether the open
 # dictation has gone idle. Nothing depends on the exact value; it only
 # bounds how late an idle block is closed.
@@ -34,6 +40,7 @@ _STOP_TIMEOUT_SECONDS = 2.0
 class _RawKey:
     is_down: bool
     vk: int
+    flags: int
     extra: int
 
 
@@ -84,9 +91,11 @@ class Win32EditObserver:
         thread.join(timeout=_STOP_TIMEOUT_SECONDS)
 
     def observe_key(
-        self, is_key_down: bool, vk: int, _flags: int, extra: int,
+        self, is_key_down: bool, vk: int, flags: int, extra: int,
     ) -> None:
-        self._queue.put(_RawKey(is_down=is_key_down, vk=vk, extra=extra))
+        self._queue.put(
+            _RawKey(is_down=is_key_down, vk=vk, flags=flags, extra=extra),
+        )
 
     def observe_delivery(
         self, text: str, pipeline_mode: str, output_mode: str,
@@ -103,9 +112,14 @@ class Win32EditObserver:
             if isinstance(item, _Stop):
                 self._recorder.dispose()
                 return
+            self._handle_idle()
             self._handle(item)
 
     def _handle_idle(self) -> None:
+        # Checked on every event, not only when the queue goes quiet: the
+        # queue sees every keystroke in the system, so an idle dictation
+        # would otherwise stay open, and armed, until the user stopped
+        # typing everywhere for a full poll interval.
         try:
             self._recorder.expire_idle_block()
         except Exception as exc:  # noqa: BLE001 - capture must never crash
@@ -129,6 +143,8 @@ class Win32EditObserver:
     def _dispatch_key(self, raw: _RawKey) -> None:
         if raw.extra == VOICETOTEXT_INPUT_TAG:
             self._handle_own_input(raw)
+            return
+        if raw.flags & _INJECTED:
             return
         self._track_modifier(raw)
         if not raw.is_down or raw.vk in _MODIFIER_KEYS:
