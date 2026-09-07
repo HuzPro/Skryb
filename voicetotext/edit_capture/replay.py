@@ -8,6 +8,7 @@ class EditFlag(StrEnum):
     MOUSE_CLICK = "mouse_click"
     UNDO = "undo"
     FOREIGN_PASTE = "foreign_paste"
+    SPLIT_PASTE = "split_paste"
     SELECT_ALL = "select_all"
     CARET_BEFORE_SPAN = "caret_before_span"
     CARET_AFTER_SPAN = "caret_after_span"
@@ -17,13 +18,18 @@ class EditFlag(StrEnum):
     IME = "ime"
 
 
-# A caret the user moved with the mouse, an undo, a paste we did not make and
-# an IME composition all change the box without leaving a keystroke that says
-# how. The rest only mean the edit may have reached outside our own span.
+# After any of these the replay can no longer say where the caret sits or what
+# the box holds, so every later edit lands at an offset we made up. SELECT_ALL
+# and the two caret-edge flags stay out because they only say the edit may have
+# reached outside our own span.
 UNRELIABLE_FLAGS = frozenset({
     EditFlag.MOUSE_CLICK,
     EditFlag.UNDO,
     EditFlag.FOREIGN_PASTE,
+    EditFlag.SPLIT_PASTE,
+    EditFlag.VERTICAL_ARROW,
+    EditFlag.TAB,
+    EditFlag.ESCAPE,
     EditFlag.IME,
 })
 
@@ -107,9 +113,19 @@ class EditReplay:
         self._flags: set[EditFlag] = set()
 
     def apply_paste(self, text: str) -> EditState:
+        if self._lands_inside_earlier_text():
+            self._flags.add(EditFlag.SPLIT_PASTE)
         self._insert(text, len(self._pasted_texts))
         self._pasted_texts.append(text)
         return self.snapshot()
+
+    def _lands_inside_earlier_text(self) -> bool:
+        """Whether the paste splits a span instead of extending the buffer.
+
+        A selection about to be replaced counts as already consumed, so the
+        far edge of the selection is where the insertion effectively sits.
+        """
+        return max(self._anchor, self._cursor) != len(self._chars)
 
     def apply_key(self, stroke: KeyStroke) -> EditState:
         if stroke.click_since_last:
@@ -167,6 +183,8 @@ class EditReplay:
             self._delete_selection()
         elif stroke.vk == VK_BACK:
             self._delete_word_before_cursor()
+        elif stroke.vk == VK_DELETE:
+            self._delete_word_after_cursor()
         elif stroke.vk in (VK_LEFT, VK_RIGHT):
             self._move_by_word(stroke)
         elif stroke.vk == VK_HOME:
@@ -177,8 +195,11 @@ class EditReplay:
             self._move_caret(len(self._chars), extend_selection=stroke.shift)
 
     def _apply_alt_key(self, stroke: KeyStroke) -> None:
+        """Windows sends AltGr as Ctrl+Alt, so that pair still types."""
         if stroke.vk == VK_BACK:
             self._flags.add(EditFlag.UNDO)
+        elif stroke.ctrl and stroke.char:
+            self._insert(stroke.char, TYPED_ORIGIN)
 
     def _apply_plain_key(self, stroke: KeyStroke) -> None:
         if stroke.vk == VK_BACK:
@@ -204,17 +225,35 @@ class EditReplay:
         self._cursor = len(self._chars)
 
     def _move_by_character(self, stroke: KeyStroke) -> None:
+        if self._collapses_a_selection(stroke):
+            self._collapse_selection_toward(stroke)
+            return
         step = -1 if stroke.vk == VK_LEFT else 1
         target = self._clamp_and_flag_overrun(self._cursor + step)
         self._move_caret(target, extend_selection=stroke.shift)
 
     def _move_by_word(self, stroke: KeyStroke) -> None:
+        if self._collapses_a_selection(stroke):
+            self._collapse_selection_toward(stroke)
+            return
         target = (
             self._word_start_before_cursor()
             if stroke.vk == VK_LEFT
             else self._word_end_after_cursor()
         )
         self._move_caret(target, extend_selection=stroke.shift)
+
+    def _collapses_a_selection(self, stroke: KeyStroke) -> bool:
+        """An unshifted arrow over a selection only drops the highlight.
+
+        Windows puts the caret on the edge the arrow points at and stops
+        there, one character short of where a plain step would land it.
+        """
+        return self._has_selection() and not stroke.shift
+
+    def _collapse_selection_toward(self, stroke: KeyStroke) -> None:
+        edge = min if stroke.vk == VK_LEFT else max
+        self._move_caret(edge(self._anchor, self._cursor), extend_selection=False)
 
     def _move_to_line_edge(self, stroke: KeyStroke) -> None:
         target = self._line_start() if stroke.vk == VK_HOME else self._line_end()
@@ -292,6 +331,12 @@ class EditReplay:
         else:
             self._delete_range(self._word_start_before_cursor(), self._cursor)
 
+    def _delete_word_after_cursor(self) -> None:
+        if self._has_selection():
+            self._delete_selection()
+        else:
+            self._delete_range(self._cursor, self._word_end_after_cursor())
+
     def _has_selection(self) -> bool:
         return self._anchor != self._cursor
 
@@ -337,7 +382,18 @@ class EditReplay:
         return owners
 
     def _text_owned_by(self, owners: list[int], ordinal: int) -> str:
-        owned = [index for index, owner in enumerate(owners) if owner == ordinal]
-        if not owned:
+        """The one run around this paste, not every stretch it ever touched.
+
+        A second dictation typed into the middle of the first splits the
+        first's characters in two. Taking the run holding its own first
+        character keeps the inner paste out of the outer paste's label.
+        """
+        if ordinal not in owners:
             return ""
-        return "".join(self._chars[owned[0]:owned[-1] + 1])
+        start = self._origins.index(ordinal)
+        while start > 0 and owners[start - 1] == ordinal:
+            start -= 1
+        stop = start
+        while stop < len(owners) and owners[stop] == ordinal:
+            stop += 1
+        return "".join(self._chars[start:stop])

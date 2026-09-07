@@ -75,6 +75,22 @@ class TestTyping:
 
         assert state.text == "hello"
 
+    def test_should_insert_the_character_an_altgr_stroke_types(self) -> None:
+        replay = _pasted("price ")
+
+        state = replay.apply_key(KeyStroke(ord("E"), "€", ctrl=True, alt=True))
+
+        assert state.text == "price €"
+        assert state.reliable is True
+
+    def test_should_keep_treating_alt_backspace_as_an_undo(self) -> None:
+        replay = _pasted("hello")
+
+        state = replay.apply_key(KeyStroke(VK_BACK, "", ctrl=True, alt=True))
+
+        assert state.text == "hello"
+        assert EditFlag.UNDO in state.flags
+
 
 class TestDeletion:
     def test_should_delete_the_character_before_the_caret(self) -> None:
@@ -104,6 +120,23 @@ class TestDeletion:
         replay = _pasted("hello world ")
 
         state = replay.apply_key(KeyStroke(VK_BACK, "", ctrl=True))
+
+        assert state.text == "hello "
+
+    def test_should_delete_the_word_after_the_caret_with_control(self) -> None:
+        replay = _pasted("hello world")
+        replay.apply_key(KeyStroke(VK_HOME, "", ctrl=True))
+
+        state = replay.apply_key(KeyStroke(VK_DELETE, "", ctrl=True))
+
+        assert state.text == " world"
+
+    def test_should_delete_the_selection_on_control_delete(self) -> None:
+        replay = _pasted("hello world")
+        for _ in range(len("world")):
+            replay.apply_key(KeyStroke(VK_LEFT, "", shift=True))
+
+        state = replay.apply_key(KeyStroke(VK_DELETE, "", ctrl=True))
 
         assert state.text == "hello "
 
@@ -160,7 +193,40 @@ class TestSelection:
 
         state = _type(replay, "X")
 
-        assert state.text == "helXlo"
+        assert state.text == "hellXo"
+
+    def test_should_collapse_to_the_right_edge_when_right_ends_a_selection(
+        self,
+    ) -> None:
+        replay = _pasted("hello world")
+        for _ in range(len("world")):
+            replay.apply_key(KeyStroke(VK_LEFT, "", shift=True))
+        replay.apply_key(KeyStroke(VK_RIGHT, ""))
+
+        state = _type(replay, "Z")
+
+        assert state.text == "hello worldZ"
+
+    def test_should_collapse_to_the_left_edge_when_control_left_ends_a_selection(
+        self,
+    ) -> None:
+        replay = _pasted("hello world")
+        for _ in range(len("world")):
+            replay.apply_key(KeyStroke(VK_LEFT, "", shift=True))
+        replay.apply_key(KeyStroke(VK_LEFT, "", ctrl=True))
+
+        state = _type(replay, "Z")
+
+        assert state.text == "hello Zworld"
+
+    def test_should_still_extend_a_selection_when_shift_is_held(self) -> None:
+        replay = _pasted("hello")
+        replay.apply_key(KeyStroke(VK_LEFT, "", shift=True))
+        replay.apply_key(KeyStroke(VK_LEFT, "", shift=True))
+
+        state = _type(replay, "X")
+
+        assert state.text == "helX"
 
 
 class TestCaretMotion:
@@ -310,6 +376,18 @@ class TestSpans:
             PasteSpan(1, "world", "world"),
         )
 
+    def test_should_keep_a_paste_out_of_the_span_it_was_dropped_into(self) -> None:
+        replay = _pasted("alpha beta")
+        for _ in range(len(" beta")):
+            replay.apply_key(KeyStroke(VK_LEFT, ""))
+
+        state = replay.apply_paste("XX")
+
+        assert state.spans == (
+            PasteSpan(0, "alpha beta", "alpha"),
+            PasteSpan(1, "XX", "XX"),
+        )
+
     def test_should_report_a_deleted_paste_with_an_empty_final_text(self) -> None:
         replay = _pasted("abc")
 
@@ -396,6 +474,14 @@ class TestFlags:
         assert state.flags == frozenset({EditFlag.TAB})
         assert state.text == "hello"
 
+    def test_should_become_unreliable_after_tab_leaves_the_control(self) -> None:
+        replay = _pasted("hello")
+        replay.apply_key(KeyStroke(VK_TAB, "\t"))
+
+        state = _type(replay, "X")
+
+        assert state.reliable is False
+
     def test_should_flag_escape_without_changing_the_text(self) -> None:
         replay = _pasted("hello")
 
@@ -403,6 +489,51 @@ class TestFlags:
 
         assert state.flags == frozenset({EditFlag.ESCAPE})
         assert state.text == "hello"
+
+    def test_should_become_unreliable_after_escape_clears_the_box(self) -> None:
+        replay = _pasted("hello")
+
+        state = replay.apply_key(KeyStroke(VK_ESCAPE, ""))
+
+        assert state.reliable is False
+
+    def test_should_commit_a_vertical_arrow_edit_as_unreliable(self) -> None:
+        replay = _pasted("line one\nline two")
+        replay.apply_key(KeyStroke(VK_UP, ""))
+        _type(replay, "X")
+
+        state = replay.apply_key(KeyStroke(VK_RETURN, ""))
+
+        assert state.committed is True
+        assert state.reliable is False
+
+    def test_should_flag_a_paste_that_lands_inside_earlier_text(self) -> None:
+        replay = _pasted("alpha beta")
+        for _ in range(len(" beta")):
+            replay.apply_key(KeyStroke(VK_LEFT, ""))
+
+        state = replay.apply_paste("XX")
+
+        assert state.text == "alphaXX beta"
+        assert EditFlag.SPLIT_PASTE in state.flags
+        assert state.reliable is False
+
+    def test_should_not_flag_a_paste_appended_after_earlier_text(self) -> None:
+        replay = _pasted("alpha ")
+
+        state = replay.apply_paste("beta")
+
+        assert EditFlag.SPLIT_PASTE not in state.flags
+        assert state.reliable is True
+
+    def test_should_not_flag_a_paste_that_replaces_the_whole_box(self) -> None:
+        replay = _pasted("alpha")
+        replay.apply_key(KeyStroke(VK_A, "", ctrl=True))
+
+        state = replay.apply_paste("beta")
+
+        assert state.text == "beta"
+        assert EditFlag.SPLIT_PASTE not in state.flags
 
     def test_should_flag_control_home_as_leaving_the_span(self) -> None:
         replay = _pasted("hello")

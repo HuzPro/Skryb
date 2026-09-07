@@ -20,6 +20,12 @@ the dictionary would then rewrite again. Rows where the user only fixed case,
 spacing or punctuation say nothing about what the model heard, so they are
 excluded too.
 
+A row carrying any flag at all is excluded, not only the ones that clear
+``reliable``. A caret the replay had to clamp, or a select-all, means the edit
+may have reached outside the text we pasted, and a wrong transcript attached to
+a real recording is worse than a smaller corpus. ``dataset.jsonl`` keeps every
+row, and the flag shares in the summary say what that strictness costs.
+
 Streaming rows are excluded outright. A streaming delivery is a fragment of an
 utterance while the transcription covers the whole clip, so this row's texts
 are not comparable with its audio at all.
@@ -324,6 +330,7 @@ _STREAMING = "streaming"
 def _trains_the_acoustic_model(row: _Row) -> bool:
     return (
         row.reliable
+        and not row.flags
         and row.end_reason == "enter"
         and row.edit_kind in _ACOUSTIC_EDIT_KINDS
         and row.pipeline_mode != _STREAMING

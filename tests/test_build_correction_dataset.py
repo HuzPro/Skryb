@@ -72,6 +72,7 @@ def _sent(
     spans: list[dict[str, object]],
     reason: str = "enter",
     reliable: bool = True,
+    flags: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "event": "sent",
@@ -82,7 +83,7 @@ def _sent(
         "title": "Untitled - Notepad",
         "text": "".join(str(span["final_text"]) for span in spans),
         "reliable": reliable,
-        "flags": [],
+        "flags": list(flags or []),
         "key_count": 4,
         "spans": spans,
     }
@@ -406,3 +407,27 @@ class TestDeliveryOrdering:
 
         rows = _records(output_dir / "dataset.jsonl")
         assert [row["transcription_index"] for row in rows] == [1, 2]
+
+
+class TestManifestExcludesFlaggedRows:
+    def test_should_exclude_a_row_whose_caret_left_the_pasted_text(
+        self, tmp_path: Path,
+    ) -> None:
+        _session(
+            tmp_path / "logs",
+            "flagged",
+            [_transcription(1, 10, "the quick brown fox")],
+            [
+                _delivered(1, 11, "the quick brown fox"),
+                _sent(
+                    1,
+                    [_span(1, "the quick brown fox", "the quick brown fox")],
+                    flags=["caret_before_span"],
+                ),
+            ],
+        )
+
+        output_dir = _build(tmp_path)
+
+        assert len(_records(output_dir / "dataset.jsonl")) == 1
+        assert _records(output_dir / "manifest.jsonl") == []

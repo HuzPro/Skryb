@@ -1,10 +1,15 @@
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from voicetotext.core.timestamps import utc_iso
-from voicetotext.edit_capture.replay import EditReplay, EditState, KeyStroke
+from voicetotext.edit_capture.replay import (
+    VK_ESCAPE,
+    VK_TAB,
+    EditReplay,
+    EditState,
+    KeyStroke,
+)
 from voicetotext.edit_capture.window import ForegroundWindow
 
 # A dictation left untouched for this long is treated as finished. The
@@ -12,14 +17,18 @@ from voicetotext.edit_capture.window import ForegroundWindow
 # timer is needed.
 IDLE_TIMEOUT = timedelta(minutes=15)
 
-# The pipeline hands over the text on the worker thread, but the paste
-# only reaches the target after the Tk dispatch, the clipboard settle and
-# the wait for the hotkey's modifiers to come up. A delivery still
-# unclaimed after this long never became a paste - the clipboard-only
-# output mode, or a failed clipboard snapshot.
+# A delivery is reported directly above the Ctrl+V injection, so the wait
+# is only the clipboard settle plus the wait for the hotkey's modifiers to
+# come up. Anything older than this never became a paste: SendInput was
+# refused by a higher-integrity window, or the clipboard write failed.
 DELIVERY_TIMEOUT = timedelta(seconds=5)
 
 # Typing in these is never dictation editing worth keeping.
+# Tab moves focus to another control in the same window and Escape clears
+# the box in many apps. Either way the keys that follow are no longer
+# editing this dictation, so the block ends rather than logging them.
+FOCUS_LEAVING_KEYS = frozenset({VK_TAB, VK_ESCAPE})
+
 DENIED_PROCESSES = frozenset({
     "windowsterminal.exe",
     "wt.exe",
@@ -32,6 +41,15 @@ DENIED_PROCESSES = frozenset({
     "1password.exe",
     "bitwarden.exe",
 })
+
+
+def _ending_for(stroke: KeyStroke, state: EditState) -> str:
+    """Why this keystroke ends the dictation, or an empty string."""
+    if state.committed:
+        return "enter"
+    if stroke.vk in FOCUS_LEAVING_KEYS:
+        return "focus_left"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -67,7 +85,13 @@ class EditRecorder:
     ) -> None:
         self._write = write
         self._now = now
-        self._pending: deque[_Delivery] = deque()
+        # One slot, not a queue. The GUI thread runs report, clipboard
+        # write, settle and SendInput as one sequence, so only one
+        # delivery is ever in flight. A delivery whose paste never went
+        # out is then overwritten by the next one instead of being
+        # claimed by it, which would have labelled the audio with the
+        # wrong dictation.
+        self._pending: _Delivery | None = None
         self._block: _Block | None = None
         self._deliveries = 0
         self._blocks = 0
@@ -75,7 +99,7 @@ class EditRecorder:
     def delivered(self, text: str, pipeline_mode: str, output_mode: str) -> None:
         self._deliveries += 1
         delivery = _Delivery(self._deliveries, text, self._now())
-        self._pending.append(delivery)
+        self._pending = delivery
         self._write({
             "event": "delivered",
             "seq": delivery.seq,
@@ -89,13 +113,14 @@ class EditRecorder:
         delivery = self._claim_delivery()
         if delivery is None:
             return
-        if window.process in DENIED_PROCESSES:
+        refusal = self._refusal_for(window)
+        if refusal:
             self._write({
                 "event": "skipped",
                 "seq": delivery.seq,
                 "at": utc_iso(self._now()),
                 "process": window.process,
-                "reason": "denied_process",
+                "reason": refusal,
             })
             return
         block = self._block_for(window)
@@ -113,6 +138,18 @@ class EditRecorder:
             "title": window.title,
         })
 
+    def _refusal_for(self, window: ForegroundWindow) -> str:
+        """Why this window must not be watched, or an empty string."""
+        if window.hwnd == 0:
+            # An elevated or otherwise unreadable window. Its process name
+            # is empty, so the denylist cannot speak for it, and every such
+            # window shares hwnd 0, which would merge unrelated dictations
+            # into one block.
+            return "unknown_window"
+        if window.process in DENIED_PROCESSES:
+            return "denied_process"
+        return ""
+
     @property
     def watching_hwnd(self) -> int:
         """The window whose keys matter, or 0 when nothing is being edited."""
@@ -126,6 +163,14 @@ class EditRecorder:
         block.last_at = self._now()
         block.key_count += 1
         state = block.replay.apply_key(stroke)
+        ending = _ending_for(stroke, state)
+        try:
+            self._write_key(block, stroke)
+        finally:
+            if ending:
+                self._finish(block, state, ending)
+
+    def _write_key(self, block: _Block, stroke: KeyStroke) -> None:
         self._write({
             "event": "key",
             "block": block.identifier,
@@ -137,8 +182,6 @@ class EditRecorder:
             "alt": stroke.alt,
             "click": stroke.click_since_last,
         })
-        if state.committed:
-            self._finish(block, state, "enter")
 
     def expire_idle_block(self) -> None:
         block = self._block
@@ -153,12 +196,11 @@ class EditRecorder:
         self._finish(block, block.replay.snapshot(), "shutdown")
 
     def _claim_delivery(self) -> _Delivery | None:
-        deadline = self._now() - DELIVERY_TIMEOUT
-        while self._pending:
-            delivery = self._pending.popleft()
-            if delivery.at >= deadline:
-                return delivery
-        return None
+        delivery = self._pending
+        self._pending = None
+        if delivery is None or delivery.at < self._now() - DELIVERY_TIMEOUT:
+            return None
+        return delivery
 
     def _block_for(self, window: ForegroundWindow) -> _Block:
         block = self._block
