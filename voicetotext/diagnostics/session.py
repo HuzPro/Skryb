@@ -1,11 +1,11 @@
-import json
 import logging
 import platform
 import shutil
 import threading
 import wave
 from collections.abc import Callable
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -14,16 +14,53 @@ import numpy as np
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.exceptions import ConfigurationError
 from voicetotext.core.paths import AppPaths
+from voicetotext.core.timestamps import utc_iso, utc_now
 from voicetotext.core.startup_log import (
     process_started_at,
     process_uptime_seconds,
 )
+from voicetotext.diagnostics.jsonl import JsonlWriter
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.model_info import DEFAULT_MODEL, get_model_info
 from voicetotext.transcription.result import TranscriptionResult
 
 _logger = logging.getLogger(__name__)
+
+# 20 ms is short enough that the quietest tenth of the frames is room
+# tone rather than speech, which is what makes it usable as a noise
+# floor. Without it a bad transcription cannot be told apart from a
+# noisy room after the fact.
+_LEVEL_FRAME_SECONDS = 0.02
+_NOISE_FLOOR_QUANTILE = 0.1
+
+
+@dataclass(frozen=True)
+class _AudioLevels:
+    rms: float
+    peak: float
+    noise_floor: float
+
+
+def _audio_levels(audio: AudioSegment) -> _AudioLevels:
+    samples = np.asarray(audio.data, dtype=np.float32).reshape(-1)
+    if samples.size == 0:
+        return _AudioLevels(rms=0.0, peak=0.0, noise_floor=0.0)
+    return _AudioLevels(
+        rms=float(np.sqrt(np.mean(np.square(samples)))),
+        peak=float(np.max(np.abs(samples))),
+        noise_floor=_noise_floor(samples, audio.sample_rate),
+    )
+
+
+def _noise_floor(samples: np.ndarray, sample_rate: int) -> float:
+    frame = max(int(sample_rate * _LEVEL_FRAME_SECONDS), 1)
+    whole_frames = samples.size // frame
+    if whole_frames == 0:
+        return float(np.sqrt(np.mean(np.square(samples))))
+    frames = samples[: whole_frames * frame].reshape(whole_frames, frame)
+    frame_levels = np.sqrt(np.mean(np.square(frames), axis=1))
+    return float(np.quantile(frame_levels, _NOISE_FLOOR_QUANTILE))
 
 
 class SessionDiagnostics:
@@ -44,7 +81,7 @@ class SessionDiagnostics:
             and not isinstance(retain_sessions, bool)
             else 50
         )
-        self._events_path = paths.session_dir / "session.jsonl"
+        self._events = JsonlWriter(paths.session_dir / "session.jsonl")
         self._lock = threading.Lock()
         self._transcription_count = 0
         self._stopped = False
@@ -61,7 +98,7 @@ class SessionDiagnostics:
         self._write_event(
             {
                 "event": "engine_loaded",
-                "at": self._utc_now(),
+                "at": utc_iso(utc_now()),
                 "model": model,
                 "engine": engine,
                 "device": device,
@@ -80,7 +117,7 @@ class SessionDiagnostics:
         self._write_event(
             {
                 "event": "engine_load_failed",
-                "at": self._utc_now(),
+                "at": utc_iso(utc_now()),
                 "model": model,
                 "engine": engine,
                 "device": device,
@@ -96,15 +133,21 @@ class SessionDiagnostics:
         requested_at: datetime,
     ) -> None:
         index = self._next_transcription_index()
-        finished_at = datetime.now(UTC)
+        finished_at = utc_now()
         if isinstance(outcome, Exception):
             text = ""
             engine_seconds: float | None = None
+            language_probability = 0.0
             error: str | None = str(outcome)
         else:
             text = outcome.text
             engine_seconds = outcome.transcription_seconds
+            language_probability = outcome.language_probability
             error = None
+        levels = (
+            _audio_levels(audio) if audio is not None
+            else _AudioLevels(rms=0.0, peak=0.0, noise_floor=0.0)
+        )
         audio_path = Path("audio") / f"{index:04d}.wav"
         transcript_path = Path("transcripts") / f"{index:04d}.txt"
         if self._enabled and audio is not None:
@@ -124,8 +167,8 @@ class SessionDiagnostics:
                 {
                     "event": "transcription",
                     "index": index,
-                    "requested_at": self._format_time(requested_at),
-                    "finished_at": self._format_time(finished_at),
+                    "requested_at": utc_iso(requested_at),
+                    "finished_at": utc_iso(finished_at),
                     "wall_seconds": (finished_at - requested_at).total_seconds(),
                     "engine_seconds": engine_seconds,
                     "model": self._active_model,
@@ -135,6 +178,10 @@ class SessionDiagnostics:
                     if audio is not None
                     else 0.0,
                     "sample_rate": audio.sample_rate if audio is not None else 0,
+                    "audio_rms": levels.rms,
+                    "audio_peak": levels.peak,
+                    "audio_noise_floor": levels.noise_floor,
+                    "language_probability": language_probability,
                     "audio_path": audio_path.as_posix() if audio is not None else "",
                     "text": text,
                     "transcript_path": transcript_path.as_posix(),
@@ -164,7 +211,7 @@ class SessionDiagnostics:
         self._write_event(
             {
                 "event": "app_stopped",
-                "stopped_at": self._utc_now(),
+                "stopped_at": utc_iso(utc_now()),
                 "uptime_seconds": process_uptime_seconds(),
                 "transcription_count": transcription_count,
             }
@@ -174,7 +221,7 @@ class SessionDiagnostics:
         self._write_event(
             {
                 "event": "app_started",
-                "started_at": self._format_time(process_started_at()),
+                "started_at": utc_iso(process_started_at()),
                 "app_version": self._app_version(),
                 "model": self._active_model,
                 "engine": self._active_engine,
@@ -190,13 +237,8 @@ class SessionDiagnostics:
             return
         self._attempt_write(
             str(event["event"]),
-            lambda: self._append_event(event),
+            lambda: self._events.append(event),
         )
-
-    def _append_event(self, event: dict[str, object]) -> None:
-        line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
-        with self._lock, self._events_path.open("a", encoding="utf-8") as stream:
-            stream.write(line + "\n")
 
     def _attempt_write(self, operation: str, write: Callable[[], None]) -> None:
         try:
@@ -263,14 +305,6 @@ class SessionDiagnostics:
     def _save_transcript(path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-
-    @staticmethod
-    def _format_time(value: datetime) -> str:
-        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-    @classmethod
-    def _utc_now(cls) -> str:
-        return cls._format_time(datetime.now(UTC))
 
     @staticmethod
     def _app_version() -> str:
