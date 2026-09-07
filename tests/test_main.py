@@ -313,6 +313,11 @@ class TestBindingStartupOrder:
         app.run.assert_called_once_with()
 
 
+# No model is installed under this path, so selection falls back to the
+# top of the ranking - which is what the gate has to answer about.
+_NO_MODELS_DIR = Path("nonexistent-models")
+
+
 class TestTorchPrewarmGate:
     """Torch costs over a second to import, so a launch that will not use
     it must not start the prewarm at all. The engine descriptor is the
@@ -327,7 +332,9 @@ class TestTorchPrewarmGate:
             "voicetotext.core.torch_prewarm.start_torch_prewarm",
             return_value=_resolved_prewarm(),
         ) as start:
-            wait = _start_torch_prewarm_if_needed(config, build_engine_registry())
+            wait = _start_torch_prewarm_if_needed(
+                config, build_engine_registry(), _NO_MODELS_DIR,
+            )
             wait()
 
         start.assert_called_once_with()
@@ -340,7 +347,9 @@ class TestTorchPrewarmGate:
         with patch(
             "voicetotext.core.torch_prewarm.start_torch_prewarm",
         ) as start:
-            wait = _start_torch_prewarm_if_needed(config, _torch_free_registry())
+            wait = _start_torch_prewarm_if_needed(
+                config, _torch_free_registry(), _NO_MODELS_DIR,
+            )
             wait()
 
         start.assert_not_called()
@@ -359,7 +368,9 @@ class TestTorchPrewarmGate:
             "voicetotext.core.torch_prewarm.start_torch_prewarm",
             return_value=_resolved_prewarm(),
         ) as start:
-            _start_torch_prewarm_if_needed(config, build_engine_registry())
+            _start_torch_prewarm_if_needed(
+                config, build_engine_registry(), _NO_MODELS_DIR,
+            )
 
         start.assert_called_once_with()
 
@@ -372,7 +383,9 @@ class TestTorchPrewarmGate:
             "voicetotext.core.torch_prewarm.start_torch_prewarm",
             return_value=_resolved_prewarm(),
         ) as start:
-            _start_torch_prewarm_if_needed(config, build_engine_registry())
+            _start_torch_prewarm_if_needed(
+                config, build_engine_registry(), _NO_MODELS_DIR,
+            )
 
         start.assert_called_once_with()
 

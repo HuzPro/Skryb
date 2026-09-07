@@ -300,7 +300,9 @@ class SessionDiagnostics:
             self._config,
             self._registry,
             self._hardware_detector,
-            selectable_engine_ids(self._config, self._registry),
+            selectable_engine_ids(
+                self._config, self._registry, self._paths.models_dir,
+            ),
         )
 
     @staticmethod

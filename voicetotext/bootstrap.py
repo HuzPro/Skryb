@@ -318,7 +318,7 @@ def _load_engine_with_fallback(
     started_at = time.monotonic()
     device = resolve_device(
         config, registry, hardware_detector,
-        selectable_engine_ids(config, registry),
+        selectable_engine_ids(config, registry, paths.models_dir),
     )
     try:
         try:

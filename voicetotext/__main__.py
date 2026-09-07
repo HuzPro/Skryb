@@ -200,13 +200,16 @@ def _prepare_startup(paths: AppPaths) -> _Startup:
         config=config,
         model_was_configured=model_was_configured,
         registry=registry,
-        await_torch_prewarm=_start_torch_prewarm_if_needed(config, registry),
+        await_torch_prewarm=_start_torch_prewarm_if_needed(
+            config, registry, paths.models_dir,
+        ),
     )
 
 
 def _start_torch_prewarm_if_needed(
     config: ConfigurationStore,
     registry: EngineRegistry,
+    models_dir: Path,
 ) -> Callable[[], None]:
     """Warm torch on a background thread, unless nothing will use it.
 
@@ -218,7 +221,7 @@ def _start_torch_prewarm_if_needed(
     """
     from voicetotext.transcription.engine_factory import startup_requires_torch
 
-    if not startup_requires_torch(config, registry):
+    if not startup_requires_torch(config, registry, models_dir):
         logging.getLogger(__name__).info(
             "Torch prewarm skipped: no engine this launch can select needs it",
         )

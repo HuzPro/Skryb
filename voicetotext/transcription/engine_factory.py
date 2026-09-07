@@ -1,3 +1,4 @@
+import importlib.util
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
@@ -132,13 +133,13 @@ def _build_crisperwhisper_ct2_engine(spec: EngineSpec) -> TranscriptionEngine:
     from voicetotext.transcription.crisperwhisper_ct2_adapter import (
         CrisperWhisperCt2Adapter,
     )
-    from voicetotext.transcription.ct2_conversion import ct2_model_dir
+    from voicetotext.transcription.ct2_conversion import ensure_ct2_model
     from voicetotext.transcription.hf_model_manager import (
         loadable_snapshot_dir,
     )
 
     return CrisperWhisperCt2Adapter(
-        model_dir=ct2_model_dir(
+        model_dir=ensure_ct2_model(
             loadable_snapshot_dir(
                 spec.model_dir, spec.repo_id, spec.revision,
             ),
@@ -152,6 +153,7 @@ def _build_crisperwhisper_ct2_engine(spec: EngineSpec) -> TranscriptionEngine:
 def selectable_engine_ids(
     config: ConfigurationStore,
     registry: EngineRegistry,
+    models_dir: Path | None = None,
 ) -> tuple[EngineId, ...]:
     """Engine ids this config could end up running, read from config alone.
 
@@ -173,15 +175,45 @@ def selectable_engine_ids(
         )
     except ConfigurationError:
         return tuple(d.engine_id for d in registry.all_descriptors())
-    return model_info.compatible_engines
+    if models_dir is None:
+        return model_info.compatible_engines
+    return _auto_selection(model_info, registry, models_dir)
+
+
+def _auto_selection(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+    models_dir: Path,
+) -> tuple[EngineId, ...]:
+    """The single engine ``auto`` will load, when that is knowable here.
+
+    ``resolve_engine_id`` makes the same choice from the same ranking and
+    the same installed set, so the torch question is answered about the
+    engine that actually loads rather than about every candidate - which
+    would report "needs torch" whenever any alternative did.
+
+    Falls back to every candidate when the ranking needs a hardware
+    probe, because probing is the import this is trying to avoid.
+    """
+    ranked = _ranking_that_ignores_hardware(model_info, registry)
+    if not ranked:
+        return model_info.compatible_engines
+    installed = engines_with_model_on_disk(model_info, models_dir)
+    for engine_id in ranked:
+        if engine_id in installed:
+            return (engine_id,)
+    return (ranked[0],)
 
 
 def startup_requires_torch(
     config: ConfigurationStore,
     registry: EngineRegistry,
+    models_dir: Path | None = None,
 ) -> bool:
     """Whether this launch will load an engine built on torch."""
-    return registry.requires_torch(selectable_engine_ids(config, registry))
+    return registry.requires_torch(
+        selectable_engine_ids(config, registry, models_dir),
+    )
 
 
 UNPROBED_HARDWARE_KIND = "unprobed"
@@ -316,9 +348,21 @@ def engines_with_model_on_disk(
     installed: set[EngineId] = set()
     for engine_id, repo_id in _engine_repo_ids(model_info):
         repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
-        if repo_has_loadable_snapshot(repo_dir, model_info.revision):
-            installed.add(engine_id)
+        if not repo_has_loadable_snapshot(repo_dir, model_info.revision):
+            continue
+        if engine_id == "crisperwhisper_ct2" and not _ctranslate2_installed():
+            continue
+        installed.add(engine_id)
     return frozenset(installed)
+
+
+def _ctranslate2_installed() -> bool:
+    """Whether the CTranslate2 runtime is importable, without importing it.
+
+    Selection runs before startup decides about torch, so this has to
+    answer from the module finder rather than by loading a backend.
+    """
+    return importlib.util.find_spec("ctranslate2") is not None
 
 
 def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:

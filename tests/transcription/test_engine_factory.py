@@ -1,6 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -30,6 +30,7 @@ from voicetotext.transcription.model_info import (
     DEFAULT_MODEL,
     PARAKEET_MODELS,
     ModelInfo,
+    get_model_info,
 )
 from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
 
@@ -474,3 +475,72 @@ class TestEngineResolutionSkipsTheProbe:
         )
 
         assert detector.detect_calls == 1
+
+
+class TestAutoPrefersTheTorchFreeEngine:
+    """``auto`` has to narrow to the one engine it will load.
+
+    Answering the torch question about every compatible engine would
+    report "needs torch" whenever any alternative did, which would
+    reinstate the import the CTranslate2 engine exists to avoid.
+    """
+
+    def _turbo_installed(self, models_dir: Path) -> None:
+        model_info = get_model_info("crisperwhisper-2.0-turbo")
+        repo = models_dir / (
+            f"models--{model_info.repo_id.replace('/', '--')}"
+        )
+        snapshot = repo / "snapshots" / model_info.revision
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.safetensors").write_bytes(b"weights")
+        (snapshot / "config.json").write_text("{}")
+        (repo / "refs").mkdir()
+        (repo / "refs" / "main").write_text(model_info.revision)
+
+    def test_should_select_ct2_and_skip_torch_when_it_is_installed(
+        self, tmp_path: Path,
+    ) -> None:
+        self._turbo_installed(tmp_path)
+        config = FakeConfig({
+            "transcription.model_size": "crisperwhisper-2.0-turbo",
+            "transcription.engine": "auto",
+        })
+        registry = build_engine_registry()
+
+        assert selectable_engine_ids(config, registry, tmp_path) == (
+            "crisperwhisper_ct2",
+        )
+        assert startup_requires_torch(config, registry, tmp_path) is False
+
+    def test_should_fall_back_to_transformers_without_ctranslate2(
+        self, tmp_path: Path,
+    ) -> None:
+        self._turbo_installed(tmp_path)
+        config = FakeConfig({
+            "transcription.model_size": "crisperwhisper-2.0-turbo",
+            "transcription.engine": "auto",
+        })
+        registry = build_engine_registry()
+
+        with patch(
+            "voicetotext.transcription.engine_factory."
+            "_ctranslate2_installed",
+            return_value=False,
+        ):
+            assert selectable_engine_ids(config, registry, tmp_path) == (
+                "crisperwhisper",
+            )
+            assert startup_requires_torch(config, registry, tmp_path) is True
+
+    def test_should_keep_an_explicit_engine_choice(
+        self, tmp_path: Path,
+    ) -> None:
+        self._turbo_installed(tmp_path)
+        config = FakeConfig({
+            "transcription.model_size": "crisperwhisper-2.0-turbo",
+            "transcription.engine": "crisperwhisper",
+        })
+
+        assert selectable_engine_ids(
+            config, build_engine_registry(), tmp_path,
+        ) == ("crisperwhisper",)
