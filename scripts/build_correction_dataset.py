@@ -7,8 +7,8 @@ when edit capture was on, ``edits.jsonl`` (what the pasted text became before
 Enter). Nothing links the two files, so a delivery is joined to its
 transcription by time: the pipeline writes ``delivered`` first and the
 ``transcription`` event lands a moment later, so each delivery takes the first
-transcription that finished at or after it. Streaming pastes several times per
-transcription, so a transcription can own several deliveries.
+transcription whose finish time is nearest to it. Streaming pastes several
+times per transcription, so a transcription can own several deliveries.
 
 ``dataset.jsonl`` keeps every joined row. ``manifest.jsonl`` keeps only rows
 that can train an acoustic model: a reliable replay, sent with Enter, an
@@ -265,10 +265,29 @@ def _transcription_by_delivery(
     matched: dict[int, _Event] = {}
     for delivery in deliveries:
         at = _moment(delivery, "at")
-        index = bisect_left(finished, at)
-        if index < len(finished) and finished[index] - at <= tolerance:
-            matched[_count(delivery, "seq")] = by_time[index]
+        nearest = _nearest_index(finished, at)
+        if nearest < len(finished) and abs(finished[nearest] - at) <= tolerance:
+            matched[_count(delivery, "seq")] = by_time[nearest]
     return matched
+
+
+def _nearest_index(finished: list[datetime], at: datetime) -> int:
+    """The transcription closest in time, on either side.
+
+    A batch delivery is reported just before its paste, which is after the
+    transcription event was written; a streaming delivery is reported during
+    the run, before it. Matching only forwards or only backwards would
+    silently mislabel one of the two. Transcriptions are serialised and each
+    takes at least its own audio duration, so the nearest one is never
+    ambiguous.
+    """
+    after = bisect_left(finished, at)
+    if after == 0:
+        return 0
+    if after >= len(finished):
+        return len(finished) - 1
+    before = after - 1
+    return before if at - finished[before] <= finished[after] - at else after
 
 
 def _span_by_delivery(sent_events: list[_Event]) -> dict[int, _Span]:
