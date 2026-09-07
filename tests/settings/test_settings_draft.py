@@ -49,7 +49,9 @@ class TestChangeSetFromDrafts:
         assert changes.hotkey_changed is False
         assert changes.output_changed is False
 
-    def test_should_flag_engine_reload_required_when_model_size_differs(self):
+    def test_should_reload_and_rebuild_output_when_model_size_differs(self):
+        # Only a CrisperWhisper model can put the pipeline in passthrough, so
+        # switching model can silently leave the dictionary off.
         original = _make_draft(model_size="parakeet-tdt-0.6b-v3")
         updated = _make_draft(model_size="nemotron-speech-streaming-en-0.6b")
 
@@ -57,7 +59,7 @@ class TestChangeSetFromDrafts:
 
         assert changes.engine_reload_required is True
         assert changes.hotkey_changed is False
-        assert changes.output_changed is False
+        assert changes.output_changed is True
 
     def test_should_flag_engine_reload_required_when_device_differs(self):
         original = _make_draft(device="auto")
@@ -151,3 +153,32 @@ class TestCrisperWhisperModeChanges:
         draft = _make_draft(crisperwhisper_mode="verbatim")
 
         assert not ChangeSet.between(draft, draft).any_changed
+
+
+class TestLeavingVerbatimTranscription:
+    def test_should_rebuild_output_when_leaving_a_verbatim_model(self):
+        # Verbatim turns the whole text pipeline off. The mode key stays in
+        # the config when the user picks a model that has no modes, so the
+        # rebuild has to be driven by the model change itself.
+        original = _make_draft(
+            model_size="crisperwhisper-2.0-turbo", crisperwhisper_mode="verbatim",
+        )
+        updated = _make_draft(
+            model_size="parakeet-tdt-0.6b-v3", crisperwhisper_mode="verbatim",
+        )
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.output_changed is True
+
+    def test_should_rebuild_output_when_arriving_at_a_verbatim_model(self):
+        original = _make_draft(
+            model_size="parakeet-tdt-0.6b-v3", crisperwhisper_mode="verbatim",
+        )
+        updated = _make_draft(
+            model_size="crisperwhisper-2.0-turbo", crisperwhisper_mode="verbatim",
+        )
+
+        changes = ChangeSet.between(original, updated)
+
+        assert changes.output_changed is True
