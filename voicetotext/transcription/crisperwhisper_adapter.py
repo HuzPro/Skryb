@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from pathlib import Path
 from types import ModuleType
@@ -25,6 +24,10 @@ from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription.whisper_features import (
     split_into_encoder_windows,
 )
+from voicetotext.transcription.whisper_tokens import (
+    MODE_TAG_COUNT,
+    strip_prompt_artifacts,
+)
 
 
 if TYPE_CHECKING:
@@ -38,7 +41,6 @@ _logger = logging.getLogger(__name__)
 
 _CPU_DEVICE = "cpu"
 _FALLBACK_MAX_NEW_TOKENS = 256
-_MODE_TAG_COUNT = 5
 _VALID_MODES = frozenset({"intended", "verbatim"})
 
 
@@ -205,7 +207,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
             token_ids,
             skip_special_tokens=True,
         )
-        return self._strip_prompt_artifacts(decoded)
+        return strip_prompt_artifacts(decoded)
 
     def _build_decoder_prefix(
         self,
@@ -216,13 +218,13 @@ class CrisperWhisperAdapter(TranscriptionEngine):
         # standard Whisper SOT/language/transcribe/no-timestamps sequence.
         tags = "".join(
             f"[{self._mode}_{index}]"
-            for index in range(1, _MODE_TAG_COUNT + 1)
+            for index in range(1, MODE_TAG_COUNT + 1)
         )
         mode_ids = processor.tokenizer.encode(
             tags,
             add_special_tokens=False,
         )
-        if len(mode_ids) != _MODE_TAG_COUNT:
+        if len(mode_ids) != MODE_TAG_COUNT:
             raise TranscriptionError(
                 f"Model tokenizer does not contain atomic {self._mode} tags"
             )
@@ -249,11 +251,6 @@ class CrisperWhisperAdapter(TranscriptionEngine):
         if not raw:
             return []
         return [int(token_id) for token_id in raw if int(token_id) >= 0]
-
-    @staticmethod
-    def _strip_prompt_artifacts(text: str) -> str:
-        text = re.sub(r"\[(?:verbatim|intended)_\d+\]", "", text)
-        return " ".join(text.split()).strip()
 
     def _raise_if_not_loaded(self) -> None:
         if not self.is_model_loaded():
