@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from voicetotext.edit_capture import win32_input as wi
 from voicetotext.edit_capture.win32_input import (
@@ -54,6 +54,14 @@ class TestKeyCharacterTranslatesAKey:
 
 @patch.object(wi, "_user32")
 class TestKeyCharacterAsksWindowsSafely:
+    def test_should_supply_caps_lock_to_the_layout(self, mock_user32: MagicMock) -> None:
+        mock_user32.ToUnicodeEx.side_effect = _translates_to("A")
+
+        key_character(_VK_A, shift=False, ctrl=False, alt=False, caps_lock=True)
+
+        state = mock_user32.ToUnicodeEx.call_args.args[2]
+        assert state[wi._VK_CAPITAL] == wi._TOGGLED_ON
+
     def test_should_build_key_state_from_the_given_modifiers(self, mock_user32):
         mock_user32.ToUnicodeEx.side_effect = _translates_to("A")
 

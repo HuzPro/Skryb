@@ -230,6 +230,21 @@ class TestJoiningDeliveriesToTranscriptions:
 
 
 class TestCorpusAudio:
+    def test_should_exclude_missing_audio_from_the_manifest(self, tmp_path: Path) -> None:
+        session_name = "missing-audio"
+        _session(
+            tmp_path / "logs", session_name,
+            [_transcription(1, 10, "hello world")],
+            [_delivered(1, 11, "hello world"),
+             _sent(1, [_span(1, "hello world", "hello world")])],
+        )
+        (tmp_path / "logs" / session_name / "audio" / "0001.wav").unlink()
+
+        output_dir = _build(tmp_path)
+
+        assert len(_records(output_dir / "dataset.jsonl")) == 1
+        assert _records(output_dir / "manifest.jsonl") == []
+
     def test_should_copy_the_wav_into_the_corpus(self, tmp_path: Path) -> None:
         _session(
             tmp_path / "logs",

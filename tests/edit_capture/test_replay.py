@@ -10,11 +10,13 @@ from voicetotext.edit_capture.replay import (
     VK_A,
     VK_BACK,
     VK_DELETE,
+    VK_DOWN,
     VK_END,
     VK_ESCAPE,
     VK_HOME,
     VK_LEFT,
     VK_NEXT,
+    VK_PRIOR,
     VK_PROCESSKEY,
     VK_RETURN,
     VK_RIGHT,
@@ -560,6 +562,14 @@ class TestFlags:
 
 
 class TestReturnModifiers:
+    @pytest.mark.parametrize("vk", [VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT, VK_TAB, VK_ESCAPE])
+    def test_should_flag_navigation_with_control_held(self, vk: int) -> None:
+        replay = _pasted("line one\nline two")
+
+        state = replay.apply_key(KeyStroke(vk, "", ctrl=True))
+
+        assert state.reliable is False
+
     def test_should_commit_on_plain_return(self):
         replay = EditReplay()
         replay.apply_paste("hello")

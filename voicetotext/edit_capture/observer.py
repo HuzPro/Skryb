@@ -4,12 +4,13 @@ import threading
 from dataclasses import dataclass
 
 from voicetotext.edit_capture.recorder import EditRecorder
-from voicetotext.edit_capture.replay import KeyStroke
+from voicetotext.edit_capture.replay import EditFlag, KeyStroke
 from voicetotext.edit_capture.win32_foreground import (
     foreground_hwnd,
     foreground_window,
 )
 from voicetotext.edit_capture.win32_input import (
+    caps_lock_enabled,
     clicked_since_last_check,
     key_character,
 )
@@ -18,6 +19,7 @@ from voicetotext.output.win32_key_sender import VOICETOTEXT_INPUT_TAG
 _logger = logging.getLogger(__name__)
 
 _VK_V = 0x56
+_VK_CAPITAL = 0x14
 _VK_SHIFT = 0xA0, 0xA1, 0x10
 _VK_CONTROL = 0xA2, 0xA3, 0x11
 _VK_ALT = 0xA4, 0xA5, 0x12
@@ -73,6 +75,7 @@ class Win32EditObserver:
         self._queue: queue.SimpleQueue[_QueueItem] = queue.SimpleQueue()
         self._thread: threading.Thread | None = None
         self._held: set[int] = set()
+        self._caps_lock = caps_lock_enabled()
 
     def start(self) -> None:
         if self._thread is not None:
@@ -144,25 +147,35 @@ class Win32EditObserver:
         if raw.extra == VOICETOTEXT_INPUT_TAG:
             self._handle_own_input(raw)
             return
+        if raw.vk == _VK_CAPITAL:
+            self._track_caps_lock(raw)
         if raw.flags & _INJECTED:
+            self._recorder.abandon(EditFlag.EXTERNAL_INPUT)
             return
         self._track_modifier(raw)
         if not raw.is_down or raw.vk in _MODIFIER_KEYS:
             return
         watched = self._recorder.watching_hwnd
-        if watched == 0 or foreground_hwnd() != watched:
+        if watched == 0:
+            return
+        if foreground_hwnd() != watched:
+            self._recorder.abandon(EditFlag.FOCUS_CHANGED)
             return
         self._recorder.keyed(self._stroke_for(raw.vk), watched)
 
     def _handle_own_input(self, raw: _RawKey) -> None:
-        # Our own Ctrl+V, injected by the paste. It is the only reliable
-        # signal that the transcription actually reached the window, and
-        # its modifiers must not disturb the user's tracked state. The
-        # discarded click check clears any click from before the paste, so
-        # the first keystroke does not inherit one.
         if raw.is_down and raw.vk == _VK_V:
-            clicked_since_last_check()
+            if clicked_since_last_check():
+                self._recorder.abandon(EditFlag.MOUSE_CLICK)
             self._recorder.pasted(foreground_window())
+
+    def _track_caps_lock(self, raw: _RawKey) -> None:
+        if raw.is_down:
+            if raw.vk not in self._held:
+                self._caps_lock = not self._caps_lock
+            self._held.add(raw.vk)
+        else:
+            self._held.discard(raw.vk)
 
     def _track_modifier(self, raw: _RawKey) -> None:
         if raw.vk not in _MODIFIER_KEYS:
@@ -178,7 +191,7 @@ class Win32EditObserver:
         alt = self._is_held(_VK_ALT)
         return KeyStroke(
             vk=vk,
-            char=key_character(vk, shift, ctrl, alt),
+            char=key_character(vk, shift, ctrl, alt, caps_lock=self._caps_lock),
             shift=shift,
             ctrl=ctrl,
             alt=alt,
