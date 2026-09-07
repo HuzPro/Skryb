@@ -646,12 +646,13 @@ class TestBuildOutput:
         result = _build_output(OutputMode.DIRECT_PASTE, dispatcher)
 
         assert isinstance(result, TextFilterDecorator)
-        assert isinstance(result._inner, DeliveryRecordingDecorator)
-        gui_output = result._inner._inner
+        gui_output = result._inner
         assert isinstance(gui_output, GuiThreadOutputDecorator)
         clipboard_preserving = gui_output._inner
         assert isinstance(clipboard_preserving, ClipboardPreservingDecorator)
-        assert isinstance(clipboard_preserving._inner, PasteAndClipboardAdapter)
+        recorded = clipboard_preserving._inner
+        assert isinstance(recorded, DeliveryRecordingDecorator)
+        assert isinstance(recorded._inner, PasteAndClipboardAdapter)
         mock_preserver_cls.assert_called_once()
         assert clipboard_preserving._preserver is mock_preserver_cls.return_value
 
@@ -663,8 +664,8 @@ class TestBuildOutput:
         result = _build_output(OutputMode.PASTE_AND_CLIPBOARD, dispatcher)
 
         assert isinstance(result, TextFilterDecorator)
-        assert isinstance(result._inner, DeliveryRecordingDecorator)
-        assert isinstance(result._inner._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner._inner, DeliveryRecordingDecorator)
         assert isinstance(result._inner._inner._inner, PasteAndClipboardAdapter)
 
     def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
@@ -673,16 +674,47 @@ class TestBuildOutput:
         result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
 
         assert isinstance(result, TextFilterDecorator)
-        assert isinstance(result._inner, DeliveryRecordingDecorator)
-        assert isinstance(result._inner._inner, GuiThreadOutputDecorator)
-        assert isinstance(result._inner._inner._inner, ClipboardAdapter)
+        assert isinstance(result._inner, GuiThreadOutputDecorator)
+        assert isinstance(result._inner._inner, ClipboardAdapter)
+
+    @patch("voicetotext.bootstrap.Win32KeySender")
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_should_report_a_delivery_when_the_text_is_pasted(
+        self, _writer_cls, _sender_cls,
+    ):
+        reported: list[str] = []
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda action: action()
+
+        result = _build_output(
+            OutputMode.PASTE_AND_CLIPBOARD, dispatcher,
+            on_delivered=reported.append,
+        )
+        result.output("hello there")
+
+        assert reported == ["hello there"]
+
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_should_report_no_delivery_when_nothing_is_pasted(self, _writer_cls):
+        # Edit capture pairs a report with the Ctrl+V that follows it. A mode
+        # that never injects one must stay out of that queue entirely.
+        reported: list[str] = []
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda action: action()
+
+        result = _build_output(
+            OutputMode.CLIPBOARD_ONLY, dispatcher, on_delivered=reported.append,
+        )
+        result.output("hello there")
+
+        assert reported == []
 
     def test_should_wrap_inner_with_gui_thread_dispatcher(self):
         dispatcher = MagicMock()
 
         result = _build_output(OutputMode.CLIPBOARD_ONLY, dispatcher)
 
-        assert result._inner._inner._dispatcher is dispatcher
+        assert result._inner._dispatcher is dispatcher
 
     def test_should_build_reduced_pipeline_for_streaming_mode(
         self, tmp_path: Path,
