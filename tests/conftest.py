@@ -48,6 +48,8 @@ if sys.platform != "win32":
         "test_bootstrap.py",
         "test_mode_aware_loader.py",
         "integration/test_config_persistence.py",
+        "edit_capture/test_win32_foreground.py",
+        "edit_capture/test_win32_input.py",
         "output/test_win32_clipboard_open.py",
         "output/test_win32_clipboard_preserver.py",
         "output/test_win32_clipboard_writer.py",

@@ -1,10 +1,13 @@
 import ctypes
 import ctypes.wintypes as _wt
+import logging
 import threading
 from collections.abc import Callable
 
 from voicetotext.core.exceptions import HotkeyError
 
+
+_logger = logging.getLogger(__name__)
 
 _user32 = ctypes.windll.user32
 _kernel32 = ctypes.windll.kernel32
@@ -71,6 +74,17 @@ _kernel32.GetCurrentThreadId.restype = _wt.DWORD
 # returns True to SUPPRESS the key (stop it reaching other applications).
 KeyEventHandler = Callable[[bool, int], bool]
 
+# Watches key events without a say in suppression. Receives
+# ``(is_key_down, vk, flags, extra)``, the last two straight off
+# ``KBDLLHOOKSTRUCT``. A second consumer rides this hook rather than
+# installing its own: two Python hook procs per keystroke double the odds
+# Windows silently drops one for exceeding ``LowLevelHooksTimeout``.
+KeyObserver = Callable[[bool, int, int, int], None]
+
+
+def _ignore_key_event(is_key_down: bool, vk: int, flags: int, extra: int) -> None:
+    return None
+
 
 class Win32KeyboardHook:
     """A low-level keyboard hook running on its own message-pump thread.
@@ -86,8 +100,13 @@ class Win32KeyboardHook:
     GC collects mid-flight would crash the interpreter.
     """
 
-    def __init__(self, handler: KeyEventHandler) -> None:
+    def __init__(
+        self,
+        handler: KeyEventHandler,
+        observer: KeyObserver = _ignore_key_event,
+    ) -> None:
         self._handler = handler
+        self._observer = observer
         self._proc = _HOOKPROC(self._hook_proc)
         self._thread: threading.Thread | None = None
         self._thread_id: int = 0
@@ -178,7 +197,28 @@ class Win32KeyboardHook:
             l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT),
         ).contents
         if message in _KEY_DOWN_MESSAGES:
-            return self._handler(True, info.vkCode)
+            return self._handle_then_observe(True, info)
         if message in _KEY_UP_MESSAGES:
-            return self._handler(False, info.vkCode)
+            return self._handle_then_observe(False, info)
         return False
+
+    def _handle_then_observe(
+        self, is_key_down: bool, info: _KBDLLHOOKSTRUCT,
+    ) -> bool:
+        suppress = self._handler(is_key_down, info.vkCode)
+        self._observe(is_key_down, info)
+        return suppress
+
+    def _observe(self, is_key_down: bool, info: _KBDLLHOOKSTRUCT) -> None:
+        # An observer fault must not reach the hook proc: an exception there
+        # escapes into a Windows callback, and the hotkeys it breaks are the
+        # only way to start recording.
+        try:
+            self._notify_observer(is_key_down, info)
+        except Exception:
+            _logger.exception("Keyboard hook observer raised; ignored.")
+
+    def _notify_observer(
+        self, is_key_down: bool, info: _KBDLLHOOKSTRUCT,
+    ) -> None:
+        self._observer(is_key_down, info.vkCode, info.flags, info.dwExtraInfo)
