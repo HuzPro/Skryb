@@ -192,6 +192,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
         with torch_module.inference_mode():
             generated = model.generate(
                 input_features,
+                language=self._language,
                 decoder_input_ids=decoder_input_ids,
                 max_new_tokens=_decode_budget(model, len(prefix)),
                 num_beams=1,
