@@ -16,6 +16,12 @@ _VK_V = 0x56
 # pointer's width on both 32- and 64-bit builds.
 _ULONG_PTR = ctypes.c_size_t
 
+# A low-level keyboard hook receives ``dwExtraInfo`` verbatim, so stamping
+# it identifies our own injected keys exactly. The ``LLKHF_INJECTED`` flag
+# would not: it is set for AutoHotkey, PowerToys and the on-screen keyboard
+# too. Stays inside 32 bits so it is a valid ULONG_PTR on either build.
+VOICETOTEXT_INPUT_TAG = 0x56325458
+
 
 class _MouseInput(ctypes.Structure):
     _fields_ = [
@@ -82,7 +88,7 @@ def _key_event(virtual_key: int, *, key_up: bool) -> _Input:
         wScan=0,
         dwFlags=_KEYEVENTF_KEYUP if key_up else 0,
         time=0,
-        dwExtraInfo=0,
+        dwExtraInfo=VOICETOTEXT_INPUT_TAG,
     )
     return event
 
