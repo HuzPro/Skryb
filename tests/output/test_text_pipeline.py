@@ -386,6 +386,40 @@ class TestNumbers:
 
 
 class TestStreamingPipeline:
+    def test_should_keep_right_glue_between_writer_updates(self) -> None:
+        from tests.fakes import FakeTextOutputHandler
+        from voicetotext.output.text_filter_decorator import TextFilterDecorator
+        from voicetotext.transcription.streaming.streaming_output_writer import (
+            StreamingOutputWriter,
+        )
+
+        config = DictionaryConfig(rules=(LiteralRule((" underscore ",), "_"),))
+        output = FakeTextOutputHandler()
+        writer = StreamingOutputWriter(TextFilterDecorator(
+            output, TextPipeline.for_streaming(config),
+        ))
+
+        for text in ("foo", "foo underscore", "foo underscore bar"):
+            writer.emit(text)
+
+        assert "".join(output.outputs) == "foo_bar"
+        writer.emit("foo underscore bar underscore")
+        writer.reset()
+        writer.emit("new")
+        writer.emit("new dictation")
+        assert "".join(output.outputs) == "foo_bar_new dictation"
+
+    @pytest.mark.parametrize("spoken", ["underscore underscore", "underscore dash"])
+    def test_should_replace_adjacent_glued_aliases(self, spoken: str) -> None:
+        config = DictionaryConfig(rules=(
+            LiteralRule((" underscore ",), "_"),
+            LiteralRule((" dash ",), "-"),
+        ))
+
+        expected = "__" if spoken.endswith("underscore") else "_-"
+        for mode in (PipelineMode.BATCH, PipelineMode.STREAMING):
+            assert build_pipeline(config, mode).process(spoken) == expected
+
     def test_should_keep_fillers_single_token_literals_and_regex(self) -> None:
         config = DictionaryConfig(
             options=DictionaryOptions(remove_fillers=True, spoken_commands=True),
