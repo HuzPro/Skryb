@@ -1,9 +1,11 @@
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from tests.fakes.config import FakeConfig
+from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from voicetotext.core.exceptions import ConfigurationError, LicenseNotAcceptedError
 from voicetotext.transcription.crisperwhisper_adapter import (
@@ -15,8 +17,12 @@ from voicetotext.transcription.engine_factory import (
     create_engine_for_active_model,
     create_model_manager,
     engines_with_model_on_disk,
+    resolve_device,
     resolve_engine_id,
+    selectable_engine_ids,
+    startup_requires_torch,
 )
+from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import (
@@ -53,10 +59,14 @@ def _paths(models_dir: Path) -> MagicMock:
     return paths
 
 
-_GPU = HardwareProfile(
-    kind="amd_rocm", device_name="AMD Radeon", gfx_arch="gfx1200",
+_GPU = FakeHardwareDetector(
+    HardwareProfile(
+        kind="amd_rocm", device_name="AMD Radeon", gfx_arch="gfx1200",
+    )
 )
-_CPU = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
+_CPU = FakeHardwareDetector(
+    HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
+)
 
 _DUAL_ENGINE_MODEL = ModelInfo(
     name="dual", size_mb=1, description="test", repo_id="example/dual",
@@ -345,3 +355,115 @@ class TestModelManagers:
         )
 
         assert {m.name for m in manager.list_models()} == set(ALL_MODELS)
+
+
+def _torch_free(registry: EngineRegistry) -> EngineRegistry:
+    return EngineRegistry(
+        descriptors=[
+            replace(descriptor, requires_torch=False)
+            for descriptor in registry.all_descriptors()
+        ],
+        builders={},
+    )
+
+
+class TestSelectableEngineIds:
+    """Startup reads this before importing anything, so it has to answer
+    from the config and the catalogue alone.
+    """
+
+    def test_should_name_only_the_explicitly_configured_engine(self) -> None:
+        ids = selectable_engine_ids(
+            _config(engine="crisperwhisper"), build_engine_registry(),
+        )
+
+        assert ids == ("crisperwhisper",)
+
+    def test_should_offer_the_models_compatible_engines_in_auto_mode(
+        self,
+    ) -> None:
+        ids = selectable_engine_ids(_config(), build_engine_registry())
+
+        assert ids == PARAKEET_MODELS[DEFAULT_MODEL].compatible_engines
+
+    def test_should_widen_to_every_engine_for_an_unknown_model(self) -> None:
+        registry = build_engine_registry()
+
+        ids = selectable_engine_ids(
+            _config(model_size="retired-model"), registry,
+        )
+
+        assert set(ids) == {d.engine_id for d in registry.all_descriptors()}
+
+
+class TestStartupRequiresTorch:
+    def test_should_require_torch_for_the_shipped_engines(self) -> None:
+        assert startup_requires_torch(_config(), build_engine_registry()) is True
+
+    def test_should_not_require_torch_when_every_candidate_declares_none(
+        self,
+    ) -> None:
+        registry = _torch_free(build_engine_registry())
+
+        assert startup_requires_torch(_config(), registry) is False
+
+
+class TestResolveDevice:
+    def test_should_return_the_explicitly_configured_device(self) -> None:
+        device = resolve_device(
+            _config(device="cpu"), build_engine_registry(), _GPU,
+            ("nano_parakeet",),
+        )
+
+        assert device == "cpu"
+
+    def test_should_resolve_auto_from_the_probe_for_a_torch_engine(
+        self,
+    ) -> None:
+        device = resolve_device(
+            _config(), build_engine_registry(), _GPU, ("nano_parakeet",),
+        )
+
+        assert device == "cuda"
+
+    def test_should_leave_auto_to_a_torch_free_engine_without_probing(
+        self,
+    ) -> None:
+        detector = FakeHardwareDetector()
+
+        device = resolve_device(
+            _config(), _torch_free(build_engine_registry()), detector,
+            ("nano_parakeet",),
+        )
+
+        assert device == "auto"
+        assert detector.detect_calls == 0
+
+
+class TestEngineResolutionSkipsTheProbe:
+    """The probe imports torch. When every engine that could drive the
+    model runs on every hardware kind, ranking cannot change with the
+    answer - so it must not be asked for one.
+    """
+
+    def test_should_resolve_a_hardware_agnostic_model_without_probing(
+        self,
+    ) -> None:
+        detector = FakeHardwareDetector()
+
+        engine_id = resolve_engine_id(
+            _config(), PARAKEET_MODELS[DEFAULT_MODEL], detector,
+            build_engine_registry(),
+        )
+
+        assert engine_id == "nano_parakeet"
+        assert detector.detect_calls == 0
+
+    def test_should_probe_when_a_candidate_is_gpu_only(self) -> None:
+        detector = FakeHardwareDetector()
+
+        resolve_engine_id(
+            _config(), _DUAL_ENGINE_MODEL, detector, build_engine_registry(),
+        )
+
+        assert detector.detect_calls == 1

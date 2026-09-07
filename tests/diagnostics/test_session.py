@@ -8,19 +8,22 @@ import numpy as np
 import pytest
 
 from tests.fakes.config import FakeConfig
+from tests.fakes.hardware import FakeHardwareDetector
 from voicetotext.core.paths import AppPaths
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.result import TranscriptionResult
 
 pytestmark = pytest.mark.integration
-_HARDWARE = HardwareProfile(
-    kind="amd_rocm",
-    device_name="Test GPU",
-    gfx_arch="gfx-test",
+_HARDWARE = FakeHardwareDetector(
+    HardwareProfile(
+        kind="amd_rocm", device_name="Test GPU", gfx_arch="gfx-test",
+    )
 )
+_REGISTRY = build_engine_registry()
 
 
 def _session_paths(base: Path, name: str = "current") -> AppPaths:
@@ -60,7 +63,7 @@ class TestSessionEvents:
             "transcription.model_size": "some-model-i-typed-wrong",
         })
 
-        SessionDiagnostics(paths, config, _HARDWARE)
+        SessionDiagnostics(paths, config, _REGISTRY, _HARDWARE)
 
         started = _events(paths)[0]
         assert started["event"] == "app_started"
@@ -87,7 +90,7 @@ class TestSessionEvents:
             model_without_engine,
         )
 
-        SessionDiagnostics(paths, config, _HARDWARE)
+        SessionDiagnostics(paths, config, _REGISTRY, _HARDWARE)
 
         started = _events(paths)[0]
         assert started["event"] == "app_started"
@@ -98,7 +101,7 @@ class TestSessionEvents:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
         diagnostics.engine_loaded(1.25, "cuda")
         requested_at = datetime.now(UTC) - timedelta(seconds=2)
         diagnostics.transcription_finished(
@@ -154,7 +157,7 @@ class TestSessionEvents:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
 
         diagnostics.transcription_finished(
             _audio(),
@@ -179,7 +182,7 @@ class TestSessionEvents:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
 
         diagnostics.engine_load_failed(3.5, RuntimeError("out of memory"), "cuda")
 
@@ -193,7 +196,7 @@ class TestSessionEvents:
 
     def test_should_write_app_stopped_once(self, tmp_path: Path) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
 
         diagnostics.dispose()
         diagnostics.dispose()
@@ -209,7 +212,7 @@ class TestTranscriptionArtifacts:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
 
         diagnostics.transcription_finished(
             _audio(),
@@ -231,7 +234,7 @@ class TestTranscriptionArtifacts:
         app_caplog: pytest.LogCaptureFixture,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
         result = TranscriptionResult(
             text="café transcript",
             language="en",
@@ -269,7 +272,7 @@ class TestSessionRetention:
         paths.activate_session(current)
         config = FakeConfig({"diagnostics.retain_sessions": 2})
 
-        SessionDiagnostics(paths, config, _HARDWARE)
+        SessionDiagnostics(paths, config, _REGISTRY, _HARDWARE)
 
         assert sorted(path.name for path in paths.diagnostics_dir.iterdir()) == [
             "20260802T000000Z-old0002",
@@ -284,7 +287,7 @@ class TestBestEffortWrites:
         app_caplog: pytest.LogCaptureFixture,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
         event_path = paths.session_dir / "session.jsonl"
         event_path.unlink()
         event_path.mkdir()
@@ -299,7 +302,7 @@ class TestBestEffortWrites:
     ) -> None:
         paths = _session_paths(tmp_path)
         config = FakeConfig({"diagnostics.enabled": False})
-        diagnostics = SessionDiagnostics(paths, config, _HARDWARE)
+        diagnostics = SessionDiagnostics(paths, config, _REGISTRY, _HARDWARE)
 
         diagnostics.transcription_finished(
             _audio(),

@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -62,6 +62,21 @@ class EngineRegistry:
 
     def all_descriptors(self) -> tuple[EngineDescriptor, ...]:
         return tuple(self._descriptors.values())
+
+    def requires_torch(self, engine_ids: Iterable[EngineId]) -> bool:
+        """Whether running any of *engine_ids* would import torch.
+
+        Answered from the descriptors alone - importing an engine's
+        backend to find out is exactly the cost startup is trying to
+        avoid. An id with no descriptor answers True, so an engine that
+        forgot to register cannot talk startup out of the import it needs.
+        """
+        return any(
+            self._descriptors[engine_id].requires_torch
+            if engine_id in self._descriptors
+            else True
+            for engine_id in engine_ids
+        )
 
     def build(
         self, engine_id: EngineId, spec: EngineSpec,
