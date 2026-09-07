@@ -202,6 +202,28 @@ class TestCrisperWhisperLoadModel:
 
 
 class TestCrisperWhisperDecoderPrefix:
+    @pytest.mark.parametrize("language", ["en", "de"])
+    def test_should_use_configured_language_for_warmup_and_dictation(
+        self, language: str,
+    ) -> None:
+        adapter = CrisperWhisperAdapter(
+            _REPO_ID, _REVISION, "cpu", Path("/models"), language,
+        )
+        _, _, processor_type, model = _load_with_fakes(adapter)
+
+        adapter.warmup()
+        adapter.transcribe(_audio())
+
+        processor = processor_type.from_pretrained.return_value
+        processor.get_decoder_prompt_ids.assert_called_once_with(
+            task="transcribe", language=language, no_timestamps=True,
+        )
+        assert len(model.generate.call_args_list) == 2
+        assert all(
+            call.kwargs["language"] == language
+            for call in model.generate.call_args_list
+        )
+
     @pytest.mark.parametrize("mode", ["intended", "verbatim"])
     def test_should_prepend_five_mode_tags_before_whisper_controls(
         self, mode: str,
@@ -253,6 +275,7 @@ class TestCrisperWhisperTranscribe:
         )
         assert model.generate.call_args.args == (sentinel.input_features,)
         assert model.generate.call_args.kwargs == {
+            "language": "en",
             "decoder_input_ids": sentinel.decoder_input_ids,
             "max_new_tokens": 256,
             "num_beams": 1,
