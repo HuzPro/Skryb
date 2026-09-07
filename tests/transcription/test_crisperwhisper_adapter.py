@@ -16,10 +16,12 @@ from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.crisperwhisper_adapter import (
     CrisperWhisperAdapter,
     resolve_crisperwhisper_mode,
-    split_into_encoder_windows,
 )
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.result import TranscriptionResult
+from voicetotext.transcription.whisper_features import (
+    split_into_encoder_windows,
+)
 
 
 _REPO_ID = "nyralabs/CrisperWhisper2.0_turbo"

@@ -1,0 +1,168 @@
+"""Whisper encoder front end: 30 s windowing and log-mel features.
+
+Every Whisper adapter shares this module, so it must stay free of
+``torch`` and ``transformers`` imports - the CTranslate2 adapter exists
+to avoid paying for those at startup.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+import numpy as np
+
+from voicetotext.recording.audio_segment import AudioSegment
+
+
+# From the model's preprocessor_config.json: 16 kHz mono, 400-sample FFT,
+# 160-sample hop, 128 mel bins, 30 s chunks.
+_SAMPLE_RATE = 16000
+_N_FFT = 400
+_HOP_LENGTH = 160
+_MEL_BIN_COUNT = 128
+# Audio past this never reaches the encoder, so longer recordings are
+# split rather than silently losing their tail.
+_ENCODER_WINDOW_SECONDS = 30.0
+_ENCODER_WINDOW_SAMPLES = int(_ENCODER_WINDOW_SECONDS * _SAMPLE_RATE)
+_ENCODER_WINDOW_FRAMES = _ENCODER_WINDOW_SAMPLES // _HOP_LENGTH
+
+# Boundaries are nudged onto the quietest frame in this trailing slice of
+# the window so a split lands between words instead of inside one.
+_BOUNDARY_SEARCH_SECONDS = 2.0
+_BOUNDARY_FRAME_SECONDS = 0.02
+
+# Slaney mel scale: linear below 1 kHz, logarithmic above.
+_MEL_LINEAR_STEP_HZ = 200.0 / 3.0
+_MEL_LOG_START_HZ = 1000.0
+_MEL_LOG_START = _MEL_LOG_START_HZ / _MEL_LINEAR_STEP_HZ
+_MEL_LOG_STEP = float(np.log(6.4) / 27.0)
+
+# Whisper's log-mel normalisation: floor the power, clamp to eight
+# decades below the peak, then map roughly onto [-1, 1].
+_MEL_POWER_FLOOR = 1e-10
+_LOG_DYNAMIC_RANGE = 8.0
+_LOG_SHIFT = 4.0
+
+
+def split_into_encoder_windows(audio: AudioSegment) -> list[AudioSegment]:
+    """Slice *audio* into windows the encoder will accept whole."""
+    window_samples = int(_ENCODER_WINDOW_SECONDS * audio.sample_rate)
+    windows: list[AudioSegment] = []
+    start = 0
+    while start < audio.sample_count:
+        end = _window_end(audio, start, window_samples)
+        windows.append(
+            AudioSegment(
+                data=audio.data[start:end],
+                sample_rate=audio.sample_rate,
+            ),
+        )
+        start = end
+    return windows
+
+
+def _window_end(audio: AudioSegment, start: int, window_samples: int) -> int:
+    limit = start + window_samples
+    if limit >= audio.sample_count:
+        return audio.sample_count
+    return _quietest_split_point(audio, start, limit)
+
+
+def _quietest_split_point(audio: AudioSegment, start: int, limit: int) -> int:
+    """Index of the quietest frame boundary near *limit*, else *limit*.
+
+    Cutting on the loudest part of a syllable mangles a word at every
+    seam, so the split moves to the lowest-energy frame in the trailing
+    search slice. The returned index always advances past *start*, so a
+    caller looping on it terminates.
+    """
+    frame = int(_BOUNDARY_FRAME_SECONDS * audio.sample_rate)
+    if frame < 1:
+        return limit
+    search_samples = int(_BOUNDARY_SEARCH_SECONDS * audio.sample_rate)
+    search_start = max(start + frame, limit - search_samples)
+    frame_count = (limit - search_start) // frame
+    if frame_count < 2:
+        return limit
+    frames = audio.data[search_start:search_start + frame_count * frame]
+    energy = np.abs(frames.reshape(frame_count, frame)).mean(axis=1)
+    # The last of the quietest frames, not the first: on a silent gap
+    # that keeps the whole gap with this window so the next one opens on
+    # speech, and on flat audio it splits as late as possible.
+    quietest = int(np.flatnonzero(energy == energy.min())[-1])
+    return search_start + (quietest + 1) * frame
+
+
+def log_mel_spectrogram(audio: AudioSegment) -> np.ndarray:
+    """Encoder input for one window: ``(128, 3000)`` float32 log-mel.
+
+    Audio shorter than 30 s is zero-padded and anything past 30 s is
+    dropped, matching what the encoder can attend to. Split long
+    recordings with :func:`split_into_encoder_windows` first.
+    """
+    if audio.sample_rate != _SAMPLE_RATE:
+        raise ValueError(
+            f"Whisper features need {_SAMPLE_RATE} Hz audio, "
+            f"got {audio.sample_rate}"
+        )
+    magnitudes = _power_spectrogram(_padded_to_window(audio.data))
+    mel_power = _mel_filter_bank() @ magnitudes
+    log_mel = np.log10(np.clip(mel_power, _MEL_POWER_FLOOR, None))
+    log_mel = np.maximum(log_mel, log_mel.max() - _LOG_DYNAMIC_RANGE)
+    return ((log_mel + _LOG_SHIFT) / _LOG_SHIFT).astype(np.float32)
+
+
+def _padded_to_window(samples: np.ndarray) -> np.ndarray:
+    truncated = samples[:_ENCODER_WINDOW_SAMPLES]
+    return np.pad(truncated, (0, _ENCODER_WINDOW_SAMPLES - truncated.size))
+
+
+def _power_spectrogram(samples: np.ndarray) -> np.ndarray:
+    """Windowed power spectra, ``(201, 3000)``, one column per hop."""
+    centred = np.pad(samples, _N_FFT // 2, mode="reflect")
+    frames = np.lib.stride_tricks.sliding_window_view(centred, _N_FFT)
+    frames = frames[::_HOP_LENGTH][:_ENCODER_WINDOW_FRAMES]
+    spectra = np.fft.rfft(frames * _hann_window(), axis=-1)
+    return np.abs(spectra).T ** 2
+
+
+@lru_cache(maxsize=1)
+def _hann_window() -> np.ndarray:
+    return np.hanning(_N_FFT + 1)[:-1]
+
+
+@lru_cache(maxsize=1)
+def _mel_filter_bank() -> np.ndarray:
+    """Slaney-normalised triangular filters, ``(128, 201)``."""
+    fft_frequencies = np.fft.rfftfreq(_N_FFT, 1.0 / _SAMPLE_RATE)
+    band_edges = _mel_to_hertz(
+        np.linspace(
+            0.0,
+            _hertz_to_mel(_SAMPLE_RATE / 2),
+            _MEL_BIN_COUNT + 2,
+        ),
+    )
+    edge_widths = np.diff(band_edges)
+    ramps = band_edges[:, None] - fft_frequencies[None, :]
+    rising = -ramps[:-2] / edge_widths[:-1, None]
+    falling = ramps[2:] / edge_widths[1:, None]
+    triangles = np.maximum(0.0, np.minimum(rising, falling))
+    equal_energy = 2.0 / (band_edges[2:] - band_edges[:-2])
+    return triangles * equal_energy[:, None]
+
+
+def _hertz_to_mel(hertz: float) -> float:
+    if hertz < _MEL_LOG_START_HZ:
+        return hertz / _MEL_LINEAR_STEP_HZ
+    return _MEL_LOG_START + float(
+        np.log(hertz / _MEL_LOG_START_HZ) / _MEL_LOG_STEP
+    )
+
+
+def _mel_to_hertz(mel: np.ndarray) -> np.ndarray:
+    hertz = mel * _MEL_LINEAR_STEP_HZ
+    log_region = mel >= _MEL_LOG_START
+    hertz[log_region] = _MEL_LOG_START_HZ * np.exp(
+        _MEL_LOG_STEP * (mel[log_region] - _MEL_LOG_START),
+    )
+    return hertz
