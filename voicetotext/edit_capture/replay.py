@@ -239,7 +239,7 @@ class EditReplay:
         target = (
             self._word_start_before_cursor()
             if stroke.vk == VK_LEFT
-            else self._word_end_after_cursor()
+            else self._next_word_start_after_cursor()
         )
         self._move_caret(target, extend_selection=stroke.shift)
 
@@ -252,8 +252,9 @@ class EditReplay:
         return self._has_selection() and not stroke.shift
 
     def _collapse_selection_toward(self, stroke: KeyStroke) -> None:
-        edge = min if stroke.vk == VK_LEFT else max
-        self._move_caret(edge(self._anchor, self._cursor), extend_selection=False)
+        edges = (self._anchor, self._cursor)
+        target = min(edges) if stroke.vk == VK_LEFT else max(edges)
+        self._move_caret(target, extend_selection=False)
 
     def _move_to_line_edge(self, stroke: KeyStroke) -> None:
         target = self._line_start() if stroke.vk == VK_HOME else self._line_end()
@@ -300,12 +301,19 @@ class EditReplay:
             position -= 1
         return position
 
-    def _word_end_after_cursor(self) -> int:
+    def _next_word_start_after_cursor(self) -> int:
+        """Where Ctrl+Right lands and Ctrl+Delete deletes up to.
+
+        Windows leaves the caret at the start of the following word, so the
+        run being crossed is the rest of this word and then the space after
+        it. Skipping the space first would land a word further on and put
+        every later edit at the wrong offset.
+        """
         position = self._cursor
         end = len(self._chars)
-        while position < end and self._chars[position].isspace():
-            position += 1
         while position < end and not self._chars[position].isspace():
+            position += 1
+        while position < end and self._chars[position].isspace():
             position += 1
         return position
 
@@ -335,7 +343,7 @@ class EditReplay:
         if self._has_selection():
             self._delete_selection()
         else:
-            self._delete_range(self._cursor, self._word_end_after_cursor())
+            self._delete_range(self._cursor, self._next_word_start_after_cursor())
 
     def _has_selection(self) -> bool:
         return self._anchor != self._cursor

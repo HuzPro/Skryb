@@ -123,13 +123,13 @@ class TestDeletion:
 
         assert state.text == "hello "
 
-    def test_should_delete_the_word_after_the_caret_with_control(self) -> None:
+    def test_should_delete_the_word_and_its_space_after_the_caret(self) -> None:
         replay = _pasted("hello world")
         replay.apply_key(KeyStroke(VK_HOME, "", ctrl=True))
 
         state = replay.apply_key(KeyStroke(VK_DELETE, "", ctrl=True))
 
-        assert state.text == " world"
+        assert state.text == "world"
 
     def test_should_delete_the_selection_on_control_delete(self) -> None:
         replay = _pasted("hello world")
@@ -245,7 +245,7 @@ class TestCaretMotion:
 
         state = _type(replay, "X")
 
-        assert state.text == "helloX world"
+        assert state.text == "hello Xworld"
 
     def test_should_flag_caret_before_span_when_left_is_clamped(self) -> None:
         replay = _pasted("a")
