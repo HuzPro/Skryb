@@ -28,6 +28,9 @@ dependencies = [
     # 5.16.0, and the upper bound keeps a future major out until tested.
     # torchaudio is the decode backend transformers' audio loader uses.
     "transformers>=5.16.0,<6",
+    # Whisper prompt building and decoding go straight to the Rust
+    # tokenizer, so no engine has to import Transformers for them.
+    "tokenizers>=0.23.1",
     "torchaudio>=2.5",
     "text2num>=3.1",
     "jellyfish>=1.0",
