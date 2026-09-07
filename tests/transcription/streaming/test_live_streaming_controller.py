@@ -77,6 +77,9 @@ def _frame():
     return np.zeros(10, dtype=np.float32)
 
 
+_SWAP_TIMEOUT_SECONDS = 5.0
+
+
 class TestHappyPath:
     def test_should_emit_committed_deltas_and_complete(self):
         session = _FakeSession(["", "hello", "hello world"], "hello world done")
@@ -210,3 +213,52 @@ class TestEngineSlot:
 
         with pytest.raises(TranscriptionError, match="no streaming engine"):
             controller.start(lambda _r, _e, _a: None)
+
+
+class _PausedAtSecondFeed:
+    """Holds the worker inside its second feed so a test can act mid-run."""
+
+    def __init__(self, committed_per_feed: list[str]) -> None:
+        self._committed = committed_per_feed
+        self._feeds = 0
+        self.reached_second_feed = threading.Event()
+        self.may_continue = threading.Event()
+
+    def feed(self, chunk: object) -> StreamingUpdate:
+        self._feeds += 1
+        if self._feeds == 2:
+            self.reached_second_feed.set()
+            self.may_continue.wait(timeout=_SWAP_TIMEOUT_SECONDS)
+        committed = self._committed[
+            min(self._feeds - 1, len(self._committed) - 1)
+        ]
+        return StreamingUpdate(
+            committed_text=committed, tentative_text="", is_final=False,
+        )
+
+    def finalize(self) -> TranscriptionResult:
+        return TranscriptionResult(
+            text=self._committed[-1], language="en",
+            language_probability=0.0, transcription_seconds=0.0,
+        )
+
+
+class TestSwappingOutputMidRun:
+    def test_should_paste_only_the_new_words_after_the_output_is_swapped(self):
+        # Saving settings rebuilds the output chain. If the swap forgot how
+        # much had already been pasted, the whole committed transcript would
+        # land at the cursor a second time.
+        session = _PausedAtSecondFeed(["hello", "hello world"])
+        controller, recorder, first = _controller(session)
+        second = FakeTextOutputHandler()
+
+        controller.start(lambda _result, _error, _audio: None)
+        recorder.captured_on_frame(_frame())
+        recorder.captured_on_frame(_frame())
+        assert session.reached_second_feed.wait(timeout=_SWAP_TIMEOUT_SECONDS)
+        controller.set_output(second)
+        session.may_continue.set()
+        controller.stop()
+
+        assert first.outputs == ["hello"]
+        assert second.outputs == [" world"]

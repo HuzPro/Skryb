@@ -351,7 +351,7 @@ class TestApplyDraft:
 
         assert config.get("transcription.language") == "de"
 
-    def test_should_return_changeset_reflecting_only_changed_fields(self):
+    def test_should_report_a_model_change_as_reload_and_output_rebuild(self):
         service, *_ = _build_service()
 
         draft = SettingsDraft(
@@ -368,7 +368,7 @@ class TestApplyDraft:
 
         assert changes.engine_reload_required is True
         assert changes.hotkey_changed is False
-        assert changes.output_changed is False
+        assert changes.output_changed is True
 
     def test_should_clear_install_cache_when_engine_changes(self):
         service, _, manager, *_ = _build_service(
