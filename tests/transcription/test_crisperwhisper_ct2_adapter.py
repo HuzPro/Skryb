@@ -25,8 +25,8 @@ def _loaded(
     adapter: CrisperWhisperCt2Adapter, sequences: list[list[int]],
 ) -> MagicMock:
     model = MagicMock()
-    model.generate.return_value = [
-        MagicMock(sequences_ids=[ids]) for ids in sequences
+    model.generate.side_effect = [
+        [MagicMock(sequences_ids=[ids])] for ids in sequences
     ]
     tokens = MagicMock()
     tokens.decoder_prompt.return_value = [51886, 50258, 50364]
@@ -89,7 +89,7 @@ class TestCrisperWhisperCt2Adapter:
 
         result = adapter.transcribe(_audio(seconds=70.0))
 
-        assert len(model.generate.call_args.args[1]) == 3
+        assert len(model.generate.call_args_list) == 3
         assert result.text == "1 2 3"
 
     def test_should_ask_for_bfloat16_on_gpu_and_default_on_cpu(self) -> None:

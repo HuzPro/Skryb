@@ -142,7 +142,10 @@ class TestRequiresTorch:
 
         assert registry.requires_torch(["crisperwhisper"]) is True
 
-    def test_should_report_no_torch_when_nothing_is_selectable(self):
+    def test_should_assume_torch_when_nothing_is_selectable(self):
+        # An empty list means selection failed, not that the launch runs
+        # no engine, so it answers on the same safe side as an id with no
+        # descriptor.
         registry = EngineRegistry(descriptors=[_DESCRIPTOR], builders={})
 
-        assert registry.requires_torch([]) is False
+        assert registry.requires_torch([]) is True

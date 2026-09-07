@@ -122,24 +122,26 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
         )
 
     def _transcribe_every_window(self, audio: AudioSegment) -> str:
+        parts = [
+            self._generate_text(window).strip()
+            for window in split_into_encoder_windows(audio)
+        ]
+        return " ".join(part for part in parts if part)
+
+    def _generate_text(self, audio: AudioSegment) -> str:
         model, tokens, prompt = self._loaded()
-        windows = split_into_encoder_windows(audio)
         features = np.ascontiguousarray(
-            np.stack([log_mel_spectrogram(window) for window in windows]),
+            log_mel_spectrogram(audio)[np.newaxis, :, :],
         )
         results = model.generate(
             _storage_view(features),
-            [prompt] * len(windows),
+            [prompt],
             beam_size=1,
             sampling_topk=1,
             suppress_blank=False,
             max_length=_MAX_LENGTH,
         )
-        parts = [
-            tokens.decode(result.sequences_ids[0]).strip()
-            for result in results
-        ]
-        return " ".join(part for part in parts if part)
+        return tokens.decode(results[0].sequences_ids[0])
 
     def _loaded(self) -> tuple[_WhisperRuntime, WhisperTokens, list[int]]:
         model, tokens, prompt = self._model, self._tokens, self._prompt
