@@ -498,8 +498,12 @@ class TestAutoPrefersTheTorchFreeEngine:
         (repo / "refs" / "main").write_text(model_info.revision)
 
     def test_should_select_ct2_and_skip_torch_when_it_is_installed(
-        self, tmp_path: Path,
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.setattr(
+            "voicetotext.transcription.engine_factory._ctranslate2_installed",
+            lambda: True,
+        )
         self._turbo_installed(tmp_path)
         config = FakeConfig({
             "transcription.model_size": "crisperwhisper-2.0-turbo",

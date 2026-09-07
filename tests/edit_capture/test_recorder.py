@@ -61,6 +61,24 @@ class _Recording:
 
 
 class TestOpeningABlock:
+    def test_discards_edits_when_consent_is_revoked(self) -> None:
+        enabled = True
+        events: list[dict[str, object]] = []
+        recorder = EditRecorder(events.append, _Clock(), lambda: enabled)
+        recorder.delivered("dictation", "batch", "direct_paste")
+        recorder.pasted(_CHAT)
+        events.clear()
+
+        enabled = False
+        recorder.keyed(KeyStroke(vk=65, char="private"), _CHAT.hwnd)
+        recorder.delivered("more private words", "batch", "direct_paste")
+        recorder.pasted(_CHAT)
+        enabled = True
+        recorder.dispose()
+
+        assert events == []
+        assert recorder.watching_hwnd == 0
+
     def test_should_record_the_delivered_text_before_the_paste(self):
         recording = _Recording()
 

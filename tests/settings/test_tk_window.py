@@ -1,4 +1,5 @@
 from pathlib import Path
+import tkinter
 from tkinter import filedialog
 from unittest.mock import MagicMock
 
@@ -68,6 +69,21 @@ def _no_change() -> ChangeSet:
     return ChangeSet(
         engine_reload_required=False, hotkey_changed=False, output_changed=False,
     )
+
+
+def test_recording_consent_is_off_until_selected(
+    tk_root: tkinter.Tk, service: MagicMock,
+) -> None:
+    window = _make_window(tk_root, service)
+    try:
+        assert window.collect_draft().capture_content is False
+        window._output_page.set_capture_content(True)
+        assert window.collect_draft().capture_content is True
+        window._on_save_clicked()
+        assert service.apply_draft.call_args.args[0].capture_content is True
+    finally:
+        if window.winfo_exists():
+            window.destroy()
 
 
 def _reload_change() -> ChangeSet:

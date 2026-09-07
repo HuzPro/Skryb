@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
@@ -46,6 +47,20 @@ from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ALL_MODELS
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
+
+
+def test_recording_consent_round_trips_through_saved_settings() -> None:
+    service, config, _, _, _ = _build_service()
+    assert service.current_draft().capture_content is False
+
+    changes = service.apply_draft(replace(service.current_draft(), capture_content=True))
+
+    assert config.get("diagnostics.capture_content") is True
+    assert service.current_draft().capture_content is True
+    assert changes.diagnostics_changed
+    assert changes.any_changed
+    service.apply_draft(replace(service.current_draft(), capture_content=False))
+    assert config.get("diagnostics.capture_content") is False
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _CRISPERWHISPER = {
     "crisperwhisper-2.0-turbo",

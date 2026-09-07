@@ -10,6 +10,7 @@ import pytest
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
 from voicetotext.core.paths import AppPaths
+from voicetotext.core.startup_log import SESSION_MARKER
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine_factory import build_engine_registry
@@ -101,7 +102,10 @@ class TestSessionEvents:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
         diagnostics.engine_loaded(1.25, "cuda")
         requested_at = datetime.now(UTC) - timedelta(seconds=2)
         diagnostics.transcription_finished(
@@ -157,7 +161,10 @@ class TestSessionEvents:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
 
         diagnostics.transcription_finished(
             _audio(),
@@ -182,7 +189,10 @@ class TestSessionEvents:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
 
         diagnostics.engine_load_failed(3.5, RuntimeError("out of memory"), "cuda")
 
@@ -196,7 +206,10 @@ class TestSessionEvents:
 
     def test_should_write_app_stopped_once(self, tmp_path: Path) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
 
         diagnostics.dispose()
         diagnostics.dispose()
@@ -212,7 +225,10 @@ class TestTranscriptionArtifacts:
         tmp_path: Path,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
 
         diagnostics.transcription_finished(
             _audio(),
@@ -234,7 +250,10 @@ class TestTranscriptionArtifacts:
         app_caplog: pytest.LogCaptureFixture,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
         result = TranscriptionResult(
             text="café transcript",
             language="en",
@@ -255,19 +274,72 @@ class TestTranscriptionArtifacts:
         assert "engine_seconds=0.250" in app_caplog.text
         assert "char_count=15" in app_caplog.text
         assert "word_count=2" in app_caplog.text
-        assert "café transcript" in app_caplog.text
+        assert "café transcript" not in app_caplog.text
 
 
 class TestSessionRetention:
+    def test_preserves_unmarked_folders_with_session_shaped_names(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        unrelated = paths.diagnostics_dir / "20260101T000000Z-12345678"
+        unrelated.mkdir()
+        (unrelated / "session.log").write_text("keep me", encoding="utf-8")
+
+        SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.retain_sessions": 1}),
+            _REGISTRY, _HARDWARE,
+        )
+
+        assert unrelated.is_dir()
+
+    def test_preserves_linked_sessions_and_their_targets(self, tmp_path: Path) -> None:
+        paths = _session_paths(tmp_path)
+        target = tmp_path / "outside"
+        target.mkdir()
+        (target / SESSION_MARKER).write_text("12345678" + "0" * 24, encoding="ascii")
+        linked = paths.diagnostics_dir / "20260101T000000Z-12345678"
+        try:
+            linked.symlink_to(target, target_is_directory=True)
+        except OSError:
+            pytest.skip("creating symlinks is unavailable")
+
+        SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.retain_sessions": 1}),
+            _REGISTRY, _HARDWARE,
+        )
+
+        assert linked.is_symlink()
+        assert (target / SESSION_MARKER).exists()
+
+    def test_preserves_unrelated_folders_when_retention_is_exceeded(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        unrelated = paths.diagnostics_dir / "000-personal-documents"
+        unrelated.mkdir()
+        document = unrelated / "keep.txt"
+        document.write_text("keep me", encoding="utf-8")
+
+        SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.retain_sessions": 1}),
+            _REGISTRY, _HARDWARE,
+        )
+
+        assert document.read_text(encoding="utf-8") == "keep me"
+
     def test_should_prune_oldest_sessions_beyond_retention(
         self,
         tmp_path: Path,
     ) -> None:
         paths = AppPaths(base=tmp_path)
         paths.ensure_dirs()
-        for name in ("20260801T000000Z-old0001", "20260802T000000Z-old0002"):
+        for name in ("20260801T000000Z-00000001", "20260802T000000Z-00000002"):
             (paths.diagnostics_dir / name).mkdir()
-        current = paths.diagnostics_dir / "20260803T000000Z-current1"
+            (paths.diagnostics_dir / name / SESSION_MARKER).write_text(
+                name[-8:] + "0" * 24, encoding="ascii",
+            )
+        current = paths.diagnostics_dir / "20260803T000000Z-00000003"
         current.mkdir()
         paths.activate_session(current)
         config = FakeConfig({"diagnostics.retain_sessions": 2})
@@ -275,19 +347,63 @@ class TestSessionRetention:
         SessionDiagnostics(paths, config, _REGISTRY, _HARDWARE)
 
         assert sorted(path.name for path in paths.diagnostics_dir.iterdir()) == [
-            "20260802T000000Z-old0002",
-            "20260803T000000Z-current1",
+            "20260802T000000Z-00000002",
+            "20260803T000000Z-00000003",
         ]
 
 
 class TestBestEffortWrites:
+    @pytest.mark.parametrize("setting", ["diagnostics.enabled", "diagnostics.capture_content"])
+    def test_stops_recording_content_without_restarting(
+        self, tmp_path: Path, setting: str,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        config = FakeConfig({"diagnostics.capture_content": True})
+        diagnostics = SessionDiagnostics(paths, config, _REGISTRY, _HARDWARE)
+        result = TranscriptionResult("first words", "en", 1.0, 0.1)
+        diagnostics.transcription_finished(_audio(), result, datetime.now(UTC))
+
+        config.set(setting, False)
+        diagnostics.transcription_finished(
+            _audio(), TranscriptionResult("private words", "en", 1.0, 0.1),
+            datetime.now(UTC),
+        )
+
+        assert (paths.session_dir / "audio" / "0001.wav").exists()
+        assert not (paths.session_dir / "audio" / "0002.wav").exists()
+        assert not (paths.session_dir / "transcripts" / "0002.txt").exists()
+        assert "private words" not in str(_events(paths))
+
+    @pytest.mark.parametrize("enabled", [False, True])
+    def test_requires_separate_content_consent_even_for_existing_configs(
+        self, tmp_path: Path, app_caplog: pytest.LogCaptureFixture,
+        enabled: bool,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.enabled": enabled}),
+            _REGISTRY, _HARDWARE,
+        )
+        result = TranscriptionResult("private words", "en", 1.0, 0.1)
+
+        diagnostics.transcription_finished(_audio(), result, datetime.now(UTC))
+
+        assert not (paths.session_dir / "audio").exists()
+        assert not (paths.session_dir / "transcripts").exists()
+        assert "private words" not in app_caplog.text
+        if enabled:
+            assert "private words" not in str(_events(paths))
+
     def test_should_warn_without_raising_when_event_write_fails(
         self,
         tmp_path: Path,
         app_caplog: pytest.LogCaptureFixture,
     ) -> None:
         paths = _session_paths(tmp_path)
-        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
         event_path = paths.session_dir / "session.jsonl"
         event_path.unlink()
         event_path.mkdir()

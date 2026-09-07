@@ -63,14 +63,18 @@ install.
 ## Licensing
 
 VoiceToText is open source under the Apache License 2.0 (`LICENSE.txt`,
-copyright statement in `NOTICE`). Every runtime dependency is permissive
-(MIT/BSD/Apache/PSF; no LGPL/GPL), so forks may build proprietary,
-closed-source derivatives - that combination is deliberate.
+copyright statement in `NOTICE`). Python packages and downloaded model weights
+have separate licenses. The application's license does not grant rights to
+use a model or its outputs.
+
+CrisperWhisper models and outputs have non-commercial restrictions. The app
+requires acceptance of the bundled terms before downloading or loading these
+models. Commercial or production use requires a separate license from the
+model publisher. See `voicetotext/licenses/crisperwhisper-nc.md`.
 
 Because PyTorch and the other Python packages are downloaded from their
 official indices at install time, the installer does not redistribute them,
-so it carries no obligation to ship their license texts (the same reasoning
-that applies to the runtime-downloaded models). It still ships:
+and model weights are downloaded separately. The installer ships:
 
 - `LICENSE.txt` - the Apache License 2.0 covering VoiceToText itself.
 - `NOTICE.txt` - covers the bundled CPython runtime (PSF license) and

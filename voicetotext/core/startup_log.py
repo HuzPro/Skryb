@@ -1,4 +1,6 @@
 import logging
+import re
+import stat
 import time
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +15,28 @@ _started_at = time.perf_counter()
 _started_at_utc = datetime.now(UTC)
 _session_id = ""
 _session_handler: RotatingFileHandler | None = None
+SESSION_MARKER = ".voicetotext-session"
+
+
+def is_owned_session(path: Path) -> bool:
+    if not re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{8}", path.name):
+        return False
+    marker = path / SESSION_MARKER
+    try:
+        for item in (path, marker):
+            attributes = item.lstat()
+            if stat.S_ISLNK(attributes.st_mode) or (
+                getattr(attributes, "st_file_attributes", 0)
+                & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                return False
+        identifier = marker.read_text(encoding="ascii")
+    except (OSError, UnicodeError):
+        return False
+    return (
+        re.fullmatch(r"[0-9a-f]{32}", identifier) is not None
+        and path.name.endswith("-" + identifier[:8])
+    )
 
 
 def begin_startup_timing() -> None:
@@ -31,6 +55,7 @@ def initialize_session_log(
     )
     session_dir = diagnostics_dir / session_name
     session_dir.mkdir(parents=True, exist_ok=False)
+    (session_dir / SESSION_MARKER).write_text(_session_id, encoding="ascii")
     path = session_dir / "session.log"
     logger = logging.getLogger(_LOGGER_NAME)
     logger.setLevel(logging.DEBUG)
