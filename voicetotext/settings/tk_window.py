@@ -1,3 +1,4 @@
+import sys
 import tkinter
 from collections.abc import Callable
 from dataclasses import replace
@@ -33,6 +34,9 @@ from voicetotext.settings.tk_pages.output_page import TkOutputPage
 from voicetotext.settings.tk_pages.transcription_page import TkTranscriptionPage
 from voicetotext.settings.tk_state_bridge import TkStateBridge
 from voicetotext.settings.theme import Theme, apply_theme, theme_for
+from voicetotext.settings.win32_ime_composition_hook import (
+    Win32ImeCompositionHook,
+)
 from voicetotext.settings.win32_titlebar import set_titlebar_dark
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
@@ -110,6 +114,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._build_ui()
         apply_theme(self, self._theme)
         set_titlebar_dark(self, dark=self._theme.is_dark)
+        if sys.platform == "win32":
+            self._install_ime_composition_hook()
 
         self._service.subscribe_engine(self._engine_bridge)
         self._service.subscribe_state_changes(self._state_bridge)
@@ -118,6 +124,13 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._download_bridge.on_model_deleted,
         )
         self._refresh_save_enabled()
+
+    def _install_ime_composition_hook(self) -> None:
+        """Best-effort: the settings window still opens without the hook."""
+        try:
+            self._ime_composition_hook = Win32ImeCompositionHook(self)
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # UI construction

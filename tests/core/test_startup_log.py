@@ -1,6 +1,7 @@
 import logging
 import re
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from voicetotext.core.debug_logger import VoiceToTextConsoleHandler
 from voicetotext.core.startup_log import (
@@ -70,6 +71,22 @@ class TestStartupLog:
             assert len(_file_handlers()) == 1
             assert len(_console_handlers()) == 1
         finally:
+            for handler in _file_handlers() + _console_handlers():
+                logger.removeHandler(handler)
+                handler.close()
+
+    def test_should_add_a_console_handler_despite_a_foreign_stream_handler(
+        self, tmp_path: Path,
+    ) -> None:
+        logger = logging.getLogger("voicetotext")
+        foreign_handler = logging.StreamHandler()
+        logger.addHandler(foreign_handler)
+        try:
+            initialize_session_log(tmp_path / "log", console=True)
+
+            assert len(_console_handlers()) == 1
+        finally:
+            logger.removeHandler(foreign_handler)
             for handler in _file_handlers() + _console_handlers():
                 logger.removeHandler(handler)
                 handler.close()
