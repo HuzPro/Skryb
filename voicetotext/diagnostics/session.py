@@ -21,7 +21,13 @@ from voicetotext.core.startup_log import (
 )
 from voicetotext.diagnostics.jsonl import JsonlWriter
 from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine_types import HardwareProfile
+from voicetotext.transcription.engine_factory import (
+    probed_hardware_kind,
+    resolve_device,
+    selectable_engine_ids,
+)
+from voicetotext.transcription.engine_registry import EngineRegistry
+from voicetotext.transcription.hardware_detector import HardwareDetector
 from voicetotext.transcription.model_info import DEFAULT_MODEL, get_model_info
 from voicetotext.transcription.result import TranscriptionResult
 
@@ -68,11 +74,13 @@ class SessionDiagnostics:
         self,
         paths: AppPaths,
         config: ConfigurationStore,
-        hardware: HardwareProfile,
+        registry: EngineRegistry,
+        hardware_detector: HardwareDetector,
     ) -> None:
         self._paths = paths
         self._config = config
-        self._hardware = hardware
+        self._registry = registry
+        self._hardware_detector = hardware_detector
         self._enabled = config.get("diagnostics.enabled", True) is True
         retain_sessions = config.get("diagnostics.retain_sessions", 50)
         self._retain_sessions = (
@@ -226,7 +234,9 @@ class SessionDiagnostics:
                 "model": self._active_model,
                 "engine": self._active_engine,
                 "device": self._active_device,
-                "hardware_kind": self._hardware.kind,
+                "hardware_kind": probed_hardware_kind(
+                    self._config, self._registry, self._hardware_detector,
+                ),
                 "os": platform.platform(),
                 "python_version": platform.python_version(),
             }
@@ -286,10 +296,12 @@ class SessionDiagnostics:
         return model, engine
 
     def _configured_device(self) -> str:
-        configured_device = self._config.get("transcription.device", "auto")
-        if isinstance(configured_device, str) and configured_device != "auto":
-            return configured_device
-        return "cpu" if self._hardware.kind == "cpu" else "cuda"
+        return resolve_device(
+            self._config,
+            self._registry,
+            self._hardware_detector,
+            selectable_engine_ids(self._config, self._registry),
+        )
 
     @staticmethod
     def _save_audio(path: Path, audio: AudioSegment) -> None:

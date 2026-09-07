@@ -1,6 +1,8 @@
 import io
 import os
 import sys
+from collections.abc import Callable
+from dataclasses import replace
 from concurrent.futures import Future
 from pathlib import Path
 from types import ModuleType
@@ -9,12 +11,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.fakes.config import FakeConfig
+from voicetotext.transcription.engine_factory import build_engine_registry
+from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.license_policy import LicensePolicy
+from voicetotext.transcription.model_info import DEFAULT_MODEL
+from voicetotext.transcription.torch_hardware_detector import (
+    TorchHardwareDetector,
+)
 from voicetotext.__main__ import (
+    _Startup,
     _apply_hf_cache_env_overrides,
     _apply_torch_env_overrides,
     _configured_model_installed,
     _show_error,
+    _start_torch_prewarm_if_needed,
     _stderr_is_console,
     _try_show_error_dialog,
     main,
@@ -26,6 +37,37 @@ windows_startup_only = pytest.mark.skipif(
     sys.platform != "win32",
     reason="drives the Windows startup chain: %APPDATA% and ctypes.windll",
 )
+
+
+def _startup(
+    registry: EngineRegistry | None = None,
+    await_torch_prewarm: Callable[[], None] = lambda: None,
+) -> _Startup:
+    config = MagicMock()
+    config.get.return_value = "parakeet-tdt-0.6b-v3"
+    return _Startup(
+        config=config,
+        model_was_configured=True,
+        registry=registry or MagicMock(name="registry"),
+        await_torch_prewarm=await_torch_prewarm,
+    )
+
+
+def _torch_free_registry() -> EngineRegistry:
+    """The shipped registry with every engine declaring no torch."""
+    return EngineRegistry(
+        descriptors=[
+            replace(descriptor, requires_torch=False)
+            for descriptor in build_engine_registry().all_descriptors()
+        ],
+        builders={},
+    )
+
+
+def _resolved_prewarm() -> Future[ModuleType]:
+    prewarm: Future[ModuleType] = Future()
+    prewarm.set_result(ModuleType("torch"))
+    return prewarm
 
 
 class TestConfiguredModelInstalled:
@@ -211,83 +253,128 @@ class TestMaintenanceStartupIsolation:
 
 @windows_startup_only
 class TestBindingStartupOrder:
-    def test_should_overlap_hardware_independent_setup_before_detection(self) -> None:
+    """``_run`` builds everything it can before anything touches the GPU.
+
+    Hardware detection is the expensive step - the probe imports torch -
+    so ``_run`` only hands the detector on. Nothing here may call it.
+    """
+
+    def test_should_build_the_app_without_ever_probing_hardware(self) -> None:
         timeline: list[str] = []
         root = MagicMock()
-        config = MagicMock()
-        config.has_persisted_value.return_value = True
-        config.get.return_value = "parakeet-tdt-0.6b-v3"
         manager = MagicMock()
         manager.is_installed.return_value = True
-        registry = MagicMock(name="registry")
-        hardware = MagicMock(name="hardware")
         app = MagicMock()
         paths = SimpleNamespace(
             config_path=Path("config.json"),
             models_dir=Path("models"),
             is_first_run=lambda: False,
         )
-        future: Future[ModuleType] = Future()
+        startup = _startup(
+            await_torch_prewarm=lambda: timeline.append("await-prewarm"),
+        )
 
         with (
             patch("tkinter.Tk", side_effect=lambda: timeline.append("tk") or root),
             patch(
-                "voicetotext.core.json_config_adapter.JsonConfigAdapter",
-                side_effect=lambda _path: timeline.append("config-constructed") or config,
-            ),
-            patch.object(config, "load", side_effect=lambda: timeline.append("config-loaded")),
-            patch(
-                "voicetotext.transcription.model_info.migrate_removed_models",
-                side_effect=lambda _config: timeline.append("models-migrated"),
-            ),
-            patch(
-                "voicetotext.transcription.model_info.migrate_engine_field",
-                side_effect=lambda _config: timeline.append("engine-migrated"),
-            ),
-            patch(
                 "voicetotext.downloads.download_manager.DownloadManager",
-                side_effect=lambda **_kwargs: timeline.append("downloads") or MagicMock(),
+                side_effect=lambda **_kwargs: timeline.append("downloads")
+                or MagicMock(),
             ),
             patch(
                 "voicetotext.transcription.engine_factory.create_model_manager",
                 side_effect=lambda *_args: timeline.append("manager") or manager,
             ),
             patch(
-                "voicetotext.transcription.engine_factory.build_engine_registry",
-                side_effect=lambda: timeline.append("registry") or registry,
-            ),
-            patch(
-                "voicetotext.__main__._consume_torch_prewarm",
-                side_effect=lambda _future: timeline.append("consume"),
-            ),
-            patch(
-                "voicetotext.transcription.torch_hardware_detector.TorchHardwareDetector.detect",
-                side_effect=lambda: timeline.append("detect") or hardware,
+                "voicetotext.transcription.torch_hardware_detector."
+                "TorchHardwareDetector.detect",
             ) as detect,
             patch(
                 "voicetotext.bootstrap.build_app",
-                side_effect=lambda *_args, **_kwargs: timeline.append("build-app") or app,
+                side_effect=lambda *_args, **_kwargs: timeline.append("build-app")
+                or app,
             ) as build_app,
         ):
-            _run(paths, future)
+            _run(paths, startup)
 
         assert timeline == [
             "tk",
-            "config-constructed",
-            "config-loaded",
-            "models-migrated",
-            "engine-migrated",
             "downloads",
             "manager",
-            "registry",
-            "consume",
-            "detect",
+            "await-prewarm",
             "build-app",
         ]
-        detect.assert_called_once_with()
-        assert build_app.call_args.kwargs["registry"] is registry
-        assert build_app.call_args.kwargs["hardware"] is hardware
+        detect.assert_not_called()
+        assert build_app.call_args.kwargs["registry"] is startup.registry
+        assert isinstance(
+            build_app.call_args.kwargs["hardware_detector"],
+            TorchHardwareDetector,
+        )
         app.run.assert_called_once_with()
+
+
+class TestTorchPrewarmGate:
+    """Torch costs over a second to import, so a launch that will not use
+    it must not start the prewarm at all. The engine descriptor is the
+    only thing asked - importing the engine to find out would cost the
+    very second the gate is protecting.
+    """
+
+    def test_should_prewarm_when_the_selected_engine_needs_torch(self) -> None:
+        config = FakeConfig({"transcription.model_size": DEFAULT_MODEL})
+
+        with patch(
+            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            return_value=_resolved_prewarm(),
+        ) as start:
+            wait = _start_torch_prewarm_if_needed(config, build_engine_registry())
+            wait()
+
+        start.assert_called_once_with()
+
+    def test_should_skip_prewarm_when_no_selectable_engine_needs_torch(
+        self,
+    ) -> None:
+        config = FakeConfig({"transcription.model_size": DEFAULT_MODEL})
+
+        with patch(
+            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+        ) as start:
+            wait = _start_torch_prewarm_if_needed(config, _torch_free_registry())
+            wait()
+
+        start.assert_not_called()
+
+    def test_should_prewarm_for_an_explicitly_configured_torch_engine(
+        self,
+    ) -> None:
+        config = FakeConfig(
+            {
+                "transcription.model_size": DEFAULT_MODEL,
+                "transcription.engine": "crisperwhisper",
+            }
+        )
+
+        with patch(
+            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            return_value=_resolved_prewarm(),
+        ) as start:
+            _start_torch_prewarm_if_needed(config, build_engine_registry())
+
+        start.assert_called_once_with()
+
+    def test_should_prewarm_when_the_configured_model_is_unknown(self) -> None:
+        # A config that predates a catalogue migration must not be able to
+        # talk startup out of an import its engine will need.
+        config = FakeConfig({"transcription.model_size": "retired-model"})
+
+        with patch(
+            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            return_value=_resolved_prewarm(),
+        ) as start:
+            _start_torch_prewarm_if_needed(config, build_engine_registry())
+
+        start.assert_called_once_with()
 
 
 @windows_startup_only
@@ -299,9 +386,6 @@ class TestOneLicensePolicyForTheProcess:
     """
 
     def _run_with_first_time_setup(self, tmp_path: Path) -> tuple:
-        config = MagicMock()
-        config.has_persisted_value.return_value = True
-        config.get.return_value = "parakeet-tdt-0.6b-v3"
         manager = MagicMock()
         manager.is_installed.return_value = True
         paths = SimpleNamespace(
@@ -310,31 +394,18 @@ class TestOneLicensePolicyForTheProcess:
             dictionary_path=tmp_path / "dictionary.json",
             is_first_run=lambda: True,
         )
-        future: Future[ModuleType] = Future()
 
         with (
             patch("tkinter.Tk", return_value=MagicMock()),
-            patch(
-                "voicetotext.core.json_config_adapter.JsonConfigAdapter",
-                return_value=config,
-            ),
-            patch("voicetotext.transcription.model_info.migrate_removed_models"),
-            patch("voicetotext.transcription.model_info.migrate_engine_field"),
             patch("voicetotext.downloads.download_manager.DownloadManager"),
             patch(
                 "voicetotext.transcription.engine_factory.create_model_manager",
                 return_value=manager,
             ) as create_model_manager,
-            patch("voicetotext.transcription.engine_factory.build_engine_registry"),
-            patch("voicetotext.__main__._consume_torch_prewarm"),
-            patch(
-                "voicetotext.transcription.torch_hardware_detector."
-                "TorchHardwareDetector.detect",
-            ),
             patch("voicetotext.__main__._run_first_time_setup") as first_run_setup,
             patch("voicetotext.bootstrap.build_app") as build_app,
         ):
-            _run(paths, future)
+            _run(paths, _startup())
 
         return create_model_manager, first_run_setup, build_app
 

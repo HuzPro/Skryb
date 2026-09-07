@@ -6,6 +6,7 @@ import pytest
 
 import voicetotext.bootstrap as bootstrap
 from tests.fakes.config import FakeConfig
+from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from voicetotext.bootstrap import (
     _build_output,
@@ -60,8 +61,11 @@ _REGISTRY = MagicMock()
 _ALLOW_ALL_LICENCES = AllowAllLicensePolicy()
 _DIAGNOSTICS = MagicMock(spec=SessionDiagnostics)
 
-_ROCM_PROFILE = HardwareProfile(
-    kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
+_ROCM_DETECTOR = FakeHardwareDetector(
+    HardwareProfile(
+        kind="amd_rocm", device_name="AMD Radeon RX 9060 XT",
+        gfx_arch="gfx1200",
+    )
 )
 
 
@@ -87,7 +91,7 @@ class TestActiveEngineProvider:
 
     def test_should_resolve_parakeet_model_to_nano_parakeet(self, tmp_path):
         provider = _make_active_engine_provider(
-            _provider_config(model_size="parakeet-tdt-0.6b-v3"), _ROCM_PROFILE,
+            _provider_config(model_size="parakeet-tdt-0.6b-v3"), _ROCM_DETECTOR,
             build_engine_registry(), tmp_path,
         )
 
@@ -487,7 +491,7 @@ class TestLicenceGateAtStartupLoad:
             self._gated_config(),
             SimpleNamespace(models_dir=tmp_path),
             build_engine_registry(),
-            _ROCM_PROFILE,
+            _ROCM_DETECTOR,
             LicensePolicy(FakeConfig()),
             _DIAGNOSTICS,
             use_case=use_case,

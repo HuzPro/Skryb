@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,48 @@ class TestEngineSpec:
         )
 
         assert spec.revision == "de0369c8a68025b7f6e86387b6eb5a3b369787c8"
+
+
+class TestRequiresTorch:
+    """Startup asks this to decide whether to import torch, so it has to
+    answer from the descriptors alone and it has to err towards yes.
+    """
+
+    def test_should_report_torch_for_an_engine_that_declares_nothing(self):
+        registry = EngineRegistry(descriptors=[_DESCRIPTOR], builders={})
+
+        assert registry.requires_torch(["nano_parakeet"]) is True
+
+    def test_should_report_no_torch_for_an_engine_that_declares_none(self):
+        registry = EngineRegistry(
+            descriptors=[replace(_DESCRIPTOR, requires_torch=False)],
+            builders={},
+        )
+
+        assert registry.requires_torch(["nano_parakeet"]) is False
+
+    def test_should_report_torch_when_any_candidate_needs_it(self):
+        registry = EngineRegistry(
+            descriptors=[
+                replace(_DESCRIPTOR, requires_torch=False),
+                replace(_DESCRIPTOR, engine_id="crisperwhisper"),
+            ],
+            builders={},
+        )
+
+        assert registry.requires_torch(
+            ["nano_parakeet", "crisperwhisper"],
+        ) is True
+
+    def test_should_report_torch_for_an_unregistered_engine(self):
+        registry = EngineRegistry(
+            descriptors=[replace(_DESCRIPTOR, requires_torch=False)],
+            builders={},
+        )
+
+        assert registry.requires_torch(["crisperwhisper"]) is True
+
+    def test_should_report_no_torch_when_nothing_is_selectable(self):
+        registry = EngineRegistry(descriptors=[_DESCRIPTOR], builders={})
+
+        assert registry.requires_torch([]) is False
