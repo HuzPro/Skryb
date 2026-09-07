@@ -16,7 +16,8 @@ from voicetotext.settings.theme import HEADING_STYLE
 
 _HINT = (
     "Replace spoken words or phrases with typed text. Separate literal aliases "
-    "with commas; regex rules use one pattern."
+    "with commas; regex rules use one pattern. A space at the start or end of "
+    "the aliases box glues every alias to the neighbouring text."
 )
 _EMPTY_SPOKEN_ERROR = "At least one spoken alias or regex pattern is required."
 _INVALID_REGEX_ERROR = "The regex pattern or replacement is invalid: {}"
@@ -201,8 +202,8 @@ class TkDictionaryPage(ttk.Frame):
     def _rule_from_editor(
         self, original: DictionaryRule | None = None,
     ) -> DictionaryRule | None:
-        spoken = self._spoken_var.get().strip()
-        if not spoken:
+        spoken = self._spoken_var.get()
+        if not spoken.strip():
             self._message_var.set(_EMPTY_SPOKEN_ERROR)
             return None
         replacement = self._replacement_var.get()
@@ -215,7 +216,7 @@ class TkDictionaryPage(ttk.Frame):
                 return None
             enabled = original.enabled if isinstance(original, RegexRule) else True
             return RegexRule(spoken, replacement, enabled)
-        aliases = tuple(alias.strip() for alias in spoken.split(",") if alias.strip())
+        aliases = _split_aliases(spoken)
         if not aliases:
             self._message_var.set(_EMPTY_SPOKEN_ERROR)
             return None
@@ -234,11 +235,11 @@ class TkDictionaryPage(ttk.Frame):
     ) -> bool:
         if not isinstance(candidate, LiteralRule):
             return False
-        aliases = set(candidate.spoken)
+        aliases = _plain_aliases(candidate)
         duplicate = any(
             index != ignored_index
             and isinstance(rule, LiteralRule)
-            and bool(aliases.intersection(rule.spoken))
+            and bool(aliases & _plain_aliases(rule))
             for index, rule in enumerate(self._dictionary.rules)
         )
         if duplicate:
@@ -296,7 +297,7 @@ class TkDictionaryPage(ttk.Frame):
         rule = self._dictionary.rules[index]
         if isinstance(rule, LiteralRule):
             self._rule_type_var.set("literal")
-            self._spoken_var.set(", ".join(rule.spoken))
+            self._spoken_var.set(_join_aliases(rule.spoken))
             self._case_sensitive_var.set(rule.case_sensitive)
             self._whole_words_var.set(rule.whole_words)
             self._phonetic_var.set(rule.phonetic)
@@ -386,6 +387,33 @@ class TkDictionaryPage(ttk.Frame):
 
 def _rule_label(rule: DictionaryRule) -> str:
     if isinstance(rule, LiteralRule):
-        source = ", ".join(rule.spoken)
+        source = ", ".join(_quote_if_glued(alias) for alias in rule.spoken)
         return f"[literal] {source}  ->  {rule.replacement}"
-    return f"[regex] {rule.pattern}  ->  {rule.replacement}"
+    return f"[regex] {_quote_if_glued(rule.pattern)}  ->  {rule.replacement}"
+
+
+def _plain_aliases(rule: LiteralRule) -> set[str]:
+    return {alias.strip() for alias in rule.spoken}
+
+
+def _split_aliases(spoken: str) -> tuple[str, ...]:
+    glue_left, glue_right = _edge_whitespace(spoken)
+    return tuple(
+        glue_left + alias.strip() + glue_right
+        for alias in spoken.split(",")
+        if alias.strip()
+    )
+
+
+def _join_aliases(aliases: tuple[str, ...]) -> str:
+    glue_left, _ = _edge_whitespace(aliases[0])
+    _, glue_right = _edge_whitespace(aliases[-1])
+    return glue_left + ", ".join(alias.strip() for alias in aliases) + glue_right
+
+
+def _edge_whitespace(text: str) -> tuple[str, str]:
+    return text[: len(text) - len(text.lstrip())], text[len(text.rstrip()):]
+
+
+def _quote_if_glued(source: str) -> str:
+    return source if source == source.strip() else f'"{source}"'

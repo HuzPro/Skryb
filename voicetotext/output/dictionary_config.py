@@ -178,7 +178,7 @@ def _load_literal_rule(
         return None
     case_sensitive, whole_words, phonetic, enabled = booleans
     return LiteralRule(
-        spoken=tuple(alias.strip() for alias in cast(list[str], raw_spoken)),
+        spoken=tuple(cast(list[str], raw_spoken)),
         replacement=replacement,
         case_sensitive=case_sensitive,
         whole_words=whole_words,
