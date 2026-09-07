@@ -37,5 +37,14 @@ class StreamingOutputWriter:
         leads_the_line = self._emitted_word_count == len(new_words)
         return suffix if leads_the_line else " " + suffix
 
+    def set_output(self, output: TextOutputHandler) -> None:
+        """Send later deltas somewhere else without forgetting the earlier ones.
+
+        Saving settings rebuilds the output chain, which can happen while a
+        dictation is still running. Counting from zero again would re-paste
+        the whole committed transcript at the cursor.
+        """
+        self._output = output
+
     def reset(self) -> None:
         self._emitted_word_count = 0
