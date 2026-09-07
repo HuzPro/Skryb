@@ -434,6 +434,10 @@ def _print_summary(corpus: _Corpus, manifest_rows: int, copied: int) -> None:
     _print_value("wav files copied", copied)
     _print_value("manifest rows", manifest_rows)
     _print_value("kept_as_is_rate", f"{_share(kept_as_is, len(rows)):.3f}")
+    # Streaming pastes one word at a time, so a single utterance becomes many
+    # rows whose text is a fragment. Splitting the counts keeps those from
+    # being read as if they were whole dictations.
+    _print_counts("pipeline_mode", Counter(row.pipeline_mode for row in rows))
     _print_counts("end_reason", Counter(row.end_reason for row in rows))
     _print_counts("process", Counter(row.process for row in rows))
     _print_counts("edit_kind", Counter(row.edit_kind for row in rows))
