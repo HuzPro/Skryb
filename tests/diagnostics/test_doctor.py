@@ -37,6 +37,11 @@ class TestDoctorReportShape:
 
         assert "[torch]" in report.lower() or "[Torch]" in report
 
+    def test_should_include_ctranslate2_section(self) -> None:
+        report = run_doctor()
+
+        assert "[ctranslate2]" in report
+
     def test_should_include_huggingface_cache_section(self) -> None:
         report = run_doctor()
 
@@ -60,6 +65,13 @@ class TestDoctorReportsMissingBackends:
             report = run_doctor()
 
         assert "nano_parakeet" in report or "nano-parakeet" in report
+        assert "MISSING" in report
+
+    def test_should_report_missing_ctranslate2_without_crashing(self) -> None:
+        with patch.dict("sys.modules", {"ctranslate2": None}):
+            report = run_doctor()
+
+        assert "[ctranslate2]" in report
         assert "MISSING" in report
 
     def test_missing_backend_line_should_include_install_hint(self) -> None:

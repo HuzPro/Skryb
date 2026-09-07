@@ -7,6 +7,7 @@ from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
 from voicetotext.downloads.download_manager import DownloadHandle, DownloadManager
 from voicetotext.downloads.hf_repo_resolver import HfRepoResolver
 from voicetotext.downloads.model_download_job import ModelDownloadJob
+from voicetotext.transcription.ct2_conversion import prebuild_ct2_model
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ModelInfo
 from voicetotext.transcription.model_manager import ModelManager
@@ -179,6 +180,7 @@ class HuggingFaceModelManager(ModelManager):
             files=resolved.files,
             models_dir=self._models_dir,
             file_downloader=self._file_downloader,
+            post_install=prebuild_ct2_model,
         )
         return self._download_manager.enqueue(job)
 

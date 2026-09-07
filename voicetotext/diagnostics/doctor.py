@@ -14,6 +14,8 @@ import sys
 
 from voicetotext.core.paths import AppPaths
 
+_CTRANSLATE2_INSTALL_HINT = "see INSTALL.md - the wheel differs per GPU vendor"
+
 _BACKEND_INSTALL_HINTS: dict[str, str] = {
     "nano_parakeet": "pip install nano-parakeet",
     "huggingface_hub": "pip install huggingface-hub",
@@ -26,6 +28,7 @@ def run_doctor() -> str:
         ["=== VoiceToText diagnostic report ==="],
         _probe_python(),
         _probe_torch(),
+        _probe_ctranslate2(),
         _probe_engine_backends(),
         _probe_audio(),
         _probe_hf_cache(),
@@ -72,6 +75,36 @@ def _read_torch_info() -> list[str]:
             lines.append(
                 f"  device[{index}]: {torch.cuda.get_device_name(index)}"
             )
+    return lines
+
+
+def _probe_ctranslate2() -> list[str]:
+    """Report which CTranslate2 build is installed, not just its version.
+
+    The PyPI wheel and the ROCm wheel share a version number, so the
+    device count is the only thing that tells them apart - and a wheel
+    built for the wrong runtime reports zero devices instead of failing
+    to import.
+    """
+    try:
+        return ["[ctranslate2]", *_read_ctranslate2_info()]
+    except ImportError:
+        return ["[ctranslate2]", f"  MISSING ({_CTRANSLATE2_INSTALL_HINT})"]
+    except Exception as exc:
+        return ["[ctranslate2]", f"  ERROR: {exc}"]
+
+
+def _read_ctranslate2_info() -> list[str]:
+    import ctranslate2
+
+    device_count = ctranslate2.get_cuda_device_count()
+    lines = [
+        f"  version: {getattr(ctranslate2, '__version__', '(unknown)')}",
+        f"  gpu devices: {device_count}",
+    ]
+    if device_count:
+        compute_types = sorted(ctranslate2.get_supported_compute_types("cuda"))
+        lines.append(f"  gpu compute types: {', '.join(compute_types)}")
     return lines
 
 
