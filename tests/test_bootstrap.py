@@ -40,6 +40,9 @@ from voicetotext.edit_capture.delivery_recording_decorator import (
     DeliveryRecordingDecorator,
 )
 from voicetotext.hotkeys.win32_keyboard_hook import ignore_key_event
+from voicetotext.output.caps_lock_uppercase_decorator import (
+    CapsLockUppercaseDecorator,
+)
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -652,7 +655,9 @@ class TestBuildOutput:
         assert isinstance(result, TextFilterDecorator)
         gui_output = result._inner
         assert isinstance(gui_output, GuiThreadOutputDecorator)
-        clipboard_preserving = gui_output._inner
+        caps_lock = gui_output._inner
+        assert isinstance(caps_lock, CapsLockUppercaseDecorator)
+        clipboard_preserving = caps_lock._inner
         assert isinstance(clipboard_preserving, ClipboardPreservingDecorator)
         recorded = clipboard_preserving._inner
         assert isinstance(recorded, DeliveryRecordingDecorator)
@@ -669,8 +674,10 @@ class TestBuildOutput:
 
         assert isinstance(result, TextFilterDecorator)
         assert isinstance(result._inner, GuiThreadOutputDecorator)
-        assert isinstance(result._inner._inner, DeliveryRecordingDecorator)
-        assert isinstance(result._inner._inner._inner, PasteAndClipboardAdapter)
+        assert isinstance(result._inner._inner, CapsLockUppercaseDecorator)
+        recorded = result._inner._inner._inner
+        assert isinstance(recorded, DeliveryRecordingDecorator)
+        assert isinstance(recorded._inner, PasteAndClipboardAdapter)
 
     def test_should_return_clipboard_adapter_for_clipboard_only_mode(self):
         dispatcher = MagicMock()
@@ -679,7 +686,8 @@ class TestBuildOutput:
 
         assert isinstance(result, TextFilterDecorator)
         assert isinstance(result._inner, GuiThreadOutputDecorator)
-        assert isinstance(result._inner._inner, ClipboardAdapter)
+        assert isinstance(result._inner._inner, CapsLockUppercaseDecorator)
+        assert isinstance(result._inner._inner._inner, ClipboardAdapter)
 
     @patch("voicetotext.bootstrap.Win32KeySender")
     @patch("voicetotext.bootstrap.Win32ClipboardWriter")
