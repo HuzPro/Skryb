@@ -30,12 +30,16 @@ from voicetotext.edit_capture.delivery_recording_decorator import (
 )
 from voicetotext.edit_capture.observer import Win32EditObserver
 from voicetotext.edit_capture.recorder import EditRecorder
+from voicetotext.edit_capture.win32_input import caps_lock_enabled
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.win32_keyboard_hook import KeyObserver, ignore_key_event
+from voicetotext.output.caps_lock_uppercase_decorator import (
+    CapsLockUppercaseDecorator,
+)
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -240,7 +244,10 @@ def _build_output(
             sleeper=sleeper,
         ),
     }
-    inner = builders[mode]()
+    # ``GetKeyState`` answers from the calling thread's message queue, so the
+    # Caps Lock check sits below the GUI hop where the queue is actually
+    # pumped; on the daemon worker it could report a stale toggle.
+    inner = CapsLockUppercaseDecorator(builders[mode](), caps_lock_enabled)
     # Always marshal output onto the GUI thread. Win32 clipboard and
     # ``SendInput`` calls require a UI thread, and the use case runs
     # on a daemon worker. Wrapping every concrete handler with this
