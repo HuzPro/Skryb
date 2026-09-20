@@ -49,6 +49,20 @@ class TestCapitalisationFromWhatPrecedes:
 
         assert result == "NASA rocks."
 
+    def test_should_lowercase_after_a_comma(self) -> None:
+        context = CaretContext("Hello, ", "", "")
+
+        result = fit_to_context("Then we left.", context)
+
+        assert result == "then we left."
+
+    def test_should_lowercase_after_a_closing_bracket(self) -> None:
+        context = CaretContext("(as agreed) ", "", "")
+
+        result = fit_to_context("We left.", context)
+
+        assert result == "we left."
+
     def test_should_lowercase_only_the_first_word(self) -> None:
         context = CaretContext("Hello, I'm ", "here for water", ". ")
 
@@ -105,3 +119,52 @@ class TestTerminalPunctuationFromWhatFollows:
         result = fit_to_context("Two.", context)
 
         assert result == "two."
+
+
+class TestInvisibleCharacters:
+    def test_should_capitalise_in_an_empty_composer_paragraph(self) -> None:
+        context = CaretContext("\ufeff", "", "\ufeff\n")
+
+        result = fit_to_context("Hello there.", context)
+
+        assert result == "Hello there."
+
+    def test_should_capitalise_at_the_start_of_an_empty_field(self) -> None:
+        context = CaretContext("", "", "\n")
+
+        result = fit_to_context("Hello there.", context)
+
+        assert result == "Hello there."
+
+    def test_should_capitalise_after_an_object_replacement_on_its_own_line(
+        self,
+    ) -> None:
+        context = CaretContext("\ufffc\n\ufffc", "", "")
+
+        result = fit_to_context("hello there.", context)
+
+        assert result == "Hello there."
+
+    def test_should_keep_the_full_stop_before_an_object_replacement(self) -> None:
+        context = CaretContext("", "", "\n\ufffc\nSend")
+
+        result = fit_to_context("Hello there.", context)
+
+        assert result == "Hello there."
+
+
+class TestUnreadableNeighbours:
+    @pytest.mark.parametrize("text", ["Hello there.", "hello there."])
+    def test_should_leave_the_case_alone_after_an_unknown_symbol(
+        self, text: str,
+    ) -> None:
+        context = CaretContext("… ", "", "")
+
+        assert fit_to_context(text, context) == text
+
+    def test_should_keep_the_full_stop_before_an_unknown_symbol(self) -> None:
+        context = CaretContext("", "", "*")
+
+        result = fit_to_context("Hello there.", context)
+
+        assert result == "Hello there."
