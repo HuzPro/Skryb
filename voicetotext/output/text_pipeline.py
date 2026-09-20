@@ -8,6 +8,11 @@ from pathlib import Path
 import jellyfish
 from text_to_num import alpha2digit
 
+from voicetotext.output.caret_context import (
+    NO_CONTEXT,
+    CaretContext,
+    fit_to_context,
+)
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
     DictionaryRule,
@@ -127,6 +132,17 @@ _FUNCTION_WORD_STOPLIST = frozenset({
 })
 
 
+def _no_caret_context() -> CaretContext:
+    return NO_CONTEXT
+
+
+def _caret_stage(caret_context: Callable[[], CaretContext]) -> Callable[[str], str]:
+    def fit(text: str) -> str:
+        return fit_to_context(text, caret_context())
+
+    return fit
+
+
 class TextPipeline:
     def __init__(self, stages: tuple[Callable[[str], str], ...]) -> None:
         self._stages = stages
@@ -137,6 +153,7 @@ class TextPipeline:
         config: DictionaryConfig,
         punctuation_backend: PunctuationBackend | None = None,
         models_dir: Path | None = None,
+        caret_context: Callable[[], CaretContext] = _no_caret_context,
     ) -> "TextPipeline":
         stages: list[Callable[[str], str]] = []
         if config.options.punctuation_model:
@@ -152,6 +169,7 @@ class TextPipeline:
             stages.append(remove_fillers)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
+        stages.append(_caret_stage(caret_context))
         stages.append(_RuleStage(config.rules).apply)
         if config.options.numbers:
             stages.append(format_numbers)
@@ -187,12 +205,15 @@ def build_pipeline(
     mode: PipelineMode,
     punctuation_backend: PunctuationBackend | None = None,
     models_dir: Path | None = None,
+    caret_context: Callable[[], CaretContext] = _no_caret_context,
 ) -> TextPipeline:
     if mode is PipelineMode.VERBATIM:
         return TextPipeline.passthrough()
     if mode is PipelineMode.STREAMING:
         return TextPipeline.for_streaming(config)
-    return TextPipeline.for_batch(config, punctuation_backend, models_dir)
+    return TextPipeline.for_batch(
+        config, punctuation_backend, models_dir, caret_context,
+    )
 
 
 def tokenize(text: str) -> tuple[TextToken, ...]:

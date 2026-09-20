@@ -6,6 +6,7 @@ from voicetotext.output.dictionary_config import (
     LiteralRule,
     RegexRule,
 )
+from voicetotext.output.caret_context import CaretContext
 from voicetotext.output.text_pipeline import (
     PipelineMode,
     TextPipeline,
@@ -495,3 +496,26 @@ class TestVerbatimPipeline:
         assert "um" in verbatim and "uh" in verbatim
         assert "cloud" in verbatim
         assert batch != verbatim
+
+
+class TestCaretContextStage:
+    def test_should_fit_the_transcript_to_the_replaced_selection(self) -> None:
+        pipeline = TextPipeline.for_batch(
+            DictionaryConfig(),
+            caret_context=lambda: CaretContext("Hello, I'm ", "here for water", ". "),
+        )
+
+        result = pipeline.process("Near harry potter.")
+
+        assert result == "near harry potter"
+
+    def test_should_let_a_dictionary_rule_recapitalise_afterwards(self) -> None:
+        rules = (LiteralRule(spoken=("harry potter",), replacement="Harry Potter"),)
+        pipeline = TextPipeline.for_batch(
+            DictionaryConfig(rules=rules),
+            caret_context=lambda: CaretContext("Hello, I'm ", "here for water", ". "),
+        )
+
+        result = pipeline.process("Near harry potter.")
+
+        assert result == "near Harry Potter"

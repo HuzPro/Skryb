@@ -34,6 +34,9 @@ dependencies = [
     "torchaudio>=2.5",
     "text2num>=3.1",
     "jellyfish>=1.0",
+    # UI Automation client for reading the text around the caret in
+    # the focused window. Pure Python over ctypes, MIT licensed.
+    "comtypes>=1.4",
 ]
 
 [project.optional-dependencies]

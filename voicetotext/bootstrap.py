@@ -61,6 +61,7 @@ from voicetotext.output.text_filter_decorator import (
     load_dictionary,
 )
 from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
+from voicetotext.output.win32_caret_context import read_caret_context
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -260,7 +261,12 @@ def _build_output(
     )
     return TextFilterDecorator(
         inner=gui_output,
-        pipeline=build_pipeline(dictionary, pipeline_mode, models_dir=models_dir),
+        pipeline=build_pipeline(
+            dictionary,
+            pipeline_mode,
+            models_dir=models_dir,
+            caret_context=read_caret_context,
+        ),
     )
 
 
