@@ -13,9 +13,12 @@ from types import SimpleNamespace
 import pytest
 
 from voicetotext.output import win32_caret_context as module
-from voicetotext.output.caret_context import NO_CONTEXT
-from voicetotext.output.win32_caret_context import (
+from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
+    NO_CONTEXT,
+    CaretContext,
+)
+from voicetotext.output.win32_caret_context import (
     _context_from,
     read_caret_context,
 )
@@ -48,6 +51,12 @@ def stub_uia(monkeypatch) -> None:
             TextUnit_Character=_UNIT_CHARACTER,
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def silent_edit_control_reader(monkeypatch) -> None:
+    """Keep the fallback from reading the real desktop during these tests."""
+    monkeypatch.setattr(module, "read_edit_control_context", lambda: NO_CONTEXT)
 
 
 class NullPointer:
@@ -261,5 +270,33 @@ class TestReadCaretContext:
     def test_should_read_the_focused_element(self, monkeypatch):
         automation = _automation_over(_DOCUMENT, _SELECTION_START, _SELECTION_END)
         monkeypatch.setattr(module, "_automation", lambda: automation)
+
+        assert read_caret_context().selected == "here for water"
+
+    def test_should_fall_back_to_the_edit_control_reader_without_a_text_pattern(
+        self, monkeypatch,
+    ):
+        """A WinForms ``TextBox`` publishes no UI Automation text pattern."""
+        monkeypatch.setattr(
+            module, "_automation", lambda: FakeAutomation(FakeElement(NullPointer())),
+        )
+        monkeypatch.setattr(
+            module,
+            "read_edit_control_context",
+            lambda: CaretContext("Hello, I'm ", "here for water", ". "),
+        )
+
+        assert read_caret_context().selected == "here for water"
+
+    def test_should_keep_the_ui_automation_reading_when_it_finds_one(
+        self, monkeypatch,
+    ):
+        automation = _automation_over(_DOCUMENT, _SELECTION_START, _SELECTION_END)
+        monkeypatch.setattr(module, "_automation", lambda: automation)
+        monkeypatch.setattr(
+            module,
+            "read_edit_control_context",
+            lambda: CaretContext("wrong", "wrong", "wrong"),
+        )
 
         assert read_caret_context().selected == "here for water"

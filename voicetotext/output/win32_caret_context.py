@@ -9,12 +9,17 @@ from functools import cache
 from types import ModuleType
 from typing import Protocol
 
-from voicetotext.output.caret_context import NO_CONTEXT, CaretContext
+from voicetotext.output.caret_context import (
+    CONTEXT_CHARS,
+    NO_CONTEXT,
+    CaretContext,
+)
+from voicetotext.output.win32_edit_control_context import (
+    read_edit_control_context,
+)
 
 
 _logger = logging.getLogger(__name__)
-
-CONTEXT_CHARS = 40
 
 # IUIAutomationTextRange.GetText takes a maximum length, where -1 means
 # "the whole range".
@@ -71,6 +76,19 @@ class _Automation(Protocol):
 
 def read_caret_context() -> CaretContext:
     """Text around the caret in the focused control, or ``NO_CONTEXT``.
+
+    Never raises. UI Automation answers first because it reaches every modern
+    framework. A WinForms ``TextBox`` publishes no text pattern, so the
+    edit-control reader picks up what UI Automation cannot see.
+    """
+    context = read_ui_automation_context()
+    if context == NO_CONTEXT:
+        return read_edit_control_context()
+    return context
+
+
+def read_ui_automation_context() -> CaretContext:
+    """The UI Automation half of the reading on its own, or ``NO_CONTEXT``.
 
     Never raises. A window with no text pattern, a control that reports no
     selection, a COM failure and a missing UIAutomationCore.dll all read as

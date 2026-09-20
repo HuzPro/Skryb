@@ -10,6 +10,8 @@ _INVISIBLE_CHARACTERS = "\ufeff\u200b\u200c\u200d\u2060\ufffc"
 _WITHOUT_INVISIBLE_CHARACTERS = str.maketrans("", "", _INVISIBLE_CHARACTERS)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 
+CONTEXT_CHARS = 40
+
 
 @dataclass(frozen=True)
 class CaretContext:
