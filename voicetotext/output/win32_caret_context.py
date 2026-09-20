@@ -28,6 +28,9 @@ _LOGGED_TEXT_CHARS = 20
 
 class _TextRange(Protocol):
     def Clone(self) -> "_TextRange": ...  # noqa: N802 (COM name)
+    def CompareEndpoints(  # noqa: N802 (COM name)
+        self, endpoint: int, target: "_TextRange", target_endpoint: int,
+    ) -> int: ...
     def GetText(self, max_length: int) -> str: ...  # noqa: N802 (COM name)
     def MoveEndpointByRange(  # noqa: N802 (COM name)
         self, endpoint: int, target: "_TextRange", target_endpoint: int,
@@ -44,6 +47,8 @@ class _TextRangeArray(Protocol):
 
 
 class _TextPattern(Protocol):
+    @property
+    def DocumentRange(self) -> _TextRange: ...  # noqa: N802 (COM name)
     def GetSelection(self) -> _TextRangeArray: ...  # noqa: N802 (COM name)
 
 
@@ -105,34 +110,76 @@ def _context_of(element: _Element) -> CaretContext:
     if ranges.Length == 0:
         return NO_CONTEXT
     selection = ranges.GetElement(0)
+    document = pattern.DocumentRange
+    if not _lies_within(selection, document):
+        return NO_CONTEXT
     context = CaretContext(
         before=_adjacent_text(
-            selection, uia.TextPatternRangeEndpoint_Start, -CONTEXT_CHARS,
+            selection, document, uia.TextPatternRangeEndpoint_Start,
         ),
         selected=selection.GetText(_ALL_TEXT),
         after=_adjacent_text(
-            selection, uia.TextPatternRangeEndpoint_End, CONTEXT_CHARS,
+            selection, document, uia.TextPatternRangeEndpoint_End,
         ),
     )
     _log_context(context)
     return context
 
 
-def _adjacent_text(selection: _TextRange, edge: int, characters: int) -> str:
-    """The text just outside ``edge`` of the selection, ``characters`` wide.
+def _lies_within(selection: _TextRange, document: _TextRange) -> bool:
+    """Whether the selection is the control's own, not the page's elsewhere.
 
-    A negative width reads backwards from the edge, a positive one forwards.
+    Chromium answers ``GetSelection`` on any text pattern with the page-wide
+    selection, so an unfocused box reports a caret that sits outside it.
     """
     uia = _uia()
+    start = uia.TextPatternRangeEndpoint_Start
+    end = uia.TextPatternRangeEndpoint_End
+    return (
+        selection.CompareEndpoints(start, document, start) >= 0
+        and selection.CompareEndpoints(end, document, end) <= 0
+    )
+
+
+def _adjacent_text(selection: _TextRange, document: _TextRange, edge: int) -> str:
+    """The text just outside ``edge`` of the selection, ``CONTEXT_CHARS`` wide.
+
+    Reads backwards from the start of the selection and forwards from its
+    end, stopping at the edge of ``document``.
+    """
+    uia = _uia()
+    reads_backwards = edge == uia.TextPatternRangeEndpoint_Start
     opposite_edge = (
         uia.TextPatternRangeEndpoint_End
-        if edge == uia.TextPatternRangeEndpoint_Start
+        if reads_backwards
         else uia.TextPatternRangeEndpoint_Start
     )
     adjacent = selection.Clone()
     adjacent.MoveEndpointByRange(opposite_edge, selection, edge)
-    adjacent.MoveEndpointByUnit(edge, uia.TextUnit_Character, characters)
+    adjacent.MoveEndpointByUnit(
+        edge,
+        uia.TextUnit_Character,
+        -CONTEXT_CHARS if reads_backwards else CONTEXT_CHARS,
+    )
+    _clamp_to_document(adjacent, edge, document)
     return adjacent.GetText(_ALL_TEXT)
+
+
+def _clamp_to_document(adjacent: _TextRange, edge: int, document: _TextRange) -> None:
+    """Hold ``edge`` inside the text pattern's own document range.
+
+    Chromium exposes one flat text tree per page, so a character walk out of
+    an editable box keeps going, and the buttons and labels around a composer
+    read as ordinary text. The pattern's document range is bounded to the
+    control, and is the only boundary the provider offers.
+    """
+    uia = _uia()
+    start = uia.TextPatternRangeEndpoint_Start
+    end = uia.TextPatternRangeEndpoint_End
+    if adjacent.CompareEndpoints(edge, document, start) < 0:
+        adjacent.MoveEndpointByRange(edge, document, start)
+    elif adjacent.CompareEndpoints(edge, document, end) > 0:
+        adjacent.MoveEndpointByRange(edge, document, end)
 
 
 def _log_context(context: CaretContext) -> None:

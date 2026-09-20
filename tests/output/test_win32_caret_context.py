@@ -2,8 +2,10 @@
 
 The COM surface is hand-faked rather than mocked: a range is a document
 string plus two offsets, which is exactly what ``IUIAutomationTextRange``
-models, so the endpoint walk these tests exercise is the real one. Nothing
-here imports ``comtypes``, so the file runs on any platform.
+models, so the endpoint walk these tests exercise is the real one. A page
+and the editable field inside it are two ranges over the same string, the
+way Chromium reports them. Nothing here imports ``comtypes``, so the file
+runs on any platform.
 """
 
 from types import SimpleNamespace
@@ -27,6 +29,9 @@ _UNIT_CHARACTER = 0
 _DOCUMENT = "Hello, I'm here for water. "
 _SELECTION_START = 11
 _SELECTION_END = 25
+
+_CHROME_BEFORE = "png\nRemove image.png\n"
+_CHROME_AFTER = "\nSend\nAdd\nPress an"
 
 
 @pytest.fixture(autouse=True)
@@ -67,10 +72,15 @@ class FakeTextRange:
     def MoveEndpointByRange(  # noqa: N802 (COM name)
         self, endpoint: int, target: "FakeTextRange", target_endpoint: int,
     ) -> None:
-        self._move_to(
-            endpoint,
-            target.start if target_endpoint == _ENDPOINT_START else target.end,
-        )
+        self._move_to(endpoint, target.position_of(target_endpoint))
+
+    def CompareEndpoints(  # noqa: N802 (COM name)
+        self, endpoint: int, target: "FakeTextRange", target_endpoint: int,
+    ) -> int:
+        return self.position_of(endpoint) - target.position_of(target_endpoint)
+
+    def position_of(self, endpoint: int) -> int:
+        return self.start if endpoint == _ENDPOINT_START else self.end
 
     def MoveEndpointByUnit(  # noqa: N802 (COM name)
         self, endpoint: int, unit: int, count: int,
@@ -100,8 +110,13 @@ class FakeTextRangeArray:
 
 
 class FakeTextPattern:
-    def __init__(self, ranges: list[FakeTextRange]) -> None:
+    def __init__(self, ranges: list[FakeTextRange], document: FakeTextRange) -> None:
         self.ranges = ranges
+        self.document = document
+
+    @property
+    def DocumentRange(self) -> FakeTextRange:  # noqa: N802 (COM name)
+        return self.document
 
     def QueryInterface(self, interface: object) -> "FakeTextPattern":  # noqa: N802 (COM name)
         return self
@@ -132,9 +147,26 @@ class BrokenAutomation:
         raise OSError("the UI Automation client went away")
 
 
+def _whole_of(document: str) -> FakeTextRange:
+    return FakeTextRange(document, 0, len(document))
+
+
 def _automation_over(document: str, start: int, end: int) -> FakeAutomation:
-    selection = FakeTextRange(document, start, end)
-    return FakeAutomation(FakeElement(FakeTextPattern([selection])))
+    return _automation_within(_whole_of(document), start, end)
+
+
+def _automation_within(field: FakeTextRange, start: int, end: int) -> FakeAutomation:
+    selection = FakeTextRange(field.document, start, end)
+    return FakeAutomation(FakeElement(FakeTextPattern([selection], field)))
+
+
+def _automation_in_a_page(field_text: str, caret: int) -> FakeAutomation:
+    """A caret in an editable field with page chrome on both sides of it."""
+    page = _CHROME_BEFORE + field_text + _CHROME_AFTER
+    start = len(_CHROME_BEFORE)
+    field = FakeTextRange(page, start, start + len(field_text))
+    position = start + caret
+    return _automation_within(field, position, position)
 
 
 class TestContextFromASelection:
@@ -166,6 +198,36 @@ class TestContextFromASelection:
         assert context.after == "b" * CONTEXT_CHARS
 
 
+class TestFieldsInsideALargerDocument:
+    """Chromium reports the page and the composer as one flat text tree."""
+
+    def test_should_not_read_the_page_before_the_field(self):
+        automation = _automation_in_a_page("Hello there. ", caret=0)
+
+        assert _context_from(automation).before == ""
+
+    def test_should_not_read_the_page_after_the_field(self):
+        field = "Hello there. "
+        automation = _automation_in_a_page(field, caret=len(field))
+
+        assert _context_from(automation).after == ""
+
+    def test_should_report_no_context_when_the_selection_is_outside_the_field(self):
+        page = _CHROME_BEFORE + "Hello there. " + _CHROME_AFTER
+        field = FakeTextRange(page, len(_CHROME_BEFORE), len(page) - len(_CHROME_AFTER))
+        automation = _automation_within(field, 0, 0)
+
+        assert _context_from(automation) == NO_CONTEXT
+
+    def test_should_read_the_full_width_when_it_fits_inside_the_field(self):
+        field = "a" * 200 + "b" * 200
+        automation = _automation_in_a_page(field, caret=200)
+
+        context = _context_from(automation)
+
+        assert context.before == "a" * CONTEXT_CHARS
+        assert context.after == "b" * CONTEXT_CHARS
+
 class TestContextWhenNoneCanBeRead:
     def test_should_report_no_context_when_the_element_has_no_text_pattern(self):
         automation = FakeAutomation(FakeElement(NullPointer()))
@@ -173,7 +235,9 @@ class TestContextWhenNoneCanBeRead:
         assert _context_from(automation) == NO_CONTEXT
 
     def test_should_report_no_context_when_nothing_is_selected(self):
-        automation = FakeAutomation(FakeElement(FakeTextPattern([])))
+        automation = FakeAutomation(
+            FakeElement(FakeTextPattern([], _whole_of(_DOCUMENT))),
+        )
 
         assert _context_from(automation) == NO_CONTEXT
 
