@@ -40,7 +40,11 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
         """
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            self._root.update()
+            try:
+                self._root.update()
+            except tkinter.TclError:
+                time.sleep(max(0.0, deadline - time.monotonic()))
+                return
             time.sleep(_PUMP_INTERVAL_SECONDS)
 
     def cancel(self) -> None:
