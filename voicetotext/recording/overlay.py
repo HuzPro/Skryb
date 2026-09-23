@@ -14,7 +14,7 @@ from voicetotext.core.state_machine import AppState
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 
 
-_WIDTH = 148
+_WIDTH = 128
 _HEIGHT = 44
 _BOTTOM_MARGIN = 36
 _FRAME_INTERVAL_MS = 33
@@ -26,9 +26,9 @@ _BAR_GAP = 6
 _BAR_MIN_HEIGHT = 4
 _BAR_MAX_HEIGHT = 28
 
-_BACKGROUND = (0x17, 0x19, 0x1D, 235)
-_BORDER = (0x2A, 0x2E, 0x35, 235)
-_BAR_COLOR = (0x70, 0xD6, 0xFF, 255)
+_BACKGROUND = (0x17, 0x19, 0x1D, 190)
+_BORDER = (0x2A, 0x2E, 0x35, 190)
+_BAR_COLOR = (0x70, 0xD6, 0xFF, 220)
 
 _LEVEL_GAIN = 15.0
 _LEVEL_SMOOTHING = 0.62

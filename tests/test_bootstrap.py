@@ -692,10 +692,11 @@ class TestBuildOutput:
         assert isinstance(result._inner._inner, CapsLockUppercaseDecorator)
         assert isinstance(result._inner._inner._inner, ClipboardAdapter)
 
+    @patch("voicetotext.bootstrap.read_caret_context", return_value=NO_CONTEXT)
     @patch("voicetotext.bootstrap.Win32KeySender")
     @patch("voicetotext.bootstrap.Win32ClipboardWriter")
     def test_should_report_a_delivery_when_the_text_is_pasted(
-        self, _writer_cls, _sender_cls,
+        self, _writer_cls, _sender_cls, _read_context,
     ):
         reported: list[str] = []
         dispatcher = MagicMock()
