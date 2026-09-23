@@ -6,6 +6,8 @@ _SENTENCE_ENDINGS = ".!?" + _NEWLINES
 _MID_SENTENCE_PUNCTUATION = ",;:)]}"
 _TERMINAL_PUNCTUATION = ".!?,;:"
 _PUNCTUATION_THAT_FOLLOWS = ".,;:!?)]}\"'"
+_CLOSING_MARKS = ")]}\"'\u201d\u2019"
+_SPACED_PUNCTUATION = ".!?,;:\u2026"
 _INVISIBLE_CHARACTERS = "\ufeff\u200b\u200c\u200d\u2060\ufffc"
 _WITHOUT_INVISIBLE_CHARACTERS = str.maketrans("", "", _INVISIBLE_CHARACTERS)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
@@ -30,9 +32,9 @@ def fit_to_context(text: str, context: CaretContext) -> str:
 
 
 def _fit_to_visible_context(text: str, context: CaretContext) -> str:
-    lead = _leading_whitespace(context.selected) or _glue_space(context.before)
-    trail = _trailing_whitespace(context.selected)
     core = _match_preceding_case(text.strip(), context.before)
+    lead = _lead(core, context)
+    trail = _trailing_whitespace(context.selected)
     following = context.after.lstrip(" \t")
     if not following:
         return lead + core + (trail or _trailing_whitespace(text))
@@ -60,8 +62,18 @@ def _without_invisible_characters(context: CaretContext) -> CaretContext:
     )
 
 
+def _lead(core: str, context: CaretContext) -> str:
+    if _starts_with_punctuation(core):
+        return ""
+    return _leading_whitespace(context.selected) or _glue_space(context.before)
+
+
+def _starts_with_punctuation(core: str) -> bool:
+    return bool(core) and core[0] in _TERMINAL_PUNCTUATION
+
+
 def _match_preceding_case(core: str, before: str) -> str:
-    preceding = before.rstrip(" \t")
+    preceding = _unwrapped(before.rstrip(" \t"))
     if not preceding or preceding[-1] in _SENTENCE_ENDINGS:
         return _capitalize_first_word(core)
     if _ends_an_unfinished_sentence(preceding[-1]):
@@ -102,7 +114,7 @@ def _is_deliberate_capital(word: str) -> bool:
 
 
 def _strip_terminal_punctuation(core: str) -> str:
-    return core.rstrip(_TERMINAL_PUNCTUATION).rstrip()
+    return core.rstrip(_TERMINAL_PUNCTUATION).rstrip() or core
 
 
 def _is_word_character(character: str) -> bool:
@@ -110,9 +122,16 @@ def _is_word_character(character: str) -> bool:
 
 
 def _glue_space(before: str) -> str:
-    if before and _is_word_character(before[-1]):
+    preceding = _unwrapped(before)
+    if preceding and (
+        _is_word_character(preceding[-1]) or preceding[-1] in _SPACED_PUNCTUATION
+    ):
         return " "
     return ""
+
+
+def _unwrapped(text: str) -> str:
+    return text.rstrip(_CLOSING_MARKS)
 
 
 def _starts_with_whitespace(text: str) -> bool:

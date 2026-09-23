@@ -30,6 +30,7 @@ _CONTROL_TOKENS = [
     "<|notimestamps|>",
 ]
 _TIMESTAMP_TOKEN = "<|0.00|>"
+_CONTEXT_MARKERS = ["<ctx>", "<ectx>"]
 _ALPHABET = sorted(pre_tokenizers.ByteLevel.alphabet())
 _START_OF_TRANSCRIPT_ID = len(_ALPHABET)
 _ENGLISH_ID = _START_OF_TRANSCRIPT_ID + 1
@@ -39,6 +40,8 @@ _NO_TIMESTAMPS_ID = _START_OF_TRANSCRIPT_ID + 4
 _FIRST_INTENDED_ID = _NO_TIMESTAMPS_ID + 1
 _FIRST_VERBATIM_ID = _FIRST_INTENDED_ID + MODE_TAG_COUNT
 _TIMESTAMP_ID = _FIRST_VERBATIM_ID + MODE_TAG_COUNT
+_CONTEXT_START_ID = _TIMESTAMP_ID + 1
+_CONTEXT_END_ID = _TIMESTAMP_ID + 2
 
 
 def _mode_tags(mode: str) -> list[str]:
@@ -62,7 +65,10 @@ def _write_tokenizer(directory: Path, *, modes: tuple[str, ...]) -> Path:
         AddedToken(tag, normalized=True, special=False)
         for mode in ("intended", "verbatim")
         for tag in (_mode_tags(mode) if mode in modes else [])
-    ] + [AddedToken(_TIMESTAMP_TOKEN, normalized=True, special=False)])
+    ] + [
+        AddedToken(token, normalized=True, special=False)
+        for token in [_TIMESTAMP_TOKEN, *_CONTEXT_MARKERS]
+    ])
     directory.mkdir(parents=True, exist_ok=True)
     tokenizer.save(str(directory / "tokenizer.json"))
     return directory
@@ -117,6 +123,22 @@ class TestDecoderPrompt:
 
         assert french[language_position] == _FRENCH_ID
         assert english[language_position] == _ENGLISH_ID
+
+    def test_wraps_the_context_in_markers_between_the_tags_and_the_whisper_sequence(
+        self,
+        model_dir: Path,
+    ) -> None:
+        tokens = WhisperTokens(model_dir)
+        plain = tokens.decoder_prompt("en", "intended")
+
+        prompt = tokens.decoder_prompt("en", "intended", "at least the")
+
+        context = prompt[MODE_TAG_COUNT:-4]
+        assert prompt[:MODE_TAG_COUNT] == plain[:MODE_TAG_COUNT]
+        assert prompt[-4:] == plain[MODE_TAG_COUNT:]
+        assert context[1] == _CONTEXT_START_ID
+        assert context[-1] == _CONTEXT_END_ID
+        assert tokens.decode(context[2:-1]).strip() == "at least the"
 
     def test_rejects_a_language_the_model_was_not_trained_on(
         self,
@@ -188,6 +210,11 @@ class TestStripPromptArtifacts:
         artifacts = "  [verbatim_3] one   two\n[intended_1] three "
 
         assert strip_prompt_artifacts(artifacts) == "one two three"
+
+    def test_removes_an_echoed_continuation_context(self) -> None:
+        echoed = "<ctx> at least the <ectx> middle of next week."
+
+        assert strip_prompt_artifacts(echoed) == "middle of next week."
 
     def test_keeps_the_disfluency_tags_the_model_emits(self) -> None:
         assert strip_prompt_artifacts("[UM] see [noise]") == "[UM] see [noise]"

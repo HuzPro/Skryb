@@ -239,10 +239,12 @@ def _build_output(
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
         OutputMode.CLIPBOARD_ONLY: lambda: ClipboardAdapter(writer=writer),
         OutputMode.PASTE_AND_CLIPBOARD: pasting_adapter,
+        # The wait for the target to read the paste runs on the GUI thread,
+        # which is also the target when the settings window has the focus.
         OutputMode.DIRECT_PASTE: lambda: ClipboardPreservingDecorator(
             inner=pasting_adapter(),
             preserver=Win32ClipboardPreserver(sleeper=sleeper),
-            sleeper=sleeper,
+            sleeper=gui_dispatcher,
         ),
     }
     # ``GetKeyState`` answers from the calling thread's message queue, so the

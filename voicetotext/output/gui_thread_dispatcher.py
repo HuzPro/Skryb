@@ -1,8 +1,11 @@
-from abc import ABC, abstractmethod
+import time
+from abc import abstractmethod
 from collections.abc import Callable
 
+from voicetotext.output.sleeper import Sleeper
 
-class GuiThreadDispatcher(ABC):
+
+class GuiThreadDispatcher(Sleeper):
     """Port for marshaling a callable onto the GUI thread.
 
     Win32 clipboard and ``SendInput``-style calls misbehave from
@@ -22,3 +25,12 @@ class GuiThreadDispatcher(ABC):
         asynchronously (Qt impl using a queued signal). Callers must
         not assume ``action`` has run by the time ``dispatch`` returns.
         """
+
+    def sleep(self, seconds: float) -> None:
+        """Wait ``seconds`` inside an action running on the GUI thread.
+
+        A plain sleep freezes every window the GUI thread owns, so a paste
+        aimed at one of our own windows would only be read after the action
+        returns. Implementations with an event loop keep it running here.
+        """
+        time.sleep(seconds)

@@ -22,10 +22,11 @@ from voicetotext.transcription.engine_diagnostics import vram_snapshot
 from voicetotext.transcription.engine_types import CrisperWhisperMode
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription.whisper_features import (
-    split_into_encoder_windows,
+    transcribe_in_windows,
 )
 from voicetotext.transcription.whisper_tokens import (
     MODE_TAG_COUNT,
+    continuation_context,
     strip_prompt_artifacts,
 )
 
@@ -50,6 +51,25 @@ def _decode_budget(model: WhisperForConditionalGeneration, prefix_length: int) -
     if not isinstance(positions, int) or positions <= prefix_length + 1:
         return _FALLBACK_MAX_NEW_TOKENS
     return positions - prefix_length - 1
+
+
+def _with_context(
+    prefix: list[int],
+    processor: WhisperProcessor,
+    context: str,
+) -> list[int]:
+    """*prefix* with the continuation context after its mode tags."""
+    if not context:
+        return prefix
+    context_ids = processor.tokenizer.encode(
+        continuation_context(context),
+        add_special_tokens=False,
+    )
+    return (
+        prefix[:MODE_TAG_COUNT]
+        + [int(token_id) for token_id in context_ids]
+        + prefix[MODE_TAG_COUNT:]
+    )
 
 
 def resolve_crisperwhisper_mode(value: ConfigValue) -> CrisperWhisperMode:
@@ -144,7 +164,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         self._raise_if_not_loaded()
         started_at = time.monotonic()
-        text = self._transcribe_every_window(audio)
+        text = transcribe_in_windows(audio, self._generate_text)
         return TranscriptionResult(
             text=text,
             language=self._language,
@@ -152,14 +172,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
             transcription_seconds=time.monotonic() - started_at,
         )
 
-    def _transcribe_every_window(self, audio: AudioSegment) -> str:
-        parts = [
-            self._generate_text(window).strip()
-            for window in split_into_encoder_windows(audio)
-        ]
-        return " ".join(part for part in parts if part)
-
-    def _generate_text(self, audio: AudioSegment) -> str:
+    def _generate_text(self, audio: AudioSegment, context: str) -> str:
         model = self._model
         processor = self._processor
         prefix = self._decoder_prefix
@@ -174,6 +187,7 @@ class CrisperWhisperAdapter(TranscriptionEngine):
         ):
             raise TranscriptionError("Model not loaded")
 
+        prefix = _with_context(prefix, processor, context)
         processed = processor(
             audio.data,
             sampling_rate=audio.sample_rate,

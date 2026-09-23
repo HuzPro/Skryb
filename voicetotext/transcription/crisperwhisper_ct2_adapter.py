@@ -19,7 +19,7 @@ from voicetotext.transcription.engine_types import CrisperWhisperMode
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription.whisper_features import (
     log_mel_spectrogram,
-    split_into_encoder_windows,
+    transcribe_in_windows,
 )
 from voicetotext.transcription.whisper_tokens import WhisperTokens
 
@@ -113,7 +113,7 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
 
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         started_at = time.monotonic()
-        text = self._transcribe_every_window(audio)
+        text = transcribe_in_windows(audio, self._generate_text)
         return TranscriptionResult(
             text=text,
             language=self._language,
@@ -121,15 +121,9 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
             transcription_seconds=time.monotonic() - started_at,
         )
 
-    def _transcribe_every_window(self, audio: AudioSegment) -> str:
-        parts = [
-            self._generate_text(window).strip()
-            for window in split_into_encoder_windows(audio)
-        ]
-        return " ".join(part for part in parts if part)
-
-    def _generate_text(self, audio: AudioSegment) -> str:
-        model, tokens, prompt = self._loaded()
+    def _generate_text(self, audio: AudioSegment, context: str) -> str:
+        model, tokens, _ = self._loaded()
+        prompt = tokens.decoder_prompt(self._language, self._mode, context)
         features = np.ascontiguousarray(
             log_mel_spectrogram(audio)[np.newaxis, :, :],
         )
