@@ -190,3 +190,36 @@ class TestFactory:
         assert adapter.current_title() == "VoiceToText - Idle - ready"
 
         adapter.stop()  # tears down the real backend window
+
+
+class TestExplorerRestartRecovery:
+    """Explorer restarting silently drops every tray icon it was hosting."""
+
+    def _backend(self, *, added: bool) -> mod.Win32TrayBackend:
+        backend = mod.Win32TrayBackend.__new__(mod.Win32TrayBackend)
+        backend._added = added
+        backend._nid = mod._NOTIFYICONDATAW()
+        return backend
+
+    def test_should_readd_a_shown_icon_when_the_shell_says_taskbar_created(
+        self, monkeypatch,
+    ) -> None:
+        backend = self._backend(added=True)
+        shell = MagicMock()
+        monkeypatch.setattr(mod, "_shell32", shell)
+
+        backend._window_proc(0, mod._WM_TASKBAR_CREATED, 0, 0)
+
+        assert shell.Shell_NotifyIconW.call_args.args[0] == mod._NIM_ADD
+        assert backend._added is True
+
+    def test_should_leave_a_hidden_icon_hidden_when_taskbar_created(
+        self, monkeypatch,
+    ) -> None:
+        backend = self._backend(added=False)
+        shell = MagicMock()
+        monkeypatch.setattr(mod, "_shell32", shell)
+
+        backend._window_proc(0, mod._WM_TASKBAR_CREATED, 0, 0)
+
+        shell.Shell_NotifyIconW.assert_not_called()
