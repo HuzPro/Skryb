@@ -7,6 +7,7 @@ to avoid paying for those at startup.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 
 import numpy as np
@@ -31,6 +32,22 @@ _ENCODER_WINDOW_FRAMES = _ENCODER_WINDOW_SAMPLES // _HOP_LENGTH
 _BOUNDARY_SEARCH_SECONDS = 2.0
 _BOUNDARY_FRAME_SECONDS = 0.02
 
+# Nyra's longform recipe, the one the model's continuation prompt was
+# trained on: neighbouring windows share 4 s of audio, and each window is
+# prompted with the last 12 words already transcribed. The last two words
+# of a window are the ones its edge cut into and punctuated as if the
+# speaker had stopped, so they are dropped for the next window to hear
+# whole.
+_WINDOW_OVERLAP_SECONDS = 4.0
+_CONTEXT_WORDS = 12
+_SEAM_WORDS = 2
+
+# Seam words are only dropped when speech reaches this close to the
+# window's end, late enough that the next window hears them again. Frames
+# quieter than this share of the window's loudest one are not speech.
+_SEAM_SPEECH_SECONDS = 2.5
+_SPEECH_LEVEL = 0.1
+
 # Slaney mel scale: linear below 1 kHz, logarithmic above.
 _MEL_LINEAR_STEP_HZ = 200.0 / 3.0
 _MEL_LOG_START_HZ = 1000.0
@@ -44,9 +61,31 @@ _LOG_DYNAMIC_RANGE = 8.0
 _LOG_SHIFT = 4.0
 
 
+def transcribe_in_windows(
+    audio: AudioSegment,
+    transcribe_window: Callable[[AudioSegment, str], str],
+) -> str:
+    """Transcribe *audio* one encoder window at a time, as one transcript.
+
+    *transcribe_window* gets each window and the words confirmed so far,
+    which it passes to the model as continuation context so a sentence
+    that crosses a seam carries on instead of ending there.
+    """
+    windows = split_into_encoder_windows(audio)
+    confirmed: list[str] = []
+    for index, window in enumerate(windows):
+        context = " ".join(confirmed[-_CONTEXT_WORDS:])
+        words = transcribe_window(window, context).split()
+        if index < len(windows) - 1 and _ends_mid_speech(words, window):
+            words = words[:-_SEAM_WORDS]
+        confirmed.extend(words)
+    return " ".join(confirmed)
+
+
 def split_into_encoder_windows(audio: AudioSegment) -> list[AudioSegment]:
-    """Slice *audio* into windows the encoder will accept whole."""
+    """Slice *audio* into overlapping windows the encoder will accept whole."""
     window_samples = int(_ENCODER_WINDOW_SECONDS * audio.sample_rate)
+    overlap_samples = int(_WINDOW_OVERLAP_SECONDS * audio.sample_rate)
     windows: list[AudioSegment] = []
     start = 0
     while start < audio.sample_count:
@@ -57,7 +96,9 @@ def split_into_encoder_windows(audio: AudioSegment) -> list[AudioSegment]:
                 sample_rate=audio.sample_rate,
             ),
         )
-        start = end
+        if end == audio.sample_count:
+            break
+        start = end - overlap_samples
     return windows
 
 
@@ -91,6 +132,23 @@ def _quietest_split_point(audio: AudioSegment, start: int, limit: int) -> int:
     # speech, and on flat audio it splits as late as possible.
     quietest = int(np.flatnonzero(energy == energy.min())[-1])
     return search_start + (quietest + 1) * frame
+
+
+def _ends_mid_speech(words: list[str], window: AudioSegment) -> bool:
+    # ponytail: a pause-then-one-word ending can still drop a seam word
+    # spoken before the next window starts. Nyra times each word from
+    # cross-attention instead; do that if seam words go missing.
+    return len(words) > _SEAM_WORDS and _speech_in_tail(window)
+
+
+def _speech_in_tail(window: AudioSegment) -> bool:
+    frame = int(_BOUNDARY_FRAME_SECONDS * window.sample_rate)
+    frame_count = window.sample_count // frame
+    energy = np.abs(
+        window.data[:frame_count * frame].reshape(frame_count, frame),
+    ).mean(axis=1)
+    tail_frames = int(_SEAM_SPEECH_SECONDS * window.sample_rate) // frame
+    return bool(energy[-tail_frames:].max() > _SPEECH_LEVEL * energy.max())
 
 
 def log_mel_spectrogram(audio: AudioSegment) -> np.ndarray:
