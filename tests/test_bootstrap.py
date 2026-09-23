@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -43,6 +44,7 @@ from voicetotext.hotkeys.win32_keyboard_hook import ignore_key_event
 from voicetotext.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
+from voicetotext.output.caret_context import NO_CONTEXT
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -54,6 +56,7 @@ from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.text_filter_decorator import TextFilterDecorator
 from voicetotext.output.text_pipeline import PipelineMode
+from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
@@ -720,6 +723,45 @@ class TestBuildOutput:
         result.output("hello there")
 
         assert reported == []
+
+    @patch("voicetotext.bootstrap.read_caret_context", return_value=NO_CONTEXT)
+    @patch("voicetotext.bootstrap.caps_lock_enabled", return_value=False)
+    @patch("voicetotext.bootstrap.Win32ModifierKeyStateReader")
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    @patch("voicetotext.bootstrap.Win32KeySender")
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_should_paste_into_our_own_window_before_restoring_the_clipboard(
+        self, writer_cls, sender_cls, preserver_cls, modifier_reader_cls,
+        _caps_lock, _caret_context, tk_root,
+    ):
+        # The settings window reads the injected Ctrl+V on the same Tk thread
+        # that runs the paste, so it only sees the clipboard once that thread
+        # gets back to its event loop.
+        clipboard = {"text": "previous clipboard"}
+        pasted: list[str] = []
+        writer_cls.return_value.set_text.side_effect = (
+            lambda text: clipboard.update(text=text)
+        )
+        preserver_cls.return_value.restore.side_effect = (
+            lambda: clipboard.update(text="previous clipboard")
+        )
+        sender_cls.return_value.send_ctrl_v.side_effect = (
+            lambda: tk_root.after(0, lambda: pasted.append(clipboard["text"]))
+        )
+        modifier_reader_cls.return_value.any_modifier_down.return_value = False
+        dispatcher = TkGuiThreadDispatcher(tk_root)
+        output = _build_output(OutputMode.DIRECT_PASTE, dispatcher)
+
+        output.output("hello there")
+        deadline = time.monotonic() + 3.0
+        while not (pasted and clipboard["text"] == "previous clipboard"):
+            if time.monotonic() > deadline:
+                break
+            tk_root.update()
+            time.sleep(0.005)
+        dispatcher.cancel()
+
+        assert pasted == ["hello there"]
 
     def test_should_wrap_inner_with_gui_thread_dispatcher(self):
         dispatcher = MagicMock()

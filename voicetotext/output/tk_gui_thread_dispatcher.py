@@ -1,5 +1,6 @@
 import logging
 import queue
+import time
 import tkinter
 from collections.abc import Callable
 
@@ -8,6 +9,7 @@ from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 
 _logger = logging.getLogger(__name__)
 _DRAIN_INTERVAL_MS = 15
+_PUMP_INTERVAL_SECONDS = 0.01
 
 
 class TkGuiThreadDispatcher(GuiThreadDispatcher):
@@ -27,6 +29,19 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
 
     def dispatch(self, action: Callable[[], None]) -> None:
         self._queue.put(action)
+
+    def sleep(self, seconds: float) -> None:
+        """Wait while Tk keeps handling events. GUI thread only.
+
+        Our own settings window reads an injected Ctrl+V from this thread, so
+        blocking it would leave the paste queued until after the clipboard is
+        restored. No drain is scheduled while an action runs, so pumping here
+        cannot start another queued action.
+        """
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self._root.update()
+            time.sleep(_PUMP_INTERVAL_SECONDS)
 
     def cancel(self) -> None:
         """Stop the drain poller (idempotent). Used on shutdown/teardown."""
