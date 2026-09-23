@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -101,6 +101,19 @@ class TestCrisperWhisperCt2Adapter:
 
         assert len(model.generate.call_args_list) == 3
         assert result.text == "1 2 3"
+
+    def test_should_prompt_the_next_window_with_the_confirmed_words(
+        self,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en", "verbatim")
+        _loaded(adapter, [[1, 2, 3, 4], [5]])
+
+        adapter.transcribe(_audio(seconds=40.0))
+
+        assert adapter._tokens.decoder_prompt.call_args_list[-2:] == [
+            call("en", "verbatim", ""),
+            call("en", "verbatim", "1 2 3 4"),
+        ]
 
     def test_should_ask_for_bfloat16_on_gpu_and_default_on_cpu(self) -> None:
         assert CrisperWhisperCt2Adapter(
