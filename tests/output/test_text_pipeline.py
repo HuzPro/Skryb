@@ -185,6 +185,22 @@ class TestSpokenCommands:
 
         assert result == 'hello. "Next"'
 
+    @pytest.mark.parametrize(("spoken", "expected"), [
+        ("Question mark.", "? "),
+        ("Stop period.", "Stop. "),
+        ("Hello comma, world.", "Hello, world. "),
+        ("Hello, comma world", "Hello, world"),
+        ("Is it done question mark?", "Is it done? "),
+        ("Hello period. New line next", "Hello.\nNext"),
+        ("Stop period comma", "Stop.,"),
+    ])
+    def test_should_drop_the_transcript_punctuation_next_to_a_spoken_mark(
+        self, spoken: str, expected: str,
+    ) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        assert _batch(spoken, options=options) == expected
+
     def test_should_preserve_commands_when_the_module_is_off(self) -> None:
         assert _batch("hello comma world") == "hello comma world"
 
@@ -537,3 +553,17 @@ class TestCaretContextStage:
         )
 
         assert pipeline.process("Right?") == expected
+
+    @pytest.mark.parametrize(
+        ("after", "expected"), [("", "? "), (" Thanks.", "?")],
+        ids=["at the end", "before another sentence"],
+    )
+    def test_should_replace_a_selected_full_stop_with_a_spoken_question_mark(
+        self, after: str, expected: str,
+    ) -> None:
+        pipeline = TextPipeline.for_batch(
+            DictionaryConfig(options=DictionaryOptions(spoken_commands=True)),
+            caret_context=lambda: CaretContext("Can you do this", ".", after),
+        )
+
+        assert pipeline.process("Question mark.") == expected

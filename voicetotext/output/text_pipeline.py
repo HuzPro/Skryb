@@ -78,6 +78,8 @@ class _Command:
 
 
 _SENTENCE_ENDINGS = (".", "?", "!")
+_SPOKEN_MARKS = ".,;:!?"
+_STRAY_MARKS = _SPOKEN_MARKS + " \t"
 _TOKEN_PATTERN = re.compile(r"\w+|\s+|[^\w\s]+", re.UNICODE)
 _FILLER_PATTERN = re.compile(r"(?<!\w)(?:um+|uh+|erm+)(?!\w)", re.IGNORECASE)
 _COMMA_BEFORE_FILLER = re.compile(r",[ \t]*$")
@@ -315,8 +317,12 @@ class _CommandFormatter:
         self._parts: list[str] = []
         self._pending_spacing: str | None = None
         self._capitalize_next = False
+        self._follows_mark = False
+        self._ends_with_text = False
 
     def append_text(self, text: str) -> None:
+        if self._follows_mark:
+            text = text.lstrip(_STRAY_MARKS)
         if not text:
             return
         prepared = self._with_pending_spacing(text)
@@ -326,8 +332,15 @@ class _CommandFormatter:
             prepared, changed = _capitalize_first_word(prepared)
             self._capitalize_next = not changed
         self._parts.append(prepared)
+        self._follows_mark = False
+        self._ends_with_text = True
 
     def append_command(self, command: _Command) -> None:
+        is_mark = command.replacement in _SPOKEN_MARKS
+        if is_mark and self._ends_with_text:
+            self._parts[-1] = self._parts[-1].rstrip(_STRAY_MARKS)
+        self._follows_mark = is_mark
+        self._ends_with_text = False
         if command.spacing == "opener":
             self._append_opener(command.replacement)
         elif command.spacing == "break":
