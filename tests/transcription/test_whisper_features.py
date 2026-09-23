@@ -8,7 +8,10 @@ import numpy as np
 import pytest
 
 from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.whisper_features import log_mel_spectrogram
+from voicetotext.transcription.whisper_features import (
+    log_mel_spectrogram,
+    transcribe_in_windows,
+)
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +91,101 @@ class TestLogMelSpectrogram:
         features = log_mel_spectrogram(audio)
 
         assert np.abs(features - reference).max() < _REFERENCE_TOLERANCE
+
+
+def _speech_then_silence(speech_seconds: float, total_seconds: float) -> AudioSegment:
+    speech = _speech(speech_seconds).data
+    data = np.zeros(int(total_seconds * _SAMPLE_RATE), dtype=np.float32)
+    data[:speech.size] = speech
+    return AudioSegment(data=data, sample_rate=_SAMPLE_RATE)
+
+
+class _ScriptedWindows:
+    """Stands in for the model: one scripted transcript per window."""
+
+    def __init__(self, *transcripts: str) -> None:
+        self._transcripts = list(transcripts)
+        self.contexts: list[str] = []
+
+    def __call__(self, window: AudioSegment, context: str) -> str:
+        self.contexts.append(context)
+        return self._transcripts.pop(0)
+
+
+class TestTranscribeInWindows:
+    def test_should_transcribe_short_audio_in_one_window(self) -> None:
+        windows = _ScriptedWindows("Hello there.")
+
+        text = transcribe_in_windows(_speech(12.0), windows)
+
+        assert text == "Hello there."
+        assert windows.contexts == [""]
+
+    def test_should_keep_a_sentence_whole_across_the_window_seam(self) -> None:
+        windows = _ScriptedWindows(
+            "You would have to wait until at least the middle of next week.",
+            "next week before going anywhere at all.",
+        )
+
+        text = transcribe_in_windows(_speech(50.0), windows)
+
+        assert text == (
+            "You would have to wait until at least the middle of next week "
+            "before going anywhere at all."
+        )
+
+    def test_should_prompt_each_window_with_the_last_confirmed_words(
+        self,
+    ) -> None:
+        first = " ".join(f"w{index}" for index in range(1, 21))
+        windows = _ScriptedWindows(first, "rest.")
+
+        transcribe_in_windows(_speech(50.0), windows)
+
+        assert windows.contexts[1] == " ".join(
+            f"w{index}" for index in range(7, 19)
+        )
+
+    def test_should_keep_every_word_when_the_window_ends_in_silence(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows("That is all for today.", "")
+
+        text = transcribe_in_windows(_speech_then_silence(20.0, 40.0), windows)
+
+        assert text == "That is all for today."
+        assert windows.contexts[1] == "That is all for today."
+
+    def test_should_keep_seam_words_spoken_before_the_next_window(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows(
+            "They read it on Monday morning.",
+            "And after that we plan.",
+        )
+
+        text = transcribe_in_windows(_speech_then_silence(27.0, 50.0), windows)
+
+        assert text == "They read it on Monday morning. And after that we plan."
+
+    def test_should_let_the_next_window_redo_the_words_the_seam_cut(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows(
+            "After that we can finally see.",
+            "finally schedule the meeting.",
+        )
+
+        text = transcribe_in_windows(_speech(50.0), windows)
+
+        assert text == "After that we can finally schedule the meeting."
+
+    def test_should_keep_the_last_words_of_the_final_window(self) -> None:
+        windows = _ScriptedWindows("one two three four", "three four five six.")
+
+        text = transcribe_in_windows(_speech(40.0), windows)
+
+        assert text == "one two three four five six."
 
 
 class TestFeatureExtractionDependencies:

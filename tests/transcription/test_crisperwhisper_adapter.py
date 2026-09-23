@@ -379,13 +379,20 @@ class TestCrisperWhisperEncoderWindows:
 
         assert len(windows) > 1
 
-    def test_should_preserve_every_sample_across_windows(self) -> None:
+    def test_should_cover_every_sample_sharing_four_seconds_per_seam(
+        self,
+    ) -> None:
         audio = _speech_with_gap(75.0)
 
         windows = split_into_encoder_windows(audio)
 
-        rejoined = np.concatenate([window.data for window in windows])
-        assert np.array_equal(rejoined, audio.data)
+        shared = 4 * _SAMPLE_RATE * (len(windows) - 1)
+        covered = sum(window.sample_count for window in windows) - shared
+        assert covered == audio.sample_count
+        assert np.array_equal(
+            windows[1].data[:4 * _SAMPLE_RATE],
+            windows[0].data[-4 * _SAMPLE_RATE:],
+        )
 
     def test_should_split_on_the_quietest_point_near_the_boundary(self) -> None:
         windows = split_into_encoder_windows(_speech_with_gap(75.0))
@@ -428,7 +435,7 @@ class TestCrisperWhisperLongAudio:
 
         assert result.text == "one two three"
 
-    def test_should_feed_every_sample_to_the_processor(self) -> None:
+    def test_should_feed_every_window_to_the_processor(self) -> None:
         adapter = _adapter()
         _, _, processor_type, _ = _load_with_fakes(adapter)
         audio = _speech_with_gap(75.0)
@@ -436,10 +443,58 @@ class TestCrisperWhisperLongAudio:
         adapter.transcribe(audio)
 
         processor = processor_type.from_pretrained.return_value
-        fed = np.concatenate(
-            [call.args[0] for call in processor.call_args_list],
+        fed = [call.args[0] for call in processor.call_args_list]
+        windows = split_into_encoder_windows(audio)
+        assert len(fed) == len(windows)
+        for fed_window, window in zip(fed, windows):
+            assert np.array_equal(fed_window, window.data)
+
+    def test_should_prompt_the_next_window_with_the_confirmed_words(
+        self,
+    ) -> None:
+        adapter = _adapter()
+        torch_module, _, processor_type, _ = _load_with_fakes(adapter)
+        processor = processor_type.from_pretrained.return_value
+        processor.tokenizer.encode.side_effect = (
+            lambda text, **_: _MODE_IDS if text.startswith("[") else [300, 301]
         )
-        assert np.array_equal(fed, audio.data)
+        processor.tokenizer.decode.side_effect = [
+            "wait until at least the middle of next week.",
+            "next week before going anywhere",
+            "going anywhere at all.",
+        ]
+
+        result = adapter.transcribe(_speech_with_gap(75.0))
+
+        processor.tokenizer.encode.assert_any_call(
+            " <ctx> wait until at least the middle of <ectx>",
+            add_special_tokens=False,
+        )
+        second_prompt = torch_module.tensor.call_args_list[1].args[0]
+        assert second_prompt == [_MODE_IDS + [300, 301] + _WHISPER_IDS]
+        assert result.text == (
+            "wait until at least the middle of next week before going "
+            "anywhere at all."
+        )
+
+    def test_should_strip_an_echoed_context_prompt_before_decoding(
+        self,
+    ) -> None:
+        adapter = _adapter()
+        _, _, processor_type, model = _load_with_fakes(adapter)
+        processor = processor_type.from_pretrained.return_value
+        processor.tokenizer.encode.side_effect = (
+            lambda text, **_: _MODE_IDS if text.startswith("[") else [300]
+        )
+        processor.tokenizer.decode.side_effect = ["one two three", "x", "y"]
+        model.generate.return_value = np.array(
+            [_MODE_IDS + [300] + _WHISPER_IDS + [201]], dtype=np.int64,
+        )
+
+        adapter.transcribe(_speech_with_gap(75.0))
+
+        second_decode = processor.tokenizer.decode.call_args_list[1]
+        assert second_decode.args[0] == [201]
 
     def test_should_time_the_whole_transcription_not_one_window(self) -> None:
         adapter = _adapter()
