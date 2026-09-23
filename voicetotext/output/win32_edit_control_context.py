@@ -33,6 +33,7 @@ _MESSAGE_TIMEOUT_MS = 200
 
 _CLASS_NAME_BUFFER_CHARS = 256
 _EDIT_CLASS_MARKER = "EDIT"
+_RICH_EDIT_CLASS_MARKER = "RICHEDIT"
 
 _LOGGED_TEXT_CHARS = 20
 
@@ -82,10 +83,13 @@ def edit_control_context_of(hwnd: int) -> CaretContext:
 
 
 def _context_of(hwnd: int) -> CaretContext:
-    if not hwnd or not _is_edit_control(_class_name(hwnd)):
+    class_name = _class_name(hwnd) if hwnd else ""
+    if not _is_edit_control(class_name):
         return NO_CONTEXT
     start, end = _selection(hwnd)
     text = _text(hwnd)
+    if _is_rich_edit(class_name):
+        text = _with_rich_edit_paragraph_breaks(text)
     context = CaretContext(
         before=text[max(0, start - CONTEXT_CHARS):start],
         selected=text[start:end],
@@ -105,6 +109,20 @@ def _is_edit_control(class_name: str) -> bool:
     ``WindowsForms10.RichEdit20W.app.0.x``.
     """
     return _EDIT_CLASS_MARKER in class_name.upper()
+
+
+def _is_rich_edit(class_name: str) -> bool:
+    return _RICH_EDIT_CLASS_MARKER in class_name.upper()
+
+
+def _with_rich_edit_paragraph_breaks(text: str) -> str:
+    """Line the text up with the offsets ``EM_GETSEL`` reports.
+
+    RichEdit counts a paragraph break as one character, a lone CR, while
+    ``WM_GETTEXT`` spells it CRLF, so without this every earlier paragraph
+    would put the caret one character late.
+    """
+    return text.replace("\r\n", "\r")
 
 
 def _focused_hwnd() -> int:

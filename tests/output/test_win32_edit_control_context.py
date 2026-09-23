@@ -138,6 +138,21 @@ class TestContextFromAnEditControl:
         assert context.before == "line one\r\nHello, I'm "
         assert context.selected == "here for water"
 
+    @pytest.mark.parametrize(
+        "class_name", ["RICHEDIT50W", "WindowsForms10.RichEdit20W.app.0.1"],
+    )
+    def test_should_count_a_rich_edit_paragraph_break_as_one_character(
+        self, user32: FakeUser32, class_name: str,
+    ):
+        user32.class_name = class_name
+        user32.text = "one\r\ntwo\r\nthree"
+        user32.start = user32.end = 8
+
+        context = edit_control_context_of(_HWND)
+
+        assert context.before == "one\rtwo\r"
+        assert context.after == "three"
+
 
 class TestContextWhenNoneCanBeRead:
     def test_should_not_ask_a_window_that_is_not_an_edit_control_for_its_text(
