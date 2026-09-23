@@ -168,3 +168,119 @@ class TestUnreadableNeighbours:
         result = fit_to_context("Hello there.", context)
 
         assert result == "Hello there."
+
+
+class TestEdgesOfTheText:
+    @pytest.mark.parametrize(
+        ("before", "selected", "after", "text", "expected"),
+        [
+            ("Hello there.", "", "", "How are you?", " How are you?"),
+            ("Hello there.", "", "", "how are you?", " How are you?"),
+            ("Hello there?", "", "", "Sure.", " Sure."),
+            ("Hello there!", "", "", "sure.", " Sure."),
+            ("Hello there", "", "", "How are you?", " how are you?"),
+            ("Hello there,", "", "", "How are you?", " how are you?"),
+            ("Buy these:", "", "", "Apples.", " apples."),
+            ("Hello there. ", "", "", "how are you?", "How are you?"),
+            ("Hello there.\n", "", "", "how are you?", "How are you?"),
+            ('He said "hi."', "", "", "then we left.", ' Then we left.'),
+            ('the word "hi"', "", "", "Is odd.", " is odd."),
+            ("(see above)", "", "", "Then we left.", " then we left."),
+            ("(see above.)", "", "", "then we left.", " Then we left."),
+            ('He said "', "", "", "Hello.", "Hello."),
+            ("Wait…", "", "", "Maybe.", " Maybe."),
+        ],
+        ids=[
+            "after a full stop",
+            "after a full stop, lowercase dictation",
+            "after a question mark",
+            "after an exclamation mark",
+            "after a bare word",
+            "after a comma",
+            "after a colon",
+            "after a full stop and a space",
+            "after a newline",
+            "after a quoted sentence",
+            "after a quoted word",
+            "after a closing bracket",
+            "after a bracketed sentence",
+            "after an opening quote",
+            "after an ellipsis",
+        ],
+    )
+    def test_should_fit_an_append_at_the_end(
+        self, before: str, selected: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext(before, selected, after)) == expected
+
+    @pytest.mark.parametrize(
+        ("before", "selected", "after", "text", "expected"),
+        [
+            ("", "", "Hello there.", "Good morning.", "Good morning. "),
+            ("", "", "Hello there.", "good morning", "Good morning "),
+            ("", "", "hello there.", "Well.", "Well "),
+            ("", "", "\nHello there.", "Good morning.", "Good morning."),
+            ("", "", " Hello there.", "good morning.", "Good morning."),
+        ],
+        ids=[
+            "before a sentence",
+            "before a sentence, unpunctuated dictation",
+            "before a lowercase word",
+            "before a newline",
+            "before a space",
+        ],
+    )
+    def test_should_fit_a_prepend_at_the_start(
+        self, before: str, selected: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext(before, selected, after)) == expected
+
+    @pytest.mark.parametrize(
+        ("before", "selected", "after", "text", "expected"),
+        [
+            ("Can you do this", ".", "", "?", "?"),
+            ("Can you do this", ".", "", "Right?", " right?"),
+            ("Can you do this", ".", "", "Is it done?", " is it done?"),
+            ("Can you do this", ".", "", ", right?", ", right?"),
+            ("Can you do this", " .", "", "?", "?"),
+            ("Can you do this", ".", " Thanks.", "?", "?"),
+            ("Can you do this", ".", " thanks", "?", "?"),
+            ("One. Two", ".", " Three.", "Four.", " four."),
+        ],
+        ids=[
+            "with a bare question mark",
+            "with a short question",
+            "with a longer question",
+            "with a punctuation-led continuation",
+            "with its leading space selected too",
+            "before another sentence",
+            "before a lowercase word",
+            "with words before another sentence",
+        ],
+    )
+    def test_should_fit_a_replaced_trailing_full_stop(
+        self, before: str, selected: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext(before, selected, after)) == expected
+
+    @pytest.mark.parametrize(
+        ("before", "selected", "after", "text", "expected"),
+        [
+            ("Hello there", " friend.", "", "Pal.", " pal."),
+            ("", "Hello ", "there.", "Hi.", "Hi "),
+            ("One. ", "Two. Three", " four.", "Five six.", "Five six"),
+            ("One.", " Two.", "", "three.", " Three."),
+            ("", "Hello.", "", "hi.", "Hi."),
+        ],
+        ids=[
+            "last word with its leading space",
+            "first word with its trailing space",
+            "across a sentence boundary",
+            "last sentence with its leading space",
+            "the whole text",
+        ],
+    )
+    def test_should_fit_a_replaced_selection(
+        self, before: str, selected: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext(before, selected, after)) == expected

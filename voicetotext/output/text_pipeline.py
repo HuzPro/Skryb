@@ -169,11 +169,11 @@ class TextPipeline:
             stages.append(remove_fillers)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
+        stages.append(add_trailing_sentence_space)
         stages.append(_caret_stage(caret_context))
         stages.append(_RuleStage(config.rules).apply)
         if config.options.numbers:
             stages.append(format_numbers)
-        stages.append(add_trailing_sentence_space)
         return cls(tuple(stages))
 
     @classmethod
