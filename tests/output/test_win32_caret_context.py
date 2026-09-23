@@ -206,6 +206,21 @@ class TestContextFromASelection:
         assert context.before == "a" * CONTEXT_CHARS
         assert context.after == "b" * CONTEXT_CHARS
 
+    @pytest.mark.parametrize(
+        ("start", "end", "expected"),
+        [
+            (0, 0, CaretContext("", "", _DOCUMENT)),
+            (27, 27, CaretContext(_DOCUMENT, "", "")),
+            (25, 27, CaretContext("Hello, I'm here for water", ". ", "")),
+            (0, 27, CaretContext("", _DOCUMENT, "")),
+        ],
+        ids=["caret at the start", "caret at the end", "selection to the end", "everything"],
+    )
+    def test_should_read_up_to_the_edges_of_the_document(self, start, end, expected):
+        automation = _automation_over(_DOCUMENT, start, end)
+
+        assert _context_from(automation) == expected
+
 
 class TestFieldsInsideALargerDocument:
     """Chromium reports the page and the composer as one flat text tree."""

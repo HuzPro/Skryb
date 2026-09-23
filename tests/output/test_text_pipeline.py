@@ -519,3 +519,21 @@ class TestCaretContextStage:
         result = pipeline.process("Near harry potter.")
 
         assert result == "near Harry Potter"
+
+    @pytest.mark.parametrize(
+        ("context", "expected"),
+        [
+            (CaretContext("Can you do this", ".", ""), " right? "),
+            (CaretContext("Can you do this", ".", " Thanks."), " right?"),
+            (CaretContext("", "", "\nThanks."), "Right?"),
+        ],
+        ids=["at the end", "before a spaced sentence", "before a newline"],
+    )
+    def test_should_space_after_a_sentence_only_where_nothing_follows(
+        self, context: CaretContext, expected: str,
+    ) -> None:
+        pipeline = TextPipeline.for_batch(
+            DictionaryConfig(), caret_context=lambda: context,
+        )
+
+        assert pipeline.process("Right?") == expected

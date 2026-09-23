@@ -9,7 +9,11 @@ touches ``ctypes.windll``, so the file runs on any platform.
 import pytest
 
 from voicetotext.output import win32_edit_control_context as module
-from voicetotext.output.caret_context import CONTEXT_CHARS, NO_CONTEXT
+from voicetotext.output.caret_context import (
+    CONTEXT_CHARS,
+    NO_CONTEXT,
+    CaretContext,
+)
 from voicetotext.output.win32_edit_control_context import (
     edit_control_context_of,
     read_edit_control_context,
@@ -152,6 +156,24 @@ class TestContextFromAnEditControl:
 
         assert context.before == "one\rtwo\r"
         assert context.after == "three"
+
+    @pytest.mark.parametrize(
+        ("start", "end", "expected"),
+        [
+            (0, 0, CaretContext("", "", _TEXT)),
+            (27, 27, CaretContext(_TEXT, "", "")),
+            (25, 27, CaretContext("Hello, I'm here for water", ". ", "")),
+            (0, 27, CaretContext("", _TEXT, "")),
+        ],
+        ids=["caret at the start", "caret at the end", "selection to the end", "everything"],
+    )
+    def test_should_read_up_to_the_edges_of_the_text(
+        self, user32: FakeUser32, start: int, end: int, expected: CaretContext,
+    ):
+        user32.start = start
+        user32.end = end
+
+        assert edit_control_context_of(_HWND) == expected
 
 
 class TestContextWhenNoneCanBeRead:
