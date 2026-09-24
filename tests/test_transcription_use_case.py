@@ -926,3 +926,77 @@ class TestRetranscribe:
 
         assert engine.transcribe.call_count == 5
         assert max(overlapped) == 1
+
+
+class TestOnePressAlwaysStartsTheNextRecording:
+    """The real toggle hotkey wired to the real use case, as bootstrap does."""
+
+    def _wired(self):
+        from voicetotext.hotkeys import keys
+        from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
+
+        use_case, recorder, engine, _, _, state_machine = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("hello")
+        combo = (keys.HotkeyKey(keys.VK_LCONTROL), keys.from_char("m"))
+        strategy = ToggleStrategy(keys=combo)
+        strategy.set_callbacks(use_case.on_hotkey_activated, use_case.on_hotkey_deactivated)
+
+        def press() -> None:
+            for key in combo:
+                strategy.on_key_press(key)
+            for key in reversed(combo):
+                strategy.on_key_release(key)
+
+        return use_case, state_machine, press
+
+    def test_after_cancelling(self):
+        use_case, state_machine, press = self._wired()
+        press()
+        use_case.on_cancel()
+
+        press()
+
+        assert state_machine.state == AppState.RECORDING
+
+    def test_after_finishing_from_the_pill(self):
+        use_case, state_machine, press = self._wired()
+        press()
+        use_case.on_hotkey_deactivated()
+
+        press()
+
+        assert state_machine.state == AppState.RECORDING
+
+    def test_after_the_length_cap_stopped_it(self):
+        use_case, state_machine, press = self._wired()
+        press()
+        use_case._handle_auto_stop()
+
+        press()
+
+        assert state_machine.state == AppState.RECORDING
+
+    def test_after_a_recording_too_short_to_transcribe(self):
+        use_case, state_machine, press = self._wired()
+        use_case._recorder.stop_recording.return_value = None
+        press()
+        press()
+
+        press()
+
+        assert state_machine.state == AppState.RECORDING
+
+    def test_across_many_cancel_and_finish_cycles(self):
+        use_case, state_machine, press = self._wired()
+
+        for cycle in range(500):
+            press()
+            assert state_machine.state == AppState.RECORDING
+            if cycle % 3 == 0:
+                use_case.on_cancel()
+            elif cycle % 3 == 1:
+                use_case.on_hotkey_deactivated()
+            else:
+                press()
+            assert state_machine.state == AppState.IDLE
