@@ -28,20 +28,7 @@ class TestToggleStrategyActivation:
 
         on_activate.assert_called_once()
 
-    def test_should_fire_deactivate_on_second_combo_press(self):
-        strategy, _, on_deactivate = _make_strategy(CTRL, M)
-
-        strategy.on_key_press(CTRL)
-        strategy.on_key_press(M)
-        strategy.on_key_release(M)
-        strategy.on_key_release(CTRL)
-
-        strategy.on_key_press(CTRL)
-        strategy.on_key_press(M)
-
-        on_deactivate.assert_called_once()
-
-    def test_should_alternate_between_activate_and_deactivate(self):
+    def test_every_combo_press_is_one_toggle_request(self):
         strategy, on_activate, on_deactivate = _make_strategy(CTRL, M)
 
         for _ in range(4):
@@ -50,8 +37,17 @@ class TestToggleStrategyActivation:
             strategy.on_key_release(M)
             strategy.on_key_release(CTRL)
 
-        assert on_activate.call_count == 2
-        assert on_deactivate.call_count == 2
+        assert on_activate.call_count == 4
+        on_deactivate.assert_not_called()
+
+    def test_holding_the_combo_down_asks_only_once(self):
+        strategy, on_activate, _ = _make_strategy(CTRL, M)
+
+        strategy.on_key_press(CTRL)
+        for _ in range(30):
+            strategy.on_key_press(M)
+
+        on_activate.assert_called_once()
 
 
 class TestToggleStrategyExactSequence:
@@ -131,11 +127,10 @@ class TestToggleStrategyMatchesHookVkEvents:
 
 class TestToggleStrategySingleKey:
     def test_should_work_with_single_key_combo(self):
-        strategy, on_activate, on_deactivate = _make_strategy(F12)
+        strategy, on_activate, _ = _make_strategy(F12)
 
         strategy.on_key_press(F12)
-        on_activate.assert_called_once()
         strategy.on_key_release(F12)
-
         strategy.on_key_press(F12)
-        on_deactivate.assert_called_once()
+
+        assert on_activate.call_count == 2
