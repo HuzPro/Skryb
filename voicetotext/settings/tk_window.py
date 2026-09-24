@@ -28,6 +28,8 @@ from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.tk_download_bridge import TkDownloadBridge
 from voicetotext.settings.tk_engine_bridge import TkEngineBridge
 from voicetotext.settings.tk_hotkey_capture import CaptureBridge
+from voicetotext.recording.input_devices import Microphones
+from voicetotext.settings.tk_pages.audio_page import TkAudioPage
 from voicetotext.settings.tk_pages.dictionary_page import TkDictionaryPage
 from voicetotext.settings.tk_pages.hotkeys_page import TkHotkeysPage
 from voicetotext.settings.tk_pages.output_page import TkOutputPage
@@ -43,7 +45,7 @@ ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 ChangeSetCallback = Callable[[ChangeSet], None]
 CaptureStateCallback = Callable[[bool], None]
 
-_SECTIONS = ["Transcription", "Hotkeys", "Output", "Dictionary"]
+_SECTIONS = ["Transcription", "Audio", "Hotkeys", "Output", "Dictionary"]
 
 
 def _run_now(action: Callable[[], None]) -> None:
@@ -83,8 +85,11 @@ class TkSettingsWindow(tkinter.Toplevel):
         schedule: ScheduleOnGuiThread = _run_now,
         color_scheme: ColorScheme | None = None,
         confirm_license: LicenseConsentPrompt = ask_license_consent,
+        microphones: Microphones | None = None,
     ) -> None:
         super().__init__(master)
+        self._microphones = microphones or Microphones()
+        self._shown_page: ttk.Frame | None = None
         # Hide immediately so the half-built, not-yet-themed window never
         # flashes on screen; ``show`` reveals it once it is dark-themed.
         self.withdraw()
@@ -171,12 +176,14 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._hotkeys_page.recording_state_changed.connect(
             self._on_recording_state_changed,
         )
+        self._audio_page = TkAudioPage(content, self._microphones)
         self._output_page = TkOutputPage(content)
         self._dictionary_page = TkDictionaryPage(content)
         self._dictionary_page.set_dictionary(self._service.dictionary_rules())
 
         self._pages = [
             self._transcription_page,
+            self._audio_page,
             self._hotkeys_page,
             self._output_page,
             self._dictionary_page,
@@ -230,6 +237,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._hotkeys_page.set_mode(draft.hotkey_mode)
         self._output_page.set_mode(draft.output_mode)
         self._output_page.set_capture_content(draft.capture_content)
+        self._audio_page.set_device(draft.input_device)
+        self._audio_page.set_boost_quiet_speech(draft.boost_quiet_speech)
 
     def _on_choose_logs_folder(self) -> None:
         selected = filedialog.askdirectory(
@@ -294,7 +303,13 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._show_page(selection[0])
 
     def _show_page(self, index: int) -> None:
-        self._pages[index].tkraise()
+        page = self._pages[index]
+        if self._shown_page is self._audio_page and page is not self._audio_page:
+            self._audio_page.on_hidden()
+        page.tkraise()
+        if page is self._audio_page and self._shown_page is not page:
+            self._audio_page.on_shown()
+        self._shown_page = page
 
     def show(self) -> None:
         """Reveal and focus the window (also the single-instance focus path)."""
@@ -323,6 +338,8 @@ class TkSettingsWindow(tkinter.Toplevel):
             hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
             capture_content=self._output_page.captures_content(),
+            input_device=self._audio_page.current_device(),
+            boost_quiet_speech=self._audio_page.boosts_quiet_speech(),
             transcription_mode=self._transcription_page.current_mode(),
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()

@@ -1032,3 +1032,35 @@ class TestEditCaptureSwitch:
         reporter = _delivery_reporter(None, PipelineMode.BATCH, OutputMode.DIRECT_PASTE)
 
         assert reporter is _ignore_delivery
+
+
+class TestMicrophoneWiring:
+    def _audio(self, peak: float):
+        import numpy as np
+
+        from voicetotext.recording.audio_segment import AudioSegment
+
+        data = (np.sin(np.arange(16000) / 5) * peak).astype(np.float32)
+        return AudioSegment(data=data, sample_rate=16000)
+
+    def test_boosts_quiet_speech_unless_switched_off(self):
+        quiet = self._audio(0.05)
+
+        boosted = bootstrap._prepare_audio(FakeConfig(), quiet)
+        untouched = bootstrap._prepare_audio(
+            FakeConfig({"audio.boost_quiet_speech": False}), quiet,
+        )
+
+        assert float(abs(boosted.data).max()) > 0.4
+        assert untouched is quiet
+
+    @pytest.mark.parametrize("saved", [None, "", 0])
+    def test_an_unset_microphone_means_the_windows_default(self, saved):
+        assert bootstrap._chosen_microphone(FakeConfig({"audio.input_device": saved})) == ""
+
+    def test_choosing_from_the_tray_saves_it(self):
+        config = FakeConfig()
+
+        bootstrap._choose_microphone(config, "Microphone (Maono PD300X Microp")
+
+        assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"

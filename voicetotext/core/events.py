@@ -38,6 +38,13 @@ class RecordingCancelledEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class MicrophoneMissingEvent(DomainEvent):
+    """The chosen microphone is gone; recording uses the Windows default."""
+
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class TranscriptionStartedEvent(DomainEvent):
     """The engine has the audio; ``estimated_seconds`` is None without history."""
 

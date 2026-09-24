@@ -9,6 +9,7 @@ from voicetotext.recording.pill import (
     Frame,
     Mode,
     Spring,
+    VoiceLevel,
     button_centres,
     hit_test,
     pill_box,
@@ -170,3 +171,43 @@ class TestRender:
         frame = Frame(width=180, height=40, opacity=1.0, controls=controls, label=0.5)
         for x, y, _ in button_centres(frame).values():
             assert render(frame).getpixel((round(x), round(y)))[3] > 240
+
+
+class TestVoiceLevel:
+    def _settle(self, level: VoiceLevel, rms: float, seconds: float = 10.0) -> float:
+        value = 0.0
+        for _ in range(round(seconds * 30)):
+            value = level.update(rms, 1 / 30)
+        return value
+
+    def test_speech_from_across_the_room_fills_the_bars_like_speech_up_close(self):
+        near = self._settle(VoiceLevel(), 0.08)
+        far = self._settle(VoiceLevel(), 0.012)
+
+        assert far == pytest.approx(near, abs=0.05)
+        assert far > 0.9
+
+    def test_room_noise_below_the_gate_draws_flat(self):
+        assert self._settle(VoiceLevel(), 0.002) == 0.0
+
+    def test_a_short_pause_between_words_does_not_rescale(self):
+        level = VoiceLevel()
+        self._settle(level, 0.05)
+        self._settle(level, 0.0, seconds=0.5)
+
+        assert level.update(0.05, 1 / 30) > 0.9
+
+    def test_a_sudden_shout_never_overflows_the_bars(self):
+        level = VoiceLevel()
+        self._settle(level, 0.01)
+
+        assert level.update(0.9, 1 / 30) == 1.0
+
+    @pytest.mark.parametrize("rms", [math.nan, -1.0, math.inf])
+    def test_bad_readings_never_break_it(self, rms):
+        level = VoiceLevel()
+
+        value = level.update(rms, 1 / 30)
+
+        assert 0.0 <= value <= 1.0
+        assert 0.0 <= level.update(0.05, 1 / 30) <= 1.0

@@ -260,6 +260,10 @@ class SettingsService:
                 self._config.get("diagnostics.enabled", True) is True
                 and self._config.get("diagnostics.capture_content", False) is True
             ),
+            input_device=str(self._config.get("audio.input_device", "") or ""),
+            boost_quiet_speech=(
+                self._config.get("audio.boost_quiet_speech", True) is not False
+            ),
         )
 
     def _crisperwhisper_mode(self) -> str:
@@ -284,6 +288,8 @@ class SettingsService:
         self._config.set("hotkey.combination", draft.hotkey_combination)
         self._config.set("hotkey.mode", draft.hotkey_mode)
         self._config.set("output.mode", draft.output_mode.value)
+        self._config.set("audio.input_device", draft.input_device)
+        self._config.set("audio.boost_quiet_speech", draft.boost_quiet_speech)
         self._config.set("transcription.mode", draft.transcription_mode.value)
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,

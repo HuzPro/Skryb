@@ -825,3 +825,19 @@ class TestDictionaryRules:
         service.save_dictionary_rules(DictionaryConfig())
 
         assert path.exists()
+
+
+def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> None:
+    service, config, _, _, _ = _build_service()
+    draft = service.current_draft()
+    assert draft.input_device == ""
+    assert draft.boost_quiet_speech is True
+
+    service.apply_draft(
+        replace(draft, input_device="Microphone (Maono PD300X Microp", boost_quiet_speech=False),
+    )
+
+    assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"
+    assert config.get("audio.boost_quiet_speech") is False
+    assert service.current_draft().input_device == "Microphone (Maono PD300X Microp"
+    assert service.current_draft().boost_quiet_speech is False

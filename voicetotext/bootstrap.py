@@ -12,7 +12,7 @@ from voicetotext.core.action_dispatcher import (
     ThreadedActionDispatcher,
 )
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
-from voicetotext.core.events import EngineLoadFailedEvent
+from voicetotext.core.events import EngineLoadFailedEvent, MicrophoneMissingEvent
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
@@ -75,10 +75,13 @@ from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
 from voicetotext.history.tk_window import HistoryWindow
+from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.recording.input_devices import Microphones
 from voicetotext.recording.overlay import RecordingOverlay
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
+from voicetotext.recording.speech_level import boost_quiet_speech
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import (
     EngineHotSwapCoordinator,
@@ -348,6 +351,30 @@ def _build_hotkey_listener(
     listener.set_on_deactivate(use_case.on_hotkey_deactivated)
     return listener
 
+
+
+def _chosen_microphone(config: JsonConfigAdapter) -> str:
+    return str(config.get("audio.input_device", "") or "")
+
+
+def _prepare_audio(config: JsonConfigAdapter, audio: AudioSegment) -> AudioSegment:
+    if config.get("audio.boost_quiet_speech", True) is False:
+        return audio
+    return boost_quiet_speech(audio)
+
+
+def _microphone_menu(
+    config: JsonConfigAdapter, microphones: Microphones,
+) -> tuple[list[tuple[str, str]], str]:
+    names = microphones.names(rescan=True)
+    labels = microphones.labels(names)
+    return [(name, labels.get(name, name)) for name in names], _chosen_microphone(config)
+
+
+def _choose_microphone(config: JsonConfigAdapter, name: str) -> None:
+    config.set("audio.input_device", name)
+    config.save()
+    _logger.info("Microphone set to %r.", name or "the Windows default")
 
 
 def _cancel_with_escape(use_case: RecordAndTranscribeUseCase) -> bool:
@@ -819,6 +846,15 @@ def build_app(
 
     recorder = SoundDeviceAdapter(
         sample_rate=config.get("audio.sample_rate", 16000),
+        device_name=functools.partial(_chosen_microphone, config),
+        on_device_missing=lambda name: event_bus.publish(
+            MicrophoneMissingEvent(name=name),
+        ),
+    )
+    # Re-scanning the hardware restarts PortAudio, which would cut off a
+    # recording, so it waits until the app is idle.
+    microphones = Microphones(
+        is_busy=lambda: state_machine.state != AppState.IDLE,
     )
 
     # The GUI thread is the only thread that owns a window and a
@@ -857,6 +893,7 @@ def build_app(
         is_streaming_mode=lambda: (
             config.get("transcription.mode", "batch") == "streaming"
         ),
+        prepare_audio=functools.partial(_prepare_audio, config),
     )
 
     listener = _build_hotkey_listener(
@@ -912,6 +949,7 @@ def build_app(
             settings_service,
             capture_bridge=Win32CaptureBridge(),
             first_run=False,
+            microphones=microphones,
             on_save=lambda changes: apply_settings(
                 changes, config, record_and_transcribe_use_case, app,
                 gui_dispatcher=gui_dispatcher,
@@ -942,6 +980,8 @@ def build_app(
         tray_factory=functools.partial(
             build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
             on_history_clicked=history_window.show,
+            list_microphones=functools.partial(_microphone_menu, config, microphones),
+            on_microphone_chosen=functools.partial(_choose_microphone, config),
         ),
         on_open_settings=open_settings,
         download_manager=download_manager,

@@ -223,3 +223,77 @@ class TestExplorerRestartRecovery:
         backend._window_proc(0, mod._WM_TASKBAR_CREATED, 0, 0)
 
         shell.Shell_NotifyIconW.assert_not_called()
+
+
+class TestMicrophoneMenu:
+    def _backend(self, connected, chosen, chosen_log):
+        from voicetotext.tray import win32_tray_adapter as tray
+
+        backend = tray.Win32TrayBackend.__new__(tray.Win32TrayBackend)
+        backend._on_settings_clicked = None
+        backend._on_quit_clicked = lambda: None
+        backend._on_history_clicked = None
+        backend._list_microphones = lambda: (connected, chosen)
+        backend._on_microphone_chosen = chosen_log.append
+        backend._offered_microphones = []
+        return tray, backend
+
+    def _menu_items(self, tray, backend, monkeypatch):
+        items = []
+        user32 = MagicMock()
+        user32.CreatePopupMenu.return_value = 55
+        user32.AppendMenuW.side_effect = (
+            lambda menu, flags, item, label: items.append((menu, flags, item, label))
+        )
+        monkeypatch.setattr(tray, "_user32", user32)
+        backend._append_microphone_menu(1)
+        return items
+
+    def test_lists_the_default_then_each_microphone_by_its_full_name(self, monkeypatch):
+        tray, backend = self._backend(
+            [("Microphone (Maono PD300X Microp", "Microphone (Maono PD300X Microphone)")],
+            "",
+            [],
+        )
+
+        items = self._menu_items(tray, backend, monkeypatch)
+
+        labels = [label for menu, _flags, _item, label in items if menu == 55]
+        assert labels == ["Windows default", "Microphone (Maono PD300X Microphone)"]
+        assert items[-1][3] == "Microphone"
+
+    def test_ticks_the_chosen_microphone(self, monkeypatch):
+        tray, backend = self._backend([("Mic A", "Mic A"), ("Mic B", "Mic B")], "Mic B", [])
+
+        items = self._menu_items(tray, backend, monkeypatch)
+
+        ticked = [label for _menu, flags, _item, label in items if flags & tray._MF_CHECKED]
+        assert ticked == ["Mic B"]
+
+    def test_keeps_an_unplugged_choice_visible_and_ticked(self, monkeypatch):
+        tray, backend = self._backend([("Mic A", "Mic A")], "USB Mic", [])
+
+        items = self._menu_items(tray, backend, monkeypatch)
+
+        ticked = [label for _menu, flags, _item, label in items if flags & tray._MF_CHECKED]
+        assert ticked == ["USB Mic (not connected)"]
+
+    def test_choosing_an_entry_saves_that_microphone(self, monkeypatch):
+        chosen = []
+        tray, backend = self._backend([("Mic A", "Mic A"), ("Mic B", "Mic B")], "", chosen)
+        self._menu_items(tray, backend, monkeypatch)
+
+        backend._dispatch_menu_command(tray._ID_FIRST_MICROPHONE + 2)
+        backend._dispatch_menu_command(tray._ID_FIRST_MICROPHONE)
+
+        assert chosen == ["Mic B", ""]
+
+    def test_a_broken_device_list_still_leaves_the_rest_of_the_menu(self, monkeypatch):
+        tray, backend = self._backend([], "", [])
+
+        def broken():
+            raise OSError("PortAudio not initialized")
+
+        backend._list_microphones = broken
+
+        assert self._menu_items(tray, backend, monkeypatch) == []
