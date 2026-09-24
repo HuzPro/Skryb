@@ -1,45 +1,59 @@
 import ctypes
 import ctypes.wintypes as wintypes
-import math
+import logging
+import time
 import tkinter
 from collections.abc import Callable
+from functools import cache
 from typing import Protocol
 
 import numpy
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from voicetotext.core.event_bus import EventBus
-from voicetotext.core.events import DomainEvent, StateChangedEvent
+from voicetotext.core.events import (
+    DomainEvent,
+    RecordingPausedEvent,
+    RecordingResumedEvent,
+    StateChangedEvent,
+    TranscriptionStartedEvent,
+)
 from voicetotext.core.state_machine import AppState
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
+from voicetotext.recording.pill import (
+    CANVAS_HEIGHT,
+    CANVAS_WIDTH,
+    Button,
+    Frame,
+    Mode,
+    Spring,
+    collapsed_size,
+    hit_test,
+    render,
+    target_size,
+    transcription_progress,
+)
 
+_logger = logging.getLogger(__name__)
 
-_WIDTH = 128
-_HEIGHT = 44
-_BOTTOM_MARGIN = 36
-_FRAME_INTERVAL_MS = 33
-_SUPERSAMPLE = 4
-
-_BAR_COUNT = 9
-_BAR_WIDTH = 4
-_BAR_GAP = 6
-_BAR_MIN_HEIGHT = 4
-_BAR_MAX_HEIGHT = 28
-
-_BACKGROUND = (0x17, 0x19, 0x1D, 190)
-_BORDER = (0x2A, 0x2E, 0x35, 190)
-_BAR_COLOR = (0x70, 0xD6, 0xFF, 220)
+_BOTTOM_MARGIN = 26
+_SETTLED_FRAME_MS = 33
+_MOVING_FRAME_MS = 16
+_LONGEST_FRAME_SECONDS = 0.05
 
 _LEVEL_GAIN = 15.0
 _LEVEL_SMOOTHING = 0.62
-_PHASE_STEP = 0.32
-_BREATHING_RATE = 0.18
+_PHASE_PER_SECOND = 9.6
+# Once the transcription is done the bar runs to full, holds for a beat
+# so the finish reads, and only then does the pill leave.
+_FULL_BAR_HOLD_SECONDS = 0.14
+_PROGRESS_CATCH_UP_RATE = 12.0
+_PROGRESS_FINISH_RATE = 20.0
 
 _WINDOW_CLASS_NAME = "VoiceToTextRecordingOverlay"
 _ERROR_CLASS_ALREADY_EXISTS = 1410
 _WS_POPUP = 0x80000000
 _WS_EX_LAYERED = 0x00080000
-_WS_EX_TRANSPARENT = 0x00000020
 _WS_EX_NOACTIVATE = 0x08000000
 _WS_EX_TOOLWINDOW = 0x00000080
 _WS_EX_TOPMOST = 0x00000008
@@ -53,6 +67,12 @@ _DIB_RGB_COLORS = 0
 _AC_SRC_OVER = 0x00
 _AC_SRC_ALPHA = 0x01
 _ULW_ALPHA = 0x00000002
+_WM_SETCURSOR = 0x0020
+_WM_MOUSEACTIVATE = 0x0021
+_WM_LBUTTONDOWN = 0x0201
+_WM_LBUTTONUP = 0x0202
+_MA_NOACTIVATE = 3
+_IDC_HAND = 32649
 
 _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(
@@ -116,31 +136,6 @@ class BlendFunction(ctypes.Structure):
     ]
 
 
-def render_overlay_frame(level: float, phase: float) -> Image.Image:
-    scale = _SUPERSAMPLE
-    image = Image.new("RGBA", (_WIDTH * scale, _HEIGHT * scale), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle(
-        (0, 0, (_WIDTH * scale) - 1, (_HEIGHT * scale) - 1),
-        radius=(_HEIGHT * scale) / 2,
-        fill=_BACKGROUND,
-        outline=_BORDER,
-        width=scale,
-    )
-    span = (_BAR_COUNT * _BAR_WIDTH) + ((_BAR_COUNT - 1) * _BAR_GAP)
-    first_left = (_WIDTH - span) / 2
-    for index in range(_BAR_COUNT):
-        height = _bar_height(index, level, phase)
-        left = (first_left + (index * (_BAR_WIDTH + _BAR_GAP))) * scale
-        top = ((_HEIGHT - height) / 2) * scale
-        draw.rounded_rectangle(
-            (left, top, left + (_BAR_WIDTH * scale) - 1, top + (height * scale) - 1),
-            radius=(_BAR_WIDTH * scale) / 2,
-            fill=_BAR_COLOR,
-        )
-    return image.resize((_WIDTH, _HEIGHT), Image.Resampling.LANCZOS)
-
-
 def premultiplied_bgra(image: Image.Image) -> bytes:
     rgba = numpy.asarray(image, dtype=numpy.uint8)
     alpha = rgba[:, :, 3]
@@ -149,14 +144,8 @@ def premultiplied_bgra(image: Image.Image) -> bytes:
     return numpy.ascontiguousarray(bgra).tobytes()
 
 
-def _bar_height(index: int, level: float, phase: float) -> float:
-    half = (_BAR_COUNT - 1) / 2
-    distance = abs(index - half)
-    bias = 1.0 - (0.62 * ((distance / half) ** 1.35))
-    pulse = 0.55 + (0.45 * math.sin(phase + (distance * 0.8)))
-    breathing = 0.06 + (0.06 * math.sin(phase * _BREATHING_RATE))
-    amplitude = max(level * pulse, breathing) * bias
-    return _BAR_MIN_HEIGHT + ((_BAR_MAX_HEIGHT - _BAR_MIN_HEIGHT) * amplitude)
+# Receives ``(is_button_down, x, y)`` in window pixels.
+MouseHandler = Callable[[bool, int, int], None]
 
 
 class OverlayWindowApi(Protocol):
@@ -165,6 +154,50 @@ class OverlayWindowApi(Protocol):
     def push_frame(self, pixels: bytes) -> None: ...
     def hide(self) -> None: ...
     def dispose(self) -> None: ...
+    def set_mouse_handler(self, handler: MouseHandler) -> None: ...
+    def cursor_position(self) -> tuple[int, int] | None: ...
+    def set_hand_cursor(self, hand: bool) -> None: ...
+
+
+# Every overlay window shares one window class, and a class has one window
+# procedure, so that procedure finds its window by handle.
+_WINDOWS: dict[int, "Win32LayeredOverlayWindow"] = {}
+
+
+def _window_proc(hwnd: int, message: int, w_param: int, l_param: int) -> int:
+    window = _WINDOWS.get(int(hwnd or 0))
+    handled = None
+    if window is not None:
+        try:
+            handled = window.handle_message(message, l_param)
+        except Exception:  # never raise into a Win32 callback
+            _logger.exception("Overlay message %#x failed.", message)
+    if handled is not None:
+        return handled
+    return _default_window_proc()(hwnd, message, w_param, l_param)
+
+
+@cache
+def _default_window_proc() -> Callable[[int, int, int, int], int]:
+    user32 = ctypes.WinDLL("user32")
+    user32.DefWindowProcW.argtypes = [
+        wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+    ]
+    user32.DefWindowProcW.restype = _LRESULT
+    return user32.DefWindowProcW
+
+
+# Pinned at module level: a ``WINFUNCTYPE`` the GC collects while Windows
+# still holds its address would crash the interpreter.
+_WINDOW_PROC = _WNDPROC(_window_proc)
+
+
+def _client_point(l_param: int) -> tuple[int, int]:
+    # Signed 16-bit halves: on a monitor left of the primary a coordinate
+    # can be negative.
+    x = ctypes.c_short(l_param & 0xFFFF).value
+    y = ctypes.c_short((l_param >> 16) & 0xFFFF).value
+    return x, y
 
 
 class Win32LayeredOverlayWindow:
@@ -174,6 +207,11 @@ class Win32LayeredOverlayWindow:
     calling ``SetLayeredWindowAttributes`` on the same window switches it
     to the colour-key/constant-alpha path and the per-pixel alpha stops
     reaching the screen.
+
+    It takes clicks but never the focus: ``WS_EX_NOACTIVATE`` and
+    ``MA_NOACTIVATE`` keep the caret in the app the dictation will paste
+    into. Fully transparent pixels still pass clicks to the window
+    beneath, so only the drawn pill is clickable.
     """
 
     def __init__(self) -> None:
@@ -181,11 +219,12 @@ class Win32LayeredOverlayWindow:
         self._gdi32 = ctypes.WinDLL("gdi32")
         self._kernel32 = ctypes.WinDLL("kernel32")
         self._declare_signatures()
-        self._wnd_proc = _WNDPROC(
-            ctypes.cast(self._user32.DefWindowProcW, ctypes.c_void_p).value,
-        )
+        self._mouse_handler: MouseHandler | None = None
+        self._hand_cursor = False
+        self._origin = (0, 0)
         self._register_class()
         self._hwnd = self._create_window()
+        _WINDOWS[self._hwnd] = self
         self._screen_dc: int = 0
         self._memory_dc: int = 0
         self._bitmap: int = 0
@@ -252,6 +291,12 @@ class Win32LayeredOverlayWindow:
             wintypes.DWORD,
         ]
         self._user32.UpdateLayeredWindow.restype = wintypes.BOOL
+        self._user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+        self._user32.GetCursorPos.restype = wintypes.BOOL
+        self._user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, wintypes.LPVOID]
+        self._user32.LoadCursorW.restype = wintypes.HANDLE
+        self._user32.SetCursor.argtypes = [wintypes.HANDLE]
+        self._user32.SetCursor.restype = wintypes.HANDLE
         self._gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
         self._gdi32.CreateCompatibleDC.restype = wintypes.HDC
         self._gdi32.CreateDIBSection.argtypes = [
@@ -272,7 +317,7 @@ class Win32LayeredOverlayWindow:
 
     def _register_class(self) -> None:
         window_class = WindowClass()
-        window_class.lpfnWndProc = self._wnd_proc
+        window_class.lpfnWndProc = _WINDOW_PROC
         window_class.hInstance = self._kernel32.GetModuleHandleW(None)
         window_class.lpszClassName = _WINDOW_CLASS_NAME
         if self._user32.RegisterClassW(ctypes.byref(window_class)):
@@ -284,7 +329,6 @@ class Win32LayeredOverlayWindow:
     def _create_window(self) -> int:
         hwnd = self._user32.CreateWindowExW(
             _WS_EX_LAYERED
-            | _WS_EX_TRANSPARENT
             | _WS_EX_NOACTIVATE
             | _WS_EX_TOOLWINDOW
             | _WS_EX_TOPMOST,
@@ -293,8 +337,8 @@ class Win32LayeredOverlayWindow:
             _WS_POPUP,
             0,
             0,
-            _WIDTH,
-            _HEIGHT,
+            CANVAS_WIDTH,
+            CANVAS_HEIGHT,
             None,
             None,
             self._kernel32.GetModuleHandleW(None),
@@ -322,8 +366,10 @@ class Win32LayeredOverlayWindow:
 
     def show_at(self, x: int, y: int) -> None:
         self._acquire_surface()
+        self._origin = (x, y)
         self._user32.SetWindowPos(
-            self._hwnd, _HWND_TOPMOST, x, y, _WIDTH, _HEIGHT, _SWP_NOACTIVATE,
+            self._hwnd, _HWND_TOPMOST, x, y, CANVAS_WIDTH, CANVAS_HEIGHT,
+            _SWP_NOACTIVATE,
         )
         self._user32.ShowWindow(self._hwnd, _SW_SHOWNOACTIVATE)
 
@@ -331,7 +377,7 @@ class Win32LayeredOverlayWindow:
         if not self._bits:
             return
         ctypes.memmove(self._bits, pixels, len(pixels))
-        size = wintypes.SIZE(_WIDTH, _HEIGHT)
+        size = wintypes.SIZE(CANVAS_WIDTH, CANVAS_HEIGHT)
         source = wintypes.POINT(0, 0)
         blend = BlendFunction(_AC_SRC_OVER, 0, 255, _AC_SRC_ALPHA)
         if not self._user32.UpdateLayeredWindow(
@@ -354,8 +400,35 @@ class Win32LayeredOverlayWindow:
     def dispose(self) -> None:
         self.hide()
         if self._hwnd:
+            _WINDOWS.pop(self._hwnd, None)
             self._user32.DestroyWindow(self._hwnd)
             self._hwnd = 0
+
+    def set_mouse_handler(self, handler: MouseHandler) -> None:
+        self._mouse_handler = handler
+
+    def cursor_position(self) -> tuple[int, int] | None:
+        point = wintypes.POINT()
+        if not self._user32.GetCursorPos(ctypes.byref(point)):
+            return None
+        return point.x - self._origin[0], point.y - self._origin[1]
+
+    def set_hand_cursor(self, hand: bool) -> None:
+        self._hand_cursor = hand
+
+    def handle_message(self, message: int, l_param: int) -> int | None:
+        """The window procedure's answer, or None for the default one."""
+        if message == _WM_MOUSEACTIVATE:
+            return _MA_NOACTIVATE
+        if message == _WM_SETCURSOR and self._hand_cursor:
+            self._user32.SetCursor(self._user32.LoadCursorW(None, _IDC_HAND))
+            return 1
+        if message in (_WM_LBUTTONDOWN, _WM_LBUTTONUP):
+            if self._mouse_handler is not None:
+                x, y = _client_point(l_param)
+                self._mouse_handler(message == _WM_LBUTTONDOWN, x, y)
+            return 0
+        return None
 
     def _acquire_surface(self) -> None:
         if self._bitmap:
@@ -364,9 +437,9 @@ class Win32LayeredOverlayWindow:
         self._memory_dc = self._gdi32.CreateCompatibleDC(self._screen_dc)
         info = BitmapInfo()
         info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
-        info.bmiHeader.biWidth = _WIDTH
+        info.bmiHeader.biWidth = CANVAS_WIDTH
         # Negative height selects a top-down DIB, matching PIL's row order.
-        info.bmiHeader.biHeight = -_HEIGHT
+        info.bmiHeader.biHeight = -CANVAS_HEIGHT
         info.bmiHeader.biPlanes = 1
         info.bmiHeader.biBitCount = 32
         info.bmiHeader.biCompression = _BI_RGB
@@ -397,7 +470,18 @@ class Win32LayeredOverlayWindow:
         self._bits = ctypes.c_void_p()
 
 
+def _ignore() -> None:
+    return None
+
+
 class RecordingOverlay:
+    """The pill: grows in on record, shrinks into a progress bar, then leaves.
+
+    Everything here runs on the Tk thread. Events arrive on worker threads
+    and are handed over through the dispatcher; clicks arrive on the Tk
+    thread already, through the window procedure.
+    """
+
     def __init__(
         self,
         root: tkinter.Misc,
@@ -405,56 +489,251 @@ class RecordingOverlay:
         dispatcher: GuiThreadDispatcher,
         level_provider: Callable[[], float],
         window_api: OverlayWindowApi | None = None,
+        on_cancel: Callable[[], None] = _ignore,
+        on_pause_toggle: Callable[[], None] = _ignore,
+        on_finish: Callable[[], None] = _ignore,
+        on_press: Callable[[], None] = _ignore,
+        on_tick: Callable[[], None] = _ignore,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._root = root
         self._event_bus = event_bus
         self._dispatcher = dispatcher
         self._level_provider = level_provider
         self._window_api = window_api or Win32LayeredOverlayWindow()
+        self._actions = {
+            Button.CANCEL: on_cancel,
+            Button.PAUSE: on_pause_toggle,
+            Button.FINISH: on_finish,
+        }
+        self._on_press = on_press
+        self._on_tick = on_tick
+        self._clock = clock
+        width, height = collapsed_size()
+        self._width = Spring(width)
+        self._height = Spring(height)
+        # Fades never overshoot: a bounce in opacity reads as a flicker.
+        self._opacity = Spring(0.0, damping=40.0)
+        self._controls = Spring(0.0, damping=40.0)
+        self._label = Spring(0.0, damping=40.0)
+        self._mode = Mode.CLOSED
+        self._visible = False
+        self._paused = False
         self._level = 0.0
         self._phase = 0.0
+        self._estimate: float | None = None
+        self._transcribing_since = 0.0
+        self._progress = 0.0
+        self._finished_at: float | None = None
+        self._pressed: Button | None = None
+        self._frame = self._current_frame(None)
+        self._last_tick = 0.0
         self._after_id: str | None = None
+        self._window_api.set_mouse_handler(self._on_mouse)
         self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
+        self._event_bus.subscribe(RecordingPausedEvent, self._on_paused)
+        self._event_bus.subscribe(RecordingResumedEvent, self._on_resumed)
+        self._event_bus.subscribe(TranscriptionStartedEvent, self._on_transcribing)
+
+    @property
+    def mode(self) -> Mode:
+        return self._mode
+
+    @property
+    def visible(self) -> bool:
+        return self._visible
+
+    @property
+    def frame(self) -> Frame:
+        return self._frame
 
     def show(self) -> None:
-        self._reset_level()
-        left, _top, right, bottom = self._window_api.work_area_for_foreground()
-        x = left + ((right - left - _WIDTH) // 2)
-        y = bottom - _HEIGHT - _BOTTOM_MARGIN
-        self._window_api.show_at(x, y)
-        if self._after_id is None:
-            self._animate()
+        """Grow the pill in for a new recording."""
+        if not self._visible:
+            left, _top, right, bottom = self._window_api.work_area_for_foreground()
+            x = left + ((right - left - CANVAS_WIDTH) // 2)
+            y = bottom - CANVAS_HEIGHT - _BOTTOM_MARGIN
+            self._window_api.show_at(x, y)
+            self._visible = True
+            self._opacity.value = 0.0
+            self._width.value, self._height.value = collapsed_size()
+        self._mode = Mode.RECORDING
+        self._paused = False
+        self._level = 0.0
+        self._phase = 0.0
+        self._finished_at = None
+        self._retarget()
+        self._start_loop()
 
     def hide(self) -> None:
-        if self._after_id is not None:
-            self._root.after_cancel(self._after_id)
-            self._after_id = None
-        self._reset_level()
-        self._window_api.hide()
+        """Shrink the pill away; the window hides once it has faded out."""
+        if not self._visible:
+            return
+        self._mode = Mode.CLOSED
+        self._pressed = None
+        self._retarget()
+        self._start_loop()
 
     def dispose(self) -> None:
         self._event_bus.unsubscribe(StateChangedEvent, self._on_state_changed)
-        self.hide()
+        self._event_bus.unsubscribe(RecordingPausedEvent, self._on_paused)
+        self._event_bus.unsubscribe(RecordingResumedEvent, self._on_resumed)
+        self._event_bus.unsubscribe(TranscriptionStartedEvent, self._on_transcribing)
+        self._stop_loop()
+        self._visible = False
         self._window_api.dispose()
+
+    def _start_transcribing(self) -> None:
+        if not self._visible:
+            return
+        self._mode = Mode.TRANSCRIBING
+        self._pressed = None
+        self._transcribing_since = self._clock()
+        self._progress = 0.0
+        self._finished_at = None
+        self._retarget()
+        self._start_loop()
+
+    def _finish_transcribing(self) -> None:
+        if self._mode is not Mode.TRANSCRIBING:
+            self.hide()
+            return
+        self._finished_at = self._clock()
+
+    def _set_estimate(self, estimate: float | None) -> None:
+        self._estimate = estimate
+
+    def _set_paused(self, paused: bool) -> None:
+        self._paused = paused
+
+    def _retarget(self) -> None:
+        width, height = target_size(self._mode)
+        self._width.target = width
+        self._height.target = height
+        self._opacity.target = 0.0 if self._mode is Mode.CLOSED else 1.0
+        self._controls.target = 1.0 if self._mode is Mode.RECORDING else 0.0
+        self._label.target = 1.0 if self._mode is Mode.TRANSCRIBING else 0.0
 
     def _on_state_changed(self, event: DomainEvent) -> None:
         if not isinstance(event, StateChangedEvent):
             return
-        if event.new_state == AppState.RECORDING.value:
+        old, new = event.old_state, event.new_state
+        if new == AppState.RECORDING.value:
             self._dispatcher.dispatch(self.show)
-        elif event.old_state == AppState.RECORDING.value:
+        elif old == AppState.RECORDING.value and new == AppState.TRANSCRIBING.value:
+            self._dispatcher.dispatch(self._start_transcribing)
+        elif old == AppState.TRANSCRIBING.value:
+            self._dispatcher.dispatch(self._finish_transcribing)
+        elif old == AppState.RECORDING.value:
             self._dispatcher.dispatch(self.hide)
 
-    def _animate(self) -> None:
+    def _on_paused(self, _event: DomainEvent) -> None:
+        self._dispatcher.dispatch(lambda: self._set_paused(True))
+
+    def _on_resumed(self, _event: DomainEvent) -> None:
+        self._dispatcher.dispatch(lambda: self._set_paused(False))
+
+    def _on_transcribing(self, event: DomainEvent) -> None:
+        if isinstance(event, TranscriptionStartedEvent):
+            estimate = event.estimated_seconds
+            self._dispatcher.dispatch(lambda: self._set_estimate(estimate))
+
+    def _on_mouse(self, is_down: bool, x: int, y: int) -> None:
+        button = hit_test(self._frame, x, y)
+        if is_down:
+            self._on_press()
+            self._pressed = button
+            return
+        pressed, self._pressed = self._pressed, None
+        if button is not None and button is pressed:
+            self._actions[button]()
+
+    def _start_loop(self) -> None:
+        if self._after_id is None:
+            self._last_tick = self._clock()
+            self._tick()
+
+    def _stop_loop(self) -> None:
+        if self._after_id is not None:
+            self._root.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _tick(self) -> None:
+        self._after_id = None
+        now = self._clock()
+        seconds = min(max(now - self._last_tick, 0.0), _LONGEST_FRAME_SECONDS)
+        self._last_tick = now
+        for spring in self._springs():
+            spring.step(seconds)
+        self._advance_level(seconds)
+        self._advance_progress(now, seconds)
+        self._on_tick()
+        hovered = self._hovered()
+        self._window_api.set_hand_cursor(hovered is not None)
+        self._frame = self._current_frame(hovered)
+        self._window_api.push_frame(premultiplied_bgra(render(self._frame)))
+        if self._mode is Mode.CLOSED and self._opacity.value < 0.01:
+            self._visible = False
+            self._window_api.hide()
+            return
+        moving = not all(spring.settled() for spring in self._springs())
+        self._after_id = self._root.after(
+            _MOVING_FRAME_MS if moving else _SETTLED_FRAME_MS, self._tick,
+        )
+
+    def _springs(self) -> tuple[Spring, ...]:
+        return self._width, self._height, self._opacity, self._controls, self._label
+
+    def _advance_level(self, seconds: float) -> None:
+        if self._mode is not Mode.RECORDING or self._paused:
+            self._level = 0.0
+            return
         normalized = min(1.0, max(0.0, self._level_provider() * _LEVEL_GAIN))
         self._level = (self._level * _LEVEL_SMOOTHING) + (
             normalized * (1.0 - _LEVEL_SMOOTHING)
         )
-        self._phase += _PHASE_STEP
-        frame = render_overlay_frame(self._level, self._phase)
-        self._window_api.push_frame(premultiplied_bgra(frame))
-        self._after_id = self._root.after(_FRAME_INTERVAL_MS, self._animate)
+        self._phase += _PHASE_PER_SECOND * seconds
 
-    def _reset_level(self) -> None:
-        self._level = 0.0
-        self._phase = 0.0
+    def _advance_progress(self, now: float, seconds: float) -> None:
+        if self._mode is not Mode.TRANSCRIBING:
+            return
+        if self._finished_at is None:
+            target = transcription_progress(
+                now - self._transcribing_since, self._estimate,
+            )
+            rate = _PROGRESS_CATCH_UP_RATE
+        else:
+            target, rate = 1.0, _PROGRESS_FINISH_RATE
+        # Never backwards: a bar that shrinks reads as the app changing its mind.
+        step = (target - self._progress) * min(1.0, rate * seconds)
+        self._progress = min(1.0, self._progress + max(step, 0.0))
+        if (
+            self._finished_at is not None
+            and self._progress > 0.99
+            and now - self._finished_at >= _FULL_BAR_HOLD_SECONDS
+        ):
+            self.hide()
+
+    def _hovered(self) -> Button | None:
+        position = self._window_api.cursor_position()
+        if position is None:
+            return None
+        return hit_test(self._frame, *position)
+
+    def _current_frame(self, hovered: Button | None) -> Frame:
+        return Frame(
+            width=max(self._width.value, 0.0),
+            height=max(self._height.value, 0.0),
+            opacity=_unit(self._opacity.value),
+            controls=_unit(self._controls.value),
+            label=_unit(self._label.value),
+            level=self._level,
+            phase=self._phase,
+            paused=self._paused,
+            progress=self._progress,
+            hovered=hovered,
+        )
+
+
+def _unit(value: float) -> float:
+    return min(max(value, 0.0), 1.0)

@@ -36,7 +36,7 @@ def _fit_to_visible_context(text: str, context: CaretContext) -> str:
     lead = _lead(core, context)
     trail = _trailing_whitespace(context.selected)
     following = context.after.lstrip(" \t")
-    if not following:
+    if not following or following[0] in _NEWLINES:
         return lead + core + (trail or _trailing_whitespace(text))
     if following[0] in _PUNCTUATION_THAT_FOLLOWS:
         return lead + _strip_terminal_punctuation(core) + trail

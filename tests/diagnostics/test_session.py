@@ -277,6 +277,64 @@ class TestTranscriptionArtifacts:
         assert "café transcript" not in app_caplog.text
 
 
+class TestCancelledRecordings:
+    def test_keeps_the_audio_and_marks_it_cancelled(self, tmp_path: Path) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
+
+        diagnostics.recording_cancelled(_audio())
+
+        cancelled = [event for event in _events(paths) if event["event"] == "cancelled"]
+        assert len(cancelled) == 1
+        assert cancelled[0]["audio_path"] == "audio/0001.wav"
+        assert cancelled[0]["audio_seconds"] == pytest.approx(1.0)
+        assert (paths.session_dir / "audio" / "0001.wav").exists()
+
+    def test_shares_numbering_with_transcriptions_so_files_never_collide(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
+        requested = datetime.now(UTC)
+
+        diagnostics.transcription_finished(
+            _audio(), TranscriptionResult("hi", "en", 0.9, 0.1), requested,
+        )
+        diagnostics.recording_cancelled(_audio())
+
+        indexes = [event["index"] for event in _events(paths) if "index" in event]
+        assert indexes == [1, 2]
+
+    def test_keeps_no_audio_without_content_consent(self, tmp_path: Path) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+
+        diagnostics.recording_cancelled(_audio())
+
+        cancelled = [event for event in _events(paths) if event["event"] == "cancelled"]
+        assert cancelled[0]["audio_path"] == ""
+        assert not (paths.session_dir / "audio").exists()
+
+    def test_records_a_cancel_that_captured_no_audio(self, tmp_path: Path) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}),
+            _REGISTRY, _HARDWARE,
+        )
+
+        diagnostics.recording_cancelled(None)
+
+        cancelled = [event for event in _events(paths) if event["event"] == "cancelled"]
+        assert cancelled[0]["audio_seconds"] == 0.0
+        assert cancelled[0]["audio_path"] == ""
+
+
 class TestSessionRetention:
     def test_preserves_unmarked_folders_with_session_shaped_names(
         self, tmp_path: Path,
@@ -350,6 +408,29 @@ class TestSessionRetention:
             "20260802T000000Z-00000002",
             "20260803T000000Z-00000003",
         ]
+
+    @pytest.mark.parametrize("retain", [0, -1])
+    def test_should_keep_every_session_when_retention_is_zero_or_less(
+        self, tmp_path: Path, retain: int,
+    ) -> None:
+        paths = AppPaths(base=tmp_path)
+        paths.ensure_dirs()
+        names = [f"202608{day:02d}T000000Z-{day:08d}" for day in range(1, 29)]
+        for name in names:
+            (paths.diagnostics_dir / name).mkdir()
+            (paths.diagnostics_dir / name / SESSION_MARKER).write_text(
+                name[-8:] + "0" * 24, encoding="ascii",
+            )
+        current = paths.diagnostics_dir / "20260901T000000Z-99999999"
+        current.mkdir()
+        paths.activate_session(current)
+
+        SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.retain_sessions": retain}),
+            _REGISTRY, _HARDWARE,
+        )
+
+        assert len(list(paths.diagnostics_dir.iterdir())) == len(names) + 1
 
 
 class TestBestEffortWrites:

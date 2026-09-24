@@ -24,5 +24,9 @@ class AudioRecorder(ABC):
         pass
 
     @abstractmethod
+    def set_paused(self, paused: bool) -> None:
+        """Drop incoming audio while paused, keeping the stream open."""
+
+    @abstractmethod
     def dispose(self) -> None:
         pass
