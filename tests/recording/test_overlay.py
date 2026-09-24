@@ -1,4 +1,5 @@
 import ctypes
+import itertools
 import sys
 import time
 from unittest.mock import MagicMock
@@ -31,6 +32,14 @@ from voicetotext.recording.pill import (
 _FRAME_SECONDS = 1 / 60
 
 
+@pytest.fixture(autouse=True)
+def restore_switch_interval():
+    """A test that leaves a pill on screen must not speed up GIL hand-offs for the rest."""
+    before = sys.getswitchinterval()
+    yield
+    sys.setswitchinterval(before)
+
+
 class FakeWindowApi:
     def __init__(self) -> None:
         self.shown_at: list[tuple[int, int]] = []
@@ -40,6 +49,8 @@ class FakeWindowApi:
         self.mouse = None
         self.cursor: tuple[int, int] | None = None
         self.hand_cursor = False
+        self.frame_waits = 0
+        self.synced = True
 
     def work_area_for_foreground(self) -> tuple[int, int, int, int]:
         return (100, 50, 1100, 850)
@@ -64,6 +75,10 @@ class FakeWindowApi:
 
     def set_hand_cursor(self, hand: bool) -> None:
         self.hand_cursor = hand
+
+    def wait_for_frame(self) -> bool:
+        self.frame_waits += 1
+        return self.synced
 
 
 class FakeRoot:
@@ -168,12 +183,13 @@ class TestAppearing:
             CANVAS_WIDTH * CANVAS_HEIGHT * 4,
         }
 
-    def test_checks_for_stray_clicks_on_every_frame(self):
+    def test_checks_for_stray_clicks_at_most_twenty_times_a_second(self):
         harness = Harness()
 
         harness.start_recording()
 
-        assert harness.ticks == len(harness.api.frames)
+        assert 14 <= harness.ticks <= 22
+        assert harness.ticks < len(harness.api.frames)
 
 
 class TestButtons:
@@ -307,7 +323,7 @@ class TestTranscribingProgress:
 
         harness.root.run(1.0)
 
-        assert harness.overlay.frame.progress == pytest.approx(0.475, abs=0.04)
+        assert harness.overlay.frame.progress == pytest.approx(0.45, abs=0.03)
 
     def test_never_looks_finished_while_the_engine_is_still_running(self):
         harness = self._transcribing(0.5)
@@ -324,7 +340,7 @@ class TestTranscribingProgress:
         harness.root.run(30.0)
 
         assert 0.2 < early
-        assert harness.overlay.frame.progress < 0.9
+        assert harness.overlay.frame.progress <= 0.9
 
     def test_never_moves_backwards(self):
         harness = self._transcribing(3.0)
@@ -533,3 +549,133 @@ def test_clicking_finish_keeps_the_focus_in_the_app_being_dictated_into(
     finally:
         overlay.dispose()
         target.destroy()
+
+
+class TestSmoothness:
+    def _transcribing(self, estimate: float | None = 2.0) -> Harness:
+        harness = Harness()
+        harness.start_recording()
+        harness.state("recording", "transcribing")
+        harness.bus.publish(
+            TranscriptionStartedEvent(audio_seconds=4.0, estimated_seconds=estimate),
+        )
+        harness.root.run(1.0)
+        return harness
+
+    def test_every_frame_waits_for_the_display_refresh(self):
+        harness = Harness()
+
+        harness.start_recording()
+
+        assert harness.api.frame_waits == len(harness.api.frames)
+
+    def test_asks_to_come_back_quickly_when_synced_to_the_display(self, monkeypatch):
+        harness = Harness()
+        delays = []
+        monkeypatch.setattr(
+            harness.root, "after", lambda ms, callback: delays.append(ms) or "frame",
+        )
+
+        harness.state("idle", "recording")
+
+        assert delays == [overlay_module._FRAME_POLL_MS]
+
+    def test_falls_back_to_a_plain_timer_without_a_display_refresh(self, monkeypatch):
+        harness = Harness()
+        harness.api.synced = False
+        delays = []
+        monkeypatch.setattr(
+            harness.root, "after", lambda ms, callback: delays.append(ms) or "frame",
+        )
+
+        harness.state("idle", "recording")
+
+        assert delays == [overlay_module._UNSYNCED_FRAME_MS]
+
+    def test_a_settled_bar_is_filled_without_redrawing_the_pill(self, monkeypatch):
+        harness = self._transcribing()
+        redraws = []
+        original = overlay_module.render
+        monkeypatch.setattr(
+            overlay_module, "render", lambda frame: redraws.append(frame) or original(frame),
+        )
+
+        harness.root.run(0.5)
+
+        assert redraws == []
+        assert len(harness.api.frames) > 20
+
+    def test_the_fill_advances_evenly_frame_to_frame(self):
+        harness = self._transcribing(estimate=4.0)
+        seen = []
+
+        for _ in range(60):
+            harness.root.run(_FRAME_SECONDS)
+            seen.append(harness.overlay.frame.progress)
+
+        steps = [after - before for before, after in itertools.pairwise(seen)]
+        assert min(steps) > 0
+        assert max(steps) / min(steps) < 1.2
+
+    def test_the_finish_eases_to_full_then_the_pill_leaves(self):
+        harness = self._transcribing(estimate=5.0)
+        start = harness.overlay.frame.progress
+
+        harness.state("transcribing", "idle")
+        harness.root.run(0.1)
+        midway = harness.overlay.frame.progress
+        harness.root.run(0.15)
+        full = harness.overlay.frame.progress
+        harness.root.run(1.0)
+
+        assert start < midway < full
+        assert full == pytest.approx(1.0)
+        assert harness.overlay.visible is False
+
+    def test_restores_the_thread_switch_interval_once_the_pill_is_gone(self):
+        before = sys.getswitchinterval()
+        harness = Harness()
+
+        harness.start_recording()
+        during = sys.getswitchinterval()
+        harness.state("recording", "idle")
+        harness.root.run(2.0)
+
+        assert during == pytest.approx(overlay_module._ANIMATING_SWITCH_INTERVAL)
+        assert sys.getswitchinterval() == pytest.approx(before)
+
+    def test_disposing_mid_animation_restores_the_switch_interval_too(self):
+        before = sys.getswitchinterval()
+        harness = Harness()
+        harness.start_recording()
+
+        harness.overlay.dispose()
+
+        assert sys.getswitchinterval() == pytest.approx(before)
+
+
+class TestWindowPixels:
+    def test_copies_frames_straight_into_the_window_bitmap(self):
+        import numpy
+
+        window = Win32LayeredOverlayWindow.__new__(Win32LayeredOverlayWindow)
+        target = numpy.zeros(CANVAS_WIDTH * CANVAS_HEIGHT * 4, dtype=numpy.uint8)
+        window._pixels = target
+        window._user32 = MagicMock()
+        window._hwnd = 1
+        window._screen_dc = window._memory_dc = 0
+        frame = bytes(range(256)) * (len(target) // 256)
+
+        window.push_frame(frame)
+
+        assert target.tobytes() == frame
+        window._user32.UpdateLayeredWindow.assert_called_once()
+
+    def test_draws_nothing_before_it_has_a_bitmap(self):
+        window = Win32LayeredOverlayWindow.__new__(Win32LayeredOverlayWindow)
+        window._pixels = None
+        window._user32 = MagicMock()
+
+        window.push_frame(bytes(1) * (CANVAS_WIDTH * CANVAS_HEIGHT * 4))
+
+        window._user32.UpdateLayeredWindow.assert_not_called()

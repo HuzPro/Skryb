@@ -178,19 +178,90 @@ def hit_test(frame: Frame, x: float, y: float) -> Button | None:
     return None
 
 
+# With an estimate the bar moves at a steady, honest pace until three
+# quarters full, then eases towards 99% along a curve that starts at the
+# same speed, so there is no visible kink where one hands over to the
+# other and a slow run never looks finished.
+_STEADY_PACE = 0.9
+_STEADY_UNTIL = 0.75
+_EASE_TOWARDS = 0.99
+# Without an estimate there is nothing to be honest about.
+_UNKNOWN_EASE_TOWARDS = 0.9
+_UNKNOWN_EASE_SECONDS = 0.8
+
+
 def transcription_progress(elapsed: float, estimate: float | None) -> float:
     """How full the bar should be ``elapsed`` seconds into a transcription.
 
-    With an estimate the fill is honest: linear against the estimate up to
-    95%, then creeping, so a slow run never looks finished. Without one
-    there is nothing to be honest about, so it eases towards 90%.
+    Smooth in time: both the fill and its speed are continuous, which is
+    what keeps the edge from visibly stepping between frames.
     """
     elapsed = max(elapsed, 0.0)
     if estimate is None or estimate <= 0:
-        return 0.9 * (1 - math.exp(-elapsed / 0.8))
-    if elapsed <= estimate:
-        return 0.95 * elapsed / estimate
-    return 0.95 + 0.04 * (1 - math.exp(-(elapsed - estimate) / estimate))
+        return _UNKNOWN_EASE_TOWARDS * (1 - math.exp(-elapsed / _UNKNOWN_EASE_SECONDS))
+    pace = _STEADY_PACE / estimate
+    handover = _STEADY_UNTIL / pace
+    if elapsed <= handover:
+        return pace * elapsed
+    remaining = _EASE_TOWARDS - _STEADY_UNTIL
+    return _EASE_TOWARDS - remaining * math.exp(-(elapsed - handover) * pace / remaining)
+
+
+def finishing_progress(start: float, elapsed: float, duration: float) -> float:
+    """From ``start`` to full over ``duration`` seconds, slowing into the end."""
+    if duration <= 0 or elapsed >= duration:
+        return 1.0
+    t = max(elapsed, 0.0) / duration
+    return start + (1.0 - start) * (1 - (1 - t) ** 3)
+
+
+class SettledBar:
+    """The transcribing bar at rest, drawn once, filled by slicing.
+
+    Redrawing the whole pill costs milliseconds; a frame at 240 Hz has
+    four. Once the pill has settled into the bar only the fill moves, so
+    the bar is drawn empty and full a single time and each frame joins
+    the two at the fill edge, blending the one column the edge falls in
+    so it moves by fractions of a pixel instead of whole-pixel steps.
+    """
+
+    def __init__(self, to_pixels) -> None:
+        width, height = _TRANSCRIBING_SIZE
+        blank = Frame(width, height, opacity=1.0, controls=0.0, label=1.0)
+        self._empty = to_pixels(render(Frame(**{**blank.__dict__, "progress": 0.0})))
+        self._full = to_pixels(render(Frame(**{**blank.__dict__, "progress": 1.0})))
+        left, _top, right, _bottom = pill_box(width, height)
+        self._left = left
+        self._span = right - left
+
+    def pixels(self, progress: float) -> bytes:
+        if progress <= 0:
+            return self._empty.tobytes()
+        if progress >= 1:
+            return self._full.tobytes()
+        edge = self._left + self._span * progress
+        column = math.floor(edge)
+        share = edge - column
+        out = self._empty.copy()
+        out[:, :column] = self._full[:, :column]
+        if 0 <= column < out.shape[1] and share > 0:
+            mixed = (
+                self._full[:, column].astype(numpy.uint16) * round(share * 256)
+                + self._empty[:, column].astype(numpy.uint16) * (256 - round(share * 256))
+            ) >> 8
+            out[:, column] = mixed.astype(numpy.uint8)
+        return out.tobytes()
+
+
+def is_settled_bar(frame: Frame) -> bool:
+    width, height = _TRANSCRIBING_SIZE
+    return (
+        abs(frame.width - width) < 0.05
+        and abs(frame.height - height) < 0.05
+        and frame.opacity > 0.999
+        and frame.controls < 0.001
+        and frame.label > 0.999
+    )
 
 
 def render(frame: Frame) -> Image.Image:
