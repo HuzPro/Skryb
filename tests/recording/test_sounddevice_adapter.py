@@ -229,3 +229,172 @@ class TestSoundDeviceAdapterIsAnAudioRecorder:
         with patch("voicetotext.recording.sounddevice_adapter.sd"):
             adapter = SoundDeviceAdapter(sample_rate=16000)
             assert isinstance(adapter, AudioRecorder)
+
+
+class ChosenMicrophone:
+    """Stands in for the saved choice and PortAudio's device list."""
+
+    def __init__(self, name: str, connected: dict[str, int]) -> None:
+        self.name = name
+        self.connected = dict(connected)
+        self.missing: list[str] = []
+        self.rescans = 0
+        self.plug_in_on_rescan: dict[str, int] = {}
+
+    def adapter(self) -> SoundDeviceAdapter:
+        return SoundDeviceAdapter(
+            device_name=lambda: self.name,
+            on_device_missing=self.missing.append,
+            device_index=self.connected.get,
+            refresh_devices=self._rescan,
+        )
+
+    def _rescan(self) -> None:
+        self.rescans += 1
+        self.connected.update(self.plug_in_on_rescan)
+
+
+def _opened_device(mock_sd) -> object:
+    return mock_sd.InputStream.call_args.kwargs["device"]
+
+
+class TestChoosingTheMicrophone:
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_records_from_the_windows_default_unless_told_otherwise(self, mock_sd):
+        SoundDeviceAdapter().start_recording()
+
+        assert _opened_device(mock_sd) is None
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_records_from_the_chosen_microphone(self, mock_sd):
+        name = "Microphone (Maono PD300X Microp"
+        mic = ChosenMicrophone(name, {name: 7})
+
+        mic.adapter().start_recording()
+
+        assert _opened_device(mock_sd) == 7
+        assert mic.missing == []
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_looks_for_a_newly_plugged_microphone_before_giving_up(self, mock_sd):
+        mic = ChosenMicrophone("USB Mic", {})
+        mic.plug_in_on_rescan = {"USB Mic": 3}
+
+        mic.adapter().start_recording()
+
+        assert _opened_device(mock_sd) == 3
+        assert mic.missing == []
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_falls_back_to_the_default_and_says_so_when_it_is_unplugged(self, mock_sd):
+        mic = ChosenMicrophone("USB Mic", {})
+
+        mic.adapter().start_recording()
+
+        assert _opened_device(mock_sd) is None
+        assert mic.missing == ["USB Mic"]
+        assert mic.rescans == 1
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_says_so_once_per_absence_not_once_per_recording(self, mock_sd):
+        mic = ChosenMicrophone("USB Mic", {})
+        adapter = mic.adapter()
+
+        for _ in range(5):
+            adapter.start_recording()
+            adapter.stop_recording()
+
+        assert mic.missing == ["USB Mic"]
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_goes_back_to_the_microphone_once_it_returns_and_warns_again_next_time(
+        self, mock_sd,
+    ):
+        mic = ChosenMicrophone("USB Mic", {})
+        adapter = mic.adapter()
+        adapter.start_recording()
+        adapter.stop_recording()
+
+        mic.connected["USB Mic"] = 4
+        adapter.start_recording()
+        adapter.stop_recording()
+        assert _opened_device(mock_sd) == 4
+
+        del mic.connected["USB Mic"]
+        adapter.start_recording()
+
+        assert mic.missing == ["USB Mic", "USB Mic"]
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_falls_back_when_the_chosen_microphone_refuses_to_open(self, mock_sd):
+        mock_sd.PortAudioError = type("PortAudioError", (Exception,), {})
+        opened = []
+
+        def open_stream(**kwargs):
+            opened.append(kwargs["device"])
+            if kwargs["device"] is not None:
+                raise mock_sd.PortAudioError("Device unavailable")
+            return mock_sd.stream
+
+        mock_sd.InputStream.side_effect = open_stream
+        mic = ChosenMicrophone("Busy Mic", {"Busy Mic": 2})
+        adapter = mic.adapter()
+
+        adapter.start_recording()
+
+        assert opened == [2, None]
+        assert mic.missing == ["Busy Mic"]
+        assert adapter.is_recording()
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_a_broken_default_microphone_is_still_an_error(self, mock_sd):
+        mock_sd.PortAudioError = type("PortAudioError", (Exception,), {})
+        mock_sd.InputStream.side_effect = mock_sd.PortAudioError("No default input")
+
+        with pytest.raises(mock_sd.PortAudioError):
+            SoundDeviceAdapter().start_recording()
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_a_failing_notice_never_stops_the_recording(self, mock_sd):
+        def broken_notice(_name):
+            raise RuntimeError("tray gone")
+
+        adapter = SoundDeviceAdapter(
+            device_name=lambda: "USB Mic",
+            on_device_missing=broken_notice,
+            device_index=lambda _name: None,
+            refresh_devices=lambda: None,
+        )
+
+        adapter.start_recording()
+
+        assert adapter.is_recording()
+
+
+class TestPausing:
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_audio_that_arrives_while_paused_is_dropped(self, mock_sd):
+        adapter = SoundDeviceAdapter()
+        adapter.start_recording()
+        _feed(mock_sd, np.full((1024, 1), 0.1, dtype=np.float32))
+
+        adapter.set_paused(True)
+        _feed(mock_sd, np.full((1024, 1), 0.9, dtype=np.float32))
+        adapter.set_paused(False)
+        _feed(mock_sd, np.full((1024, 1), 0.2, dtype=np.float32))
+
+        audio = adapter.stop_recording()
+        assert audio.sample_count == 2048
+        assert float(audio.data.max()) == pytest.approx(0.2)
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_a_new_recording_never_starts_paused(self, mock_sd):
+        adapter = SoundDeviceAdapter()
+        adapter.start_recording()
+        adapter.set_paused(True)
+        adapter.stop_recording()
+
+        adapter.start_recording()
+        _feed(mock_sd, np.full((1024, 1), 0.1, dtype=np.float32))
+
+        assert adapter.stop_recording() is not None

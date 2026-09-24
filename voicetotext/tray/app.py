@@ -9,6 +9,7 @@ from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     EngineLoadFailedEvent,
     ErrorOccurredEvent,
+    MicrophoneMissingEvent,
     RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionEmptyEvent,
@@ -113,6 +114,9 @@ class SystemTrayApp:
         )
         self._event_bus.subscribe(
             RecordingCappedEvent, self._handle_recording_capped,
+        )
+        self._event_bus.subscribe(
+            MicrophoneMissingEvent, self._handle_microphone_missing,
         )
 
     def run(self) -> None:
@@ -227,6 +231,15 @@ class SystemTrayApp:
             "VoiceToText",
             f"Recording auto-stopped at "
             f"{format_duration(event.max_duration_seconds)} cap.",
+        )
+
+    def _handle_microphone_missing(self, event: MicrophoneMissingEvent) -> None:
+        if self._icon is None:
+            return
+        self._icon.notify(
+            "VoiceToText",
+            f"Can't find the microphone \"{event.name}\". Using the Windows "
+            "default until it's back.",
         )
 
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:

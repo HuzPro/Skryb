@@ -66,6 +66,34 @@ class Button(Enum):
     FINISH = "finish"
 
 
+# The waveform scales to how loud you have been lately rather than to a
+# fixed gain, so speech from across the room fills the bars the way
+# speech up close does. Below the gate is room noise and draws flat.
+_NOISE_GATE = 0.003
+_QUIETEST_LOUDNESS = 0.008
+_LOUDNESS_HALF_LIFE_SECONDS = 4.0
+_STARTING_LOUDNESS = 0.06
+
+
+class VoiceLevel:
+    """Microphone loudness mapped to 0..1 against the speaker's own recent peak.
+
+    The peak rises at once to anything louder and eases back down over a
+    few seconds, so stepping away from the microphone rescales the bars
+    within a sentence while a pause between words does not.
+    """
+
+    def __init__(self) -> None:
+        self._loudness = _STARTING_LOUDNESS
+
+    def update(self, rms: float, seconds: float) -> float:
+        if not math.isfinite(rms) or rms < 0:
+            rms = 0.0
+        decay = 0.5 ** (max(seconds, 0.0) / _LOUDNESS_HALF_LIFE_SECONDS)
+        self._loudness = max(rms, self._loudness * decay, _QUIETEST_LOUDNESS)
+        return min(max((rms - _NOISE_GATE) / (self._loudness - _NOISE_GATE), 0.0), 1.0)
+
+
 class Spring:
     """A damped spring chasing ``target``; the whole motion system."""
 

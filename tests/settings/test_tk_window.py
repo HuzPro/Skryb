@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.settings.tk_pages.test_tk_audio_page import FakeMicrophones
+
 from voicetotext.core.events import (
     DownloadCompletedEvent,
     DownloadProgressEvent,
@@ -114,6 +116,7 @@ def service():
 
 
 def _make_window(tk_root, service, **kwargs):
+    kwargs.setdefault("microphones", FakeMicrophones([]))
     return TkSettingsWindow(
         tk_root, service, capture_bridge=FakeCaptureBridge(), **kwargs
     )
@@ -645,7 +648,7 @@ class TestMode:
 
     def test_should_show_every_sidebar_section(self, mode_window):
         assert mode_window.sidebar_labels() == [
-            "Transcription", "Hotkeys", "Output", "Dictionary",
+            "Transcription", "Audio", "Hotkeys", "Output", "Dictionary",
         ]
 
     def test_should_include_mode_in_collected_draft(self, mode_window):

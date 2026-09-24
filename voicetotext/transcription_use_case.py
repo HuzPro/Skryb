@@ -58,6 +58,7 @@ class RecordAndTranscribeUseCase:
         max_recording_seconds: float = _DEFAULT_MAX_RECORDING_SECONDS,
         streaming_controller: LiveStreamingController | None = None,
         is_streaming_mode: Callable[[], bool] | None = None,
+        prepare_audio: Callable[[AudioSegment], AudioSegment] | None = None,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -69,6 +70,8 @@ class RecordAndTranscribeUseCase:
         self._max_recording_seconds = max_recording_seconds
         self._streaming = streaming_controller
         self._is_streaming_mode = is_streaming_mode or (lambda: False)
+        # Runs on the audio the engine hears only; history keeps the original.
+        self._prepare_audio = prepare_audio or (lambda audio: audio)
         self._streaming_active = False
         self._stream_requested_at: datetime | None = None
         self._action_lock = threading.Lock()
@@ -115,7 +118,7 @@ class RecordAndTranscribeUseCase:
 
         def run() -> None:
             try:
-                audio = load_wav(wav_path)
+                audio = self._prepare_audio(load_wav(wav_path))
                 with self._engine_lock:
                     result = self._engine.transcribe(audio)
             except Exception as exc:  # noqa: BLE001 - reported to the window
@@ -455,8 +458,9 @@ class RecordAndTranscribeUseCase:
     def _transcribe_and_publish(
         self, audio: AudioSegment, requested_at: datetime,
     ) -> None:
+        heard = self._prepare_audio(audio)
         with self._engine_lock:
-            result = self._engine.transcribe(audio)
+            result = self._engine.transcribe(heard)
         self._deliver_transcribed_text(result)
         self._diagnostics.transcription_finished(
             audio, result, requested_at,

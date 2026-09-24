@@ -1,13 +1,16 @@
 import ctypes
 import ctypes.wintypes as _wt
+import logging
 import tkinter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from voicetotext.core.state_machine import AppState
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 from voicetotext.tray.duration_format import format_duration
 from voicetotext.tray.win32_icons import create_icon_image
+
+_logger = logging.getLogger(__name__)
 
 _user32 = ctypes.windll.user32
 _gdi32 = ctypes.windll.gdi32
@@ -37,6 +40,8 @@ _WS_EX_TOOLWINDOW = 0x80
 _MF_STRING = 0x0
 _MF_SEPARATOR = 0x800
 _MF_GRAYED = 0x1
+_MF_CHECKED = 0x8
+_MF_POPUP = 0x10
 _TPM_RIGHTBUTTON = 0x2
 _TPM_RETURNCMD = 0x100
 
@@ -44,6 +49,13 @@ _ID_STATE = 1
 _ID_SETTINGS = 2
 _ID_QUIT = 3
 _ID_HISTORY = 4
+# Microphone choices take one id each from here up.
+_ID_FIRST_MICROPHONE = 100
+_SYSTEM_DEFAULT_LABEL = "Windows default"
+
+# Returns the microphones to offer as (name, label) and the chosen name
+# ("" = the Windows default).
+MicrophoneLister = Callable[[], tuple[Sequence[tuple[str, str]], str]]
 
 _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(_LRESULT, _wt.HWND, _wt.UINT, _wt.WPARAM, _wt.LPARAM)
@@ -247,11 +259,16 @@ class Win32TrayBackend:
         on_settings_clicked: Callable[[], None] | None,
         on_quit_clicked: Callable[[], None],
         on_history_clicked: Callable[[], None] | None = None,
+        list_microphones: MicrophoneLister | None = None,
+        on_microphone_chosen: Callable[[str], None] | None = None,
     ) -> None:
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
         self._on_history_clicked = on_history_clicked
+        self._list_microphones = list_microphones
+        self._on_microphone_chosen = on_microphone_chosen
+        self._offered_microphones: list[str] = []
         self._added = False
         self._wndproc = _WNDPROC(self._window_proc)  # pinned: GC would crash us
         self._hwnd = self._create_tray_window()
@@ -349,6 +366,7 @@ class Win32TrayBackend:
         _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
         if self._on_history_clicked is not None:
             _user32.AppendMenuW(menu, _MF_STRING, _ID_HISTORY, "History...")
+        self._append_microphone_menu(menu)
         if self._on_settings_clicked is not None:
             _user32.AppendMenuW(menu, _MF_STRING, _ID_SETTINGS, "Settings...")
             _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
@@ -364,7 +382,32 @@ class Win32TrayBackend:
         _user32.DestroyMenu(menu)
         self._dispatch_menu_command(command)
 
+    def _append_microphone_menu(self, menu: int) -> None:
+        if self._list_microphones is None or self._on_microphone_chosen is None:
+            return
+        try:
+            connected, chosen = self._list_microphones()
+        except Exception:  # a broken device list must not lose the menu
+            _logger.exception("Listing microphones failed.")
+            return
+        entries = [("", _SYSTEM_DEFAULT_LABEL), *connected]
+        # A chosen microphone that is unplugged stays listed, so the menu
+        # still shows what the user picked.
+        if chosen and chosen not in dict(connected):
+            entries.append((chosen, f"{chosen} (not connected)"))
+        self._offered_microphones = [name for name, _label in entries]
+        submenu = _user32.CreatePopupMenu()
+        for offset, (name, label) in enumerate(entries):
+            flags = _MF_STRING | (_MF_CHECKED if name == chosen else 0)
+            _user32.AppendMenuW(submenu, flags, _ID_FIRST_MICROPHONE + offset, label)
+        _user32.AppendMenuW(menu, _MF_POPUP, submenu, "Microphone")
+
     def _dispatch_menu_command(self, command: int) -> None:
+        offset = command - _ID_FIRST_MICROPHONE
+        if 0 <= offset < len(self._offered_microphones):
+            if self._on_microphone_chosen is not None:
+                self._on_microphone_chosen(self._offered_microphones[offset])
+            return
         if command == _ID_SETTINGS and self._on_settings_clicked is not None:
             self._on_settings_clicked()
         elif command == _ID_HISTORY and self._on_history_clicked is not None:
@@ -395,6 +438,8 @@ class Win32TrayAdapter:
         dispatcher: GuiThreadDispatcher,
         backend: TrayBackend | None = None,
         on_history_clicked: Callable[[], None] | None = None,
+        list_microphones: MicrophoneLister | None = None,
+        on_microphone_chosen: Callable[[str], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
@@ -406,7 +451,7 @@ class Win32TrayAdapter:
         self._elapsed_after_id: str | None = None
         self._backend: TrayBackend = backend or Win32TrayBackend(
             get_state_label, on_settings_clicked, on_quit_clicked,
-            on_history_clicked,
+            on_history_clicked, list_microphones, on_microphone_chosen,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -513,6 +558,8 @@ def build_win32_tray_adapter(
     root: tkinter.Misc,
     dispatcher: GuiThreadDispatcher,
     on_history_clicked: Callable[[], None] | None = None,
+    list_microphones: MicrophoneLister | None = None,
+    on_microphone_chosen: Callable[[str], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`voicetotext.tray.app.TrayIconFactory`.
 
@@ -529,4 +576,6 @@ def build_win32_tray_adapter(
         root=root,
         dispatcher=dispatcher,
         on_history_clicked=on_history_clicked,
+        list_microphones=list_microphones,
+        on_microphone_chosen=on_microphone_chosen,
     )

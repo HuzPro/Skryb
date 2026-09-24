@@ -24,6 +24,10 @@ class SettingsDraft:
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
     crisperwhisper_mode: str = "intended"
     capture_content: bool = False
+    # "" is the Windows default microphone. Both are read at the start of
+    # every recording, so neither needs a rebuild to take effect.
+    input_device: str = ""
+    boost_quiet_speech: bool = True
 
 
 @dataclass(frozen=True)

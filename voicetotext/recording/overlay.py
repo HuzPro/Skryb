@@ -27,6 +27,7 @@ from voicetotext.recording.pill import (
     Frame,
     Mode,
     Spring,
+    VoiceLevel,
     collapsed_size,
     hit_test,
     render,
@@ -41,7 +42,6 @@ _SETTLED_FRAME_MS = 33
 _MOVING_FRAME_MS = 16
 _LONGEST_FRAME_SECONDS = 0.05
 
-_LEVEL_GAIN = 15.0
 _LEVEL_SMOOTHING = 0.62
 _PHASE_PER_SECOND = 9.6
 # Once the transcription is done the bar runs to full, holds for a beat
@@ -521,6 +521,8 @@ class RecordingOverlay:
         self._paused = False
         self._level = 0.0
         self._phase = 0.0
+        # Kept across recordings: it has learnt how loud this speaker is.
+        self._voice = VoiceLevel()
         self._estimate: float | None = None
         self._transcribing_since = 0.0
         self._progress = 0.0
@@ -688,7 +690,7 @@ class RecordingOverlay:
         if self._mode is not Mode.RECORDING or self._paused:
             self._level = 0.0
             return
-        normalized = min(1.0, max(0.0, self._level_provider() * _LEVEL_GAIN))
+        normalized = self._voice.update(self._level_provider(), seconds)
         self._level = (self._level * _LEVEL_SMOOTHING) + (
             normalized * (1.0 - _LEVEL_SMOOTHING)
         )

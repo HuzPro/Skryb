@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
+    MicrophoneMissingEvent,
     EngineLoadFailedEvent,
     ErrorOccurredEvent,
     RecordingCappedEvent,
@@ -650,3 +651,23 @@ class TestErrorIconStickiness:
         icon.set_elapsed_provider.assert_called_once()
         provider = icon.set_elapsed_provider.call_args.args[0]
         assert callable(provider)
+
+
+class TestMicrophoneMissingNotification:
+    def test_names_the_missing_microphone_and_says_the_default_is_in_use(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(MicrophoneMissingEvent(name="Microphone (Maono PD300X Microp"))
+
+        message = icon.notify.call_args.args[1]
+        assert "Maono PD300X" in message
+        assert "default" in message.lower()
+        for update_call in icon.update_state.call_args_list:
+            assert update_call.args[0] != AppState.ERROR
