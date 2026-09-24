@@ -43,6 +43,7 @@ _TPM_RETURNCMD = 0x100
 _ID_STATE = 1
 _ID_SETTINGS = 2
 _ID_QUIT = 3
+_ID_HISTORY = 4
 
 _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(_LRESULT, _wt.HWND, _wt.UINT, _wt.WPARAM, _wt.LPARAM)
@@ -245,10 +246,12 @@ class Win32TrayBackend:
         get_state_label: Callable[[], str],
         on_settings_clicked: Callable[[], None] | None,
         on_quit_clicked: Callable[[], None],
+        on_history_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
+        self._on_history_clicked = on_history_clicked
         self._added = False
         self._wndproc = _WNDPROC(self._window_proc)  # pinned: GC would crash us
         self._hwnd = self._create_tray_window()
@@ -344,6 +347,8 @@ class Win32TrayBackend:
             menu, _MF_STRING | _MF_GRAYED, _ID_STATE, self._get_state_label(),
         )
         _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
+        if self._on_history_clicked is not None:
+            _user32.AppendMenuW(menu, _MF_STRING, _ID_HISTORY, "History...")
         if self._on_settings_clicked is not None:
             _user32.AppendMenuW(menu, _MF_STRING, _ID_SETTINGS, "Settings...")
             _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
@@ -362,6 +367,8 @@ class Win32TrayBackend:
     def _dispatch_menu_command(self, command: int) -> None:
         if command == _ID_SETTINGS and self._on_settings_clicked is not None:
             self._on_settings_clicked()
+        elif command == _ID_HISTORY and self._on_history_clicked is not None:
+            self._on_history_clicked()
         elif command == _ID_QUIT:
             self._on_quit_clicked()
 
@@ -387,6 +394,7 @@ class Win32TrayAdapter:
         root: tkinter.Misc,
         dispatcher: GuiThreadDispatcher,
         backend: TrayBackend | None = None,
+        on_history_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
@@ -398,6 +406,7 @@ class Win32TrayAdapter:
         self._elapsed_after_id: str | None = None
         self._backend: TrayBackend = backend or Win32TrayBackend(
             get_state_label, on_settings_clicked, on_quit_clicked,
+            on_history_clicked,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -503,6 +512,7 @@ def build_win32_tray_adapter(
     on_quit_clicked: Callable[[], None],
     root: tkinter.Misc,
     dispatcher: GuiThreadDispatcher,
+    on_history_clicked: Callable[[], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`voicetotext.tray.app.TrayIconFactory`.
 
@@ -518,4 +528,5 @@ def build_win32_tray_adapter(
         on_quit_clicked=on_quit_clicked,
         root=root,
         dispatcher=dispatcher,
+        on_history_clicked=on_history_clicked,
     )

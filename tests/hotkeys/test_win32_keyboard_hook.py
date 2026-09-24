@@ -84,12 +84,20 @@ class TestWin32KeyboardHookObserver:
 
         assert calls == ["handler", "observer"]
 
-    def test_should_keep_suppression_when_the_observer_raises(self):
+    def test_should_let_the_key_through_when_the_observer_raises(self):
         observer = MagicMock(side_effect=RuntimeError("observer is broken"))
-        hook = Win32KeyboardHook(MagicMock(return_value=True), observer)
+        hook = Win32KeyboardHook(MagicMock(return_value=False), observer)
         info, lparam = _lparam(0x4D)
 
+        assert hook._dispatch(wkh._WM_KEYDOWN, lparam) is False
+
+    def test_should_not_report_a_key_it_swallowed(self):
+        observer = MagicMock()
+        hook = Win32KeyboardHook(MagicMock(return_value=True), observer)
+        info, lparam = _lparam(0x1B)
+
         assert hook._dispatch(wkh._WM_KEYDOWN, lparam) is True
+        observer.assert_not_called()
 
     def test_should_not_observe_keys_when_no_observer_was_given(self):
         handler = MagicMock(return_value=False)

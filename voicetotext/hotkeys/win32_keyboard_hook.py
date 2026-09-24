@@ -206,7 +206,10 @@ class Win32KeyboardHook:
         self, is_key_down: bool, info: _KBDLLHOOKSTRUCT,
     ) -> bool:
         suppress = self._handler(is_key_down, info.vkCode)
-        self._observe(is_key_down, info)
+        # A swallowed key never reached the focused app, so watchers of
+        # what the user typed there must not see it either.
+        if not suppress:
+            self._observe(is_key_down, info)
         return suppress
 
     def _observe(self, is_key_down: bool, info: _KBDLLHOOKSTRUCT) -> None:

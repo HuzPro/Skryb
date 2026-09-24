@@ -30,7 +30,8 @@ from voicetotext.edit_capture.delivery_recording_decorator import (
 )
 from voicetotext.edit_capture.observer import Win32EditObserver
 from voicetotext.edit_capture.recorder import EditRecorder
-from voicetotext.edit_capture.win32_input import caps_lock_enabled
+from voicetotext.edit_capture.win32_foreground import foreground_hwnd
+from voicetotext.edit_capture.win32_input import caps_lock_enabled, click_count
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
@@ -55,6 +56,7 @@ from voicetotext.output.modifier_release_waiting_key_sender import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.paste_memory import PasteMemory, read_or_remember
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.text_filter_decorator import (
     TextFilterDecorator,
@@ -65,10 +67,14 @@ from voicetotext.output.win32_caret_context import read_caret_context
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
-from voicetotext.output.win32_key_sender import Win32KeySender
+from voicetotext.output.win32_key_sender import (
+    VOICETOTEXT_INPUT_TAG,
+    Win32KeySender,
+)
 from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
+from voicetotext.history.tk_window import HistoryWindow
 from voicetotext.recording.overlay import RecordingOverlay
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
@@ -151,6 +157,11 @@ def _ignore_delivery(text: str) -> None:
     return None
 
 
+# One per process, like the keyboard hook and the caret it stands in for.
+_paste_memory = PasteMemory(foreground_hwnd, click_count, VOICETOTEXT_INPUT_TAG)
+_REREAD_CARET_AFTER_SECONDS = 0.1
+
+
 # Folders that a sync client uploads. Edit capture records what the user
 # typed, so a session log inside one leaves the machine.
 _SYNCED_FOLDER_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive")
@@ -202,7 +213,21 @@ def _delivery_reporter(
 
 
 def _key_observer(capture: Win32EditObserver | None) -> KeyObserver:
-    return ignore_key_event if capture is None else capture.observe_key
+    if capture is None:
+        return _paste_memory.observe_key
+
+    def observe(is_key_down: bool, vk: int, flags: int, extra: int) -> None:
+        _paste_memory.observe_key(is_key_down, vk, flags, extra)
+        capture.observe_key(is_key_down, vk, flags, extra)
+
+    return observe
+
+
+def _remember_then_report(
+    on_delivered: Callable[[str], None], text: str,
+) -> None:
+    _paste_memory.remember(text)
+    on_delivered(text)
 
 
 def _build_output(
@@ -233,7 +258,7 @@ def _build_output(
             inner=PasteAndClipboardAdapter(
                 sleeper=sleeper, writer=writer, key_sender=key_sender,
             ),
-            record=on_delivered,
+            record=functools.partial(_remember_then_report, on_delivered),
         )
 
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
@@ -267,7 +292,11 @@ def _build_output(
             dictionary,
             pipeline_mode,
             models_dir=models_dir,
-            caret_context=read_caret_context,
+            caret_context=read_or_remember(
+                read_caret_context,
+                _paste_memory,
+                functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
+            ),
         ),
     )
 
@@ -305,17 +334,28 @@ def _build_hotkey_listener(
 ) -> HotkeyListener:
     combo_string = config.get("hotkey.combination", "ctrl+alt+m")
     keys = parse_hotkey_combo(combo_string)
+    _paste_memory.set_hotkey(key.vk for key in keys)
 
     if config.get("hotkey.mode") == "push_to_talk":
         strategy = PushToTalkStrategy(keys=keys)
     else:
         strategy = ToggleStrategy(keys=keys)
 
-    listener = Win32HookAdapter(strategy, observer)
+    listener = Win32HookAdapter(
+        strategy, observer, cancel=functools.partial(_cancel_with_escape, use_case),
+    )
     listener.set_on_activate(use_case.on_hotkey_activated)
     listener.set_on_deactivate(use_case.on_hotkey_deactivated)
     return listener
 
+
+
+def _cancel_with_escape(use_case: RecordAndTranscribeUseCase) -> bool:
+    """Esc cancels a recording in progress, and only then is it swallowed."""
+    if not use_case.is_recording():
+        return False
+    use_case.on_cancel()
+    return True
 
 
 def _load_engine_with_fallback(
@@ -794,17 +834,6 @@ def build_app(
         pipeline_mode, paths.models_dir,
         _delivery_reporter(edit_capture, pipeline_mode, output_mode),
     )
-    overlay = (
-        RecordingOverlay(
-            root=root,
-            event_bus=event_bus,
-            dispatcher=gui_dispatcher,
-            level_provider=lambda: recorder.current_rms,
-        )
-        if config.get("overlay.enabled", True)
-        else None
-    )
-
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
     # The real engine load happens on a background thread so the tray
@@ -832,6 +861,21 @@ def build_app(
 
     listener = _build_hotkey_listener(
         config, record_and_transcribe_use_case, _key_observer(edit_capture),
+    )
+    overlay = (
+        RecordingOverlay(
+            root=root,
+            event_bus=event_bus,
+            dispatcher=gui_dispatcher,
+            level_provider=lambda: recorder.current_rms,
+            on_cancel=record_and_transcribe_use_case.on_cancel,
+            on_pause_toggle=record_and_transcribe_use_case.on_pause_toggled,
+            on_finish=record_and_transcribe_use_case.on_hotkey_deactivated,
+            on_press=_paste_memory.excuse_click,
+            on_tick=_paste_memory.sync_clicks,
+        )
+        if config.get("overlay.enabled", True)
+        else None
     )
 
     active_engine_provider = _make_active_engine_provider(
@@ -883,6 +927,13 @@ def build_app(
         settings_window_ref["current"] = window
         window.show()
 
+    history_window = HistoryWindow(
+        root,
+        paths.diagnostics_dir,
+        retranscribe=record_and_transcribe_use_case.retranscribe,
+        schedule=gui_dispatcher.dispatch,
+    )
+
     app = SystemTrayApp(
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
@@ -890,6 +941,7 @@ def build_app(
         hotkey_listener=listener,
         tray_factory=functools.partial(
             build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
+            on_history_clicked=history_window.show,
         ),
         on_open_settings=open_settings,
         download_manager=download_manager,

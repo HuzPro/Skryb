@@ -9,12 +9,16 @@ from voicetotext.core.action_dispatcher import ActionDispatcher
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     ErrorOccurredEvent,
+    RecordingCancelledEvent,
     RecordingCappedEvent,
+    RecordingPausedEvent,
+    RecordingResumedEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     TranscriptionCompletedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
+    TranscriptionStartedEvent,
 )
 from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
 from voicetotext.core.state_machine import AppState, AppStateMachine
@@ -682,3 +686,243 @@ class TestDispose:
 
         use_case._diagnostics.dispose.assert_called_once()
         engine.dispose.assert_called_once()
+
+
+class TestPause:
+    def test_pausing_stops_keeping_audio_but_stays_recording(self):
+        use_case, recorder, _, _, event_bus, state_machine = _build_use_case()
+        paused: list[RecordingPausedEvent] = []
+        event_bus.subscribe(RecordingPausedEvent, paused.append)
+        use_case.on_hotkey_activated()
+
+        use_case.on_pause_toggled()
+
+        recorder.set_paused.assert_called_once_with(True)
+        assert state_machine.state == AppState.RECORDING
+        assert len(paused) == 1
+
+    def test_pausing_again_resumes_the_same_recording(self):
+        use_case, recorder, _, _, event_bus, _ = _build_use_case()
+        resumed: list[RecordingResumedEvent] = []
+        event_bus.subscribe(RecordingResumedEvent, resumed.append)
+        use_case.on_hotkey_activated()
+
+        use_case.on_pause_toggled()
+        use_case.on_pause_toggled()
+
+        assert [call.args for call in recorder.set_paused.call_args_list] == [
+            (True,), (False,),
+        ]
+        assert recorder.start_recording.call_count == 1
+        assert len(resumed) == 1
+
+    def test_the_hotkey_finishes_a_paused_recording_and_transcribes_it(self):
+        use_case, recorder, engine, output, _, state_machine = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("paused then done")
+        use_case.on_hotkey_activated()
+        use_case.on_pause_toggled()
+
+        use_case.on_hotkey_activated()
+
+        output.output.assert_called_once_with("paused then done")
+        assert state_machine.state == AppState.IDLE
+
+    @pytest.mark.parametrize("state", [AppState.IDLE, AppState.LOADING])
+    def test_pause_does_nothing_when_not_recording(self, state):
+        use_case, recorder, *_ = _build_use_case(initial_state=state)
+
+        use_case.on_pause_toggled()
+
+        recorder.set_paused.assert_not_called()
+
+    @patch("voicetotext.transcription_use_case.time.monotonic")
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_paused_time_does_not_count_towards_the_recording_cap(
+        self, MockTimer, monotonic,
+    ):
+        from unittest.mock import ANY
+
+        use_case, *_ = _build_use_case(max_recording_seconds=600.0)
+        monotonic.return_value = 1000.0
+        use_case.on_hotkey_activated()
+        monotonic.return_value = 1100.0
+        use_case.on_pause_toggled()
+        monotonic.return_value = 5000.0
+
+        use_case.on_pause_toggled()
+
+        assert MockTimer.call_args_list[-1].args == (500.0, ANY)
+
+
+class TestCancel:
+    def test_cancel_discards_the_recording_without_transcribing_or_pasting(self):
+        use_case, recorder, engine, output, event_bus, state_machine = (
+            _build_use_case()
+        )
+        cancelled: list[RecordingCancelledEvent] = []
+        event_bus.subscribe(RecordingCancelledEvent, cancelled.append)
+        recorder.stop_recording.return_value = _make_audio()
+        use_case.on_hotkey_activated()
+
+        use_case.on_cancel()
+
+        engine.transcribe.assert_not_called()
+        output.output.assert_not_called()
+        assert state_machine.state == AppState.IDLE
+        assert len(cancelled) == 1
+
+    def test_cancel_keeps_the_audio_in_history(self):
+        use_case, recorder, *_ = _build_use_case()
+        audio = _make_audio()
+        recorder.stop_recording.return_value = audio
+        use_case.on_hotkey_activated()
+
+        use_case.on_cancel()
+
+        use_case._diagnostics.recording_cancelled.assert_called_once_with(audio)
+
+    def test_cancel_works_while_paused_and_the_next_recording_starts_unpaused(self):
+        use_case, recorder, *_ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        use_case.on_hotkey_activated()
+        use_case.on_pause_toggled()
+
+        use_case.on_cancel()
+        use_case.on_hotkey_activated()
+        use_case.on_pause_toggled()
+
+        assert recorder.set_paused.call_args_list[-1].args == (True,)
+
+    def test_cancel_does_nothing_while_transcribing(self):
+        use_case, recorder, *_ = _build_use_case(
+            dispatcher=DeferredActionDispatcher(),
+        )
+        use_case._state_machine.transition_to(AppState.RECORDING)
+        use_case._state_machine.transition_to(AppState.TRANSCRIBING)
+
+        use_case._handle_cancel()
+
+        recorder.stop_recording.assert_not_called()
+
+    def test_cancel_reports_a_recorder_that_fails_to_stop(self):
+        use_case, recorder, _, _, event_bus, state_machine = _build_use_case()
+        errors: list[ErrorOccurredEvent] = []
+        event_bus.subscribe(ErrorOccurredEvent, errors.append)
+        recorder.stop_recording.side_effect = AudioRecorderError("device gone")
+        use_case.on_hotkey_activated()
+
+        use_case.on_cancel()
+
+        assert state_machine.state == AppState.IDLE
+        assert errors and "device gone" in errors[0].error
+
+
+class TestTranscriptionEstimate:
+    def test_announces_the_audio_length_and_the_learnt_estimate(self):
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case()
+        started: list[TranscriptionStartedEvent] = []
+        event_bus.subscribe(TranscriptionStartedEvent, started.append)
+        recorder.stop_recording.return_value = _make_audio(samples=32000)
+        engine.transcribe.return_value = _make_result()
+        use_case._diagnostics.estimate_transcription_seconds.return_value = 0.7
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        assert started == [
+            TranscriptionStartedEvent(
+                timestamp=started[0].timestamp,
+                audio_seconds=2.0,
+                estimated_seconds=0.7,
+            ),
+        ]
+
+
+class ThreadPerActionDispatcher:
+    def dispatch(self, action) -> None:
+        import threading
+
+        threading.Thread(target=action, daemon=True).start()
+
+
+class TestRetranscribe:
+    def _wav(self, tmp_path, seconds: float = 1.0):
+        import wave
+
+        path = tmp_path / "0007.wav"
+        with wave.open(str(path), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(16000)
+            output.writeframes(np.zeros(int(16000 * seconds), dtype="<i2").tobytes())
+        return path
+
+    def test_transcribes_a_saved_recording_without_pasting_it(self, tmp_path):
+        use_case, _, engine, output, _, _ = _build_use_case()
+        engine.transcribe.return_value = _make_result("second try, café ✓")
+        results = []
+
+        use_case.retranscribe(self._wav(tmp_path), results.append)
+
+        assert results == ["second try, café ✓"]
+        output.output.assert_not_called()
+        assert engine.transcribe.call_args.args[0].duration_seconds == pytest.approx(1.0)
+
+    def test_hands_back_the_error_when_the_file_is_gone(self, tmp_path):
+        use_case, _, engine, _, _, _ = _build_use_case()
+        results = []
+
+        use_case.retranscribe(tmp_path / "missing.wav", results.append)
+
+        assert isinstance(results[0], FileNotFoundError)
+        engine.transcribe.assert_not_called()
+
+    def test_hands_back_the_error_when_the_engine_fails(self, tmp_path):
+        use_case, _, engine, _, _, state_machine = _build_use_case()
+        engine.transcribe.side_effect = RuntimeError("CUDA out of memory")
+        results = []
+
+        use_case.retranscribe(self._wav(tmp_path), results.append)
+
+        assert str(results[0]) == "CUDA out of memory"
+        assert state_machine.state == AppState.IDLE
+
+    def test_never_runs_the_model_on_two_recordings_at_once(self, tmp_path):
+        import threading
+        import time
+
+        use_case, recorder, engine, _, _, _ = _build_use_case(
+            dispatcher=ThreadPerActionDispatcher(),
+        )
+        running = 0
+        overlapped = []
+        lock = threading.Lock()
+        finished = threading.Semaphore(0)
+
+        def slow_transcribe(_audio):
+            nonlocal running
+            with lock:
+                running += 1
+                overlapped.append(running)
+            time.sleep(0.05)
+            with lock:
+                running -= 1
+            return _make_result("done")
+
+        engine.transcribe.side_effect = slow_transcribe
+        recorder.stop_recording.return_value = _make_audio()
+        wav = self._wav(tmp_path)
+
+        for _ in range(4):
+            use_case.retranscribe(wav, lambda _result: finished.release())
+        use_case._handle_activate()
+        use_case._handle_activate()
+        for _ in range(4):
+            assert finished.acquire(timeout=5)
+        deadline = time.monotonic() + 5
+        while engine.transcribe.call_count < 5 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        assert engine.transcribe.call_count == 5
+        assert max(overlapped) == 1

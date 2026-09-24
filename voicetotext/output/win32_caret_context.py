@@ -122,14 +122,17 @@ def _context_of(element: _Element) -> CaretContext:
     uia = _uia()
     handle = element.GetCurrentPattern(uia.UIA_TextPatternId)
     if not handle:
+        _logger.debug("No caret context: the focused element has no text pattern.")
         return NO_CONTEXT
     pattern = handle.QueryInterface(uia.IUIAutomationTextPattern)
     ranges = pattern.GetSelection()
     if ranges.Length == 0:
+        _logger.debug("No caret context: the text pattern reports no selection.")
         return NO_CONTEXT
     selection = ranges.GetElement(0)
     document = pattern.DocumentRange
     if not _lies_within(selection, document):
+        _logger.debug("No caret context: the selection lies outside the field.")
         return NO_CONTEXT
     context = CaretContext(
         before=_adjacent_text(

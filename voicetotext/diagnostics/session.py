@@ -21,6 +21,10 @@ from voicetotext.core.startup_log import (
     process_uptime_seconds,
 )
 from voicetotext.diagnostics.jsonl import JsonlWriter
+from voicetotext.diagnostics.timing_estimate import (
+    TranscriptionTimeEstimate,
+    engine_key,
+)
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine_factory import (
     probed_hardware_kind,
@@ -102,8 +106,44 @@ class SessionDiagnostics:
         self._stopped = False
         self._active_model, self._active_engine = self._model_context()
         self._active_device = self._configured_device()
+        self._timing = TranscriptionTimeEstimate()
         self._prune_sessions()
         self._record_app_started()
+        threading.Thread(
+            target=self._timing.seed_from,
+            args=(paths.diagnostics_dir, paths.session_dir),
+            name="timing-seed",
+            daemon=True,
+        ).start()
+
+    def estimate_transcription_seconds(self, audio_seconds: float) -> float | None:
+        return self._timing.estimate(self._engine_key(), audio_seconds)
+
+    def recording_cancelled(self, audio: AudioSegment | None) -> None:
+        """Keep a cancelled recording, so a stray cancel can be undone."""
+        index = self._next_transcription_index()
+        audio_path = Path("audio") / f"{index:04d}.wav"
+        saved = content_recording_enabled(self._config) and audio is not None
+        if saved:
+            self._attempt_write(
+                f"audio {index}",
+                lambda: self._save_audio(self._paths.session_dir / audio_path, audio),
+            )
+        self._write_event(
+            {
+                "event": "cancelled",
+                "index": index,
+                "at": utc_iso(utc_now()),
+                "model": self._active_model,
+                "engine": self._active_engine,
+                "audio_seconds": audio.duration_seconds if audio is not None else 0.0,
+                "audio_path": audio_path.as_posix() if saved else "",
+            }
+        )
+        _logger.info("recording cancelled index=%d", index)
+
+    def _engine_key(self) -> str:
+        return engine_key(self._active_model, self._active_engine, self._active_device)
 
     def engine_loaded(self, seconds: float, device: str) -> None:
         model, engine = self._model_context()
@@ -149,6 +189,12 @@ class SessionDiagnostics:
     ) -> None:
         index = self._next_transcription_index()
         finished_at = utc_now()
+        if audio is not None and not isinstance(outcome, Exception):
+            self._timing.record(
+                self._engine_key(),
+                audio.duration_seconds,
+                (finished_at - requested_at).total_seconds(),
+            )
         if isinstance(outcome, Exception):
             text = ""
             engine_seconds: float | None = None
@@ -267,7 +313,9 @@ class SessionDiagnostics:
             _logger.warning("Diagnostics write failed for %s: %s", operation, exc)
 
     def _prune_sessions(self) -> None:
-        retained_previous = max(self._retain_sessions, 1) - 1
+        if self._retain_sessions <= 0:
+            return  # 0 keeps every session: the logs double as a training set.
+        retained_previous = self._retain_sessions - 1
         try:
             previous = sorted(
                 path

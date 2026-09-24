@@ -32,6 +32,48 @@ class TestWin32HookAdapterDelegation:
         assert adapter._handle_key(False, 0x4D) is False
 
 
+class TestEscapeCancelsARecording:
+    def test_escape_cancels_and_is_swallowed_while_recording(self):
+        strategy = MagicMock()
+        cancel = MagicMock(return_value=True)
+        adapter = Win32HookAdapter(strategy, cancel=cancel)
+
+        assert adapter._handle_key(True, keys.VK_ESCAPE) is True
+        assert adapter._handle_key(False, keys.VK_ESCAPE) is True
+        cancel.assert_called_once()
+        strategy.on_key_press.assert_not_called()
+
+    def test_escape_reaches_the_app_when_nothing_is_recording(self):
+        adapter = Win32HookAdapter(MagicMock(), cancel=lambda: False)
+
+        assert adapter._handle_key(True, keys.VK_ESCAPE) is False
+        assert adapter._handle_key(False, keys.VK_ESCAPE) is False
+
+    def test_a_held_escape_cancels_once_and_stays_swallowed_until_released(self):
+        cancel = MagicMock(return_value=True)
+        adapter = Win32HookAdapter(MagicMock(), cancel=cancel)
+
+        repeats = [adapter._handle_key(True, keys.VK_ESCAPE) for _ in range(30)]
+        released = adapter._handle_key(False, keys.VK_ESCAPE)
+
+        assert all(repeats) and released
+        cancel.assert_called_once()
+
+    def test_the_next_escape_after_a_cancel_reaches_the_app(self):
+        results = iter([True, False])
+        adapter = Win32HookAdapter(MagicMock(), cancel=lambda: next(results))
+        adapter._handle_key(True, keys.VK_ESCAPE)
+        adapter._handle_key(False, keys.VK_ESCAPE)
+
+        assert adapter._handle_key(True, keys.VK_ESCAPE) is False
+        assert adapter._handle_key(False, keys.VK_ESCAPE) is False
+
+    def test_other_keys_are_never_swallowed_while_recording(self):
+        adapter = Win32HookAdapter(MagicMock(), cancel=lambda: True)
+
+        assert adapter._handle_key(True, 0x4D) is False
+
+
 class TestWin32HookAdapterPause:
     def test_should_ignore_events_when_paused(self):
         strategy = MagicMock()

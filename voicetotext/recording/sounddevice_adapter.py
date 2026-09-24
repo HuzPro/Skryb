@@ -16,6 +16,7 @@ class SoundDeviceAdapter(AudioRecorder):
         self._stream: sd.InputStream | None = None
         self._chunks: list[np.ndarray] = []
         self._is_recording: bool = False
+        self._paused = False
         self._on_frame: Callable[[np.ndarray], None] | None = None
         self._lock = threading.Lock()
         self.current_rms = 0.0
@@ -28,6 +29,7 @@ class SoundDeviceAdapter(AudioRecorder):
                 raise AudioRecorderError("already recording")
             self._chunks = []
             self.current_rms = 0.0
+            self._paused = False
             self._on_frame = on_frame
             self._stream = sd.InputStream(
                 samplerate=self._sample_rate,
@@ -59,6 +61,11 @@ class SoundDeviceAdapter(AudioRecorder):
     def is_recording(self) -> bool:
         return self._is_recording
 
+    def set_paused(self, paused: bool) -> None:
+        self._paused = paused
+        if paused:
+            self.current_rms = 0.0
+
     def dispose(self) -> None:
         with self._lock:
             self._on_frame = None
@@ -83,6 +90,8 @@ class SoundDeviceAdapter(AudioRecorder):
         # promises. The batch path already flattened at stop; the streaming
         # path fed the raw 2-D frame straight into the model, where
         # ``torch.stft`` reflect-padded the size-1 trailing axis and crashed.
+        if self._paused:
+            return
         chunk = indata.reshape(-1).copy()
         self.current_rms = float(np.sqrt(np.mean(np.square(chunk))))
         self._chunks.append(chunk)

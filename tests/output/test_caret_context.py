@@ -153,6 +153,35 @@ class TestInvisibleCharacters:
         assert result == "Hello there."
 
 
+class TestEndOfLine:
+    @pytest.mark.parametrize(
+        "before, after",
+        [
+            ("﻿", "\n"),
+            ("", "\n"),
+            ("", "\r\n"),
+            ("First line.\n", "  \nSecond line."),
+            ("Café. ", "\n￼\nSend"),
+        ],
+    )
+    def test_should_keep_the_trailing_space_when_only_a_line_break_follows(
+        self, before: str, after: str,
+    ) -> None:
+        context = CaretContext(before, "", after)
+
+        result = fit_to_context("Okay. ", context)
+
+        assert result == "Okay. "
+
+    def test_should_space_the_next_dictation_even_when_the_caret_cannot_be_read(
+        self,
+    ) -> None:
+        first = fit_to_context("Okay. ", CaretContext("﻿", "", "\n"))
+        second = fit_to_context("Good luck. Take care. ", NO_CONTEXT)
+
+        assert first + second == "Okay. Good luck. Take care. "
+
+
 class TestUnreadableNeighbours:
     @pytest.mark.parametrize("text", ["Hello there.", "hello there."])
     def test_should_leave_the_case_alone_after_an_unknown_symbol(

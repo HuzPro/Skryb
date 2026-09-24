@@ -541,11 +541,11 @@ class TestCaretContextStage:
         [
             (CaretContext("Can you do this", ".", ""), " right? "),
             (CaretContext("Can you do this", ".", " Thanks."), " right?"),
-            (CaretContext("", "", "\nThanks."), "Right?"),
+            (CaretContext("", "", "\nThanks."), "Right? "),
         ],
         ids=["at the end", "before a spaced sentence", "before a newline"],
     )
-    def test_should_space_after_a_sentence_only_where_nothing_follows(
+    def test_should_space_after_a_sentence_unless_text_follows_on_the_same_line(
         self, context: CaretContext, expected: str,
     ) -> None:
         pipeline = TextPipeline.for_batch(

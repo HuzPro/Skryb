@@ -40,7 +40,6 @@ from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.edit_capture.delivery_recording_decorator import (
     DeliveryRecordingDecorator,
 )
-from voicetotext.hotkeys.win32_keyboard_hook import ignore_key_event
 from voicetotext.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
@@ -54,6 +53,7 @@ from voicetotext.output.gui_thread_output_decorator import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.paste_memory import PasteMemory
 from voicetotext.output.text_filter_decorator import TextFilterDecorator
 from voicetotext.output.text_pipeline import PipelineMode
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
@@ -73,6 +73,15 @@ _ROCM_DETECTOR = FakeHardwareDetector(
         gfx_arch="gfx1200",
     )
 )
+
+
+@pytest.fixture(autouse=True)
+def fresh_paste_memory(monkeypatch):
+    """Keep one test's paste out of the next, and off the real desktop."""
+    monkeypatch.setattr(
+        bootstrap, "_paste_memory", PasteMemory(lambda: 0, lambda: 0, 0),
+    )
+
 
 
 def _provider_config(
@@ -875,7 +884,7 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_listener.assert_called_once_with(
-            config, use_case, ignore_key_event,
+            config, use_case, bootstrap._paste_memory.observe_key,
         )
         app.set_hotkey_listener.assert_called_once_with(
             mock_build_listener.return_value
@@ -1016,8 +1025,8 @@ class TestEditCaptureSwitch:
 
         assert capture is not None
 
-    def test_should_hand_the_hotkey_hook_a_no_op_watcher_while_off(self):
-        assert _key_observer(None) is ignore_key_event
+    def test_should_hand_the_hotkey_hook_only_the_paste_memory_while_off(self):
+        assert _key_observer(None) == bootstrap._paste_memory.observe_key
 
     def test_should_hand_the_output_chain_a_no_op_reporter_while_off(self):
         reporter = _delivery_reporter(None, PipelineMode.BATCH, OutputMode.DIRECT_PASTE)

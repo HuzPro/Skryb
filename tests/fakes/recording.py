@@ -21,6 +21,7 @@ class FakeAudioRecorder(AudioRecorder):
         self.dispose_called: bool = False
         self.captured_on_frame: Callable[[np.ndarray], None] | None = None
         self._is_recording: bool = False
+        self.paused: bool = False
         self._next_segment: AudioSegment | None = None
         self._start_error: Exception | None = None
         self._stop_error: Exception | None = None
@@ -52,6 +53,9 @@ class FakeAudioRecorder(AudioRecorder):
 
     def is_recording(self) -> bool:
         return self._is_recording
+
+    def set_paused(self, paused: bool) -> None:
+        self.paused = paused
 
     def dispose(self) -> None:
         self.dispose_called = True

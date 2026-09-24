@@ -1,6 +1,6 @@
 import ctypes
 import ctypes.wintypes as _wt
-
+import threading
 
 _user32 = ctypes.windll.user32
 
@@ -28,8 +28,7 @@ _VK_MBUTTON = 0x04
 _MOUSE_BUTTONS = (_VK_LBUTTON, _VK_RBUTTON, _VK_MBUTTON)
 
 # Bit 0 of GetAsyncKeyState means "pressed since the last call to this
-# function", and reading it clears it. Nothing else in this app polls the
-# mouse buttons, so this module is their only reader.
+# function", and reading it clears it. ``click_count`` is the only reader.
 _PRESSED_SINCE_LAST_CALL = 0x0001
 
 _user32.GetForegroundWindow.argtypes = []
@@ -123,11 +122,33 @@ def clicked_since_last_check() -> bool:
     # ponytail: blind to a click that no keystroke follows, since only a
     # later call reports it. Upgrade to a WH_MOUSE_LL hook if that proves
     # too coarse.
-    #
-    # Every button is read on every call - short-circuiting would leave an
-    # unread button's bit set and report that stale click next time.
-    pressed = [
-        _user32.GetAsyncKeyState(button) & _PRESSED_SINCE_LAST_CALL
-        for button in _MOUSE_BUTTONS
-    ]
-    return any(pressed)
+    global _clicks_seen_by_capture
+    count = click_count()
+    clicked = count != _clicks_seen_by_capture
+    _clicks_seen_by_capture = count
+    return clicked
+
+
+_click_lock = threading.Lock()
+_clicks = 0
+_clicks_seen_by_capture = 0
+
+
+def click_count() -> int:
+    """How many polls have seen a mouse button go down, ever.
+
+    The only reader of the pressed-since-last-call bits. Reading a bit
+    clears it, so each consumer keeps the count it last saw and compares,
+    instead of polling the bits itself and stealing clicks from the rest.
+    """
+    global _clicks
+    with _click_lock:
+        # Every button is read on every call - short-circuiting would leave
+        # an unread button's bit set and report that stale click next time.
+        pressed = [
+            _user32.GetAsyncKeyState(button) & _PRESSED_SINCE_LAST_CALL
+            for button in _MOUSE_BUTTONS
+        ]
+        if any(pressed):
+            _clicks += 1
+        return _clicks

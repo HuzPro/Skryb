@@ -23,6 +23,29 @@ class RecordingCappedEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class RecordingPausedEvent(DomainEvent):
+    pass
+
+
+@dataclass(frozen=True)
+class RecordingResumedEvent(DomainEvent):
+    pass
+
+
+@dataclass(frozen=True)
+class RecordingCancelledEvent(DomainEvent):
+    pass
+
+
+@dataclass(frozen=True)
+class TranscriptionStartedEvent(DomainEvent):
+    """The engine has the audio; ``estimated_seconds`` is None without history."""
+
+    audio_seconds: float = 0.0
+    estimated_seconds: float | None = None
+
+
+@dataclass(frozen=True)
 class StateChangedEvent(DomainEvent):
     old_state: str = ""
     new_state: str = ""
