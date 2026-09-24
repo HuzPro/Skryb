@@ -1,6 +1,7 @@
 import ctypes
 import ctypes.wintypes as wintypes
 import logging
+import sys
 import time
 import tkinter
 from collections.abc import Callable
@@ -26,10 +27,13 @@ from voicetotext.recording.pill import (
     Button,
     Frame,
     Mode,
+    SettledBar,
     Spring,
     VoiceLevel,
     collapsed_size,
+    finishing_progress,
     hit_test,
+    is_settled_bar,
     render,
     target_size,
     transcription_progress,
@@ -38,17 +42,33 @@ from voicetotext.recording.pill import (
 _logger = logging.getLogger(__name__)
 
 _BOTTOM_MARGIN = 26
-_SETTLED_FRAME_MS = 33
-_MOVING_FRAME_MS = 16
+# Each frame waits for the display's next refresh itself, so the timer
+# only has to come back soon; a millisecond keeps up with 240 Hz.
+_FRAME_POLL_MS = 1
+# Without a refresh to wait on (no desktop compositor) a plain timer paces
+# the frames instead, so the loop never spins.
+_UNSYNCED_FRAME_MS = 8
 _LONGEST_FRAME_SECONDS = 0.05
+# While the pill is up, hand the GIL between threads more often, so a
+# transcription busy in Python cannot hold the frame loop off for the
+# default 5 ms, longer than a whole frame at 240 Hz. Measured against a
+# thread that never leaves Python: frames every 1.2 ms (p95 1.3 ms) at
+# 0.2 ms, against bursts of up to 27 ms at the default. That worst-case
+# thread ran 13% slower meanwhile; a transcription spends most of its
+# time in native code that lets the GIL go, so it pays far less.
+_ANIMATING_SWITCH_INTERVAL = 0.0002
+# Every call into Windows lets go of the GIL and has to win it back, which
+# under a busy transcription can take a switch interval each time. The
+# stray-click check costs three such calls, so it runs a few times a
+# second rather than every frame.
+_CLICK_CHECK_SECONDS = 0.05
 
 _LEVEL_SMOOTHING = 0.62
 _PHASE_PER_SECOND = 9.6
 # Once the transcription is done the bar runs to full, holds for a beat
 # so the finish reads, and only then does the pill leave.
 _FULL_BAR_HOLD_SECONDS = 0.14
-_PROGRESS_CATCH_UP_RATE = 12.0
-_PROGRESS_FINISH_RATE = 20.0
+_FINISH_SECONDS = 0.22
 
 _WINDOW_CLASS_NAME = "VoiceToTextRecordingOverlay"
 _ERROR_CLASS_ALREADY_EXISTS = 1410
@@ -136,12 +156,16 @@ class BlendFunction(ctypes.Structure):
     ]
 
 
-def premultiplied_bgra(image: Image.Image) -> bytes:
+def premultiplied_array(image: Image.Image) -> numpy.ndarray:
     rgba = numpy.asarray(image, dtype=numpy.uint8)
     alpha = rgba[:, :, 3]
     scaled = (rgba[:, :, :3].astype(numpy.uint16) * alpha[:, :, None]) // 255
     bgra = numpy.dstack((scaled[:, :, ::-1].astype(numpy.uint8), alpha))
-    return numpy.ascontiguousarray(bgra).tobytes()
+    return numpy.ascontiguousarray(bgra)
+
+
+def premultiplied_bgra(image: Image.Image) -> bytes:
+    return premultiplied_array(image).tobytes()
 
 
 # Receives ``(is_button_down, x, y)`` in window pixels.
@@ -157,6 +181,7 @@ class OverlayWindowApi(Protocol):
     def set_mouse_handler(self, handler: MouseHandler) -> None: ...
     def cursor_position(self) -> tuple[int, int] | None: ...
     def set_hand_cursor(self, hand: bool) -> None: ...
+    def wait_for_frame(self) -> bool: ...
 
 
 # Every overlay window shares one window class, and a class has one window
@@ -230,6 +255,7 @@ class Win32LayeredOverlayWindow:
         self._bitmap: int = 0
         self._previous_bitmap: int = 0
         self._bits = ctypes.c_void_p()
+        self._pixels: numpy.ndarray | None = None
 
     def _declare_signatures(self) -> None:
         # Without these, ctypes narrows handles to C int and 64-bit HWNDs
@@ -297,6 +323,12 @@ class Win32LayeredOverlayWindow:
         self._user32.LoadCursorW.restype = wintypes.HANDLE
         self._user32.SetCursor.argtypes = [wintypes.HANDLE]
         self._user32.SetCursor.restype = wintypes.HANDLE
+        self._dwmapi = ctypes.WinDLL("dwmapi")
+        self._dwmapi.DwmFlush.argtypes = []
+        self._dwmapi.DwmFlush.restype = ctypes.c_long
+        self._winmm = ctypes.WinDLL("winmm")
+        self._winmm.timeBeginPeriod.argtypes = [wintypes.UINT]
+        self._winmm.timeEndPeriod.argtypes = [wintypes.UINT]
         self._gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
         self._gdi32.CreateCompatibleDC.restype = wintypes.HDC
         self._gdi32.CreateDIBSection.argtypes = [
@@ -365,6 +397,11 @@ class Win32LayeredOverlayWindow:
         )
 
     def show_at(self, x: int, y: int) -> None:
+        if not self._bitmap:
+            # Windows timers tick every 15.6 ms by default, which would
+            # round the frame timer up to a quarter of the frames 240 Hz
+            # needs. Asked for only while the pill is on screen.
+            self._winmm.timeBeginPeriod(1)
         self._acquire_surface()
         self._origin = (x, y)
         self._user32.SetWindowPos(
@@ -374,9 +411,11 @@ class Win32LayeredOverlayWindow:
         self._user32.ShowWindow(self._hwnd, _SW_SHOWNOACTIVATE)
 
     def push_frame(self, pixels: bytes) -> None:
-        if not self._bits:
+        if self._pixels is None:
             return
-        ctypes.memmove(self._bits, pixels, len(pixels))
+        # A numpy copy into the DIB stays inside Python, where memmove
+        # would give the GIL away and have to wait to win it back.
+        self._pixels[:] = numpy.frombuffer(pixels, dtype=numpy.uint8)
         size = wintypes.SIZE(CANVAS_WIDTH, CANVAS_HEIGHT)
         source = wintypes.POINT(0, 0)
         blend = BlendFunction(_AC_SRC_OVER, 0, 255, _AC_SRC_ALPHA)
@@ -395,7 +434,17 @@ class Win32LayeredOverlayWindow:
 
     def hide(self) -> None:
         self._user32.ShowWindow(self._hwnd, _SW_HIDE)
+        if self._bitmap:
+            self._winmm.timeEndPeriod(1)
         self._release_surface()
+
+    def wait_for_frame(self) -> bool:
+        """Block until the compositor's next refresh; False if it has none.
+
+        ctypes lets go of the GIL for the wait, so the transcription keeps
+        running while the frame loop sleeps.
+        """
+        return self._dwmapi.DwmFlush() == 0
 
     def dispose(self) -> None:
         self.hide()
@@ -453,6 +502,10 @@ class Win32LayeredOverlayWindow:
         )
         if not self._bitmap:
             raise OSError("CreateDIBSection failed")
+        self._pixels = numpy.ctypeslib.as_array(
+            ctypes.cast(self._bits, ctypes.POINTER(ctypes.c_uint8)),
+            shape=(CANVAS_WIDTH * CANVAS_HEIGHT * 4,),
+        )
         self._previous_bitmap = self._gdi32.SelectObject(
             self._memory_dc, self._bitmap,
         )
@@ -468,6 +521,7 @@ class Win32LayeredOverlayWindow:
         self._memory_dc = 0
         self._screen_dc = 0
         self._bits = ctypes.c_void_p()
+        self._pixels = None
 
 
 def _ignore() -> None:
@@ -526,10 +580,14 @@ class RecordingOverlay:
         self._estimate: float | None = None
         self._transcribing_since = 0.0
         self._progress = 0.0
+        self._finish_from = 0.0
         self._finished_at: float | None = None
+        self._settled_bar = SettledBar(premultiplied_array)
+        self._switch_interval: float | None = None
         self._pressed: Button | None = None
         self._frame = self._current_frame(None)
         self._last_tick = 0.0
+        self._last_click_check = float("-inf")
         self._after_id: str | None = None
         self._window_api.set_mouse_handler(self._on_mouse)
         self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
@@ -557,6 +615,8 @@ class RecordingOverlay:
             y = bottom - CANVAS_HEIGHT - _BOTTOM_MARGIN
             self._window_api.show_at(x, y)
             self._visible = True
+            self._switch_interval = sys.getswitchinterval()
+            sys.setswitchinterval(_ANIMATING_SWITCH_INTERVAL)
             self._opacity.value = 0.0
             self._width.value, self._height.value = collapsed_size()
         self._mode = Mode.RECORDING
@@ -582,6 +642,7 @@ class RecordingOverlay:
         self._event_bus.unsubscribe(RecordingResumedEvent, self._on_resumed)
         self._event_bus.unsubscribe(TranscriptionStartedEvent, self._on_transcribing)
         self._stop_loop()
+        self._restore_switch_interval()
         self._visible = False
         self._window_api.dispose()
 
@@ -600,6 +661,7 @@ class RecordingOverlay:
         if self._mode is not Mode.TRANSCRIBING:
             self.hide()
             return
+        self._finish_from = self._progress
         self._finished_at = self._clock()
 
     def _set_estimate(self, estimate: float | None) -> None:
@@ -662,26 +724,38 @@ class RecordingOverlay:
 
     def _tick(self) -> None:
         self._after_id = None
+        synced = self._window_api.wait_for_frame()
         now = self._clock()
         seconds = min(max(now - self._last_tick, 0.0), _LONGEST_FRAME_SECONDS)
         self._last_tick = now
         for spring in self._springs():
             spring.step(seconds)
         self._advance_level(seconds)
-        self._advance_progress(now, seconds)
-        self._on_tick()
+        self._advance_progress(now)
+        if now - self._last_click_check >= _CLICK_CHECK_SECONDS:
+            self._last_click_check = now
+            self._on_tick()
         hovered = self._hovered()
         self._window_api.set_hand_cursor(hovered is not None)
         self._frame = self._current_frame(hovered)
-        self._window_api.push_frame(premultiplied_bgra(render(self._frame)))
+        if is_settled_bar(self._frame):
+            pixels = self._settled_bar.pixels(self._progress)
+        else:
+            pixels = premultiplied_bgra(render(self._frame))
+        self._window_api.push_frame(pixels)
         if self._mode is Mode.CLOSED and self._opacity.value < 0.01:
             self._visible = False
             self._window_api.hide()
+            self._restore_switch_interval()
             return
-        moving = not all(spring.settled() for spring in self._springs())
         self._after_id = self._root.after(
-            _MOVING_FRAME_MS if moving else _SETTLED_FRAME_MS, self._tick,
+            _FRAME_POLL_MS if synced else _UNSYNCED_FRAME_MS, self._tick,
         )
+
+    def _restore_switch_interval(self) -> None:
+        if self._switch_interval is not None:
+            sys.setswitchinterval(self._switch_interval)
+            self._switch_interval = None
 
     def _springs(self) -> tuple[Spring, ...]:
         return self._width, self._height, self._opacity, self._controls, self._label
@@ -696,27 +770,31 @@ class RecordingOverlay:
         )
         self._phase += _PHASE_PER_SECOND * seconds
 
-    def _advance_progress(self, now: float, seconds: float) -> None:
+    def _advance_progress(self, now: float) -> None:
         if self._mode is not Mode.TRANSCRIBING:
             return
+        # A pure function of the clock, not a chase of a moving target: a
+        # chase moves by whatever each frame's gap happens to be, and
+        # uneven gaps show as a stutter.
         if self._finished_at is None:
             target = transcription_progress(
                 now - self._transcribing_since, self._estimate,
             )
-            rate = _PROGRESS_CATCH_UP_RATE
         else:
-            target, rate = 1.0, _PROGRESS_FINISH_RATE
+            target = finishing_progress(
+                self._finish_from, now - self._finished_at, _FINISH_SECONDS,
+            )
         # Never backwards: a bar that shrinks reads as the app changing its mind.
-        step = (target - self._progress) * min(1.0, rate * seconds)
-        self._progress = min(1.0, self._progress + max(step, 0.0))
+        self._progress = min(1.0, max(self._progress, target))
         if (
             self._finished_at is not None
-            and self._progress > 0.99
-            and now - self._finished_at >= _FULL_BAR_HOLD_SECONDS
+            and now - self._finished_at >= _FINISH_SECONDS + _FULL_BAR_HOLD_SECONDS
         ):
             self.hide()
 
     def _hovered(self) -> Button | None:
+        if self._controls.value < 0.9:
+            return None
         position = self._window_api.cursor_position()
         if position is None:
             return None

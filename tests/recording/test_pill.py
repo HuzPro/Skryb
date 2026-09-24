@@ -1,3 +1,4 @@
+import itertools
 import math
 
 import pytest
@@ -8,9 +9,12 @@ from voicetotext.recording.pill import (
     Button,
     Frame,
     Mode,
+    SettledBar,
     Spring,
     VoiceLevel,
     button_centres,
+    finishing_progress,
+    is_settled_bar,
     hit_test,
     pill_box,
     render,
@@ -60,18 +64,85 @@ class TestSpring:
 class TestProgress:
     @pytest.mark.parametrize(
         ("elapsed", "estimate", "expected"),
-        [(0.0, 2.0, 0.0), (1.0, 2.0, 0.475), (2.0, 2.0, 0.95)],
+        [(0.0, 2.0, 0.0), (0.5, 2.0, 0.225), (1.0, 2.0, 0.45)],
     )
-    def test_is_linear_against_the_estimate_up_to_ninety_five_percent(
+    def test_moves_at_a_steady_pace_set_by_the_estimate(
         self, elapsed, estimate, expected,
     ):
         assert transcription_progress(elapsed, estimate) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("estimate", [0.05, 0.4, 2.0, 30.0])
+    def test_speed_never_jumps_anywhere_along_the_bar(self, estimate):
+        step = estimate / 2000
+        values = [transcription_progress(i * step, estimate) for i in range(8000)]
+        speeds = [after - before for before, after in itertools.pairwise(values)]
+
+        jumps = [abs(after - before) for before, after in itertools.pairwise(speeds)]
+        assert max(jumps) < max(speeds) * 0.01
+
+    def test_is_most_of_the_way_there_when_the_estimate_runs_out(self):
+        assert 0.8 < transcription_progress(2.0, 2.0) < 0.9
 
     def test_creeps_but_never_finishes_when_the_estimate_is_blown(self):
         values = [transcription_progress(t, 0.5) for t in (0.6, 1.0, 5.0, 3600.0)]
 
         assert values == sorted(values)
-        assert all(0.95 < value < 1.0 for value in values)
+        assert all(value < 1.0 for value in values)
+        assert values[-1] == pytest.approx(0.99)
+
+
+class TestFinishingProgress:
+    def test_runs_from_where_the_bar_was_to_full(self):
+        assert finishing_progress(0.6, 0.0, 0.2) == pytest.approx(0.6)
+        assert finishing_progress(0.6, 0.2, 0.2) == 1.0
+        assert finishing_progress(0.6, 5.0, 0.2) == 1.0
+
+    def test_slows_into_the_end(self):
+        early = finishing_progress(0.0, 0.05, 0.2) - finishing_progress(0.0, 0.0, 0.2)
+        late = finishing_progress(0.0, 0.2, 0.2) - finishing_progress(0.0, 0.15, 0.2)
+
+        assert early > late > 0
+
+    def test_a_zero_length_finish_is_simply_full(self):
+        assert finishing_progress(0.3, 0.0, 0.0) == 1.0
+
+
+class TestSettledBar:
+    def _bar(self):
+        from voicetotext.recording.overlay import premultiplied_array
+
+        return SettledBar(premultiplied_array), premultiplied_array
+
+    @pytest.mark.parametrize("progress", [0.0, 1.0])
+    def test_matches_the_full_drawing_when_empty_and_when_full(self, progress):
+        bar, to_pixels = self._bar()
+        width, height = target_size(Mode.TRANSCRIBING)
+        drawn = to_pixels(
+            render(Frame(width, height, 1.0, 0.0, 1.0, progress=progress)),
+        ).tobytes()
+
+        assert bar.pixels(progress) == drawn
+
+    def test_the_edge_moves_by_fractions_of_a_pixel(self):
+        bar, _ = self._bar()
+
+        frames = {bar.pixels(0.5 + i * 0.0005) for i in range(8)}
+
+        assert len(frames) == 8
+
+    def test_ignores_progress_outside_the_bar(self):
+        bar, _ = self._bar()
+
+        assert bar.pixels(-3.0) == bar.pixels(0.0)
+        assert bar.pixels(7.0) == bar.pixels(1.0)
+
+    def test_is_only_used_once_the_pill_has_fully_settled(self):
+        width, height = target_size(Mode.TRANSCRIBING)
+
+        assert is_settled_bar(Frame(width, height, 1.0, 0.0, 1.0))
+        assert not is_settled_bar(Frame(width + 2, height, 1.0, 0.0, 1.0))
+        assert not is_settled_bar(Frame(width, height, 0.9, 0.0, 1.0))
+        assert not is_settled_bar(Frame(width, height, 1.0, 0.2, 1.0))
 
     @pytest.mark.parametrize("estimate", [None, 0.0, -1.0])
     def test_eases_short_of_ninety_percent_without_a_usable_estimate(self, estimate):
