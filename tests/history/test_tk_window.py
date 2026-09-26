@@ -1,5 +1,6 @@
 import json
 import tkinter
+import tkinter.font
 import wave
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -15,6 +16,7 @@ from voicetotext.core.events import (
 )
 from voicetotext.history import tk_window
 from voicetotext.history.tk_window import HistoryWindow
+from voicetotext.settings.theme import BODY_FONT
 
 _SESSION = "20260924T063505Z-7aff44ec"
 _START = datetime(2026, 9, 24, 6, 35, 5, tzinfo=UTC)
@@ -193,6 +195,30 @@ def test_selecting_a_dictation_shows_its_full_text(tmp_path, open_history) -> No
     _select(history, 0)
 
     assert _detail(history) == text
+
+
+def test_long_text_ends_in_an_ellipsis_inside_its_column_and_reads_in_full_below(
+    tmp_path, tk_root, open_history,
+) -> None:
+    long_text = (
+        "Please send the contract to Ayesha tomorrow morning — and tell Farhan "
+        "the review moved to Thursday, déjà vu 你好 🎙️ " * 3
+    ).strip()
+    _log(tmp_path, [_dictation(1, long_text), _dictation(2, "Short and sweet.")])
+    history = open_history()
+    font = tkinter.font.Font(root=tk_root, font=BODY_FONT)
+    width = int(history._tree.column("text", "width"))
+
+    rows = _rows(history)
+    _select(history, 1)
+
+    assert rows[0][1:] == ("Short and sweet.", "0:03", "")
+    shown = rows[1][1]
+    assert shown.endswith("…")
+    assert long_text.startswith(shown[:-1])
+    assert font.measure(shown) <= width - 16
+    assert rows[1][2] == "0:03"
+    assert _detail(history) == long_text
 
 
 def test_search_narrows_the_list_and_clearing_it_restores_everything(
