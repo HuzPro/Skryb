@@ -186,14 +186,22 @@ class SessionDiagnostics:
         audio: AudioSegment | None,
         outcome: TranscriptionResult | Exception,
         requested_at: datetime,
+        kind: str = "dictation",
+        output_seconds: float = 0.0,
     ) -> None:
+        """Log one transcription; a voice edit's ``text`` is its instruction.
+
+        ``output_seconds`` is the part of the wall time spent after the
+        engine, in the text pipeline and the writing model; the timing
+        estimate leaves it out.
+        """
         index = self._next_transcription_index()
         finished_at = utc_now()
         if audio is not None and not isinstance(outcome, Exception):
             self._timing.record(
                 self._engine_key(),
                 audio.duration_seconds,
-                (finished_at - requested_at).total_seconds(),
+                (finished_at - requested_at).total_seconds() - output_seconds,
             )
         if isinstance(outcome, Exception):
             text = ""
@@ -229,10 +237,12 @@ class SessionDiagnostics:
             self._write_event(
                 {
                     "event": "transcription",
+                    "kind": kind,
                     "index": index,
                     "requested_at": utc_iso(requested_at),
                     "finished_at": utc_iso(finished_at),
                     "wall_seconds": (finished_at - requested_at).total_seconds(),
+                    "output_seconds": output_seconds,
                     "engine_seconds": engine_seconds,
                     "model": self._active_model,
                     "engine": self._active_engine,

@@ -46,6 +46,11 @@ _FINISH_GLYPH = (10, 10, 12)
 _LABEL = (236, 236, 240)
 _LABEL_TEXT = "Transcribing"
 _LABEL_SIZE = 12
+# The caption sits on the pill's top edge like a badge: half above it, half
+# over the empty padding, so it never covers a button or the waveform.
+_CAPTION_SIZE = 9
+_CAPTION_HEIGHT = 12.0
+_CAPTION_PADDING = 7.0
 
 # A little under critical damping, so the pill lands with one small
 # bounce the way Typeless's does, then settles.
@@ -135,6 +140,7 @@ class Frame:
     paused: bool = False
     progress: float = 0.0
     hovered: Button | None = None
+    caption: str = ""
 
 
 def target_size(mode: Mode) -> tuple[float, float]:
@@ -296,6 +302,10 @@ def _draw_pill(image: Image.Image, frame: Frame) -> None:
         controls = _blank(image)
         _draw_controls(ImageDraw.Draw(controls), frame)
         _blend(layer, controls, frame.controls)
+        if frame.caption:
+            caption = _blank(image)
+            _draw_caption(ImageDraw.Draw(caption), box, frame.caption)
+            _blend(layer, caption, frame.controls)
     _fade(layer, frame.opacity)
     image.alpha_composite(layer)
 
@@ -343,6 +353,24 @@ def _draw_label(draw: ImageDraw.ImageDraw, box: tuple[float, ...]) -> None:
         fill=(*_LABEL, 255),
         anchor="mm",
     )
+
+
+def _draw_caption(draw: ImageDraw.ImageDraw, box: tuple[float, ...], caption: str) -> None:
+    scale = _SUPERSAMPLE
+    left, top, right, _bottom = box
+    font = _font(_CAPTION_SIZE * scale)
+    text_left, _, text_right, _ = draw.textbbox((0, 0), caption, font=font)
+    half_width = (text_right - text_left) / 2 + _CAPTION_PADDING * scale
+    half_height = _CAPTION_HEIGHT * scale / 2
+    centre = (left + right) / 2
+    draw.rounded_rectangle(
+        (centre - half_width, top - half_height, centre + half_width, top + half_height),
+        radius=half_height,
+        fill=(*_TRANSCRIBING_FILL, 255),
+        outline=_BORDER,
+        width=scale,
+    )
+    draw.text((centre, top), caption, font=font, fill=(*_LABEL, 255), anchor="mm")
 
 
 def _draw_controls(draw: ImageDraw.ImageDraw, frame: Frame) -> None:

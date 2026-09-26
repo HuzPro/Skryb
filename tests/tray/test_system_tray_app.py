@@ -9,6 +9,7 @@ from voicetotext.core.events import (
     StateChangedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
+    WritingNoticeEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.tray.app import SystemTrayApp, format_duration
@@ -671,3 +672,25 @@ class TestMicrophoneMissingNotification:
         assert "default" in message.lower()
         for update_call in icon.update_state.call_args_list:
             assert update_call.args[0] != AppState.ERROR
+
+
+class TestWritingNotices:
+    def test_a_writing_notice_becomes_one_tray_balloon(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(WritingNoticeEvent(message="Selection too long to edit"))
+
+        icon.notify.assert_called_once_with("VoiceToText", "Selection too long to edit")
+        icon.update_state.assert_not_called()
+
+    def test_a_notice_before_the_icon_exists_is_ignored(self):
+        app = _build_app()
+
+        app._event_bus.publish(WritingNoticeEvent(message="The writing model could not start."))

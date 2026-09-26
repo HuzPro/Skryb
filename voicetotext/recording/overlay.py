@@ -16,6 +16,7 @@ from voicetotext.core.events import (
     DomainEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
+    RecordingStartedEvent,
     StateChangedEvent,
     TranscriptionStartedEvent,
 )
@@ -585,6 +586,7 @@ class RecordingOverlay:
         self._settled_bar = SettledBar(premultiplied_array)
         self._switch_interval: float | None = None
         self._pressed: Button | None = None
+        self._caption = ""
         self._frame = self._current_frame(None)
         self._last_tick = 0.0
         self._last_click_check = float("-inf")
@@ -594,6 +596,7 @@ class RecordingOverlay:
         self._event_bus.subscribe(RecordingPausedEvent, self._on_paused)
         self._event_bus.subscribe(RecordingResumedEvent, self._on_resumed)
         self._event_bus.subscribe(TranscriptionStartedEvent, self._on_transcribing)
+        self._event_bus.subscribe(RecordingStartedEvent, self._on_recording_started)
 
     @property
     def mode(self) -> Mode:
@@ -641,6 +644,7 @@ class RecordingOverlay:
         self._event_bus.unsubscribe(RecordingPausedEvent, self._on_paused)
         self._event_bus.unsubscribe(RecordingResumedEvent, self._on_resumed)
         self._event_bus.unsubscribe(TranscriptionStartedEvent, self._on_transcribing)
+        self._event_bus.unsubscribe(RecordingStartedEvent, self._on_recording_started)
         self._stop_loop()
         self._restore_switch_interval()
         self._visible = False
@@ -669,6 +673,9 @@ class RecordingOverlay:
 
     def _set_paused(self, paused: bool) -> None:
         self._paused = paused
+
+    def _set_caption(self, caption: str) -> None:
+        self._caption = caption
 
     def _retarget(self) -> None:
         width, height = target_size(self._mode)
@@ -701,6 +708,11 @@ class RecordingOverlay:
         if isinstance(event, TranscriptionStartedEvent):
             estimate = event.estimated_seconds
             self._dispatcher.dispatch(lambda: self._set_estimate(estimate))
+
+    def _on_recording_started(self, event: DomainEvent) -> None:
+        if isinstance(event, RecordingStartedEvent):
+            caption = event.caption
+            self._dispatcher.dispatch(lambda: self._set_caption(caption))
 
     def _on_mouse(self, is_down: bool, x: int, y: int) -> None:
         button = hit_test(self._frame, x, y)
@@ -812,6 +824,7 @@ class RecordingOverlay:
             paused=self._paused,
             progress=self._progress,
             hovered=hovered,
+            caption=self._caption,
         )
 
 

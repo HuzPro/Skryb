@@ -14,6 +14,7 @@ from voicetotext.core.events import (
     StateChangedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
+    WritingNoticeEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.downloads.download_manager import DownloadManager
@@ -118,6 +119,7 @@ class SystemTrayApp:
         self._event_bus.subscribe(
             MicrophoneMissingEvent, self._handle_microphone_missing,
         )
+        self._event_bus.subscribe(WritingNoticeEvent, self._handle_writing_notice)
 
     def run(self) -> None:
         self._icon = self._tray_factory(
@@ -241,6 +243,11 @@ class SystemTrayApp:
             f"Can't find the microphone \"{event.name}\". Using the Windows "
             "default until it's back.",
         )
+
+    def _handle_writing_notice(self, event: WritingNoticeEvent) -> None:
+        if self._icon is None:
+            return
+        self._icon.notify("VoiceToText", event.message)
 
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
         self._pending_engine_failure = event.error
