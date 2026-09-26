@@ -1148,30 +1148,29 @@ class TestAppAwareOutputChain:
         assert isinstance(streaming._inner, GuiThreadOutputDecorator)
         assert isinstance(batch._inner._inner, AppAwareDelivery)
 
-    @patch("voicetotext.bootstrap.prune_in_background")
-    def test_a_changed_retention_prunes_history_in_the_background(self, prune, tmp_path):
-        config = FakeConfig({"history.retention_days": 7})
+    def test_a_changed_retention_restarts_history_pruning(self):
+        pruner = MagicMock()
         changes = ChangeSet(
             engine_reload_required=False, hotkey_changed=False, output_changed=False,
             history_retention_changed=True,
         )
 
         apply_settings(
-            changes, config, MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
-            history_dir=tmp_path,
+            changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+            history_pruner=pruner,
         )
 
-        prune.assert_called_once_with(tmp_path, 7)
+        pruner.prune_now.assert_called_once_with()
 
-    @patch("voicetotext.bootstrap.prune_in_background")
-    def test_an_unchanged_retention_prunes_nothing(self, prune, tmp_path):
+    def test_an_unchanged_retention_prunes_nothing(self):
+        pruner = MagicMock()
         changes = ChangeSet(
             engine_reload_required=False, hotkey_changed=False, output_changed=False,
         )
 
         apply_settings(
             changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
-            history_dir=tmp_path,
+            history_pruner=pruner,
         )
 
-        prune.assert_not_called()
+        pruner.prune_now.assert_not_called()

@@ -92,11 +92,7 @@ from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
 from voicetotext.history.management import delete_all_in_background
-from voicetotext.history.retention import (
-    history_retention_days,
-    prune_in_background,
-    prune_once_ready,
-)
+from voicetotext.history.retention import HistoryPruner, history_retention_days
 from voicetotext.history.tk_window import HistoryWindow
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.input_devices import Microphones
@@ -1044,7 +1040,7 @@ def build_app(
                 models_dir=paths.models_dir,
                 edit_capture=edit_capture,
                 delivery_hooks=delivery_hooks,
-                history_dir=paths.diagnostics_dir,
+                history_pruner=history_pruner,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
@@ -1074,10 +1070,10 @@ def build_app(
         paste_again=record_and_transcribe_use_case.paste_last,
         copy_again=record_and_transcribe_use_case.copy_last,
     )
-    prune_once_ready(
-        event_bus, paths.diagnostics_dir,
-        functools.partial(history_retention_days, config),
+    history_pruner = HistoryPruner(
+        paths.diagnostics_dir, functools.partial(history_retention_days, config),
     )
+    history_pruner.start_when_ready(event_bus)
 
     app = SystemTrayApp(
         use_case=record_and_transcribe_use_case,
@@ -1094,7 +1090,9 @@ def build_app(
         ),
         on_open_settings=open_settings,
         download_manager=download_manager,
-        owned_disposables=(overlay,) if overlay is not None else (),
+        owned_disposables=(
+            (history_pruner,) if overlay is None else (overlay, history_pruner)
+        ),
     )
 
     config.save()
@@ -1127,7 +1125,7 @@ def apply_settings(
     models_dir: Path | None = None,
     edit_capture: Win32EditObserver | None = None,
     delivery_hooks: DeliveryHooks | None = None,
-    history_dir: Path | None = None,
+    history_pruner: HistoryPruner | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -1147,8 +1145,8 @@ def apply_settings(
             )
         )
 
-    if changes.history_retention_changed and history_dir is not None:
-        prune_in_background(history_dir, history_retention_days(config))
+    if changes.history_retention_changed and history_pruner is not None:
+        history_pruner.prune_now()
 
     if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(
