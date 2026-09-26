@@ -1,6 +1,7 @@
 """The UI contract, end to end over loopback HTTP, against real services on fakes."""
 
 import json
+import logging
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -56,6 +57,18 @@ def test_a_request_without_the_apps_token_is_refused(rig: Rig) -> None:
     with refused.value:
         assert refused.value.code == 401
     assert rig.call("GET", "/api/app")[0] == 200
+
+
+def test_the_token_never_reaches_the_session_log(rig: Rig, app_caplog) -> None:
+    app_caplog.set_level(logging.DEBUG, logger="voicetotext")
+
+    stream = rig.events()
+    stream.until("app")
+    rig.call("GET", "/api/app")
+    stream.close()
+
+    assert "GET /api/events?token=" in app_caplog.text
+    assert rig.server.token not in app_caplog.text
 
 
 def test_the_shells_preflight_is_answered_without_a_token_and_allows_its_origin(rig: Rig) -> None:
