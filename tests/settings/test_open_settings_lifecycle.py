@@ -69,6 +69,7 @@ class _TrackingService:
         self.dictionary_rules = MagicMock(return_value=DictionaryConfig())
         self.save_dictionary_rules = MagicMock()
         self.license_acceptance_required = MagicMock(return_value=False)
+        self.reset_pill_position = MagicMock()
 
     def subscribe_engine(self, listener: object) -> None:
         self._engine_listeners.append(listener)

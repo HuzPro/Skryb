@@ -20,3 +20,5 @@ text2num>=3.1
 jellyfish>=1.0
 # UI Automation client used to read the text around the caret.
 comtypes>=1.4
+# Per-app volume, for lowering other apps while recording.
+pycaw>=20240210; sys_platform == 'win32'

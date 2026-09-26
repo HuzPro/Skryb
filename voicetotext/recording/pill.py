@@ -8,7 +8,7 @@ transparent margin passes clicks through to whatever is underneath.
 import math
 from dataclasses import dataclass
 from enum import Enum
-from functools import cache
+from functools import cache, lru_cache
 
 import numpy
 from PIL import Image, ImageDraw, ImageFont
@@ -19,6 +19,16 @@ CANVAS_HEIGHT = 72
 # a little room below it for the overshoot of the spring.
 _BOTTOM_INSET = 10
 _SUPERSAMPLE = 3
+
+# Where the pill sits, as how far along its travel it is across and down
+# the work area: 0.5 across is centred, 1.0 down is as low as it goes,
+# which keeps the margin above the taskbar it has always had.
+PillPosition = tuple[float, float]
+DEFAULT_PILL_POSITION: PillPosition = (0.5, 1.0)
+BOTTOM_MARGIN = 26
+# Fractions come back from a division; the last bit of float error is
+# forgiven before flooring back to a whole pixel.
+_PIXEL_SLACK = 1e-6
 
 _RECORDING_SIZE = (220.0, 48.0)
 _TRANSCRIBING_SIZE = (156.0, 34.0)
@@ -46,6 +56,14 @@ _FINISH_GLYPH = (10, 10, 12)
 _LABEL = (236, 236, 240)
 _LABEL_TEXT = "Transcribing"
 _LABEL_SIZE = 12
+_AMBER = (255, 184, 48)
+_NOTICE_TEXT = "No audio from"
+_NOTICE_SIZE = 11
+_NOTICE_LINE_OFFSET = 7.0
+_TEXT_MARGIN = 6.0
+_COUNTDOWN_SIZE = 12
+_COUNTDOWN_GAP = 6.0
+_COUNTDOWN_BAR_COUNT = 7
 
 # A little under critical damping, so the pill lands with one small
 # bounce the way Typeless's does, then settles.
@@ -135,6 +153,10 @@ class Frame:
     paused: bool = False
     progress: float = 0.0
     hovered: Button | None = None
+    # Shown in amber in place of the waveform while the microphone is silent.
+    silent_microphone: str = ""
+    # Time left before the recording limit, in amber beside the waveform.
+    countdown: str = ""
 
 
 def target_size(mode: Mode) -> tuple[float, float]:
@@ -147,6 +169,48 @@ def target_size(mode: Mode) -> tuple[float, float]:
 
 def collapsed_size() -> tuple[float, float]:
     return _COLLAPSED_SIZE
+
+
+def pill_origin(
+    position: PillPosition, work_area: tuple[int, int, int, int],
+) -> tuple[int, int]:
+    """The window's top-left corner for ``position`` inside ``work_area``."""
+    left, top, right, bottom = work_area
+    across, down = (min(max(value, 0.0), 1.0) for value in position)
+    x = left + math.floor(across * _travel(right - left, CANVAS_WIDTH) + _PIXEL_SLACK)
+    y = top + math.floor(
+        down * _travel(bottom - top, CANVAS_HEIGHT + BOTTOM_MARGIN) + _PIXEL_SLACK,
+    )
+    return x, y
+
+
+def pill_position(
+    origin: tuple[int, int], work_area: tuple[int, int, int, int],
+) -> PillPosition:
+    """Where a window at ``origin`` sits in ``work_area``; off the edge is the edge."""
+    left, top, right, bottom = work_area
+    return (
+        _fraction(origin[0] - left, _travel(right - left, CANVAS_WIDTH), 0.5),
+        _fraction(
+            origin[1] - top, _travel(bottom - top, CANVAS_HEIGHT + BOTTOM_MARGIN), 1.0,
+        ),
+    )
+
+
+def _travel(span: int, size: int) -> int:
+    return max(span - size, 0)
+
+
+def _fraction(offset: int, travel: int, default: float) -> float:
+    if travel <= 0:
+        return default
+    return min(max(offset / travel, 0.0), 1.0)
+
+
+def countdown_text(seconds: float) -> str:
+    """``m:ss`` left, rounded up so the last second reads 0:01, not 0:00."""
+    whole = max(math.ceil(seconds), 0) if math.isfinite(seconds) else 0
+    return f"{whole // 60}:{whole % 60:02d}"
 
 
 def pill_box(width: float, height: float) -> tuple[float, float, float, float]:
@@ -360,7 +424,7 @@ def _draw_controls(draw: ImageDraw.ImageDraw, frame: Frame) -> None:
             fill=(*fill, 255),
         )
         _draw_glyph(draw, button, cx, cy, radius, frame.paused)
-    _draw_waveform(draw, frame, centres)
+    _draw_middle(draw, frame, centres)
 
 
 def _draw_glyph(
@@ -402,26 +466,87 @@ def _draw_glyph(
             )
 
 
-def _draw_waveform(
+def _draw_middle(
     draw: ImageDraw.ImageDraw,
     frame: Frame,
     centres: dict[Button, tuple[float, float, float]],
 ) -> None:
-    scale = _SUPERSAMPLE
     cancel_x, middle, radius = centres[Button.CANCEL]
     pause_x = centres[Button.PAUSE][0]
+    if frame.silent_microphone:
+        _draw_silence_notice(
+            draw,
+            frame.silent_microphone,
+            cancel_x + radius + _TEXT_MARGIN,
+            pause_x - radius - _TEXT_MARGIN,
+            middle,
+        )
+        return
     start = cancel_x + radius + _WAVE_MARGIN
     end = pause_x - radius - _WAVE_MARGIN
-    span = _BAR_COUNT * _BAR_WIDTH + (_BAR_COUNT - 1) * _BAR_GAP
+    count = _BAR_COUNT
+    if frame.countdown:
+        start += _draw_text(draw, frame.countdown, _COUNTDOWN_SIZE, start, middle, "lm")
+        start += _COUNTDOWN_GAP
+        count = _COUNTDOWN_BAR_COUNT
+    _draw_waveform(draw, frame, start, end, middle, count)
+
+
+def _draw_silence_notice(
+    draw: ImageDraw.ImageDraw, microphone: str, start: float, end: float, middle: float,
+) -> None:
+    width = max(int(end - start), 0)
+    centre = (start + end) / 2
+    for text, y in (
+        (_NOTICE_TEXT, middle - _NOTICE_LINE_OFFSET),
+        (microphone, middle + _NOTICE_LINE_OFFSET),
+    ):
+        _draw_text(draw, _fitted(text, _NOTICE_SIZE, width), _NOTICE_SIZE, centre, y, "mm")
+
+
+def _draw_text(
+    draw: ImageDraw.ImageDraw, text: str, size: int, x: float, y: float, anchor: str,
+) -> float:
+    """Draw ``text`` in amber and return how wide it is, in canvas pixels."""
+    font = _font(size * _SUPERSAMPLE)
+    draw.text(
+        (x * _SUPERSAMPLE, y * _SUPERSAMPLE), text, font=font,
+        fill=(*_AMBER, 255), anchor=anchor,
+    )
+    return font.getlength(text) / _SUPERSAMPLE
+
+
+@lru_cache(maxsize=256)
+def _fitted(text: str, size: int, width: int) -> str:
+    """``text`` cut short with an ellipsis until it fits ``width`` pixels."""
+    font = _font(size * _SUPERSAMPLE)
+    limit = width * _SUPERSAMPLE
+    if font.getlength(text) <= limit:
+        return text
+    while text and font.getlength(text + "…") > limit:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+def _draw_waveform(
+    draw: ImageDraw.ImageDraw,
+    frame: Frame,
+    start: float,
+    end: float,
+    middle: float,
+    count: int,
+) -> None:
+    scale = _SUPERSAMPLE
+    span = count * _BAR_WIDTH + (count - 1) * _BAR_GAP
     if end - start < span:
         return
     first = (start + end - span) / 2
     tallest = max(frame.height - 2 * (_PADDING + 6), _BAR_MIN_HEIGHT)
     alpha = 115 if frame.paused else 255
-    for index in range(_BAR_COUNT):
+    for index in range(count):
         height = (
             _BAR_MIN_HEIGHT if frame.paused
-            else _bar_height(index, frame.level, frame.phase, tallest)
+            else _bar_height(index, count, frame.level, frame.phase, tallest)
         )
         left = first + index * (_BAR_WIDTH + _BAR_GAP)
         top = middle - height / 2
@@ -432,8 +557,10 @@ def _draw_waveform(
         )
 
 
-def _bar_height(index: int, level: float, phase: float, tallest: float) -> float:
-    half = (_BAR_COUNT - 1) / 2
+def _bar_height(
+    index: int, count: int, level: float, phase: float, tallest: float,
+) -> float:
+    half = max((count - 1) / 2, 1.0)
     distance = abs(index - half)
     bias = 1.0 - (0.62 * ((distance / half) ** 1.35))
     pulse = 0.55 + (0.45 * math.sin(phase + (distance * 0.8)))

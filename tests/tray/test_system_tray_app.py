@@ -2,7 +2,9 @@ from unittest.mock import MagicMock, patch
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
+    MicrophoneConnectedEvent,
     MicrophoneMissingEvent,
+    MicrophoneSilentEvent,
     EngineLoadFailedEvent,
     ErrorOccurredEvent,
     RecordingCappedEvent,
@@ -671,3 +673,74 @@ class TestMicrophoneMissingNotification:
         assert "default" in message.lower()
         for update_call in icon.update_state.call_args_list:
             assert update_call.args[0] != AppState.ERROR
+
+
+class TestMicrophoneNotices:
+    def _running_app(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+        return app, icon
+
+    def _record(self, app) -> None:
+        app._event_bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
+
+    def test_a_silent_microphone_gets_one_balloon_per_recording(self):
+        app, icon = self._running_app()
+        self._record(app)
+
+        for _ in range(4):
+            app._event_bus.publish(MicrophoneSilentEvent(
+                device_name="Microphone (Maono PD300X Microphone)", seconds_silent=6.0,
+            ))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "No audio from Microphone (Maono PD300X Microphone). Check it is "
+            "unmuted or pick another microphone from the tray menu.",
+        )
+
+    def test_the_next_recording_can_warn_again(self):
+        app, icon = self._running_app()
+        for _ in range(3):
+            self._record(app)
+            app._event_bus.publish(MicrophoneSilentEvent(device_name="Windows default"))
+            app._event_bus.publish(
+                StateChangedEvent(old_state="recording", new_state="idle"),
+            )
+
+        assert icon.notify.call_count == 3
+
+    def test_a_preferred_microphone_plugged_in_says_it_will_be_used(self):
+        app, icon = self._running_app()
+
+        app._event_bus.publish(MicrophoneConnectedEvent(
+            name="Headset (Jabra Evolve 20 MS Stereo)", will_be_used=True,
+        ))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "Using Headset (Jabra Evolve 20 MS Stereo) for the next dictation.",
+        )
+
+    def test_any_other_new_microphone_points_at_the_tray_menu(self):
+        app, icon = self._running_app()
+
+        app._event_bus.publish(MicrophoneConnectedEvent(name="Mikrofon (Gerät für Café ✓)"))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "New microphone: Mikrofon (Gerät für Café ✓). Choose it from the tray "
+            "Microphone menu.",
+        )
+
+    def test_nothing_is_shown_before_the_tray_icon_exists(self):
+        app = _build_app()
+
+        app._event_bus.publish(MicrophoneConnectedEvent(name="USB Mic"))
+        app._event_bus.publish(MicrophoneSilentEvent(device_name="USB Mic"))
