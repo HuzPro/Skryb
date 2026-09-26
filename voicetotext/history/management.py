@@ -1,13 +1,16 @@
-"""Deleting and exporting history entries without rewriting any log.
+"""Deleting and exporting history entries.
 
-Session logs are append-only: a deletion removes the entry's recording and
-transcript, then appends a ``history_deleted`` line naming its ``seq`` so
-:func:`~voicetotext.history.entries.load_history` stops listing it. The
-session log, the session's text log and any other diagnostics file are
-never touched.
+A deletion removes the entry's recording and transcript, blanks the text
+its log line kept (marking the line ``"history_deleted": true``) and adds a
+``history_deleted`` line naming its ``seq``, so
+:func:`~voicetotext.history.entries.load_history` stops listing it. The log
+is rewritten in one atomic swap; every other line stays byte for byte, and
+the session's text log and other diagnostics files are never touched.
 """
 
+import json
 import logging
+import os
 import shutil
 import threading
 from collections import defaultdict
@@ -16,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from voicetotext.core.timestamps import utc_iso, utc_now
-from voicetotext.diagnostics.jsonl import JsonlWriter
+from voicetotext.diagnostics.jsonl import JsonlWriter, encode_line
 from voicetotext.history.entries import HistoryEntry, load_history
 
 _logger = logging.getLogger(__name__)
@@ -24,6 +27,7 @@ _logger = logging.getLogger(__name__)
 # The only folders a session keeps per-entry files in. A log line naming
 # anything else (``session.jsonl`` included) is never acted on.
 _ENTRY_FOLDERS = frozenset({"audio", "transcripts"})
+_NEWLINE = os.linesep.encode()
 
 
 def delete_entries(
@@ -32,7 +36,7 @@ def delete_entries(
     """Delete *entries* and return how many were marked deleted.
 
     Files that are already gone are fine: the tombstone alone hides the
-    entry. A session whose log cannot be appended to keeps its entries
+    entry. A session whose log cannot be rewritten keeps its entries
     listed, so the user can see the deletion did not happen.
     """
     by_session: dict[str, list[HistoryEntry]] = defaultdict(list)
@@ -96,18 +100,51 @@ def _delete_in_session(
     if not seqs:
         return 0
     try:
-        _append_tombstones(session_dir, seqs, now)
+        _redact_and_mark_deleted(session_dir, seqs, now)
     except OSError as exc:
         _logger.warning("Could not mark history deleted in %s: %s", session_dir, exc)
         return 0
     return len(seqs)
 
 
-def _append_tombstones(session_dir: Path, seqs: list[int], now: datetime) -> None:
+def _redact_and_mark_deleted(
+    session_dir: Path, seqs: list[int], now: datetime,
+) -> None:
     at = utc_iso(now)
-    JsonlWriter(session_dir / "session.jsonl").append_many(
-        {"event": "history_deleted", "seq": seq, "at": at} for seq in seqs
-    )
+    tombstones = [
+        encode_line({"event": "history_deleted", "seq": seq, "at": at})
+        for seq in seqs
+    ]
+
+    def edit(lines: list[bytes]) -> list[bytes]:
+        deleted = set(seqs)
+        redacted = [_redacted_line(line, deleted) for line in lines]
+        if redacted and not redacted[-1].endswith(b"\n"):
+            redacted[-1] += _NEWLINE  # a line cut short by a crash stays apart
+        return redacted + tombstones
+
+    JsonlWriter(session_dir / "session.jsonl").rewrite(edit)
+
+
+def _redacted_line(line: bytes, seqs: set[int]) -> bytes:
+    """*line* with its dictation text blanked if it records a deleted seq."""
+    if b'"transcription"' not in line:
+        return line
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return line
+    if not isinstance(event, dict) or event.get("event") != "transcription":
+        return line
+    index = event.get("index")
+    if not isinstance(index, int) or isinstance(index, bool) or index not in seqs:
+        return line
+    if event.get("text") == "" and event.get("history_deleted") is True:
+        return line
+    event["text"] = ""
+    event["history_deleted"] = True
+    body = line.rstrip(b"\r\n")
+    return encode_line(event, line[len(body):] or _NEWLINE)
 
 
 def _remove_owned_file(session_dir: Path, path: Path | None) -> None:
