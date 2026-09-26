@@ -417,14 +417,14 @@ def test_lists_thousands_of_dictations(tmp_path, open_history) -> None:
     assert rows[0][1] == "dictation number 4000"
 
 
-def _answer_confirmations(monkeypatch, answer: bool) -> list[str]:
-    asked: list[str] = []
+def _answer_confirmations(monkeypatch, answer: bool) -> list[tuple]:
+    asked: list[tuple] = []
 
-    def ask(title: str, _message: str, **_kwargs) -> bool:
-        asked.append(title)
+    def ask(parent, theme, heading: str, _message: str) -> bool:
+        asked.append((parent, theme, heading))
         return answer
 
-    monkeypatch.setattr(tk_window.messagebox, "askyesno", ask)
+    monkeypatch.setattr(tk_window, "confirm_deletion", ask)
     return asked
 
 
@@ -448,7 +448,7 @@ def test_delete_asks_first_then_removes_only_the_selected_dictation(
     _answer_confirmations(monkeypatch, answer=True)
     history._delete_button.invoke()
 
-    assert asked == ["Delete dictation"]
+    assert asked == [(history._window, history._theme, "Delete dictation")]
     assert [row[1] for row in _rows(history)] == ["Send it over."] * 2
     assert not (session / "audio" / "0002.wav").exists()
     assert (session / "audio" / "0001.wav").exists()
