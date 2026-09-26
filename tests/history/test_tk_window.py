@@ -7,6 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from voicetotext.core.event_bus import SimpleEventBus
+from voicetotext.core.events import (
+    RecordingCancelledEvent,
+    TranscriptionCompletedEvent,
+    TranscriptionFailedEvent,
+)
 from voicetotext.history import tk_window
 from voicetotext.history.tk_window import HistoryWindow
 
@@ -127,6 +133,42 @@ def test_lists_dictations_newest_first_with_length_and_status(
         ("(CUDA failed with error out of memory)", "0:03", "Failed"),
         ("First thing this morning.", "0:03", ""),
     ]
+
+
+def test_an_open_window_lists_each_new_dictation_without_pressing_refresh(
+    tmp_path, tk_root, retranscribe, no_real_window,
+) -> None:
+    bus = SimpleEventBus()
+    loads: list[str] = []
+
+    def load_now(work: Callable[[], None]) -> None:
+        loads.append("load")
+        work()
+
+    history = HistoryWindow(
+        tk_root, tmp_path, retranscribe, _run_now,
+        saves_history=lambda: True, run_in_background=load_now, event_bus=bus,
+    )
+    history.show()
+    try:
+        _log(tmp_path, [_dictation(1, "Book the dentist for Thursday.")])
+        bus.publish(TranscriptionCompletedEvent(text="Book the dentist for Thursday."))
+        _log(tmp_path, [_dictation(2, "", error="CUDA out of memory", audio_path="")])
+        bus.publish(TranscriptionFailedEvent(error="CUDA out of memory"))
+        _log(tmp_path, [
+            {"event": "cancelled", "index": 3,
+             "at": (_START + timedelta(minutes=3)).isoformat(), "audio_seconds": 4.0,
+             "audio_path": "audio/0003.wav"},
+        ])
+        bus.publish(RecordingCancelledEvent(recoverable=True))
+
+        assert [row[3] for row in _rows(history)] == ["Cancelled", "Failed", ""]
+        assert history._hint.cget("text") == ""
+    finally:
+        history.close()
+
+    bus.publish(TranscriptionCompletedEvent(text="after closing"))
+    assert len(loads) == 4
 
 
 def test_opening_again_reuses_the_open_window_and_rereads_the_logs(

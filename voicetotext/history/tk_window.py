@@ -6,6 +6,13 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from voicetotext.core.color_scheme import detect_app_color_scheme
+from voicetotext.core.event_bus import EventBus
+from voicetotext.core.events import (
+    DomainEvent,
+    RecordingCancelledEvent,
+    TranscriptionCompletedEvent,
+    TranscriptionFailedEvent,
+)
 from voicetotext.core.timestamps import utc_now
 from voicetotext.history.entries import (
     CANCELLED,
@@ -56,6 +63,9 @@ _COLUMNS = (
 _ROW_TAGS = {FAILED: "failed", CANCELLED: "quiet", EMPTY: "quiet", NOT_SAVED: "quiet"}
 _TRANSCRIBING = "Transcribing…"
 _NO_MATCHES = "No dictations match your search."
+_NEW_ENTRY_EVENTS: tuple[type[DomainEvent], ...] = (
+    TranscriptionCompletedEvent, TranscriptionFailedEvent, RecordingCancelledEvent,
+)
 _PADDING = 16
 
 
@@ -99,6 +109,7 @@ class HistoryWindow:
         run_in_background: Callable[[Callable[[], None]], None] = (
             _start_daemon_thread
         ),
+        event_bus: EventBus | None = None,
     ) -> None:
         self._root = root
         self._diagnostics_dir = diagnostics_dir
@@ -113,6 +124,9 @@ class HistoryWindow:
         # ``None`` marks a retry still running.
         self._retries: dict[tuple[str, int], RetryOutcome | None] = {}
         self._playback_end: str | None = None
+        if event_bus is not None:
+            for finished in _NEW_ENTRY_EVENTS:
+                event_bus.subscribe(finished, self._on_new_entry)
 
     def show(self) -> None:
         """Open the window, or raise it if it is already open; then re-read the logs."""
@@ -130,6 +144,14 @@ class HistoryWindow:
         self._hint_text = "Loading…"
         self._show_hint(self._hint_text)
         self._run_in_background(self._load)
+
+    def _on_new_entry(self, _event: DomainEvent) -> None:
+        self._schedule(self._reload_if_open)
+
+    def _reload_if_open(self) -> None:
+        """Pick up a dictation that just finished, without the Loading… hint."""
+        if self._window is not None:
+            self._run_in_background(self._load)
 
     def close(self) -> None:
         if self._window is None:

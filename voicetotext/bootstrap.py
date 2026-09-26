@@ -1301,6 +1301,7 @@ def build_app(
         retranscribe=record_and_transcribe_use_case.retranscribe,
         schedule=gui_dispatcher.dispatch,
         saves_history=functools.partial(content_recording_enabled, config),
+        event_bus=event_bus,
     )
     notice = Notice(root)
     RecoveryNotices(
