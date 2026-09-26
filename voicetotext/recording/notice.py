@@ -37,6 +37,8 @@ _HWND_TOPMOST = -1
 _SWP_NOACTIVATE = 0x0010
 _SW_HIDE = 0
 _SW_SHOWNOACTIVATE = 4
+_RDW_ALLCHILDREN = 0x0080
+_RDW_UPDATENOW = 0x0100
 _BODY_FONT = ("Segoe UI", -13)
 
 
@@ -76,6 +78,9 @@ class Win32NoticeWindow:
     """No-activate styles, placement on the foreground monitor, show and hide.
 
     ``show`` maps the window fully transparent; ``reveal`` makes it opaque.
+    Tk labels and buttons are native child windows that draw themselves
+    while handling WM_PAINT, with no Expose event to wait for, so ``reveal``
+    first has Windows deliver any WM_PAINT still pending.
     """
 
     def __init__(self) -> None:
@@ -98,6 +103,10 @@ class Win32NoticeWindow:
             ctypes.c_void_p, ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_uint32,
         ]
         user32.SetLayeredWindowAttributes.restype = ctypes.c_int
+        user32.RedrawWindow.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+        ]
+        user32.RedrawWindow.restype = ctypes.c_int
         self._user32 = user32
 
     def prepare(self, hwnd: int) -> None:
@@ -119,6 +128,7 @@ class Win32NoticeWindow:
         self._user32.ShowWindow(hwnd, _SW_SHOWNOACTIVATE)
 
     def reveal(self, hwnd: int) -> None:
+        self._user32.RedrawWindow(hwnd, None, None, _RDW_UPDATENOW | _RDW_ALLCHILDREN)
         self._user32.SetLayeredWindowAttributes(hwnd, 0, _OPAQUE, _LWA_ALPHA)
 
     def hide(self, hwnd: int) -> None:
@@ -133,10 +143,12 @@ class Notice:
     focus when it maps any other kind. It gets ``WS_EX_NOACTIVATE`` while
     still hidden and is shown with ``SW_SHOWNOACTIVATE``, so neither its
     appearance nor a click on it moves the focus off the app the text is
-    going to. It is shown see-through and made opaque only once every widget
-    in it has painted: Tk draws each widget separately, when idle after
-    Windows asks it to, so a notice revealed on a timer can show a frame
-    with some widgets still blank. The buttons are classic Tk buttons: unlike
+    going to. It is shown see-through and made opaque only once it has
+    painted: Tk draws its frames when idle after an Expose, and the label
+    and buttons whenever Windows gets round to their WM_PAINT, so a notice
+    revealed on a timer can show a frame with parts still blank. The reveal
+    waits for every frame's Expose, then flushes the rest. The buttons are
+    classic Tk buttons: unlike
     ``ttk.Button`` they have no click-to-focus binding. A new notice
     replaces the one showing, and each hides itself after ten seconds. A
     strip down the left edge is the accent colour, or amber when something
@@ -178,10 +190,10 @@ class Notice:
         window = self._window or self._build()
         self._cancel_auto_hide()
         self._shown += 1
-        widgets = self._fill(
+        frames = self._fill(
             window, message, buttons[:_MAX_BUTTONS], _PALETTES[self._color_scheme()], warning,
         )
-        self._reveal_once_painted(widgets, self._shown)
+        self._reveal_once_painted(frames, self._shown)
         window.update_idletasks()
         api = self._api()
         self._hwnd = int(window.wm_frame(), 16)
@@ -198,19 +210,19 @@ class Notice:
         self._message = message
         self._hide_after = window.after(_AUTO_HIDE_MS, self.hide)
 
-    def _reveal_once_painted(self, widgets: Sequence[tkinter.Widget], shown: int) -> None:
-        # A widget's own Expose handler queues its drawing before this
+    def _reveal_once_painted(self, frames: Sequence[tkinter.Frame], shown: int) -> None:
+        # A frame's own Expose handler queues its drawing before this
         # binding runs, so the reveal queued here runs after the drawing.
         reveal = functools.partial(self._reveal, shown)
-        waiting = set(widgets)
+        waiting: set[tkinter.Misc] = set(frames)
 
         def painted(event: "tkinter.Event[tkinter.Misc]") -> None:
             waiting.discard(event.widget)
             if not waiting:
                 self._root.after_idle(reveal)
 
-        for widget in widgets:
-            widget.bind("<Expose>", painted, add="+")
+        for frame in frames:
+            frame.bind("<Expose>", painted, add="+")
         self._root.after(_REVEAL_ANYWAY_MS, reveal)
 
     def _reveal(self, shown: int) -> None:
@@ -254,8 +266,8 @@ class Notice:
         actions: Sequence[NoticeAction],
         theme: Palette,
         warning: bool,
-    ) -> list[tkinter.Widget]:
-        """Build the notice's content and return every widget that paints."""
+    ) -> list[tkinter.Frame]:
+        """Build the notice's content and return its frames, which paint on Expose."""
         for child in window.winfo_children():
             child.destroy()
         frame = tkinter.Frame(
@@ -267,16 +279,15 @@ class Notice:
             frame, bg=theme.warning if warning else theme.accent, width=_STRIP_WIDTH,
         )
         strip.pack(side="left", fill="y")
-        text = tkinter.Label(
+        tkinter.Label(
             frame, text=message, bg=theme.surface, fg=theme.foreground, font=_BODY_FONT,
-        )
-        text.pack(side="left", padx=(_PADDING, _PADDING + 4), pady=_PADDING)
+        ).pack(side="left", padx=(_PADDING, _PADDING + 4), pady=_PADDING)
         self._buttons = [
             self._button(frame, label, action, theme) for label, action in actions
         ]
         if self._buttons:
             self._buttons[-1].pack_configure(padx=(0, _PADDING))
-        return [frame, strip, text, *self._buttons]
+        return [frame, strip]
 
     def _button(
         self,

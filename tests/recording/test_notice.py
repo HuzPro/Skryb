@@ -76,10 +76,11 @@ def test_a_notice_is_built_hidden_and_shown_only_through_the_no_activate_path(
     assert y + height == 1040 - 26 - 72 - 8
 
 
-def _painted_widgets(widget) -> list:
+def _frames(widget) -> list:
     return [
         child for direct in widget.winfo_children()
-        for child in (direct, *_painted_widgets(direct))
+        for child in (direct, *_frames(direct))
+        if child.winfo_class() == "Frame"
     ]
 
 
@@ -89,21 +90,19 @@ def _paint(widget) -> None:
     widget.event_generate("<Expose>")
 
 
-def test_a_notice_stays_see_through_until_every_widget_in_it_has_painted(
+def test_a_notice_stays_see_through_until_every_frame_in_it_has_painted(
     tk_root, notice, native, monkeypatch,
 ) -> None:
     monkeypatch.setattr(notice_module, "_REVEAL_ANYWAY_MS", 60_000)
     notice.show("Transcription failed.", [("Retry", lambda: None), ("Open history", lambda: None)])
-    widgets = _painted_widgets(notice._window)
-    assert len(widgets) == 5
+    outer, strip = _frames(notice._window)
 
-    for widget in widgets[:-1]:
-        _paint(widget)
-        _paint(widget)
+    _paint(outer)
+    _paint(outer)
     _pump(tk_root, lambda: native.revealed, seconds=0.2)
     assert native.revealed == []
 
-    _paint(widgets[-1])
+    _paint(strip)
     _pump(tk_root, lambda: native.revealed)
 
     assert native.revealed == [native.shown[-1][0]]
