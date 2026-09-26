@@ -36,6 +36,8 @@ _WM_APP_TRAY = 0x0400 + 1  # WM_APP + 1: our tray callback message
 _WM_RBUTTONUP = 0x0205
 _WM_CONTEXTMENU = 0x007B
 _WM_LBUTTONDBLCLK = 0x0203
+_WM_DEVICECHANGE = 0x0219
+_DBT_DEVNODES_CHANGED = 0x0007
 _WS_EX_TOOLWINDOW = 0x80
 _MF_STRING = 0x0
 _MF_SEPARATOR = 0x800
@@ -261,6 +263,7 @@ class Win32TrayBackend:
         on_history_clicked: Callable[[], None] | None = None,
         list_microphones: MicrophoneLister | None = None,
         on_microphone_chosen: Callable[[str], None] | None = None,
+        on_devices_changed: Callable[[], None] | None = None,
     ) -> None:
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
@@ -268,6 +271,7 @@ class Win32TrayBackend:
         self._on_history_clicked = on_history_clicked
         self._list_microphones = list_microphones
         self._on_microphone_chosen = on_microphone_chosen
+        self._on_devices_changed = on_devices_changed
         self._offered_microphones: list[str] = []
         self._added = False
         self._wndproc = _WNDPROC(self._window_proc)  # pinned: GC would crash us
@@ -344,6 +348,14 @@ class Win32TrayBackend:
         if msg == _WM_TASKBAR_CREATED:
             self._readd_after_explorer_restart()
             return 0
+        # Windows sends this to every top-level window when any device is
+        # plugged in or out; this window is top-level for broadcasts anyway.
+        if (
+            msg == _WM_DEVICECHANGE
+            and wparam == _DBT_DEVNODES_CHANGED
+            and self._on_devices_changed is not None
+        ):
+            self._on_devices_changed()
         return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def _readd_after_explorer_restart(self) -> None:
@@ -440,6 +452,7 @@ class Win32TrayAdapter:
         on_history_clicked: Callable[[], None] | None = None,
         list_microphones: MicrophoneLister | None = None,
         on_microphone_chosen: Callable[[str], None] | None = None,
+        on_devices_changed: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
@@ -452,6 +465,7 @@ class Win32TrayAdapter:
         self._backend: TrayBackend = backend or Win32TrayBackend(
             get_state_label, on_settings_clicked, on_quit_clicked,
             on_history_clicked, list_microphones, on_microphone_chosen,
+            on_devices_changed,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -560,6 +574,7 @@ def build_win32_tray_adapter(
     on_history_clicked: Callable[[], None] | None = None,
     list_microphones: MicrophoneLister | None = None,
     on_microphone_chosen: Callable[[str], None] | None = None,
+    on_devices_changed: Callable[[], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`voicetotext.tray.app.TrayIconFactory`.
 
@@ -578,4 +593,5 @@ def build_win32_tray_adapter(
         on_history_clicked=on_history_clicked,
         list_microphones=list_microphones,
         on_microphone_chosen=on_microphone_chosen,
+        on_devices_changed=on_devices_changed,
     )

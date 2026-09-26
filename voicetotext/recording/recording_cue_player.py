@@ -5,6 +5,7 @@ import numpy as np
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     EngineLoadCompletedEvent,
+    RecordingCapWarningEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     StateChangedEvent,
@@ -24,6 +25,12 @@ STOP_FREQUENCY_HZ = 587.33
 # and clearly different from the single start/stop boops.
 READY_LOW_FREQUENCY_HZ = 659.25   # E5
 READY_HIGH_FREQUENCY_HZ = 987.77  # B5
+# The limit is near: two soft, low taps, quieter than the start and stop
+# cues, so it reads as a nudge rather than the recording ending.
+WARNING_FREQUENCY_HZ = 523.25  # C5
+_WARNING_TAP_SECONDS = 0.06
+_WARNING_GAP_SECONDS = 0.07
+_WARNING_AMPLITUDE = 0.1
 
 
 def tone_to_samples(
@@ -51,6 +58,15 @@ def _envelope(count: int, sample_rate: int) -> np.ndarray:
     return envelope
 
 
+def warning_to_samples(sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+    """Render the soft two-tap 'limit is near' cue as float32 mono samples."""
+    tap = tone_to_samples(
+        WARNING_FREQUENCY_HZ, _WARNING_TAP_SECONDS, sample_rate, _WARNING_AMPLITUDE,
+    )
+    gap = np.zeros(int(_WARNING_GAP_SECONDS * sample_rate), dtype=np.float32)
+    return np.concatenate([tap, gap, tap])
+
+
 def ready_chime_to_samples(sample_rate: int = SAMPLE_RATE) -> np.ndarray:
     """Render the two-note ascending 'ready' chime as float32 mono samples."""
     low = tone_to_samples(READY_LOW_FREQUENCY_HZ, sample_rate=sample_rate)
@@ -67,6 +83,9 @@ class RecordingCuePlayer(ABC):
     @abstractmethod
     def play_stop(self) -> None: ...
 
+    @abstractmethod
+    def play_warning(self) -> None: ...
+
 
 class CueBeeper:
     """Observer that plays a cue when recording starts and stops.
@@ -79,12 +98,16 @@ class CueBeeper:
         self._player = player
         event_bus.subscribe(RecordingStartedEvent, self._on_started)
         event_bus.subscribe(RecordingStoppedEvent, self._on_stopped)
+        event_bus.subscribe(RecordingCapWarningEvent, self._on_cap_warning)
 
     def _on_started(self, event: RecordingStartedEvent) -> None:
         self._player.play_start()
 
     def _on_stopped(self, event: RecordingStoppedEvent) -> None:
         self._player.play_stop()
+
+    def _on_cap_warning(self, event: RecordingCapWarningEvent) -> None:
+        self._player.play_warning()
 
 
 class ReadyCuePlayer(ABC):

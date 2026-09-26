@@ -11,6 +11,7 @@ from voicetotext.core.events import (
     DomainEvent,
     ErrorOccurredEvent,
     RecordingCancelledEvent,
+    RecordingCapWarningEvent,
     RecordingCappedEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
@@ -44,6 +45,14 @@ _MIN_DURATION_SECONDS = 0.1
 _DEFAULT_MAX_RECORDING_SECONDS = 600.0
 
 
+def _default_cap() -> float:
+    return _DEFAULT_MAX_RECORDING_SECONDS
+
+
+def _no_warning() -> float:
+    return 0.0
+
+
 class RecordAndTranscribeUseCase:
 
     def __init__(
@@ -55,10 +64,11 @@ class RecordAndTranscribeUseCase:
         event_bus: EventBus,
         action_dispatcher: ActionDispatcher,
         diagnostics: SessionDiagnostics,
-        max_recording_seconds: float = _DEFAULT_MAX_RECORDING_SECONDS,
+        max_recording_seconds: Callable[[], float] = _default_cap,
         streaming_controller: LiveStreamingController | None = None,
         is_streaming_mode: Callable[[], bool] | None = None,
         prepare_audio: Callable[[AudioSegment], AudioSegment] | None = None,
+        warn_before_cap_seconds: Callable[[], float] = _no_warning,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -67,7 +77,10 @@ class RecordAndTranscribeUseCase:
         self._event_bus = event_bus
         self._dispatcher = action_dispatcher
         self._diagnostics = diagnostics
+        # Both limits are asked at every start, so a saved change applies to
+        # the next recording.
         self._max_recording_seconds = max_recording_seconds
+        self._warn_before_cap_seconds = warn_before_cap_seconds
         self._streaming = streaming_controller
         self._is_streaming_mode = is_streaming_mode or (lambda: False)
         # Runs on the audio the engine hears only; history keeps the original.
@@ -89,10 +102,14 @@ class RecordAndTranscribeUseCase:
         # to enforce the duration cap, cancelled when the user stops
         # normally or replaced when the recording finishes auto-stopped.
         self._cap_timer: threading.Timer | None = None
+        self._cap_warning_timer: threading.Timer | None = None
         # Paused time does not count towards the cap: the cap bounds the
         # audio, and a pause records none.
         self._paused = False
-        self._cap_remaining = max_recording_seconds
+        self._cap_seconds = _DEFAULT_MAX_RECORDING_SECONDS
+        self._warn_seconds = 0.0
+        self._cap_warned = False
+        self._cap_remaining = self._cap_seconds
         self._cap_started_at = 0.0
         event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
@@ -269,7 +286,7 @@ class RecordAndTranscribeUseCase:
 
     def _start_recording(self) -> None:
         self._paused = False
-        self._cap_remaining = self._max_recording_seconds
+        self._reset_cap()
         try:
             self._recorder.start_recording()
         except Exception as e:
@@ -289,7 +306,7 @@ class RecordAndTranscribeUseCase:
             self._event_bus.publish(ErrorOccurredEvent(error=str(exc)))
             return
         self._paused = False
-        self._cap_remaining = self._max_recording_seconds
+        self._reset_cap()
         self._streaming_active = True
         self._state_machine.transition_to(AppState.RECORDING)
         self._event_bus.publish(RecordingStartedEvent())
@@ -357,6 +374,12 @@ class RecordAndTranscribeUseCase:
         if result.is_empty:
             self._announce_empty_transcription(result)
 
+    def _reset_cap(self) -> None:
+        self._cap_seconds = self._max_recording_seconds()
+        self._warn_seconds = self._warn_before_cap_seconds()
+        self._cap_warned = False
+        self._cap_remaining = self._cap_seconds
+
     def _schedule_cap_timer(self) -> None:
         self._cap_started_at = time.monotonic()
         self._cap_timer = threading.Timer(
@@ -365,12 +388,37 @@ class RecordAndTranscribeUseCase:
         )
         self._cap_timer.daemon = True
         self._cap_timer.start()
+        if self._warn_seconds > 0 and not self._cap_warned:
+            self._cap_warning_timer = threading.Timer(
+                max(self._cap_remaining - self._warn_seconds, 0.0),
+                self._on_cap_warning_due,
+            )
+            self._cap_warning_timer.daemon = True
+            self._cap_warning_timer.start()
 
     def _cancel_cap_timer(self) -> None:
-        if self._cap_timer is None:
-            return
-        self._cap_timer.cancel()
+        for timer in (self._cap_timer, self._cap_warning_timer):
+            if timer is not None:
+                timer.cancel()
         self._cap_timer = None
+        self._cap_warning_timer = None
+
+    def _on_cap_warning_due(self) -> None:
+        self._dispatcher.dispatch(self._warn_of_cap)
+
+    def _warn_of_cap(self) -> None:
+        with self._action_lock:
+            if (
+                self._state_machine.state != AppState.RECORDING
+                or self._paused
+                or self._cap_warned
+            ):
+                return
+            self._cap_warned = True
+            remaining = self._cap_remaining - (time.monotonic() - self._cap_started_at)
+            self._event_bus.publish(
+                RecordingCapWarningEvent(remaining_seconds=max(remaining, 0.0)),
+            )
 
     def _on_cap_timer_fired(self) -> None:
         # Timer thread → worker thread, so the auto-stop takes the
@@ -386,11 +434,11 @@ class RecordAndTranscribeUseCase:
                 return
             _logger.info(
                 "Recording auto-stopped: %.0fs cap reached.",
-                self._max_recording_seconds,
+                self._cap_seconds,
             )
             self._event_bus.publish(
                 RecordingCappedEvent(
-                    max_duration_seconds=self._max_recording_seconds,
+                    max_duration_seconds=self._cap_seconds,
                 )
             )
             self._end_capture()

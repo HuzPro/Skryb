@@ -34,6 +34,11 @@ from voicetotext.output.dictionary_config import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.text_filter_decorator import load_dictionary
+from voicetotext.recording.pill import DEFAULT_PILL_POSITION
+from voicetotext.recording.preferences import (
+    RecordingPreferences,
+    save_pill_position,
+)
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwap
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
@@ -277,6 +282,7 @@ class SettingsService:
             double_tap_locks_hold=(
                 self._config.get("hotkey.double_tap_locks_hold", True) is not False
             ),
+            recording=RecordingPreferences.from_config(self._config),
         )
 
     def _crisperwhisper_mode(self) -> str:
@@ -303,6 +309,7 @@ class SettingsService:
         self._config.set("output.mode", draft.output_mode.value)
         self._config.set("audio.input_device", draft.input_device)
         self._config.set("audio.boost_quiet_speech", draft.boost_quiet_speech)
+        draft.recording.save_to(self._config)
         self._config.set("transcription.mode", draft.transcription_mode.value)
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
@@ -335,6 +342,9 @@ class SettingsService:
             ) + "\n",
             encoding="utf-8",
         )
+
+    def reset_pill_position(self) -> None:
+        save_pill_position(self._config, DEFAULT_PILL_POSITION)
 
     def diagnostics_directory(self) -> str:
         configured = self._config.get("diagnostics.directory", "")

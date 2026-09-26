@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from voicetotext.hotkeys.bindings import DEFAULT_BINDINGS, Binding
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
 
@@ -29,6 +30,9 @@ class SettingsDraft:
     boost_quiet_speech: bool = True
     hotkey_bindings: tuple[Binding, ...] = DEFAULT_BINDINGS
     double_tap_locks_hold: bool = True
+    # Read where it is used, at each recording or sound, so none of it
+    # needs a rebuild either.
+    recording: RecordingPreferences = RecordingPreferences()
 
 
 @dataclass(frozen=True)

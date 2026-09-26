@@ -225,6 +225,31 @@ class TestExplorerRestartRecovery:
         shell.Shell_NotifyIconW.assert_not_called()
 
 
+class TestDeviceChanges:
+    def _backend(self, changes: list[str]) -> mod.Win32TrayBackend:
+        backend = mod.Win32TrayBackend.__new__(mod.Win32TrayBackend)
+        backend._on_devices_changed = lambda: changes.append("changed")
+        return backend
+
+    def test_a_device_plugged_in_or_out_is_reported(self, monkeypatch) -> None:
+        changes: list[str] = []
+        monkeypatch.setattr(mod, "_user32", MagicMock())
+
+        self._backend(changes)._window_proc(0, 0x0219, 0x0007, 0)
+
+        assert changes == ["changed"]
+
+    def test_other_device_messages_are_left_to_windows(self, monkeypatch) -> None:
+        changes: list[str] = []
+        user32 = MagicMock()
+        monkeypatch.setattr(mod, "_user32", user32)
+
+        self._backend(changes)._window_proc(0, 0x0219, 0x8000, 1234)
+
+        assert changes == []
+        user32.DefWindowProcW.assert_called_once_with(0, 0x0219, 0x8000, 1234)
+
+
 class TestMicrophoneMenu:
     def _backend(self, connected, chosen, chosen_log):
         from voicetotext.tray import win32_tray_adapter as tray
