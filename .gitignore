@@ -44,3 +44,5 @@ scripts/_spike_out/
 ui/node_modules/
 ui/src-tauri/target/
 ui/dist/
+# Tauri UI shell build output
+ui/src-tauri/gen/
