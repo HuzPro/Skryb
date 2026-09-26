@@ -18,8 +18,8 @@ EMPTY = "Empty"
 NOT_SAVED = "Not saved"
 
 _CAPTURE_HINT = (
-    "Dictations are listed here when \"Save dictation history (text and "
-    "audio)\" is on in Settings > Output."
+    "Dictations are listed here when \"Save history\" is on in "
+    "Settings > History."
 )
 _DELETED_EVENT = "history_deleted"
 

@@ -306,7 +306,7 @@ def test_explains_an_empty_history_and_how_to_fill_it(tmp_path: Path) -> None:
     assert "does not exist" in missing
     assert empty.startswith("No dictations yet.")
     for message in (missing, empty):
-        assert "Settings > Output" in message
+        assert "Settings > History" in message
 
 
 def test_hints_at_content_capture_when_the_newest_dictation_was_not_saved() -> None:
