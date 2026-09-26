@@ -156,6 +156,11 @@ class SystemTrayApp:
         self._hotkey_listener = listener
         self._hotkey_listener.start()
 
+    def notify(self, message: str) -> None:
+        """A tray balloon, from any thread; nothing before the icon is up."""
+        if self._icon is not None:
+            self._icon.notify("VoiceToText", message)
+
     def pause_listener(self) -> None:
         self._hotkey_listener.pause()
 

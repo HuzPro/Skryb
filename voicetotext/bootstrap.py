@@ -98,9 +98,8 @@ from voicetotext.output.win32_key_sender import (
 from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
-from voicetotext.history.management import delete_all_in_background
 from voicetotext.history.retention import HistoryPruner, history_retention_days
-from voicetotext.history.tk_window import HistoryWindow
+from voicetotext.history.service import HistoryService
 from voicetotext.recording.audio_ducking import AudioDucking, core_audio_sessions
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.hot_plug import MicrophoneHotPlug
@@ -126,7 +125,6 @@ from voicetotext.settings.engine_hot_swap import (
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
-from voicetotext.settings.tk_window import TkSettingsWindow
 from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
@@ -162,6 +160,9 @@ from voicetotext.transcription.streaming.streaming_engine import (
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
 from voicetotext.tray.win32_tray_adapter import build_win32_tray_adapter
+from voicetotext.ui.api_handlers import CoreApi, ShortcutCapture
+from voicetotext.ui.api_server import ApiServer
+from voicetotext.ui.launcher import ShellLauncher
 from voicetotext.writing.install import WritingPaths, managed_root, server_files
 from voicetotext.writing.learning import Learner
 from voicetotext.writing.llama_server import LlamaServer
@@ -612,19 +613,6 @@ def _cancel_with_escape(use_case: RecordAndTranscribeUseCase) -> bool:
     return True
 
 
-def _report_history_deletion(
-    history_window: HistoryWindow,
-    settings_window: TkSettingsWindow | None,
-    deleted: bool,
-) -> None:
-    """Refresh the history list and replace Settings' "Deleting all history" status."""
-    history_window.refresh()
-    if settings_window is not None and settings_window.is_open():
-        settings_window.status_label().configure(
-            text="History deleted." if deleted else "Could not delete all history.",
-        )
-
-
 def _load_engine_with_fallback(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -1053,6 +1041,7 @@ def build_app(
     registry: EngineRegistry,
     hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
+    api_server: ApiServer,
 ) -> SystemTrayApp:
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
@@ -1245,46 +1234,43 @@ def build_app(
         diagnostics=diagnostics,
     )
 
-    settings_window_ref: dict[str, TkSettingsWindow | None] = {"current": None}
-
-    def open_settings() -> None:
-        existing = settings_window_ref["current"]
-        if existing is not None and existing.is_open():
-            existing.show()
-            return
-        window = TkSettingsWindow(
-            root,
-            settings_service,
-            capture_bridge=Win32CaptureBridge(),
-            first_run=False,
-            microphones=microphones,
-            on_save=lambda changes: apply_settings(
-                changes, config, record_and_transcribe_use_case, app,
-                gui_dispatcher=gui_dispatcher,
-                dictionary_path=paths.dictionary_path,
-                models_dir=paths.models_dir,
-                edit_capture=_edit_watcher(changes),
-                writing=writing,
-                hotkey_actions=hotkey_actions,
-                delivery_hooks=delivery_hooks,
-                history_pruner=history_pruner,
-            ),
-            on_capture_state_changed=lambda recording: (
-                app.pause_listener() if recording else app.resume_listener()
-            ),
-            schedule=gui_dispatcher.dispatch,
+    def apply_saved_settings(changes: ChangeSet) -> None:
+        apply_settings(
+            changes, config, record_and_transcribe_use_case, app,
+            gui_dispatcher=gui_dispatcher,
+            dictionary_path=paths.dictionary_path,
+            models_dir=paths.models_dir,
+            edit_capture=_edit_watcher(changes),
             writing=writing,
-            delete_all_history=lambda: delete_all_in_background(
-                paths.diagnostics_dir,
-                on_done=lambda deleted: gui_dispatcher.dispatch(
-                    lambda: _report_history_deletion(
-                        history_window, settings_window_ref["current"], deleted,
-                    ),
-                ),
-            ),
+            hotkey_actions=hotkey_actions,
+            delivery_hooks=delivery_hooks,
+            history_pruner=history_pruner,
         )
-        settings_window_ref["current"] = window
-        window.show()
+
+    # The shell's requests arrive on the API server's threads; applying
+    # settings rebuilds the output chain and the hotkey hook, which the
+    # settings window always did on the GUI thread.
+    api = CoreApi(
+        settings_service,
+        api_server.hub,
+        microphones=microphones,
+        capture=ShortcutCapture(
+            Win32CaptureBridge(),
+            functools.partial(api_server.hub.publish, "capture"),
+            pause=lambda: app.pause_listener(),
+            resume=lambda: app.resume_listener(),
+        ),
+        diagnostics_dir=paths.diagnostics_dir,
+        state=lambda: state_machine.state,
+        on_save=lambda changes: gui_dispatcher.dispatch(
+            lambda: apply_saved_settings(changes),
+        ),
+        writing=writing,
+        history=HistoryService(
+            paths.diagnostics_dir, record_and_transcribe_use_case.retranscribe,
+        ),
+    )
+    launcher = ShellLauncher(api_server, notify=lambda message: app.notify(message))
 
     hot_plug = MicrophoneHotPlug(
         root,
@@ -1295,21 +1281,13 @@ def build_app(
         run_in_background=action_dispatcher.dispatch,
     )
 
-    history_window = HistoryWindow(
-        root,
-        paths.diagnostics_dir,
-        retranscribe=record_and_transcribe_use_case.retranscribe,
-        schedule=gui_dispatcher.dispatch,
-        saves_history=functools.partial(content_recording_enabled, config),
-        event_bus=event_bus,
-    )
     notice = Notice(root)
     RecoveryNotices(
         event_bus,
         notice,
         gui_dispatcher.dispatch,
         retry=record_and_transcribe_use_case.retry_last_recording,
-        open_history=history_window.show,
+        open_history=functools.partial(launcher.open, "history"),
         paste_again=record_and_transcribe_use_case.paste_last,
         copy_again=record_and_transcribe_use_case.copy_last,
     )
@@ -1325,14 +1303,14 @@ def build_app(
         hotkey_listener=listener,
         tray_factory=functools.partial(
             build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
-            on_history_clicked=history_window.show,
+            on_history_clicked=functools.partial(launcher.open, "history"),
             on_paste_last_clicked=record_and_transcribe_use_case.paste_last,
             on_copy_last_clicked=record_and_transcribe_use_case.copy_last,
             list_microphones=functools.partial(_microphone_menu, config, microphones),
             on_microphone_chosen=functools.partial(_choose_microphone, config),
             on_devices_changed=hot_plug.devices_changed,
         ),
-        on_open_settings=open_settings,
+        on_open_settings=functools.partial(launcher.open, "settings"),
         download_manager=download_manager,
         owned_disposables=(
             (overlay, ducking, history_pruner, writing) if overlay is not None
@@ -1340,6 +1318,9 @@ def build_app(
         ),
     )
 
+    # Only once the tray app exists: saving settings and recording a
+    # shortcut both reach it.
+    api.serve_on(api_server)
     config.save()
     model_name = config.get("transcription.model_size")
     _logger.info(

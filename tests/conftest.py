@@ -64,6 +64,8 @@ if sys.platform != "win32":
         "recording/test_overlay.py",
         "settings/test_win32_capture_bridge.py",
         "tray/test_win32_tray_adapter.py",
+        "ui/test_first_run.py",
+        "ui/test_settings_apply_live.py",
         "performance",
     ]
 

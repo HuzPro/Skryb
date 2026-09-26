@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from voicetotext.transcription.hardware_detector import HardwareDetector
     from voicetotext.transcription.license_policy import LicensePolicy
     from voicetotext.transcription.model_manager import ModelManager
+    from voicetotext.ui.api_server import ApiServer
+    from voicetotext.ui.launcher import ShellLauncher
 
 
 def _apply_torch_env_overrides() -> None:
@@ -266,6 +268,9 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     license_policy = LicensePolicy(config)
 
     event_bus = SimpleEventBus()
+    # Before setup, which is served through it: one socket bind and an idle
+    # thread until the shell connects.
+    api_server = _start_api_server(event_bus)
     download_manager = DownloadManager(event_bus=event_bus)
     model_manager = create_model_manager(
         paths.models_dir, download_manager, license_policy,
@@ -295,9 +300,14 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     if paths.is_first_run() or not _configured_model_installed(
         config, model_manager,
     ):
+        from voicetotext.ui.launcher import ShellLauncher
+
         _run_first_time_setup(
             config, model_manager, event_bus, root, registry,
             hardware_detector, paths.dictionary_path, license_policy,
+            api_server=api_server,
+            launcher=ShellLauncher(api_server, notify=_show_setup_problem),
+            diagnostics_dir=paths.diagnostics_dir,
         )
 
     if not _configured_model_installed(config, model_manager):
@@ -315,8 +325,18 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
         registry=registry,
         hardware_detector=hardware_detector,
         license_policy=license_policy,
+        api_server=api_server,
     )
     app.run()
+
+
+def _start_api_server(event_bus: SimpleEventBus) -> ApiServer:
+    from voicetotext.ui.api_server import ApiServer
+    from voicetotext.ui.event_hub import EventHub
+
+    server = ApiServer(EventHub(event_bus))
+    server.start()
+    return server
 
 
 def _configured_model_installed(
@@ -341,11 +361,24 @@ def _run_first_time_setup(
     hardware_detector: HardwareDetector,
     dictionary_path: Path,
     license_policy: LicensePolicy,
+    *,
+    api_server: ApiServer,
+    launcher: ShellLauncher,
+    diagnostics_dir: Path,
 ) -> None:
+    """Serve setup to the shell and wait, pumping Tk, until it is done or closed.
+
+    A shell that cannot be opened has already told the user why, so this
+    returns at once and the caller finds no model installed.
+    """
+    import functools
+    import threading
+
     from voicetotext.bootstrap import build_first_run_settings_service
-    from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
-    from voicetotext.settings.tk_window import TkSettingsWindow
+    from voicetotext.recording.input_devices import Microphones
     from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
+    from voicetotext.ui.api_handlers import CoreApi, ShortcutCapture
+    from voicetotext.ui.launcher import wait_for_setup
 
     service = build_first_run_settings_service(
         config=config,
@@ -356,18 +389,26 @@ def _run_first_time_setup(
         dictionary_path=dictionary_path,
         license_policy=license_policy,
     )
-    dispatcher = TkGuiThreadDispatcher(root)
-    window = TkSettingsWindow(
-        root,
+    setup_done = threading.Event()
+    CoreApi(
         service,
-        capture_bridge=Win32CaptureBridge(),
+        api_server.hub,
+        microphones=Microphones(),
+        capture=ShortcutCapture(
+            Win32CaptureBridge(), functools.partial(api_server.hub.publish, "capture"),
+        ),
+        diagnostics_dir=diagnostics_dir,
         first_run=True,
-        schedule=dispatcher.dispatch,
-    )
-    window.show()
-    root.wait_window(window)
-    dispatcher.cancel()
+        on_setup_done=setup_done.set,
+    ).serve_on(api_server)
+    if launcher.open("setup"):
+        wait_for_setup(root, lambda: setup_done.is_set() or not launcher.is_running())
     config.save()
+
+
+def _show_setup_problem(message: str) -> None:
+    # No tray icon exists yet to show a balloon on.
+    _try_show_message("VoiceToText", message)
 
 
 def _show_instance_conflict() -> None:
