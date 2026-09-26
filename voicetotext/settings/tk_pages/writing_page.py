@@ -23,6 +23,7 @@ from voicetotext.settings.theme import (
     combobox,
     divider,
     hide_while_empty,
+    keep_scroll_position,
     page_note,
     section_heading,
     set_card_selected,
@@ -482,7 +483,7 @@ class TkWritingPage(ttk.Frame):
         self._transform_name.set("")
         self._transform_text.set("")
         self._message.set("")
-        self._refresh_transforms()
+        keep_scroll_position(self, self._refresh_transforms)
 
     def _refresh_transforms(self) -> None:
         for child in self._transform_list.winfo_children():

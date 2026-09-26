@@ -340,6 +340,17 @@ def combobox(parent: tkinter.Misc, **options: object) -> ttk.Combobox:
     return ttk.Combobox(parent, font=BODY_FONT, **options)
 
 
+def keep_scroll_position(widget: tkinter.Misc, change: Callable[[], None]) -> None:
+    """Run *change* to part of a page without the page moving under the mouse."""
+    parent = widget.master
+    while parent is not None:
+        if isinstance(parent, ScrollArea):
+            parent.keep_position_while(change)
+            return
+        parent = parent.master
+    change()
+
+
 def _should_show_scrollbar(content_height: int, viewport_height: int) -> bool:
     """The scrollbar is needed only when the content overflows the viewport."""
     return content_height > viewport_height
@@ -387,6 +398,18 @@ class ScrollArea(ttk.Frame):
     def scroll(self, units: int) -> None:
         if self._scrollbar_visible:
             self._canvas.yview_scroll(units, "units")
+
+    def keep_position_while(self, change: Callable[[], None]) -> None:
+        """Run *change* and put the page back where it was scrolled to.
+
+        Rebuilt widgets start out one pixel tall, so while Tk lays them out
+        the page is briefly shorter and its scroll position is pulled up.
+        """
+        top = self._canvas.canvasy(0)
+        change()
+        self.update_idletasks()
+        height = max(self._content_height, self._canvas.winfo_height())
+        self._canvas.yview_moveto(top / height if height else 0.0)
 
     def _on_body_configure(self, event: tkinter.Event) -> None:
         self._content_height = event.height
