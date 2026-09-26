@@ -227,6 +227,22 @@ class TestVoiceEditInTheUseCase:
         assert notices == ["Selection too long to edit"]
         assert output.outputs == []
 
+    def test_streaming_mode_refuses_a_voice_edit_instead_of_typing_over_the_selection(self):
+        use_case, output, _, notices, captions, state_machine = self._use_case(
+            Desktop(), ScriptedClient(),
+        )
+        streaming = MagicMock()
+        streaming.has_engine.return_value = True
+        use_case._streaming = streaming
+        use_case._is_streaming_mode = lambda: True
+
+        use_case.on_edit_hotkey_activated()
+
+        assert state_machine.state is AppState.IDLE
+        assert captions == []
+        assert notices == ["Voice editing works in batch mode only. The selection was left unchanged."]
+        streaming.start.assert_not_called()
+
     def test_cancelling_an_edit_forgets_the_selection(self):
         use_case, output, _, _, captions, _ = self._use_case(Desktop(), ScriptedClient(answer="Nope."))
 

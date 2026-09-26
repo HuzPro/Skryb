@@ -45,10 +45,9 @@ _CORRECTED_NUMBER = re.compile(
     re.IGNORECASE,
 )
 _NEGATION = re.compile(r"\b(?:not|never|cannot|without)\b|n't\b", re.IGNORECASE)
-_HEDGES = (
-    "maybe", "perhaps", "probably", "might", "not sure", "i think",
-    "i was thinking", "i guess",
-)
+# Words that soften a claim. "I was thinking" is left out: as a lead-in
+# ("so I was thinking we should...") it is filler, not doubt.
+_HEDGES = ("maybe", "perhaps", "probably", "might", "not sure", "i think", "i guess")
 _PREAMBLES = re.compile(r"(?:sure|here)\b", re.IGNORECASE)
 _QUOTE_PAIRS = (('"', '"'), ("“", "”"), ("'", "'"))
 
