@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { launchPath, rememberPage } from "../app";
 import type { HistoryEntry, Model, Settings } from "../lib/types";
 import { duplicateAlias, joinAliases, splitAliases } from "./dictionary";
 import { formatDuration, groupByDay, preview } from "./history";
@@ -99,5 +100,43 @@ describe("settings helpers", () => {
     expect(live).toMatchObject({ transcription_mode: "streaming", model_size: "nemotron-b", engine: "auto" });
     expect(withMode(live, "batch", models)).toMatchObject({ transcription_mode: "batch", model_size: "parakeet" });
     expect(withMode(settings, "batch", models)).toMatchObject({ model_size: "parakeet", engine: "nano_parakeet" });
+  });
+});
+
+describe("the page a launch opens", () => {
+  const memory = () => {
+    const saved = new Map<string, string>();
+    return { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value) };
+  };
+
+  it("opens settings on Transcription the first time, and History and setup on themselves", () => {
+    const fresh = memory();
+    expect(launchPath("settings", fresh)).toBe("/transcription");
+    expect(launchPath("history", fresh)).toBe("/history");
+    expect(launchPath("setup", fresh)).toBe("/setup");
+    expect(launchPath("settings", null)).toBe("/transcription");
+  });
+
+  it("reopens settings on the settings page shown last, never on History or setup", () => {
+    const used = memory();
+    for (const path of ["/writing", "/shortcuts", "/history", "/setup", "/nowhere", "/"]) rememberPage(path, used);
+    expect(launchPath("settings", used)).toBe("/shortcuts");
+    expect(launchPath("history", used)).toBe("/history");
+  });
+
+  it("falls back to Transcription when the stored page is unknown or storage is blocked", () => {
+    const tampered = memory();
+    tampered.setItem("last-settings-page", "../../etc");
+    expect(launchPath("settings", tampered)).toBe("/transcription");
+    const blocked = {
+      getItem: () => {
+        throw new Error("SecurityError");
+      },
+      setItem: () => {
+        throw new Error("QuotaExceededError");
+      },
+    };
+    expect(() => rememberPage("/output", blocked)).not.toThrow();
+    expect(launchPath("settings", blocked)).toBe("/transcription");
   });
 });
