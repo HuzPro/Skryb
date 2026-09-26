@@ -27,7 +27,7 @@ from voicetotext.history.entries import HistoryEntry
 from voicetotext.history.service import HistoryService, RetryOutcome
 from voicetotext.hotkeys.bindings import Binding, BindingError, validate_bindings
 from voicetotext.output.dictionary_config import LiteralRule
-from voicetotext.recording.input_devices import DEFAULT_LABEL, SYSTEM_DEFAULT, Microphones
+from voicetotext.recording.input_devices import SYSTEM_DEFAULT, Microphones
 from voicetotext.recording.pill import DEFAULT_PILL_POSITION
 from voicetotext.settings.service import EngineEventListener, SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
@@ -360,6 +360,13 @@ class CoreApi:
         if not self._service.is_installed(draft.model_size):
             raise ApiError(400, f"'{draft.model_size}' is not installed. Download it first.")
         self._refuse_until_licensed(draft.model_size)
+        self._refuse_while_busy()
+        changes = self._service.apply_draft(draft)
+        reload = self._put_into_effect(changes)
+        self._publish_settings()
+        return ApiResponse(200, {"changes": asdict(changes), "engine_reload_started": reload})
+
+    def _refuse_while_busy(self) -> None:
         if not self._service.can_apply_now():
             raise ApiError(
                 409,
@@ -368,14 +375,15 @@ class CoreApi:
             )
         if self._service.is_engine_swapping():
             raise ApiError(409, "A model is still loading. Save again once it has finished.")
-        changes = self._service.apply_draft(draft)
+
+    def _put_into_effect(self, changes: ChangeSet) -> bool:
+        """Apply saved settings live, as Save & Apply did; True when a model reload started."""
         reload = changes.engine_reload_required and not self._first_run
         if reload:
             self._apply_once_loaded(changes)
         else:
             self._on_save(changes)
-        self._publish_settings()
-        return ApiResponse(200, {"changes": asdict(changes), "engine_reload_started": reload})
+        return reload
 
     def _refuse_until_licensed(self, model_name: str) -> None:
         if not self._service.license_acceptance_required(model_name):
@@ -423,10 +431,13 @@ class CoreApi:
 
     def _import_settings(self, request: ApiRequest) -> ApiResponse:
         path = _path_from(request)
+        self._refuse_while_busy()
+        before = self._service.current_draft()
         try:
             self._service.import_settings(path)
         except (OSError, ValueError) as exc:
             raise ApiError(400, f"Could not import settings: {exc}") from exc
+        self._put_into_effect(ChangeSet.between(before, self._service.current_draft()))
         self._publish_settings()
         return _NO_CONTENT
 
@@ -546,19 +557,14 @@ class CoreApi:
         names = self._microphones.names(rescan=request.query.get("rescan") == "1")
         labels = self._microphones.labels(names)
         chosen = self._service.current_draft().input_device
+        # The shell offers "Windows default" itself; the devices come from here.
         microphones: list[Json] = [
-            {"name": SYSTEM_DEFAULT, "label": DEFAULT_LABEL, "connected": True, "is_default": True},
-            *(
-                {
-                    "name": name, "label": labels.get(name, name),
-                    "connected": True, "is_default": False,
-                }
-                for name in names
-            ),
+            {"name": name, "label": labels.get(name, name), "connected": True, "is_default": False}
+            for name in names
         ]
         # A chosen microphone that is unplugged stays listed, so saving
         # without touching the picker does not quietly forget it.
-        if chosen and chosen not in names:
+        if chosen != SYSTEM_DEFAULT and chosen not in names:
             microphones.append(
                 {"name": chosen, "label": chosen, "connected": False, "is_default": False},
             )
@@ -718,6 +724,12 @@ class CoreApi:
             self._require_history().play(entry)
         except FileNotFoundError as exc:
             raise ApiError(404, str(exc)) from exc
+        except OSError as exc:
+            raise ApiError(
+                500,
+                "The recording could not be played. Check that speakers or headphones are connected.",
+                str(exc),
+            ) from exc
         return _NO_CONTENT
 
     def _stop_playback(self, _request: ApiRequest) -> ApiResponse:

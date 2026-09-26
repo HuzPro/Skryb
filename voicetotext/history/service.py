@@ -26,7 +26,10 @@ def play_wav(path: Path) -> None:
     audio = load_wav(path)
     import sounddevice as sd
 
-    sd.play(audio.data, audio.sample_rate)
+    try:
+        sd.play(audio.data, audio.sample_rate)
+    except sd.PortAudioError as exc:  # no output device, or one that will not open
+        raise OSError(str(exc)) from exc
 
 
 def stop_playback() -> None:
