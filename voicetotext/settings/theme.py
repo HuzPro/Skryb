@@ -570,9 +570,10 @@ def _configure_buttons(style: ttk.Style, theme: Theme) -> None:
         )
     style.configure(SMALL_BUTTON_STYLE, padding=(10, 3))
     for prefix, background in _surfaces(theme):
-        for suffix, foreground, hover, padding in (
-            ("Link", theme.accent, theme.accent_hover, (0, 4)),
-            ("Icon", theme.muted, theme.danger, (6, 2)),
+        # A muted icon beside a disabled one reads the same in the dark theme.
+        for suffix, foreground, disabled, hover, padding in (
+            ("Link", theme.accent, theme.disabled, theme.accent_hover, (0, 4)),
+            ("Icon", theme.foreground, theme.muted, theme.danger, (6, 2)),
         ):
             name = f"{prefix}{suffix}.TButton"
             style.configure(
@@ -586,7 +587,7 @@ def _configure_buttons(style: ttk.Style, theme: Theme) -> None:
             style.map(
                 name,
                 background=[("active", background), ("pressed", background)],
-                foreground=[("disabled", theme.disabled), ("active", hover)],
+                foreground=[("disabled", disabled), ("active", hover)],
             )
 
 

@@ -151,6 +151,14 @@ class TestApplyTheme:
         assert _pixel(container, "vtt_radio_on", 3) != theme.accent
         assert _pixel(container, "vtt_radio_off", 8) == theme.surface
 
+    @pytest.mark.parametrize("theme", [LIGHT_THEME, DARK_THEME], ids=["light", "dark"])
+    def test_a_disabled_arrow_button_is_muted_next_to_an_enabled_one(self, container, theme):
+        apply_theme(container, theme)
+        style = ttk.Style(container)
+
+        assert style.lookup("CardIcon.TButton", "foreground") == theme.foreground
+        assert style.lookup("CardIcon.TButton", "foreground", ["disabled"]) == theme.muted
+
 
 class TestScrollArea:
     def test_shows_the_scrollbar_only_when_the_page_overflows(self):

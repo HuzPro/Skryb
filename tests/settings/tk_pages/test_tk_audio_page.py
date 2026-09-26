@@ -128,6 +128,20 @@ class TestLevelMeter:
         page.on_shown()
 
         assert "could not be opened" in page._meter_status.cget("text")
+        assert page._no_signal.winfo_manager() == "grid"
+        assert page._no_signal.cget("text") == "No signal"
+        assert not page._meter.winfo_manager()
+        page.on_hidden()
+
+    def test_the_meter_comes_back_when_another_microphone_opens(self, page, microphones):
+        microphones.opens = False
+        page.on_shown()
+
+        microphones.opens = True
+        _pick(page, "Mikrofon (Gerät für Café ✓)")
+
+        assert page._meter.winfo_manager() == "grid"
+        assert not page._no_signal.winfo_manager()
         page.on_hidden()
 
     def test_closing_the_page_stops_the_meter(self, tk_root, microphones):

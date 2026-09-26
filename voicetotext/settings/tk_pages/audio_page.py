@@ -45,6 +45,7 @@ _DUCK_VALUES = {label: value for value, label in _DUCK_CHOICES}
 _NOT_CONNECTED = " (not connected)"
 _SPEAK_TO_TEST = "Speak to test the microphone."
 _WILL_NOT_OPEN = "This microphone could not be opened."
+_NO_SIGNAL = "No signal"
 _DEFAULT_DESCRIPTION = "Uses the microphone Windows is set to."
 _NO_PREFERRED = "None yet. The microphone chosen above is used."
 
@@ -78,6 +79,7 @@ class TkAudioPage(ttk.Frame):
         self._poll_id: str | None = None
         self._meter: ttk.Progressbar
         self._meter_status: ttk.Label
+        self._no_signal: ttk.Label
         self._duck.trace_add(
             "write",
             lambda *_args: self._duck_label.set(_DUCK_LABELS.get(self._duck.get(), "")),
@@ -356,7 +358,10 @@ class TkAudioPage(ttk.Frame):
             self._meter = ttk.Progressbar(
                 mic_card, maximum=1.0, length=_METER_LENGTH, style=THIN_PROGRESS_STYLE,
             )
-            self._meter.grid(row=0, column=1, rowspan=2, sticky="e", padx=(16, 0))
+            self._no_signal = ttk.Label(mic_card, text=_NO_SIGNAL, style=CARD_MUTED_STYLE)
+            for meter in (self._no_signal, self._meter):
+                meter.grid(row=0, column=1, rowspan=2, sticky="e", padx=(16, 0))
+            self._no_signal.grid_remove()
         elif description:
             ttk.Label(mic_card, text=description, style=CARD_MUTED_STYLE).grid(
                 row=1, column=0, sticky="w", pady=(2, 0),
@@ -378,6 +383,11 @@ class TkAudioPage(ttk.Frame):
             text=_SPEAK_TO_TEST if opened else _WILL_NOT_OPEN,
             style="SelectedAccent.TLabel" if opened else "SelectedDanger.TLabel",
         )
+        shown, hidden = (
+            (self._meter, self._no_signal) if opened else (self._no_signal, self._meter)
+        )
+        hidden.grid_remove()
+        shown.grid()
         if self._poll_id is None:
             self._poll()
 
