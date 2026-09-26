@@ -1064,9 +1064,10 @@ def build_app(
         retranscribe=record_and_transcribe_use_case.retranscribe,
         schedule=gui_dispatcher.dispatch,
     )
+    notice = Notice(root)
     RecoveryNotices(
         event_bus,
-        Notice(root),
+        notice,
         gui_dispatcher.dispatch,
         retry=record_and_transcribe_use_case.retry_last_recording,
         open_history=history_window.show,
