@@ -49,6 +49,8 @@ _ID_STATE = 1
 _ID_SETTINGS = 2
 _ID_QUIT = 3
 _ID_HISTORY = 4
+_ID_PASTE_LAST = 5
+_ID_COPY_LAST = 6
 # Microphone choices take one id each from here up.
 _ID_FIRST_MICROPHONE = 100
 _SYSTEM_DEFAULT_LABEL = "Windows default"
@@ -261,11 +263,15 @@ class Win32TrayBackend:
         on_history_clicked: Callable[[], None] | None = None,
         list_microphones: MicrophoneLister | None = None,
         on_microphone_chosen: Callable[[str], None] | None = None,
+        on_paste_last_clicked: Callable[[], None] | None = None,
+        on_copy_last_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
         self._on_history_clicked = on_history_clicked
+        self._on_paste_last_clicked = on_paste_last_clicked
+        self._on_copy_last_clicked = on_copy_last_clicked
         self._list_microphones = list_microphones
         self._on_microphone_chosen = on_microphone_chosen
         self._offered_microphones: list[str] = []
@@ -364,6 +370,14 @@ class Win32TrayBackend:
             menu, _MF_STRING | _MF_GRAYED, _ID_STATE, self._get_state_label(),
         )
         _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
+        if self._on_paste_last_clicked is not None:
+            _user32.AppendMenuW(
+                menu, _MF_STRING, _ID_PASTE_LAST, "Paste last dictation",
+            )
+        if self._on_copy_last_clicked is not None:
+            _user32.AppendMenuW(
+                menu, _MF_STRING, _ID_COPY_LAST, "Copy last dictation",
+            )
         if self._on_history_clicked is not None:
             _user32.AppendMenuW(menu, _MF_STRING, _ID_HISTORY, "History...")
         self._append_microphone_menu(menu)
@@ -412,6 +426,10 @@ class Win32TrayBackend:
             self._on_settings_clicked()
         elif command == _ID_HISTORY and self._on_history_clicked is not None:
             self._on_history_clicked()
+        elif command == _ID_PASTE_LAST and self._on_paste_last_clicked is not None:
+            self._on_paste_last_clicked()
+        elif command == _ID_COPY_LAST and self._on_copy_last_clicked is not None:
+            self._on_copy_last_clicked()
         elif command == _ID_QUIT:
             self._on_quit_clicked()
 
@@ -440,6 +458,8 @@ class Win32TrayAdapter:
         on_history_clicked: Callable[[], None] | None = None,
         list_microphones: MicrophoneLister | None = None,
         on_microphone_chosen: Callable[[str], None] | None = None,
+        on_paste_last_clicked: Callable[[], None] | None = None,
+        on_copy_last_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
@@ -452,6 +472,7 @@ class Win32TrayAdapter:
         self._backend: TrayBackend = backend or Win32TrayBackend(
             get_state_label, on_settings_clicked, on_quit_clicked,
             on_history_clicked, list_microphones, on_microphone_chosen,
+            on_paste_last_clicked, on_copy_last_clicked,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -560,6 +581,8 @@ def build_win32_tray_adapter(
     on_history_clicked: Callable[[], None] | None = None,
     list_microphones: MicrophoneLister | None = None,
     on_microphone_chosen: Callable[[str], None] | None = None,
+    on_paste_last_clicked: Callable[[], None] | None = None,
+    on_copy_last_clicked: Callable[[], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`voicetotext.tray.app.TrayIconFactory`.
 
@@ -578,4 +601,6 @@ def build_win32_tray_adapter(
         on_history_clicked=on_history_clicked,
         list_microphones=list_microphones,
         on_microphone_chosen=on_microphone_chosen,
+        on_paste_last_clicked=on_paste_last_clicked,
+        on_copy_last_clicked=on_copy_last_clicked,
     )

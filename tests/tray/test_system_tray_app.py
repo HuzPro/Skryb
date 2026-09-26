@@ -671,3 +671,21 @@ class TestMicrophoneMissingNotification:
         assert "default" in message.lower()
         for update_call in icon.update_state.call_args_list:
             assert update_call.args[0] != AppState.ERROR
+
+
+class TestNoLastDictation:
+    def test_asking_for_the_last_dictation_before_any_shows_a_balloon(self):
+        from voicetotext.core.events import NoLastDictationEvent
+
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(NoLastDictationEvent())
+
+        icon.notify.assert_called_once_with("VoiceToText", "No dictation yet.")
