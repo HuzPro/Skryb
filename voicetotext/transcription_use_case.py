@@ -228,6 +228,10 @@ class RecordAndTranscribeUseCase:
         if selection is None:
             self._begin_capture()
             return
+        if self._streaming_ready():
+            # Streaming parks the batch engine, which the instruction needs.
+            self._notify("Voice editing works in batch mode only. The selection was left unchanged.")
+            return
         self._start_recording(caption=_EDIT_CAPTION)
         if self._state_machine.state == AppState.RECORDING:
             self._editing = selection
