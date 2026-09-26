@@ -91,16 +91,22 @@ def local_time(entry: HistoryEntry) -> str:
     return entry.at.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
-def empty_state_message(entries: list[HistoryEntry], diagnostics_dir: Path) -> str:
-    """What to tell the user when history has nothing useful to show, else ``""``."""
+def empty_state_message(
+    entries: list[HistoryEntry], diagnostics_dir: Path, *, saving: bool,
+) -> str:
+    """What to tell the user when history has nothing useful to show, else ``""``.
+
+    The hint to turn history saving on is left out while *saving* is on.
+    """
+    hint = "" if saving else f" {_CAPTURE_HINT}"
     if not entries:
         where = (
             "No dictations yet." if diagnostics_dir.is_dir()
             else f"The logs folder {diagnostics_dir} does not exist yet."
         )
-        return f"{where} {_CAPTURE_HINT}"
+        return f"{where}{hint}"
     if entries[0].status == NOT_SAVED:
-        return f"Recent dictations were not saved. {_CAPTURE_HINT}"
+        return f"Recent dictations were not saved.{hint}"
     return ""
 
 

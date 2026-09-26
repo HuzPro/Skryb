@@ -77,6 +77,7 @@ class HistoryWindow:
         retranscribe: Retranscribe,
         schedule: ScheduleOnGuiThread,
         *,
+        saves_history: Callable[[], bool],
         run_in_background: Callable[[Callable[[], None]], None] = (
             _start_daemon_thread
         ),
@@ -85,6 +86,7 @@ class HistoryWindow:
         self._diagnostics_dir = diagnostics_dir
         self._retranscribe = retranscribe
         self._schedule = schedule
+        self._saves_history = saves_history
         self._run_in_background = run_in_background
         self._window: tkinter.Toplevel | None = None
         self._entries: list[HistoryEntry] = []
@@ -241,7 +243,9 @@ class HistoryWindow:
         if self._window is None:
             return
         self._entries = entries
-        self._hint.configure(text=empty_state_message(entries, self._diagnostics_dir))
+        self._hint.configure(text=empty_state_message(
+            entries, self._diagnostics_dir, saving=self._saves_history(),
+        ))
         self._show_filtered()
 
     def _show_filtered(self) -> None:

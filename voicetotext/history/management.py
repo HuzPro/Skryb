@@ -55,23 +55,24 @@ def delete_all_history(diagnostics_dir: Path, now: datetime) -> int:
 
 
 def delete_all_in_background(
-    diagnostics_dir: Path, on_done: Callable[[], None],
+    diagnostics_dir: Path, on_done: Callable[[bool], None],
 ) -> None:
-    """Delete all history on a daemon thread, then call *on_done* from it."""
+    """Delete all history on a daemon thread, then tell *on_done* from it whether it worked."""
     threading.Thread(
         target=_delete_all_then, args=(diagnostics_dir, on_done),
         name="history-delete-all", daemon=True,
     ).start()
 
 
-def _delete_all_then(diagnostics_dir: Path, on_done: Callable[[], None]) -> None:
+def _delete_all_then(diagnostics_dir: Path, on_done: Callable[[bool], None]) -> None:
     try:
         deleted = delete_all_history(diagnostics_dir, utc_now())
     except Exception:  # a daemon thread would drop it silently
         _logger.exception("Deleting all history failed.")
+        on_done(False)
     else:
         _logger.info("Deleted %d history entries.", deleted)
-    on_done()
+        on_done(True)
 
 
 def export_audio(diagnostics_dir: Path, entry: HistoryEntry, destination: Path) -> None:
