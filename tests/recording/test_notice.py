@@ -76,13 +76,47 @@ def test_a_notice_is_built_hidden_and_shown_only_through_the_no_activate_path(
     assert y + height == 1040 - 26 - 72 - 8
 
 
-def test_a_notice_stays_see_through_until_its_content_has_painted(
+def _painted_widgets(widget) -> list:
+    return [
+        child for direct in widget.winfo_children()
+        for child in (direct, *_painted_widgets(direct))
+    ]
+
+
+def _paint(widget) -> None:
+    # The fake never shows the window, so Tk has not made the native one yet.
+    widget.winfo_id()
+    widget.event_generate("<Expose>")
+
+
+def test_a_notice_stays_see_through_until_every_widget_in_it_has_painted(
+    tk_root, notice, native, monkeypatch,
+) -> None:
+    monkeypatch.setattr(notice_module, "_REVEAL_ANYWAY_MS", 60_000)
+    notice.show("Transcription failed.", [("Retry", lambda: None), ("Open history", lambda: None)])
+    widgets = _painted_widgets(notice._window)
+    assert len(widgets) == 5
+
+    for widget in widgets[:-1]:
+        _paint(widget)
+        _paint(widget)
+    _pump(tk_root, lambda: native.revealed, seconds=0.2)
+    assert native.revealed == []
+
+    _paint(widgets[-1])
+    _pump(tk_root, lambda: native.revealed)
+
+    assert native.revealed == [native.shown[-1][0]]
+
+
+def test_a_notice_whose_widgets_are_never_asked_to_paint_is_still_revealed(
     tk_root, notice, native,
 ) -> None:
     notice.show("Recording cancelled.", [("Transcribe anyway", lambda: None)])
     assert native.revealed == []
 
     _pump(tk_root, lambda: native.revealed)
+    _pump(tk_root, lambda: False, seconds=0.3)
 
     assert native.revealed == [native.shown[-1][0]]
 
@@ -97,7 +131,7 @@ def test_a_notice_put_away_or_replaced_before_it_painted_is_revealed_only_as_the
 
     notice.show("Recording cancelled.", [("Transcribe anyway", lambda: None)])
     notice.show("Nothing to paste into. The text is on your clipboard.", [])
-    _pump(tk_root, lambda: False, seconds=0.1)
+    _pump(tk_root, lambda: False, seconds=0.5)
 
     assert len(native.revealed) == 1
 
