@@ -16,6 +16,7 @@ class FakeNoticeWindow:
     def __init__(self) -> None:
         self.prepared: list[int] = []
         self.shown: list[tuple[int, int, int, int, int]] = []
+        self.revealed: list[int] = []
         self.hidden: list[int] = []
 
     def prepare(self, hwnd: int) -> None:
@@ -27,8 +28,18 @@ class FakeNoticeWindow:
     def show(self, hwnd: int, x: int, y: int, width: int, height: int) -> None:
         self.shown.append((hwnd, x, y, width, height))
 
+    def reveal(self, hwnd: int) -> None:
+        self.revealed.append(hwnd)
+
     def hide(self, hwnd: int) -> None:
         self.hidden.append(hwnd)
+
+
+def _pump(tk_root, until, seconds: float = 3.0) -> None:
+    deadline = time.monotonic() + seconds
+    while not until() and time.monotonic() < deadline:
+        tk_root.update()
+        time.sleep(0.005)
 
 
 @pytest.fixture()
@@ -63,6 +74,32 @@ def test_a_notice_is_built_hidden_and_shown_only_through_the_no_activate_path(
     assert native.prepared == [hwnd]
     assert x == (1920 - width) // 2
     assert y + height == 1040 - 26 - 72 - 8
+
+
+def test_a_notice_stays_see_through_until_its_content_has_painted(
+    tk_root, notice, native,
+) -> None:
+    notice.show("Recording cancelled.", [("Transcribe anyway", lambda: None)])
+    assert native.revealed == []
+
+    _pump(tk_root, lambda: native.revealed)
+
+    assert native.revealed == [native.shown[-1][0]]
+
+
+def test_a_notice_put_away_or_replaced_before_it_painted_is_revealed_only_as_the_latest(
+    tk_root, notice, native,
+) -> None:
+    notice.show("Transcription failed.", [("Retry", lambda: None)])
+    notice.hide()
+    _pump(tk_root, lambda: False, seconds=0.1)
+    assert native.revealed == []
+
+    notice.show("Recording cancelled.", [("Transcribe anyway", lambda: None)])
+    notice.show("Nothing to paste into. The text is on your clipboard.", [])
+    _pump(tk_root, lambda: False, seconds=0.1)
+
+    assert len(native.revealed) == 1
 
 
 def test_buttons_run_their_action_and_put_the_notice_away(notice, native) -> None:
