@@ -122,15 +122,13 @@ class ShellLauncher:
 def wait_for_setup(
     root: tkinter.Misc, finished: Callable[[], bool], poll_ms: int = _SETUP_POLL_MS,
 ) -> None:
-    """Keep Tk's events flowing, as ``wait_window`` did, until *finished* says so."""
-    done = tkinter.BooleanVar(master=root, value=False)
+    """Keep Tk's events flowing, as ``wait_window`` did, until *finished* says so.
 
-    def check() -> None:
-        if finished():
-            done.set(True)
-        else:
-            root.after(poll_ms, check)
-
-    check()
-    if not done.get():
-        root.wait_variable(done)
+    No closure holds the variable, so it is freed here on the GUI thread
+    rather than by the cycle collector on whichever thread it runs on,
+    which Tk refuses.
+    """
+    tick = tkinter.BooleanVar(master=root)
+    while not finished():
+        root.after(poll_ms, tick.set, True)
+        root.wait_variable(tick)

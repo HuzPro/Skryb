@@ -26,6 +26,11 @@ if TYPE_CHECKING:
     from voicetotext.ui.api_server import ApiServer
     from voicetotext.ui.launcher import ShellLauncher
 
+SETUP_NOT_FINISHED = (
+    "Setup was closed before a speech model was installed, so VoiceToText will close. "
+    "Start VoiceToText again to finish setting it up."
+)
+
 
 def _apply_torch_env_overrides() -> None:
     """Translate VoiceToText env vars into PyTorch env vars.
@@ -403,6 +408,8 @@ def _run_first_time_setup(
     ).serve_on(api_server)
     if launcher.open("setup"):
         wait_for_setup(root, lambda: setup_done.is_set() or not launcher.is_running())
+        if not _configured_model_installed(config, model_manager):
+            _show_setup_problem(SETUP_NOT_FINISHED)
     config.save()
 
 

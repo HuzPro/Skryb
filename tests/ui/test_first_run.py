@@ -13,7 +13,7 @@ from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
-from voicetotext.__main__ import _run_first_time_setup
+from voicetotext.__main__ import SETUP_NOT_FINISHED, _run_first_time_setup
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.ui.api_server import ApiServer
@@ -100,13 +100,18 @@ def test_setup_is_served_to_the_shell_and_waits_until_the_shell_says_it_is_done(
 ) -> None:
     shell = _Shell()
     commands: list[list[str]] = []
+    seen: list[dict[str, object]] = []
+
+    def spawn(args: list[str]) -> _Shell:
+        commands.append(args)
+        _after(0.3, lambda: (seen.append(_app(server)), _post(server, "/api/setup/done")))
+        return shell
+
     launcher = ShellLauncher(
         server, lambda message: pytest.fail(message),
-        spawn=lambda args: commands.append(args) or shell, candidates=lambda: [_exe(tmp_path)],
+        spawn=spawn, candidates=lambda: [_exe(tmp_path)],
     )
     config = FakeConfig({"transcription.model_size": _PARAKEET})
-    seen: list[dict[str, object]] = []
-    _after(0.3, lambda: (seen.append(_app(server)), _post(server, "/api/setup/done")))
 
     took = _setup(tk_root, tmp_path, server, launcher, config)
 
@@ -117,19 +122,23 @@ def test_setup_is_served_to_the_shell_and_waits_until_the_shell_says_it_is_done(
     assert shell.exit_code is None
 
 
-def test_closing_the_shell_during_setup_ends_the_wait(
-    tk_root, tmp_path: Path, server: ApiServer,
+def test_closing_the_shell_before_a_model_is_installed_ends_the_wait_and_says_the_app_will_close(
+    tk_root, tmp_path: Path, server: ApiServer, monkeypatch,
 ) -> None:
+    shown: list[str] = []
+    monkeypatch.setattr("voicetotext.__main__._show_setup_problem", shown.append)
     shell = _Shell()
     launcher = ShellLauncher(
         server, lambda message: pytest.fail(message),
         spawn=lambda _args: shell, candidates=lambda: [_exe(tmp_path)],
     )
     _after(0.3, lambda: setattr(shell, "exit_code", 0))
+    not_downloaded = FakeConfig({"transcription.model_size": "crisperwhisper-2.0-turbo"})
 
-    took = _setup(tk_root, tmp_path, server, launcher, FakeConfig())
+    took = _setup(tk_root, tmp_path, server, launcher, not_downloaded)
 
     assert 0.3 <= took < _RETURNS_WITHIN_SECONDS
+    assert shown == [SETUP_NOT_FINISHED]
 
 
 @pytest.mark.parametrize(
