@@ -86,8 +86,10 @@ class TkSettingsWindow(tkinter.Toplevel):
         color_scheme: ColorScheme | None = None,
         confirm_license: LicenseConsentPrompt = ask_license_consent,
         microphones: Microphones | None = None,
+        delete_all_history: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
+        self._delete_all_history = delete_all_history
         self._microphones = microphones or Microphones()
         self._shown_page: ttk.Frame | None = None
         # Hide immediately so the half-built, not-yet-themed window never
@@ -180,6 +182,11 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._audio_page = TkAudioPage(content, self._microphones)
         self._output_page = TkOutputPage(
             content, on_reset_pill_position=self._service.reset_pill_position,
+            content,
+            delete_all_history=(
+                None if self._delete_all_history is None
+                else self._on_delete_all_history
+            ),
         )
         self._dictionary_page = TkDictionaryPage(content)
         self._dictionary_page.set_dictionary(self._service.dictionary_rules())
@@ -240,6 +247,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._hotkeys_page.set_double_tap_locks_hold(draft.double_tap_locks_hold)
         self._output_page.set_mode(draft.output_mode)
         self._output_page.set_capture_content(draft.capture_content)
+        self._output_page.set_history_retention_days(draft.history_retention_days)
+        self._output_page.set_paste_method_overrides(draft.paste_method_overrides)
         self._audio_page.set_device(draft.input_device)
         self._audio_page.set_boost_quiet_speech(draft.boost_quiet_speech)
         self._audio_page.set_recording_preferences(draft.recording)
@@ -259,6 +268,12 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._show_status(f"Could not set logs folder: {exc}", error=True)
             return
         self._show_status("Logs folder applies from the next launch.")
+
+    def _on_delete_all_history(self) -> None:
+        if self._delete_all_history is None:
+            return
+        self._delete_all_history()
+        self._show_status("Deleting all history in the background.")
 
     def _on_export_settings(self) -> None:
         selected = filedialog.asksaveasfilename(
@@ -343,6 +358,8 @@ class TkSettingsWindow(tkinter.Toplevel):
             input_device=self._audio_page.current_device(),
             boost_quiet_speech=self._audio_page.boosts_quiet_speech(),
             recording=self._audio_page.recording_preferences(),
+            history_retention_days=self._output_page.history_retention_days(),
+            paste_method_overrides=self._output_page.paste_method_overrides(),
             transcription_mode=self._transcription_page.current_mode(),
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()

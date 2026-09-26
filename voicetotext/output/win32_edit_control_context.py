@@ -125,19 +125,35 @@ def _with_rich_edit_paragraph_breaks(text: str) -> str:
     return text.replace("\r\n", "\r")
 
 
+def foreground_has_caret() -> bool:
+    """Whether the foreground app shows a system caret, the classic text-field sign.
+
+    Raises ``OSError`` when the foreground thread cannot be asked.
+    """
+    return bool(_foreground_gui_thread_info().hwndCaret)
+
+
 def _focused_hwnd() -> int:
     """The control with the keyboard focus, not just the foreground window.
 
     ``GetFocus`` only answers for the calling thread, so the focused child has
     to come from the foreground thread's own GUI state.
     """
+    try:
+        info = _foreground_gui_thread_info()
+    except OSError:
+        return 0
+    return int(info.hwndFocus or 0)
+
+
+def _foreground_gui_thread_info() -> _GuiThreadInfo:
     user32 = _user32()
     thread = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
     info = _GuiThreadInfo()
     info.cbSize = ctypes.sizeof(_GuiThreadInfo)
     if not user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
-        return 0
-    return int(info.hwndFocus or 0)
+        raise OSError("GetGUIThreadInfo failed for the foreground thread")
+    return info
 
 
 def _class_name(hwnd: int) -> str:

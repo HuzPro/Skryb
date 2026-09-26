@@ -3,8 +3,9 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
-from voicetotext.core.config import ConfigurationStore
+from voicetotext.core.config import ConfigurationStore, ConfigValue
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -28,11 +29,13 @@ from voicetotext.hotkeys.bindings import (
     migrate_legacy_hotkey,
     parse_bindings,
 )
+from voicetotext.history.retention import history_retention_days
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
     dictionary_to_json,
 )
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.output.paste_method import paste_method_overrides
 from voicetotext.output.text_filter_decorator import load_dictionary
 from voicetotext.recording.pill import DEFAULT_PILL_POSITION
 from voicetotext.recording.preferences import (
@@ -283,6 +286,14 @@ class SettingsService:
                 self._config.get("hotkey.double_tap_locks_hold", True) is not False
             ),
             recording=RecordingPreferences.from_config(self._config),
+            history_retention_days=history_retention_days(self._config),
+            paste_method_overrides=tuple(
+                (process, method.value) for process, method in sorted(
+                    paste_method_overrides(
+                        self._config.get("output.paste_method_overrides", {}),
+                    ).items(),
+                )
+            ),
         )
 
     def _crisperwhisper_mode(self) -> str:
@@ -313,6 +324,13 @@ class SettingsService:
         self._config.set("transcription.mode", draft.transcription_mode.value)
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
+        )
+        self._config.set("history.retention_days", draft.history_retention_days)
+        # A process name holds a dot, so the map is stored whole rather
+        # than key by dotted key.
+        self._config.set(
+            "output.paste_method_overrides",
+            cast(ConfigValue, dict(draft.paste_method_overrides)),
         )
         self._config.save()
         self._invalidate_cache_on_engine_change(original, draft)

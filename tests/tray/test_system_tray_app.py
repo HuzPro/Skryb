@@ -744,3 +744,22 @@ class TestMicrophoneNotices:
 
         app._event_bus.publish(MicrophoneConnectedEvent(name="USB Mic"))
         app._event_bus.publish(MicrophoneSilentEvent(device_name="USB Mic"))
+
+
+
+class TestNoLastDictation:
+    def test_asking_for_the_last_dictation_before_any_shows_a_balloon(self):
+        from voicetotext.core.events import NoLastDictationEvent
+
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(NoLastDictationEvent())
+
+        icon.notify.assert_called_once_with("VoiceToText", "No dictation yet.")

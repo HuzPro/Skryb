@@ -10,6 +10,7 @@ from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     DomainEvent,
     ErrorOccurredEvent,
+    NoLastDictationEvent,
     RecordingCancelledEvent,
     RecordingCapWarningEvent,
     RecordingCappedEvent,
@@ -28,6 +29,7 @@ from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.last_dictation import LastDictation
 from voicetotext.recording.audio_segment import AudioSegment, load_wav
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.transcription.engine import TranscriptionEngine
@@ -69,6 +71,7 @@ class RecordAndTranscribeUseCase:
         is_streaming_mode: Callable[[], bool] | None = None,
         prepare_audio: Callable[[AudioSegment], AudioSegment] | None = None,
         warn_before_cap_seconds: Callable[[], float] = _no_warning,
+        last_dictation: LastDictation | None = None,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -111,6 +114,11 @@ class RecordAndTranscribeUseCase:
         self._cap_warned = False
         self._cap_remaining = self._cap_seconds
         self._cap_started_at = 0.0
+        self._last_dictation = last_dictation or LastDictation()
+        # The last recording that was cancelled or failed to transcribe,
+        # kept in memory so the notice beside it can still transcribe it.
+        self._unfinished_audio: AudioSegment | None = None
+        self._unfinished_lock = threading.Lock()
         event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
     def on_hotkey_activated(self) -> None:
@@ -127,6 +135,70 @@ class RecordAndTranscribeUseCase:
 
     def is_recording(self) -> bool:
         return self._state_machine.state == AppState.RECORDING
+
+    def paste_last(self) -> None:
+        """Deliver the last dictation's final text again, as output is set up now."""
+        self._dispatcher.dispatch(
+            lambda: self._repeat_last_dictation(self._last_dictation.paste),
+        )
+
+    def copy_last(self) -> None:
+        """Put the last dictation's final text on the clipboard, nothing more."""
+        self._dispatcher.dispatch(
+            lambda: self._repeat_last_dictation(self._last_dictation.copy),
+        )
+
+    def retry_last_recording(self) -> None:
+        """Transcribe the last cancelled or failed recording and deliver it."""
+        self._dispatcher.dispatch(self._transcribe_unfinished)
+
+    def _repeat_last_dictation(self, send: Callable[[], bool]) -> None:
+        if not send():
+            self._event_bus.publish(NoLastDictationEvent())
+
+    def _keep_unfinished(self, audio: AudioSegment | None) -> bool:
+        if audio is None or audio.duration_seconds < _MIN_DURATION_SECONDS:
+            return False
+        with self._unfinished_lock:
+            self._unfinished_audio = audio
+        return True
+
+    def _transcribe_unfinished(self) -> None:
+        with self._unfinished_lock:
+            audio, self._unfinished_audio = self._unfinished_audio, None
+        if audio is None:
+            return
+        requested_at = datetime.now(UTC)
+        try:
+            result = self._transcribe(audio)
+        except Exception as exc:  # noqa: BLE001 - offered again beside the failure
+            self._report_unfinished_failure(audio, exc, requested_at)
+            return
+        self._deliver_transcribed_text(result)
+        self._diagnostics.transcription_finished(audio, result, requested_at)
+        self._event_bus.publish(
+            TranscriptionCompletedEvent(
+                text=result.text,
+                transcription_seconds=result.transcription_seconds,
+            )
+        )
+
+    def _report_unfinished_failure(
+        self, audio: AudioSegment, error: Exception, requested_at: datetime,
+    ) -> None:
+        # No state change: a new dictation may already be under way.
+        _logger.error("Transcribing the kept recording failed: %s", error)
+        self._diagnostics.transcription_finished(audio, error, requested_at)
+        self._event_bus.publish(
+            TranscriptionFailedEvent(
+                error=str(error), recoverable=self._keep_unfinished(audio),
+            )
+        )
+
+    def _transcribe(self, audio: AudioSegment) -> TranscriptionResult:
+        heard = self._prepare_audio(audio)
+        with self._engine_lock:
+            return self._engine.transcribe(heard)
 
     def retranscribe(
         self, wav_path: Path, on_done: Callable[[str | Exception], None],
@@ -182,7 +254,9 @@ class RecordAndTranscribeUseCase:
                 )
                 return
             self._state_machine.transition_to(AppState.IDLE)
-            self._event_bus.publish(RecordingCancelledEvent())
+            self._event_bus.publish(
+                RecordingCancelledEvent(recoverable=self._keep_unfinished(audio)),
+            )
             _logger.info("Recording cancelled.")
             self._dispatcher.dispatch(
                 lambda: self._diagnostics.recording_cancelled(audio),
@@ -497,10 +571,13 @@ class RecordAndTranscribeUseCase:
             self._diagnostics.transcription_finished(
                 audio, exc, requested_at,
             )
+            recoverable = self._keep_unfinished(audio)
             self._report_error(
                 "Transcription failed",
                 exc,
-                lambda message: TranscriptionFailedEvent(error=message),
+                lambda message: TranscriptionFailedEvent(
+                    error=message, recoverable=recoverable,
+                ),
             )
 
     def _transcribe_and_publish(

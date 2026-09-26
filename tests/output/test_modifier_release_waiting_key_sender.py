@@ -9,6 +9,7 @@ Ctrl+Shift+Alt+V and silently drop the paste.
 import logging
 
 from voicetotext.output.key_sender import KeySender
+from voicetotext.output.paste_method import PasteMethod
 from voicetotext.output.modifier_release_waiting_key_sender import (
     ModifierReleaseWaitingKeySender,
 )
@@ -25,7 +26,7 @@ class _FakeKeySender(KeySender):
     def __init__(self, journal: list[str] | None = None) -> None:
         self.journal = journal if journal is not None else []
 
-    def send_ctrl_v(self) -> None:
+    def send_paste(self, method: PasteMethod, text: str) -> None:
         self.journal.append("paste")
 
 
@@ -65,7 +66,7 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
     def test_should_paste_immediately_when_no_modifiers_are_held(self):
         sender, inner, sleeper, journal = _build_sender(answers=[False])
 
-        sender.send_ctrl_v()
+        sender.send_paste(PasteMethod.CTRL_V, "hello")
 
         assert journal == ["poll:up", "paste"]
         assert sleeper.requested_durations == []
@@ -75,7 +76,7 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
             answers=[True, True, False],
         )
 
-        sender.send_ctrl_v()
+        sender.send_paste(PasteMethod.CTRL_V, "hello")
 
         assert journal == ["poll:down", "poll:down", "poll:up", "paste"]
         assert len(sleeper.requested_durations) == 2
@@ -83,7 +84,7 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
     def test_should_paste_anyway_when_modifiers_never_release(self):
         sender, inner, _, journal = _build_sender(answers=[True])
 
-        sender.send_ctrl_v()
+        sender.send_paste(PasteMethod.CTRL_V, "hello")
 
         assert journal.count("paste") == 1
         assert journal[-1] == "paste"
@@ -91,7 +92,7 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
     def test_should_bound_the_wait_when_modifiers_never_release(self):
         sender, _, sleeper, _ = _build_sender(answers=[True])
 
-        sender.send_ctrl_v()
+        sender.send_paste(PasteMethod.CTRL_V, "hello")
 
         # Summing 100 x 0.01 drifts a few ULP above 1.0 on Python < 3.12
         # (3.12's sum() compensates); allow that float noise, not more.
@@ -103,7 +104,7 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
         logger.addHandler(caplog.handler)
         caplog.handler.setLevel(logging.DEBUG)
         try:
-            sender.send_ctrl_v()
+            sender.send_paste(PasteMethod.CTRL_V, "hello")
         finally:
             logger.removeHandler(caplog.handler)
 
@@ -115,7 +116,7 @@ class TestModifierReleaseWaitingKeySenderSendCtrlV:
         logger.addHandler(caplog.handler)
         caplog.handler.setLevel(logging.WARNING)
         try:
-            sender.send_ctrl_v()
+            sender.send_paste(PasteMethod.CTRL_V, "hello")
         finally:
             logger.removeHandler(caplog.handler)
 

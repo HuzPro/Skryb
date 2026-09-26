@@ -823,8 +823,8 @@ class TestBuildOutput:
         preserver_cls.return_value.restore.side_effect = (
             lambda: clipboard.update(text="previous clipboard")
         )
-        sender_cls.return_value.send_ctrl_v.side_effect = (
-            lambda: tk_root.after(0, lambda: pasted.append(clipboard["text"]))
+        sender_cls.return_value.send_paste.side_effect = (
+            lambda _method, _text: tk_root.after(0, lambda: pasted.append(clipboard["text"]))
         )
         modifier_reader_cls.return_value.any_modifier_down.return_value = False
         dispatcher = TkGuiThreadDispatcher(tk_root)
@@ -903,7 +903,7 @@ class TestApplySettings:
 
         mock_build_output.assert_called_once_with(
             OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None,
-            _ignore_delivery,
+            _ignore_delivery, hooks=None,
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
@@ -1152,3 +1152,113 @@ class TestMicrophoneWiring:
         bootstrap._choose_microphone(config, "Microphone (Maono PD300X Microp")
 
         assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"
+
+
+class TestAppAwareOutputChain:
+    def _hooks(self, failures: list, method=None):
+        from voicetotext.output.app_aware_delivery import DeliveryHooks
+        from voicetotext.output.last_dictation import LastDictation
+        from voicetotext.output.paste_method import PasteMethod
+
+        return DeliveryHooks(
+            last_dictation=LastDictation(),
+            paste_method=method or (lambda: PasteMethod.CTRL_V),
+            on_failed=lambda failure, text: failures.append((failure.value, text)),
+        )
+
+    @patch("voicetotext.bootstrap.text_field_focused", return_value=False)
+    @patch("voicetotext.bootstrap.read_caret_context", return_value=NO_CONTEXT)
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    @patch("voicetotext.bootstrap.Win32KeySender")
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_with_no_text_field_the_text_goes_to_the_clipboard_and_nothing_is_typed(
+        self, writer_cls, sender_cls, preserver_cls, _context, _field,
+    ):
+        failures: list = []
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda action: action()
+        hooks = self._hooks(failures)
+
+        output = _build_output(OutputMode.DIRECT_PASTE, dispatcher, hooks=hooks)
+        output.output("Meeting moved to Thursday.")
+
+        writer_cls.return_value.set_text.assert_called_once_with("Meeting moved to Thursday. ")
+        sender_cls.return_value.send_paste.assert_not_called()
+        preserver_cls.return_value.restore.assert_not_called()
+        assert failures == [("no_text_field", "Meeting moved to Thursday. ")]
+        assert hooks.last_dictation.text() == "Meeting moved to Thursday. "
+
+    @patch("voicetotext.bootstrap.caps_lock_enabled", return_value=False)
+    @patch("voicetotext.bootstrap.Win32ModifierKeyStateReader")
+    @patch("voicetotext.bootstrap.text_field_focused", return_value=True)
+    @patch("voicetotext.bootstrap.read_caret_context", return_value=NO_CONTEXT)
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    @patch("voicetotext.bootstrap.Win32KeySender")
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_a_text_field_gets_the_paste_with_the_method_for_its_app(
+        self, writer_cls, sender_cls, preserver_cls, _context, _field,
+        modifier_reader_cls, _caps,
+    ):
+        from voicetotext.output.paste_method import PasteMethod
+
+        failures: list = []
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda action: action()
+        modifier_reader_cls.return_value.any_modifier_down.return_value = False
+        hooks = self._hooks(failures, method=lambda: PasteMethod.SHIFT_INSERT)
+
+        output = _build_output(OutputMode.DIRECT_PASTE, dispatcher, hooks=hooks)
+        output.output("ls -la")
+        hooks.last_dictation.paste()
+
+        assert sender_cls.return_value.send_paste.call_args_list == [
+            call(PasteMethod.SHIFT_INSERT, "ls -la"),
+            call(PasteMethod.SHIFT_INSERT, "ls -la"),
+        ]
+        assert preserver_cls.return_value.restore.call_count == 2
+        assert failures == []
+
+    def test_clipboard_only_and_streaming_never_ask_about_text_fields(self):
+        from voicetotext.output.app_aware_delivery import AppAwareDelivery
+        from voicetotext.output.last_dictation import LastDictationDecorator
+
+        hooks = self._hooks([])
+
+        clipboard = _build_output(OutputMode.CLIPBOARD_ONLY, MagicMock(), hooks=hooks)
+        streaming = _build_output(
+            OutputMode.DIRECT_PASTE, MagicMock(), pipeline_mode=PipelineMode.STREAMING,
+            hooks=hooks,
+        )
+        batch = _build_output(OutputMode.DIRECT_PASTE, MagicMock(), hooks=hooks)
+
+        assert isinstance(clipboard._inner, LastDictationDecorator)
+        assert isinstance(clipboard._inner._inner, GuiThreadOutputDecorator)
+        assert isinstance(streaming._inner, GuiThreadOutputDecorator)
+        assert isinstance(batch._inner._inner, AppAwareDelivery)
+
+    def test_a_changed_retention_restarts_history_pruning(self):
+        pruner = MagicMock()
+        changes = ChangeSet(
+            engine_reload_required=False, hotkey_changed=False, output_changed=False,
+            history_retention_changed=True,
+        )
+
+        apply_settings(
+            changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+            history_pruner=pruner,
+        )
+
+        pruner.prune_now.assert_called_once_with()
+
+    def test_an_unchanged_retention_prunes_nothing(self):
+        pruner = MagicMock()
+        changes = ChangeSet(
+            engine_reload_required=False, hotkey_changed=False, output_changed=False,
+        )
+
+        apply_settings(
+            changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+            history_pruner=pruner,
+        )
+
+        pruner.prune_now.assert_not_called()

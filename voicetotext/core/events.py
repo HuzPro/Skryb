@@ -34,7 +34,9 @@ class RecordingResumedEvent(DomainEvent):
 
 @dataclass(frozen=True)
 class RecordingCancelledEvent(DomainEvent):
-    pass
+    """``recoverable`` when the discarded audio can still be transcribed."""
+
+    recoverable: bool = False
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,10 @@ class TranscriptionCompletedEvent(DomainEvent):
 
 @dataclass(frozen=True)
 class TranscriptionFailedEvent(DomainEvent):
+    """``recoverable`` when the recording can be transcribed again."""
+
     error: str = ""
+    recoverable: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,3 +167,21 @@ class ModelDeletedEvent(DomainEvent):
     flips from "Delete" back to "Download" without a manual refresh.
     """
     name: str = ""
+
+
+@dataclass(frozen=True)
+class DeliveryFailedEvent(DomainEvent):
+    """Dictated text did not reach a text field; ``reason`` says why.
+
+    ``reason`` is a :class:`voicetotext.output.app_aware_delivery.DeliveryFailure`
+    value: ``no_text_field`` (the text went to the clipboard instead) or
+    ``not_landed`` (the paste was sent but never showed up).
+    """
+
+    reason: str = ""
+    text: str = ""
+
+
+@dataclass(frozen=True)
+class NoLastDictationEvent(DomainEvent):
+    """Paste-last or copy-last was asked for before anything was dictated."""
