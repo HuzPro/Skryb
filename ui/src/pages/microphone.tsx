@@ -67,7 +67,7 @@ function LevelMeter({ device }: { device: string }) {
       setFailure(errorText(error) || COULD_NOT_OPEN);
       setState("failed");
     });
-    const watchdog = setTimeout(() => alive && !heard && setState("silent"), NO_SIGNAL_AFTER_MS);
+    const watchdog = setTimeout(() => alive && !heard && setState((current) => (current === "listening" ? "silent" : current)), NO_SIGNAL_AFTER_MS);
     return () => {
       alive = false;
       stopListening();
