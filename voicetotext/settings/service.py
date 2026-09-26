@@ -57,7 +57,7 @@ from voicetotext.transcription.engine_selector import (
     model_supports_streaming as _model_supports_streaming,
     rank_engines,
 )
-from voicetotext.transcription.engine_types import EngineCandidate
+from voicetotext.transcription.engine_types import EngineCandidate, HardwareProfile
 from voicetotext.transcription.hardware_detector import HardwareDetector
 from voicetotext.transcription.license_policy import LicensePolicy, LicenseTerms
 from voicetotext.transcription.model_info import (
@@ -433,6 +433,10 @@ class SettingsService:
             else self._hardware_detector.peek()
         )
         return hardware is not None and hardware.kind != "cpu"
+
+    def detected_hardware(self) -> HardwareProfile | None:
+        """The probed hardware, or ``None`` until a probe has run."""
+        return None if self._hardware_detector is None else self._hardware_detector.peek()
 
     def hardware_probe_pending(self) -> bool:
         """Whether the hardware answers above wait on a probe not yet run."""

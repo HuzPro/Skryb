@@ -193,6 +193,14 @@ class WritingService:
         if log.exists():
             self._open_path(log)
 
+    def server_paths(self) -> tuple[Path, Path]:
+        """The runtime and model the server launches: each override, else the managed file."""
+        settings = self._settings()
+        return (
+            Path(settings.runtime_path) if settings.runtime_path else self._paths.runtime_exe,
+            Path(settings.model_path) if settings.model_path else self._paths.model_file,
+        )
+
     def learned_style_summary(self) -> str:
         return self.learner.style_summary()
 

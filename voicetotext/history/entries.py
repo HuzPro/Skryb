@@ -43,6 +43,8 @@ class HistoryEntry:
     error: str | None
     seq: int | None = None
     transcript_path: Path | None = None
+    # "edit" for a voice edit, whose text is the spoken instruction.
+    kind: str = "dictation"
 
     @property
     def is_cancelled(self) -> bool:
@@ -67,6 +69,21 @@ def load_history(diagnostics_dir: Path) -> list[HistoryEntry]:
         entries.extend(_session_entries(session_dir))
     entries.sort(key=lambda entry: (entry.at, entry.key), reverse=True)
     return entries
+
+
+def find_entry(diagnostics_dir: Path, key: tuple[str, int]) -> HistoryEntry | None:
+    """The entry *key* names, reading only its own session's log.
+
+    A key that does not name a session folder finds nothing, so it can
+    never lead a caller outside *diagnostics_dir*.
+    """
+    session, _line = key
+    if not _SESSION_NAME.fullmatch(session):
+        return None
+    return next(
+        (entry for entry in _session_entries(diagnostics_dir / session) if entry.key == key),
+        None,
+    )
 
 
 def filter_entries(entries: list[HistoryEntry], query: str) -> list[HistoryEntry]:
@@ -179,6 +196,7 @@ def _entry(
         error=error,
         seq=_seq(event.get("index")),
         transcript_path=transcript,
+        kind="edit" if event.get("kind") == "edit" else "dictation",
     )
 
 
