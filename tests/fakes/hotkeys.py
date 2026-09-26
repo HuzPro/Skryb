@@ -4,34 +4,19 @@ from voicetotext.hotkeys.listener import HotkeyListener
 
 
 class FakeHotkeyListener(HotkeyListener):
-    """In-memory HotkeyListener.
-
-    Instead of hooking real keyboard events, tests drive activation
-    through :meth:`fire_activate` and :meth:`fire_deactivate`.
-    """
+    """In-memory HotkeyListener that counts its lifecycle calls."""
 
     def __init__(self) -> None:
         self.start_calls: int = 0
         self.stop_calls: int = 0
         self.pause_calls: int = 0
         self.resume_calls: int = 0
-        self._on_activate: Callable[[], None] | None = None
-        self._on_deactivate: Callable[[], None] | None = None
-        self._started: bool = False
 
     def start(self) -> None:
         self.start_calls += 1
-        self._started = True
 
     def stop(self) -> None:
         self.stop_calls += 1
-        self._started = False
-
-    def set_on_activate(self, callback: Callable[[], None]) -> None:
-        self._on_activate = callback
-
-    def set_on_deactivate(self, callback: Callable[[], None]) -> None:
-        self._on_deactivate = callback
 
     def pause(self) -> None:
         self.pause_calls += 1
@@ -39,16 +24,41 @@ class FakeHotkeyListener(HotkeyListener):
     def resume(self) -> None:
         self.resume_calls += 1
 
-    def fire_activate(self) -> None:
-        if not self._started:
-            raise RuntimeError("fire_activate called before start()")
-        if self._on_activate is None:
-            raise RuntimeError("fire_activate called before set_on_activate()")
-        self._on_activate()
 
-    def fire_deactivate(self) -> None:
-        if not self._started:
-            raise RuntimeError("fire_deactivate called before start()")
-        if self._on_deactivate is None:
-            raise RuntimeError("fire_deactivate called before set_on_deactivate()")
-        self._on_deactivate()
+class FakeClock:
+    """A monotonic clock the test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class FakeTimer:
+    def __init__(self, cancelled: list[bool]) -> None:
+        self._cancelled = cancelled
+
+    def start(self) -> None:
+        pass
+
+    def cancel(self) -> None:
+        self._cancelled[0] = True
+
+
+class FakeTimers:
+    """Timers that only fire when the test says their time has come."""
+
+    def __init__(self) -> None:
+        self.pending: list[tuple[float, list[bool], Callable[[], None]]] = []
+
+    def make(self, seconds: float, action: Callable[[], None]) -> FakeTimer:
+        cancelled = [False]
+        self.pending.append((seconds, cancelled, action))
+        return FakeTimer(cancelled)
+
+    def fire_all(self) -> None:
+        pending, self.pending = self.pending, []
+        for _seconds, cancelled, action in pending:
+            if not cancelled[0]:
+                action()

@@ -24,7 +24,9 @@ _VK_BACK = 0x08
 _VK_RETURN = 0x0D
 _VK_LEFT = 0x25
 _VK_SPACE = 0x20
+_VK_F13 = 0x7C
 _HOTKEY = (_VK_LCONTROL, _VK_LSHIFT, _VK_LMENU, _VK_M)
+_SECOND_HOTKEY = (_VK_F13,)
 
 
 class Desktop:
@@ -41,7 +43,7 @@ def desktop() -> Desktop:
 @pytest.fixture
 def memory(desktop: Desktop) -> PasteMemory:
     memory = PasteMemory(lambda: desktop.window, lambda: desktop.clicks, _OWN_TAG)
-    memory.set_hotkey(_HOTKEY)
+    memory.set_hotkeys([_HOTKEY, _SECOND_HOTKEY])
     return memory
 
 
@@ -159,6 +161,14 @@ class TestKeysThatLeaveTheCaretAlone:
 
         press_hotkey(memory)
         press_hotkey(memory)
+
+        assert memory.context().before == "okay"
+
+    def test_keeps_the_paste_across_every_other_dictation_shortcut(self, memory):
+        memory.remember("okay")
+
+        press(memory, _VK_F13)
+        release(memory, _VK_F13)
 
         assert memory.context().before == "okay"
 

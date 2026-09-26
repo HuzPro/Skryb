@@ -35,8 +35,6 @@ def _draft() -> SettingsDraft:
         language="en",
         device="auto",
         engine="auto",
-        hotkey_combination="ctrl+alt+m",
-        hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE,
     )
 

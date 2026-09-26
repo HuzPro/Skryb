@@ -26,6 +26,7 @@ from voicetotext.core.events import (
 from voicetotext.core.exceptions import LicenseNotAcceptedError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
     DictionaryOptions,
@@ -83,8 +84,6 @@ def _build_service(
         "transcription.model_size": _PARAKEET,
         "transcription.language": "en",
         "transcription.device": "auto",
-        "hotkey.combination": "ctrl+alt+m",
-        "hotkey.mode": "toggle",
         "output.mode": "direct_paste",
     }
     config_data.update(config_overrides or {})
@@ -305,8 +304,11 @@ class TestCurrentDraft:
                 "transcription.model_size": "nemotron-speech-streaming-en-0.6b",
                 "transcription.language": "en",
                 "transcription.device": "cuda",
-                "hotkey.combination": "f12",
-                "hotkey.mode": "push_to_talk",
+                "hotkey.bindings": [
+                    {"keys": "f12", "mode": "hold", "action": "dictate"},
+                    {"keys": "ctrl+shift+v", "mode": "press", "action": "paste_last"},
+                ],
+                "hotkey.double_tap_locks_hold": False,
                 "output.mode": "clipboard_only",
             }
         )
@@ -316,8 +318,11 @@ class TestCurrentDraft:
         assert draft.model_size == "nemotron-speech-streaming-en-0.6b"
         assert draft.language == "en"
         assert draft.device == "cuda"
-        assert draft.hotkey_combination == "f12"
-        assert draft.hotkey_mode == "push_to_talk"
+        assert draft.hotkey_bindings == (
+            Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+            Binding("ctrl+shift+v", BindingMode.PRESS, BindingAction.PASTE_LAST),
+        )
+        assert draft.double_tap_locks_hold is False
         assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
 
     def test_should_pass_language_through_without_translation(self):
@@ -338,9 +343,12 @@ class TestApplyDraft:
             language="en",
             device="cuda",
             engine="auto",
-            hotkey_combination="f12",
-            hotkey_mode="push_to_talk",
             output_mode=OutputMode.CLIPBOARD_ONLY,
+            hotkey_bindings=(
+                Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+                Binding("mouse4", BindingMode.TOGGLE, BindingAction.DICTATE),
+            ),
+            double_tap_locks_hold=False,
         )
 
         service.apply_draft(draft)
@@ -348,8 +356,11 @@ class TestApplyDraft:
         assert config.get("transcription.model_size") == "nemotron-speech-streaming-en-0.6b"
         assert config.get("transcription.language") == "en"
         assert config.get("transcription.device") == "cuda"
-        assert config.get("hotkey.combination") == "f12"
-        assert config.get("hotkey.mode") == "push_to_talk"
+        assert config.get("hotkey.bindings") == [
+            {"keys": "f12", "mode": "hold", "action": "dictate"},
+            {"keys": "mouse4", "mode": "toggle", "action": "dictate"},
+        ]
+        assert config.get("hotkey.double_tap_locks_hold") is False
         assert config.get("output.mode") == "clipboard_only"
         assert config.save_count == 1
 
@@ -360,8 +371,6 @@ class TestApplyDraft:
             language="de",
             device="auto",
             engine="auto",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
 
@@ -377,8 +386,6 @@ class TestApplyDraft:
             language="en",
             device="auto",
             engine="auto",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
 
@@ -402,8 +409,6 @@ class TestApplyDraft:
             language="en",
             device="auto",
             engine="nano_parakeet",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
         service.apply_draft(draft)
@@ -423,8 +428,6 @@ class TestApplyDraft:
             language="en",
             device="auto",
             engine="nano_parakeet",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
         service.apply_draft(draft)
@@ -442,7 +445,7 @@ class TestSettingsTransfer:
 
         exported = json.loads(path.read_text(encoding="utf-8"))
         assert exported["transcription"]["model_size"] == _PARAKEET
-        assert exported["hotkey"]["mode"] == "toggle"
+        assert exported["output"]["mode"] == "direct_paste"
 
     def test_should_import_unknown_keys_and_fill_missing_defaults(
         self,
@@ -462,7 +465,7 @@ class TestSettingsTransfer:
 
         assert config.get("transcription.language") == "fr"
         assert config.get("transcription.device") == "auto"
-        assert config.get("hotkey.mode") == "toggle"
+        assert config.get("hotkey.bindings") == [{"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"}]
         assert config.get("future.nested.option") == "enabled"
         assert config.save_count == 1
 
@@ -474,7 +477,7 @@ class TestSettingsTransfer:
         service, *_ = _build_service(config_store=config)
         import_path = tmp_path / "settings.json"
         import_path.write_text(
-            json.dumps({"hotkey": {"mode": "push_to_talk"}}),
+            json.dumps({"output": {"mode": "clipboard_only"}}),
             encoding="utf-8",
         )
 
@@ -485,8 +488,27 @@ class TestSettingsTransfer:
         ).splitlines()
         entry = cast(dict[str, object], json.loads(history_lines[-1]))
         assert entry["changes"] == [
-            {"key": "hotkey.mode", "from": "toggle", "to": "push_to_talk"}
+            {"key": "output.mode", "from": "direct_paste", "to": "clipboard_only"}
         ]
+
+    def test_importing_an_export_from_before_bindings_keeps_its_hotkey(
+        self, tmp_path: Path,
+    ) -> None:
+        config = JsonConfigAdapter(tmp_path / "config.json")
+        config.load()
+        service, *_ = _build_service(config_store=config)
+        import_path = tmp_path / "old-export.json"
+        import_path.write_text(
+            json.dumps({"hotkey": {"mode": "push_to_talk", "combination": "f12"}}),
+            encoding="utf-8",
+        )
+
+        service.import_settings(import_path)
+
+        assert service.current_draft().hotkey_bindings == (
+            Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+        )
+        assert config.get("hotkey.mode") is None
 
     @pytest.mark.parametrize("value", [[], "settings", 1, None])
     def test_should_reject_import_when_json_is_not_an_object(
@@ -682,8 +704,6 @@ class TestIsEngineSwapping:
         config = FakeConfig({
             "transcription.model_size": "parakeet-tdt-0.6b-v3",
             "transcription.device": "auto",
-            "hotkey.combination": "ctrl+alt+m",
-            "hotkey.mode": "toggle",
             "output.mode": "direct_paste",
         })
         manager = FakeModelManager(installed={"parakeet-tdt-0.6b-v3": True})

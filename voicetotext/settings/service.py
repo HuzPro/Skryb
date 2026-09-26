@@ -22,6 +22,11 @@ from voicetotext.core.json_config_adapter import (
     load_json_object,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.hotkeys.bindings import (
+    bindings_to_config,
+    migrate_legacy_hotkey,
+    parse_bindings,
+)
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
     dictionary_to_json,
@@ -249,8 +254,6 @@ class SettingsService:
             language=self._config.get("transcription.language", "en"),
             device=self._config.get("transcription.device", "auto"),
             engine=self._config.get("transcription.engine", "auto"),
-            hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
-            hotkey_mode=self._config.get("hotkey.mode", "toggle"),
             output_mode=OutputMode.migrate(self._config.get("output.mode")),
             transcription_mode=TranscriptionMode.migrate(
                 self._config.get("transcription.mode")
@@ -263,6 +266,10 @@ class SettingsService:
             input_device=str(self._config.get("audio.input_device", "") or ""),
             boost_quiet_speech=(
                 self._config.get("audio.boost_quiet_speech", True) is not False
+            ),
+            hotkey_bindings=parse_bindings(self._config),
+            double_tap_locks_hold=(
+                self._config.get("hotkey.double_tap_locks_hold", True) is not False
             ),
         )
 
@@ -285,8 +292,8 @@ class SettingsService:
         self._config.set("transcription.language", draft.language)
         self._config.set("transcription.device", draft.device)
         self._config.set("transcription.engine", draft.engine)
-        self._config.set("hotkey.combination", draft.hotkey_combination)
-        self._config.set("hotkey.mode", draft.hotkey_mode)
+        self._config.set("hotkey.bindings", bindings_to_config(draft.hotkey_bindings))
+        self._config.set("hotkey.double_tap_locks_hold", draft.double_tap_locks_hold)
         self._config.set("output.mode", draft.output_mode.value)
         self._config.set("audio.input_device", draft.input_device)
         self._config.set("audio.boost_quiet_speech", draft.boost_quiet_speech)
@@ -334,6 +341,7 @@ class SettingsService:
     def import_settings(self, path: Path) -> None:
         imported = load_json_object(path)
         self._config.replace_all(deep_merge_config(DEFAULT_CONFIG, imported))
+        migrate_legacy_hotkey(self._config)
         self._config.save()
 
     # ------------------------------------------------------------------
