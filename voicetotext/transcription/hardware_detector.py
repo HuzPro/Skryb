@@ -15,3 +15,10 @@ class HardwareDetector(ABC):
     @abstractmethod
     def detect(self) -> HardwareProfile:
         pass
+
+    @abstractmethod
+    def peek(self) -> HardwareProfile | None:
+        """The profile if it is already known without probing, else None.
+
+        Safe on the GUI thread: it never imports torch or waits on a probe.
+        """
