@@ -1,5 +1,6 @@
 import tkinter
 from tkinter import ttk
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,9 +8,11 @@ from voicetotext.core.color_scheme import ColorScheme
 from voicetotext.settings.theme import (
     DARK_THEME,
     LIGHT_THEME,
+    ScrollArea,
     _scroll_region_height,
     _should_show_scrollbar,
     apply_theme,
+    keep_scroll_position,
     theme_for,
 )
 
@@ -158,6 +161,34 @@ class TestScrollArea:
     def test_a_short_page_cannot_be_scrolled_into_empty_space(self):
         assert _scroll_region_height(80, 100) == 100
         assert _scroll_region_height(200, 100) == 200
+
+    def test_rebuilding_part_of_a_scrolled_page_leaves_it_where_it_was(self, tk_root):
+        area = ScrollArea(tk_root, "Writing")
+        page = ttk.Frame(area.body)
+        try:
+            _lay_out(area, content_height=2400)
+            area.scroll(20)
+            scrolled_to = area._canvas.canvasy(0)
+
+            def rebuild_rows() -> None:
+                # New rows are one pixel tall until Tk lays them out.
+                _lay_out(area, content_height=300)
+                _lay_out(area, content_height=2400)
+
+            keep_scroll_position(page, rebuild_rows)
+            kept = area._canvas.canvasy(0)
+            rebuild_rows()
+
+            assert scrolled_to == 480
+            assert kept == scrolled_to
+            assert area._canvas.canvasy(0) < scrolled_to
+        finally:
+            area.destroy()
+
+
+def _lay_out(area: ScrollArea, content_height: int) -> None:
+    """What Tk reports when the page's content settles at *content_height*."""
+    area._on_body_configure(SimpleNamespace(height=content_height))
 
 
 def _pixel(widget, image: str, x: int) -> str:
