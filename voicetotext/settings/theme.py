@@ -196,6 +196,28 @@ def _configure_styles(style: ttk.Style, theme: Theme) -> None:
         darkcolor=theme.accent,
     )
     _configure_slim_scrollbar(style, theme)
+    _configure_table(style, theme)
+
+
+def _configure_table(style: ttk.Style, theme: Theme) -> None:
+    style.configure(
+        "Treeview",
+        background=theme.surface,
+        fieldbackground=theme.surface,
+        foreground=theme.foreground,
+        borderwidth=0,
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", theme.select_background)],
+        foreground=[("selected", theme.select_foreground)],
+    )
+    style.configure(
+        "Treeview.Heading",
+        background=theme.background,
+        foreground=theme.foreground,
+        relief="flat",
+    )
 
 
 def _configure_flat_button(style: ttk.Style, theme: Theme) -> None:

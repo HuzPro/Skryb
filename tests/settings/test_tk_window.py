@@ -88,6 +88,31 @@ def test_recording_consent_is_off_until_selected(
             window.destroy()
 
 
+def test_history_and_paste_settings_are_shown_and_saved(
+    tk_root: tkinter.Tk, service: MagicMock,
+) -> None:
+    service.current_draft.return_value = _draft(
+        history_retention_days=30,
+        paste_method_overrides=(("mintty.exe", "ctrl_shift_v"),),
+    )
+    deleted: list[bool] = []
+    window = _make_window(tk_root, service, delete_all_history=lambda: deleted.append(True))
+    try:
+        assert window.collect_draft().history_retention_days == 30
+        assert window.collect_draft().paste_method_overrides == (
+            ("mintty.exe", "ctrl_shift_v"),
+        )
+        window._on_delete_all_history()
+        window._on_save_clicked()
+        saved = service.apply_draft.call_args.args[0]
+        assert saved.history_retention_days == 30
+        assert saved.paste_method_overrides == (("mintty.exe", "ctrl_shift_v"),)
+        assert deleted == [True]
+    finally:
+        if window.winfo_exists():
+            window.destroy()
+
+
 def _reload_change() -> ChangeSet:
     return ChangeSet(
         engine_reload_required=True, hotkey_changed=False, output_changed=False,

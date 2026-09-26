@@ -12,7 +12,11 @@ from voicetotext.core.action_dispatcher import (
     ThreadedActionDispatcher,
 )
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
-from voicetotext.core.events import EngineLoadFailedEvent, MicrophoneMissingEvent
+from voicetotext.core.events import (
+    DeliveryFailedEvent,
+    EngineLoadFailedEvent,
+    MicrophoneMissingEvent,
+)
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
@@ -30,7 +34,10 @@ from voicetotext.edit_capture.delivery_recording_decorator import (
 )
 from voicetotext.edit_capture.observer import Win32EditObserver
 from voicetotext.edit_capture.recorder import EditRecorder
-from voicetotext.edit_capture.win32_foreground import foreground_hwnd
+from voicetotext.edit_capture.win32_foreground import (
+    foreground_hwnd,
+    foreground_window,
+)
 from voicetotext.edit_capture.win32_input import caps_lock_enabled, click_count
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
@@ -38,6 +45,11 @@ from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.win32_keyboard_hook import KeyObserver, ignore_key_event
+from voicetotext.output.app_aware_delivery import (
+    AppAwareDelivery,
+    DeliveryFailure,
+    DeliveryHooks,
+)
 from voicetotext.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
@@ -51,19 +63,24 @@ from voicetotext.output.gui_thread_output_decorator import (
     GuiThreadOutputDecorator,
 )
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.last_dictation import LastDictation, LastDictationDecorator
 from voicetotext.output.modifier_release_waiting_key_sender import (
     ModifierReleaseWaitingKeySender,
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.paste_memory import PasteMemory, read_or_remember
+from voicetotext.output.paste_method import PasteMethod, paste_method_for
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
 from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
-from voicetotext.output.win32_caret_context import read_caret_context
+from voicetotext.output.win32_caret_context import (
+    read_caret_context,
+    text_field_focused,
+)
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -74,11 +91,19 @@ from voicetotext.output.win32_key_sender import (
 from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
+from voicetotext.history.management import delete_all_in_background
+from voicetotext.history.retention import (
+    history_retention_days,
+    prune_in_background,
+    prune_once_ready,
+)
 from voicetotext.history.tk_window import HistoryWindow
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.input_devices import Microphones
+from voicetotext.recording.notice import Notice
 from voicetotext.recording.overlay import RecordingOverlay
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
+from voicetotext.recording.recovery_notices import RecoveryNotices
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.recording.speech_level import boost_quiet_speech
@@ -240,6 +265,7 @@ def _build_output(
     pipeline_mode: PipelineMode = PipelineMode.BATCH,
     models_dir: Path | None = None,
     on_delivered: Callable[[str], None] = _ignore_delivery,
+    hooks: DeliveryHooks | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -260,6 +286,7 @@ def _build_output(
         return DeliveryRecordingDecorator(
             inner=PasteAndClipboardAdapter(
                 sleeper=sleeper, writer=writer, key_sender=key_sender,
+                paste_method=hooks.paste_method if hooks is not None else None,
             ),
             record=functools.partial(_remember_then_report, on_delivered),
         )
@@ -283,7 +310,16 @@ def _build_output(
     # ``SendInput`` calls require a UI thread, and the use case runs
     # on a daemon worker. Wrapping every concrete handler with this
     # decorator means the worker never touches Win32 directly.
-    gui_output = GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
+    gui_output: TextOutputHandler = GuiThreadOutputDecorator(
+        inner=inner, dispatcher=gui_dispatcher,
+    )
+    # Streaming pastes fragments: none is a dictation to repeat, and each
+    # would read as a paste that the next one pushed out of place.
+    if hooks is not None and pipeline_mode is not PipelineMode.STREAMING:
+        gui_output = _deliver_with_hooks(
+            hooks, gui_output, inner, writer, gui_dispatcher,
+            app_aware=mode is not OutputMode.CLIPBOARD_ONLY,
+        )
     dictionary = (
         load_dictionary(dictionary_path)
         if dictionary_path is not None
@@ -302,6 +338,49 @@ def _build_output(
             ),
         ),
     )
+
+
+def _deliver_with_hooks(
+    hooks: DeliveryHooks,
+    gui_output: TextOutputHandler,
+    inner: TextOutputHandler,
+    writer: Win32ClipboardWriter,
+    gui_dispatcher: GuiThreadDispatcher,
+    *,
+    app_aware: bool,
+) -> TextOutputHandler:
+    """Remember each dictation for paste-last, and paste only into text fields."""
+    delivery = gui_output
+    if app_aware:
+        delivery = AppAwareDelivery(
+            paste=inner,
+            copy=ClipboardAdapter(writer=writer),
+            gui=gui_dispatcher,
+            on_failed=hooks.on_failed,
+            text_field_focused=text_field_focused,
+            read_context=read_caret_context,
+            foreground=foreground_hwnd,
+        )
+    hooks.last_dictation.route(
+        paste=delivery,
+        copy=GuiThreadOutputDecorator(
+            inner=ClipboardAdapter(writer=writer), dispatcher=gui_dispatcher,
+        ),
+    )
+    return LastDictationDecorator(delivery, hooks.last_dictation)
+
+
+def _foreground_paste_method(config: JsonConfigAdapter) -> PasteMethod:
+    return paste_method_for(
+        foreground_window().process,
+        config.get("output.paste_method_overrides", {}),
+    )
+
+
+def _publish_delivery_failure(
+    event_bus: EventBus, failure: DeliveryFailure, text: str,
+) -> None:
+    event_bus.publish(DeliveryFailedEvent(reason=failure.value, text=text))
 
 
 def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
@@ -865,10 +944,17 @@ def build_app(
     gui_dispatcher = TkGuiThreadDispatcher(root)
     output_mode = _resolve_output_mode(config)
     pipeline_mode = _resolve_pipeline_mode(config)
+    last_dictation = LastDictation()
+    delivery_hooks = DeliveryHooks(
+        last_dictation=last_dictation,
+        paste_method=functools.partial(_foreground_paste_method, config),
+        on_failed=functools.partial(_publish_delivery_failure, event_bus),
+    )
     output = _build_output(
         output_mode, gui_dispatcher, paths.dictionary_path,
         pipeline_mode, paths.models_dir,
         _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+        hooks=delivery_hooks,
     )
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -894,6 +980,7 @@ def build_app(
             config.get("transcription.mode", "batch") == "streaming"
         ),
         prepare_audio=functools.partial(_prepare_audio, config),
+        last_dictation=last_dictation,
     )
 
     listener = _build_hotkey_listener(
@@ -956,11 +1043,17 @@ def build_app(
                 dictionary_path=paths.dictionary_path,
                 models_dir=paths.models_dir,
                 edit_capture=edit_capture,
+                delivery_hooks=delivery_hooks,
+                history_dir=paths.diagnostics_dir,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
             ),
             schedule=gui_dispatcher.dispatch,
+            delete_all_history=lambda: delete_all_in_background(
+                paths.diagnostics_dir,
+                on_done=lambda: gui_dispatcher.dispatch(history_window.refresh),
+            ),
         )
         settings_window_ref["current"] = window
         window.show()
@@ -971,6 +1064,19 @@ def build_app(
         retranscribe=record_and_transcribe_use_case.retranscribe,
         schedule=gui_dispatcher.dispatch,
     )
+    RecoveryNotices(
+        event_bus,
+        Notice(root),
+        gui_dispatcher.dispatch,
+        retry=record_and_transcribe_use_case.retry_last_recording,
+        open_history=history_window.show,
+        paste_again=record_and_transcribe_use_case.paste_last,
+        copy_again=record_and_transcribe_use_case.copy_last,
+    )
+    prune_once_ready(
+        event_bus, paths.diagnostics_dir,
+        functools.partial(history_retention_days, config),
+    )
 
     app = SystemTrayApp(
         use_case=record_and_transcribe_use_case,
@@ -980,6 +1086,8 @@ def build_app(
         tray_factory=functools.partial(
             build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
             on_history_clicked=history_window.show,
+            on_paste_last_clicked=record_and_transcribe_use_case.paste_last,
+            on_copy_last_clicked=record_and_transcribe_use_case.copy_last,
             list_microphones=functools.partial(_microphone_menu, config, microphones),
             on_microphone_chosen=functools.partial(_choose_microphone, config),
         ),
@@ -1017,6 +1125,8 @@ def apply_settings(
     dictionary_path: Path | None = None,
     models_dir: Path | None = None,
     edit_capture: Win32EditObserver | None = None,
+    delivery_hooks: DeliveryHooks | None = None,
+    history_dir: Path | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -1032,8 +1142,12 @@ def apply_settings(
                 output_mode, gui_dispatcher, dictionary_path,
                 pipeline_mode, models_dir,
                 _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+                hooks=delivery_hooks,
             )
         )
+
+    if changes.history_retention_changed and history_dir is not None:
+        prune_in_background(history_dir, history_retention_days(config))
 
     if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(
