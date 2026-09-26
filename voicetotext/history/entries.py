@@ -148,6 +148,8 @@ def _entry(
     started_at: datetime,
 ) -> HistoryEntry | None:
     kind = event.get("event")
+    if event.get("history_deleted") is True:
+        return None
     transcript = _session_file(session_dir, event.get("transcript_path"))
     if kind == "transcription":
         at = _timestamp(event.get("requested_at"), started_at)
