@@ -114,6 +114,6 @@
     accent-color: var(--primary);
   }
   input[type="number"]::-webkit-inner-spin-button {
-    opacity: 1;
+    -webkit-appearance: none;
   }
 }

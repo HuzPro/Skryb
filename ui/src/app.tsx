@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AudioLines, BookA, ClipboardPaste, History, Keyboard, Mic, PenLine } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, type NavItem } from "./components/shell";
-import { connectTo } from "./lib/api";
 import { guardClose, onRelaunch, runBeforeClose, windowControls, type LaunchArgs, type Page } from "./lib/platform";
 import { useServerEvents } from "./lib/sse";
 import { StoreProvider, useStore } from "./lib/store";
@@ -36,8 +35,7 @@ const LaunchContext = createContext<LaunchArgs | null>(null);
 
 function Shell() {
   const launch = useContext(LaunchContext);
-  const [connection, setConnection] = useState(`${launch?.port}:${launch?.token}`);
-  const lost = useServerEvents(connection);
+  const lost = useServerEvents();
   const store = useStore();
   const storeRef = useRef(store);
   storeRef.current = store;
@@ -63,11 +61,13 @@ function Shell() {
   useEffect(() => {
     guardClose(mayClose);
     onRelaunch((next) => {
-      connectTo(next.port, next.token);
-      setConnection(`${next.port}:${next.token}`);
+      if (next.port !== launch?.port || next.token !== launch?.token) {
+        window.location.reload();
+        return;
+      }
       void navigateRef.current(PAGE_PATHS[next.page] ?? PAGE_PATHS.settings);
     });
-  }, [mayClose]);
+  }, [mayClose, launch]);
 
   return (
     <LostContext.Provider value={lost}>

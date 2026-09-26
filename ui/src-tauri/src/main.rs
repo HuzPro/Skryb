@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -35,24 +36,29 @@ fn parse_args(args: &[String]) -> LaunchArgs {
     }
 }
 
+/// The latest launch's arguments; a second launch replaces them so a reload picks up a restarted core.
+struct Launch(Mutex<LaunchArgs>);
+
 #[tauri::command]
-fn launch_args(args: tauri::State<'_, LaunchArgs>) -> LaunchArgs {
-    args.inner().clone()
+fn launch_args(launch: tauri::State<'_, Launch>) -> LaunchArgs {
+    launch.0.lock().expect("launch arguments lock").clone()
 }
 
 fn main() {
     let args = parse_args(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let args = parse_args(&argv);
+            *app.state::<Launch>().0.lock().expect("launch arguments lock") = args.clone();
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            let _ = app.emit("launch", parse_args(&argv));
+            let _ = app.emit("launch", args);
         }))
         .plugin(tauri_plugin_dialog::init())
-        .manage(args)
+        .manage(Launch(Mutex::new(args)))
         .invoke_handler(tauri::generate_handler![launch_args])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

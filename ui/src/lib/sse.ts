@@ -27,7 +27,7 @@ export function useServerEvent(handler: Listener): void {
  * Keeps one EventSource open, folds its events into the query cache, and
  * reports the core as lost once it has been unreachable for five seconds.
  */
-export function useServerEvents(connection: string): boolean {
+export function useServerEvents(): boolean {
   const client = useQueryClient();
   const [lost, setLost] = useState(false);
 
@@ -77,7 +77,7 @@ export function useServerEvents(connection: string): boolean {
       clearTimeout(retryTimer);
       clearTimeout(lostTimer);
     };
-  }, [client, connection]);
+  }, [client]);
 
   return lost;
 }
