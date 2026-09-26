@@ -75,9 +75,17 @@ from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
 from voicetotext.history.tk_window import HistoryWindow
+from voicetotext.recording.audio_ducking import AudioDucking, core_audio_sessions
 from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.recording.hot_plug import MicrophoneHotPlug
 from voicetotext.recording.input_devices import Microphones
 from voicetotext.recording.overlay import RecordingOverlay
+from voicetotext.recording.preferences import (
+    RecordingPreferences,
+    load_pill_position,
+    save_pill_position,
+)
+from voicetotext.recording.silence_watchdog import SilenceWatchdog
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
@@ -832,7 +840,11 @@ def build_app(
     # distinct chime when the engine becomes ready to transcribe. The event
     # bus retains the subscriptions, so the beepers outlive this function
     # without an explicit reference.
-    cue_player = SoundDeviceCuePlayer()
+    preferences = functools.partial(RecordingPreferences.from_config, config)
+    cue_player = SoundDeviceCuePlayer(
+        enabled=lambda: preferences().cues_enabled,
+        volume=lambda: preferences().cue_volume,
+    )
     CueBeeper(event_bus, cue_player)
     EngineReadyBeeper(event_bus, cue_player)
 
@@ -850,11 +862,24 @@ def build_app(
         on_device_missing=lambda name: event_bus.publish(
             MicrophoneMissingEvent(name=name),
         ),
+        preferred_names=lambda: preferences().preferred_devices,
     )
     # Re-scanning the hardware restarts PortAudio, which would cut off a
     # recording, so it waits until the app is idle.
     microphones = Microphones(
         is_busy=lambda: state_machine.state != AppState.IDLE,
+    )
+    SilenceWatchdog(
+        event_bus,
+        level=lambda: recorder.current_rms,
+        device_name=lambda: microphones.label(recorder.device_name),
+        enabled=lambda: preferences().warn_when_silent,
+    )
+    ducking = AudioDucking(
+        event_bus,
+        mode=lambda: preferences().duck_other_audio,
+        level=lambda: preferences().duck_level,
+        list_sessions=core_audio_sessions,
     )
 
     # The GUI thread is the only thread that owns a window and a
@@ -886,9 +911,8 @@ def build_app(
         event_bus=event_bus,
         action_dispatcher=action_dispatcher,
         diagnostics=diagnostics,
-        max_recording_seconds=config.get(
-            "recording.max_duration_seconds", 600.0,
-        ),
+        max_recording_seconds=lambda: preferences().max_duration_seconds,
+        warn_before_cap_seconds=lambda: preferences().warn_before_cap_seconds,
         streaming_controller=streaming_controller,
         is_streaming_mode=lambda: (
             config.get("transcription.mode", "batch") == "streaming"
@@ -910,6 +934,8 @@ def build_app(
             on_finish=record_and_transcribe_use_case.on_hotkey_deactivated,
             on_press=_paste_memory.excuse_click,
             on_tick=_paste_memory.sync_clicks,
+            load_position=functools.partial(load_pill_position, config),
+            save_position=functools.partial(save_pill_position, config),
         )
         if config.get("overlay.enabled", True)
         else None
@@ -965,6 +991,15 @@ def build_app(
         settings_window_ref["current"] = window
         window.show()
 
+    hot_plug = MicrophoneHotPlug(
+        root,
+        microphones,
+        preferred=lambda: preferences().preferred_devices,
+        chosen=functools.partial(_chosen_microphone, config),
+        event_bus=event_bus,
+        run_in_background=action_dispatcher.dispatch,
+    )
+
     history_window = HistoryWindow(
         root,
         paths.diagnostics_dir,
@@ -982,10 +1017,13 @@ def build_app(
             on_history_clicked=history_window.show,
             list_microphones=functools.partial(_microphone_menu, config, microphones),
             on_microphone_chosen=functools.partial(_choose_microphone, config),
+            on_devices_changed=hot_plug.devices_changed,
         ),
         on_open_settings=open_settings,
         download_manager=download_manager,
-        owned_disposables=(overlay,) if overlay is not None else (),
+        owned_disposables=(
+            (overlay, ducking) if overlay is not None else (ducking,)
+        ),
     )
 
     config.save()

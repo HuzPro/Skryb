@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 
-ConfigValue = str | int | float | bool | None
+ConfigValue = str | int | float | bool | list[str] | None
 
 
 class ConfigurationStore(ABC):

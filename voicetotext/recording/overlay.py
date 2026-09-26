@@ -1,6 +1,7 @@
 import ctypes
 import ctypes.wintypes as wintypes
 import logging
+import math
 import sys
 import time
 import tkinter
@@ -14,6 +15,9 @@ from PIL import Image
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     DomainEvent,
+    MicrophoneAudioResumedEvent,
+    MicrophoneSilentEvent,
+    RecordingCapWarningEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
     StateChangedEvent,
@@ -21,19 +25,25 @@ from voicetotext.core.events import (
 )
 from voicetotext.core.state_machine import AppState
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
+from voicetotext.recording.input_devices import short_microphone_name
 from voicetotext.recording.pill import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
+    DEFAULT_PILL_POSITION,
     Button,
     Frame,
     Mode,
+    PillPosition,
     SettledBar,
     Spring,
     VoiceLevel,
     collapsed_size,
+    countdown_text,
     finishing_progress,
     hit_test,
     is_settled_bar,
+    pill_origin,
+    pill_position,
     render,
     target_size,
     transcription_progress,
@@ -41,7 +51,6 @@ from voicetotext.recording.pill import (
 
 _logger = logging.getLogger(__name__)
 
-_BOTTOM_MARGIN = 26
 # Each frame waits for the display's next refresh itself, so the timer
 # only has to come back soon; a millisecond keeps up with 240 Hz.
 _FRAME_POLL_MS = 1
@@ -69,6 +78,11 @@ _PHASE_PER_SECOND = 9.6
 # so the finish reads, and only then does the pill leave.
 _FULL_BAR_HOLD_SECONDS = 0.14
 _FINISH_SECONDS = 0.22
+# Windows' own defaults for telling a drag from a wobbly click and a double
+# click from two single ones.
+_DRAG_THRESHOLD = 4
+_DOUBLE_CLICK_SECONDS = 0.5
+_DOUBLE_CLICK_SLACK = 4
 
 _WINDOW_CLASS_NAME = "VoiceToTextRecordingOverlay"
 _ERROR_CLASS_ALREADY_EXISTS = 1410
@@ -80,6 +94,8 @@ _WS_EX_TOPMOST = 0x00000008
 _SW_HIDE = 0
 _SW_SHOWNOACTIVATE = 4
 _HWND_TOPMOST = -1
+_SWP_NOSIZE = 0x0001
+_SWP_NOZORDER = 0x0004
 _SWP_NOACTIVATE = 0x0010
 _MONITOR_DEFAULTTONEAREST = 2
 _BI_RGB = 0
@@ -93,6 +109,9 @@ _WM_LBUTTONDOWN = 0x0201
 _WM_LBUTTONUP = 0x0202
 _MA_NOACTIVATE = 3
 _IDC_HAND = 32649
+_VK_LBUTTON = 0x01
+_VK_RBUTTON = 0x02
+_SM_SWAPBUTTON = 23
 
 _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(
@@ -182,6 +201,8 @@ class OverlayWindowApi(Protocol):
     def cursor_position(self) -> tuple[int, int] | None: ...
     def set_hand_cursor(self, hand: bool) -> None: ...
     def wait_for_frame(self) -> bool: ...
+    def move_to(self, x: int, y: int) -> None: ...
+    def left_button_down(self) -> bool: ...
 
 
 # Every overlay window shares one window class, and a class has one window
@@ -323,6 +344,10 @@ class Win32LayeredOverlayWindow:
         self._user32.LoadCursorW.restype = wintypes.HANDLE
         self._user32.SetCursor.argtypes = [wintypes.HANDLE]
         self._user32.SetCursor.restype = wintypes.HANDLE
+        self._user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+        self._user32.GetAsyncKeyState.restype = ctypes.c_short
+        self._user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+        self._user32.GetSystemMetrics.restype = ctypes.c_int
         self._dwmapi = ctypes.WinDLL("dwmapi")
         self._dwmapi.DwmFlush.argtypes = []
         self._dwmapi.DwmFlush.restype = ctypes.c_long
@@ -465,6 +490,24 @@ class Win32LayeredOverlayWindow:
     def set_hand_cursor(self, hand: bool) -> None:
         self._hand_cursor = hand
 
+    def move_to(self, x: int, y: int) -> None:
+        self._origin = (x, y)
+        self._user32.SetWindowPos(
+            self._hwnd, None, x, y, 0, 0,
+            _SWP_NOACTIVATE | _SWP_NOSIZE | _SWP_NOZORDER,
+        )
+
+    def left_button_down(self) -> bool:
+        """Whether the primary button is held, wherever the cursor is.
+
+        A release off the pill goes to the window under it, so a drag also
+        watches the button itself. ``GetAsyncKeyState`` reads the physical
+        buttons, and with them swapped the primary one is on the right.
+        """
+        swapped = self._user32.GetSystemMetrics(_SM_SWAPBUTTON)
+        button = _VK_RBUTTON if swapped else _VK_LBUTTON
+        return bool(self._user32.GetAsyncKeyState(button) & 0x8000)
+
     def handle_message(self, message: int, l_param: int) -> int | None:
         """The window procedure's answer, or None for the default one."""
         if message == _WM_MOUSEACTIVATE:
@@ -528,12 +571,23 @@ def _ignore() -> None:
     return None
 
 
+def _default_position() -> PillPosition:
+    return DEFAULT_PILL_POSITION
+
+
+def _forget_position(_position: PillPosition) -> None:
+    return None
+
+
 class RecordingOverlay:
     """The pill: grows in on record, shrinks into a progress bar, then leaves.
 
     Everything here runs on the Tk thread. Events arrive on worker threads
     and are handed over through the dispatcher; clicks arrive on the Tk
     thread already, through the window procedure.
+
+    Dragging the pill by anything but its buttons moves it, and it comes
+    back there next time; a double click puts it back at the bottom centre.
     """
 
     def __init__(
@@ -549,6 +603,8 @@ class RecordingOverlay:
         on_press: Callable[[], None] = _ignore,
         on_tick: Callable[[], None] = _ignore,
         clock: Callable[[], float] = time.monotonic,
+        load_position: Callable[[], PillPosition] = _default_position,
+        save_position: Callable[[PillPosition], None] = _forget_position,
     ) -> None:
         self._root = root
         self._event_bus = event_bus
@@ -563,6 +619,8 @@ class RecordingOverlay:
         self._on_press = on_press
         self._on_tick = on_tick
         self._clock = clock
+        self._load_position = load_position
+        self._save_position = save_position
         width, height = collapsed_size()
         self._width = Spring(width)
         self._height = Spring(height)
@@ -585,15 +643,32 @@ class RecordingOverlay:
         self._settled_bar = SettledBar(premultiplied_array)
         self._switch_interval: float | None = None
         self._pressed: Button | None = None
+        self._work_area = (0, 0, 0, 0)
+        self._origin = (0, 0)
+        # Where on the pill a press that may become a drag landed.
+        self._grab: tuple[int, int] | None = None
+        self._dragging = False
+        self._last_click: tuple[float, int, int] | None = None
+        self._silent_microphone = ""
+        self._countdown: float | None = None
         self._frame = self._current_frame(None)
         self._last_tick = 0.0
         self._last_click_check = float("-inf")
         self._after_id: str | None = None
         self._window_api.set_mouse_handler(self._on_mouse)
-        self._event_bus.subscribe(StateChangedEvent, self._on_state_changed)
-        self._event_bus.subscribe(RecordingPausedEvent, self._on_paused)
-        self._event_bus.subscribe(RecordingResumedEvent, self._on_resumed)
-        self._event_bus.subscribe(TranscriptionStartedEvent, self._on_transcribing)
+        self._subscriptions: tuple[
+            tuple[type[DomainEvent], Callable[[DomainEvent], None]], ...
+        ] = (
+            (StateChangedEvent, self._on_state_changed),
+            (RecordingPausedEvent, self._on_paused),
+            (RecordingResumedEvent, self._on_resumed),
+            (TranscriptionStartedEvent, self._on_transcribing),
+            (MicrophoneSilentEvent, self._on_microphone_silent),
+            (MicrophoneAudioResumedEvent, self._on_microphone_back),
+            (RecordingCapWarningEvent, self._on_cap_warning),
+        )
+        for event_type, handler in self._subscriptions:
+            self._event_bus.subscribe(event_type, handler)
 
     @property
     def mode(self) -> Mode:
@@ -610,10 +685,9 @@ class RecordingOverlay:
     def show(self) -> None:
         """Grow the pill in for a new recording."""
         if not self._visible:
-            left, _top, right, bottom = self._window_api.work_area_for_foreground()
-            x = left + ((right - left - CANVAS_WIDTH) // 2)
-            y = bottom - CANVAS_HEIGHT - _BOTTOM_MARGIN
-            self._window_api.show_at(x, y)
+            self._work_area = self._window_api.work_area_for_foreground()
+            self._origin = pill_origin(self._load_position(), self._work_area)
+            self._window_api.show_at(*self._origin)
             self._visible = True
             self._switch_interval = sys.getswitchinterval()
             sys.setswitchinterval(_ANIMATING_SWITCH_INTERVAL)
@@ -624,6 +698,8 @@ class RecordingOverlay:
         self._level = 0.0
         self._phase = 0.0
         self._finished_at = None
+        self._silent_microphone = ""
+        self._countdown = None
         self._retarget()
         self._start_loop()
 
@@ -633,14 +709,14 @@ class RecordingOverlay:
             return
         self._mode = Mode.CLOSED
         self._pressed = None
+        if self._grab is not None:
+            self._release_grab()
         self._retarget()
         self._start_loop()
 
     def dispose(self) -> None:
-        self._event_bus.unsubscribe(StateChangedEvent, self._on_state_changed)
-        self._event_bus.unsubscribe(RecordingPausedEvent, self._on_paused)
-        self._event_bus.unsubscribe(RecordingResumedEvent, self._on_resumed)
-        self._event_bus.unsubscribe(TranscriptionStartedEvent, self._on_transcribing)
+        for event_type, handler in self._subscriptions:
+            self._event_bus.unsubscribe(event_type, handler)
         self._stop_loop()
         self._restore_switch_interval()
         self._visible = False
@@ -669,6 +745,12 @@ class RecordingOverlay:
 
     def _set_paused(self, paused: bool) -> None:
         self._paused = paused
+
+    def _set_silent_microphone(self, name: str) -> None:
+        self._silent_microphone = name
+
+    def _set_countdown(self, seconds: float) -> None:
+        self._countdown = seconds
 
     def _retarget(self) -> None:
         width, height = target_size(self._mode)
@@ -702,15 +784,74 @@ class RecordingOverlay:
             estimate = event.estimated_seconds
             self._dispatcher.dispatch(lambda: self._set_estimate(estimate))
 
+    def _on_microphone_silent(self, event: DomainEvent) -> None:
+        if isinstance(event, MicrophoneSilentEvent):
+            name = short_microphone_name(event.device_name)
+            self._dispatcher.dispatch(lambda: self._set_silent_microphone(name))
+
+    def _on_microphone_back(self, _event: DomainEvent) -> None:
+        self._dispatcher.dispatch(lambda: self._set_silent_microphone(""))
+
+    def _on_cap_warning(self, event: DomainEvent) -> None:
+        if isinstance(event, RecordingCapWarningEvent):
+            remaining = event.remaining_seconds
+            self._dispatcher.dispatch(lambda: self._set_countdown(remaining))
+
     def _on_mouse(self, is_down: bool, x: int, y: int) -> None:
         button = hit_test(self._frame, x, y)
         if is_down:
             self._on_press()
             self._pressed = button
+            if button is None:
+                self._grab = (x, y)
+                self._dragging = False
             return
         pressed, self._pressed = self._pressed, None
-        if button is not None and button is pressed:
+        if self._grab is not None:
+            self._release_grab()
+        elif button is not None and button is pressed:
             self._actions[button]()
+
+    def _follow_drag(self) -> None:
+        if self._grab is None:
+            return
+        if not self._window_api.left_button_down():
+            self._release_grab()
+            return
+        cursor = self._window_api.cursor_position()
+        if cursor is None:
+            return
+        dx, dy = cursor[0] - self._grab[0], cursor[1] - self._grab[1]
+        if not self._dragging and math.hypot(dx, dy) < _DRAG_THRESHOLD:
+            return
+        self._dragging = True
+        wanted = (self._origin[0] + dx, self._origin[1] + dy)
+        self._move_to(pill_origin(pill_position(wanted, self._work_area), self._work_area))
+
+    def _release_grab(self) -> None:
+        grab, self._grab = self._grab, None
+        if self._dragging:
+            self._dragging = False
+            self._last_click = None
+            self._save_position(pill_position(self._origin, self._work_area))
+            return
+        if grab is None:
+            return
+        now = self._clock()
+        last, self._last_click = self._last_click, (now, *grab)
+        if (
+            last is not None
+            and now - last[0] <= _DOUBLE_CLICK_SECONDS
+            and math.hypot(grab[0] - last[1], grab[1] - last[2]) <= _DOUBLE_CLICK_SLACK
+        ):
+            self._last_click = None
+            self._move_to(pill_origin(DEFAULT_PILL_POSITION, self._work_area))
+            self._save_position(DEFAULT_PILL_POSITION)
+
+    def _move_to(self, origin: tuple[int, int]) -> None:
+        if origin != self._origin:
+            self._origin = origin
+            self._window_api.move_to(*origin)
 
     def _start_loop(self) -> None:
         if self._after_id is None:
@@ -726,12 +867,15 @@ class RecordingOverlay:
         self._after_id = None
         synced = self._window_api.wait_for_frame()
         now = self._clock()
-        seconds = min(max(now - self._last_tick, 0.0), _LONGEST_FRAME_SECONDS)
+        elapsed = max(now - self._last_tick, 0.0)
+        seconds = min(elapsed, _LONGEST_FRAME_SECONDS)
         self._last_tick = now
         for spring in self._springs():
             spring.step(seconds)
         self._advance_level(seconds)
         self._advance_progress(now)
+        self._advance_countdown(elapsed)
+        self._follow_drag()
         if now - self._last_click_check >= _CLICK_CHECK_SECONDS:
             self._last_click_check = now
             self._on_tick()
@@ -769,6 +913,11 @@ class RecordingOverlay:
             normalized * (1.0 - _LEVEL_SMOOTHING)
         )
         self._phase += _PHASE_PER_SECOND * seconds
+
+    def _advance_countdown(self, elapsed: float) -> None:
+        # Paused time does not count towards the limit, so the clock stops too.
+        if self._countdown is not None and self._mode is Mode.RECORDING and not self._paused:
+            self._countdown = max(self._countdown - elapsed, 0.0)
 
     def _advance_progress(self, now: float) -> None:
         if self._mode is not Mode.TRANSCRIBING:
@@ -812,6 +961,10 @@ class RecordingOverlay:
             paused=self._paused,
             progress=self._progress,
             hovered=hovered,
+            silent_microphone=self._silent_microphone,
+            countdown=(
+                countdown_text(self._countdown) if self._countdown is not None else ""
+            ),
         )
 
 

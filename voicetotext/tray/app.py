@@ -9,7 +9,9 @@ from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     EngineLoadFailedEvent,
     ErrorOccurredEvent,
+    MicrophoneConnectedEvent,
     MicrophoneMissingEvent,
+    MicrophoneSilentEvent,
     RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionEmptyEvent,
@@ -102,6 +104,7 @@ class SystemTrayApp:
         # guaranteed second channel. Cleared when the user activates
         # a new recording - that's the implicit acknowledgement.
         self._error_sticky = False
+        self._silence_reported = False
 
         self._event_bus.subscribe(StateChangedEvent, self._handle_state_changed)
         self._event_bus.subscribe(ErrorOccurredEvent, self._handle_error)
@@ -117,6 +120,12 @@ class SystemTrayApp:
         )
         self._event_bus.subscribe(
             MicrophoneMissingEvent, self._handle_microphone_missing,
+        )
+        self._event_bus.subscribe(
+            MicrophoneSilentEvent, self._handle_microphone_silent,
+        )
+        self._event_bus.subscribe(
+            MicrophoneConnectedEvent, self._handle_microphone_connected,
         )
 
     def run(self) -> None:
@@ -242,6 +251,30 @@ class SystemTrayApp:
             "default until it's back.",
         )
 
+    def _handle_microphone_silent(self, event: MicrophoneSilentEvent) -> None:
+        # Once per recording: a microphone that cuts in and out would
+        # otherwise stack up balloons.
+        if self._icon is None or self._silence_reported:
+            return
+        self._silence_reported = True
+        self._icon.notify(
+            "VoiceToText",
+            f"No audio from {event.device_name}. Check it is unmuted or pick "
+            "another microphone from the tray menu.",
+        )
+
+    def _handle_microphone_connected(self, event: MicrophoneConnectedEvent) -> None:
+        if self._icon is None:
+            return
+        if event.will_be_used:
+            message = f"Using {event.name} for the next dictation."
+        else:
+            message = (
+                f"New microphone: {event.name}. Choose it from the tray "
+                "Microphone menu."
+            )
+        self._icon.notify("VoiceToText", message)
+
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
         self._pending_engine_failure = event.error
         self._pending_engine_ready = False
@@ -275,6 +308,7 @@ class SystemTrayApp:
         new_state = AppState(event.new_state)
         if new_state == AppState.RECORDING:
             self._error_sticky = False
+            self._silence_reported = False
         # The elapsed-time provider tracks the domain state, not the
         # icon presentation - install/clear it regardless of whether
         # the error sticky is suppressing the icon update.

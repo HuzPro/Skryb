@@ -45,6 +45,32 @@ class MicrophoneMissingEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class MicrophoneSilentEvent(DomainEvent):
+    """The recording microphone has sent nothing but digital silence."""
+
+    device_name: str = ""
+    seconds_silent: float = 0.0
+
+
+@dataclass(frozen=True)
+class MicrophoneAudioResumedEvent(DomainEvent):
+    pass
+
+
+@dataclass(frozen=True)
+class MicrophoneConnectedEvent(DomainEvent):
+    """A microphone was plugged in; ``will_be_used`` if the next recording picks it."""
+
+    name: str = ""
+    will_be_used: bool = False
+
+
+@dataclass(frozen=True)
+class RecordingCapWarningEvent(DomainEvent):
+    remaining_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
 class TranscriptionStartedEvent(DomainEvent):
     """The engine has the audio; ``estimated_seconds`` is None without history."""
 

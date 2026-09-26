@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
 
@@ -28,6 +29,9 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
+    # Read where it is used, at each recording or sound, so none of it
+    # needs a rebuild either.
+    recording: RecordingPreferences = RecordingPreferences()
 
 
 @dataclass(frozen=True)

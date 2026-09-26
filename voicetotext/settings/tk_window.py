@@ -177,7 +177,9 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._on_recording_state_changed,
         )
         self._audio_page = TkAudioPage(content, self._microphones)
-        self._output_page = TkOutputPage(content)
+        self._output_page = TkOutputPage(
+            content, on_reset_pill_position=self._service.reset_pill_position,
+        )
         self._dictionary_page = TkDictionaryPage(content)
         self._dictionary_page.set_dictionary(self._service.dictionary_rules())
 
@@ -239,6 +241,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._output_page.set_capture_content(draft.capture_content)
         self._audio_page.set_device(draft.input_device)
         self._audio_page.set_boost_quiet_speech(draft.boost_quiet_speech)
+        self._audio_page.set_recording_preferences(draft.recording)
 
     def _on_choose_logs_folder(self) -> None:
         selected = filedialog.askdirectory(
@@ -340,6 +343,7 @@ class TkSettingsWindow(tkinter.Toplevel):
             capture_content=self._output_page.captures_content(),
             input_device=self._audio_page.current_device(),
             boost_quiet_speech=self._audio_page.boosts_quiet_speech(),
+            recording=self._audio_page.recording_preferences(),
             transcription_mode=self._transcription_page.current_mode(),
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()
