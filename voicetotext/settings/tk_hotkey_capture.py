@@ -46,6 +46,17 @@ def _typed_combination(text: str) -> str:
     return "+".join(part.strip().lower() for part in text.strip().split("+"))
 
 
+def _problem_with(combo: str) -> str:
+    """Why *combo* is not a shortcut, or "" when it is one or is empty."""
+    if not combo:
+        return ""
+    try:
+        parse_hotkey_combo(combo)
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
 class TkHotkeyCapture(ttk.Frame):
     """A key-cap field + Record/Stop control for capturing a global hotkey.
 
@@ -75,6 +86,7 @@ class TkHotkeyCapture(ttk.Frame):
         self.recording_started = Signal()
         self.recording_stopped = Signal()
         self._text_var = tkinter.StringVar(master=self)
+        self._text_var.trace_add("write", self._on_text_changed)
         self._build()
         self._bridge.key_pressed.connect(self._on_bridge_key_raw)
 
@@ -204,17 +216,22 @@ class TkHotkeyCapture(ttk.Frame):
             self._text_var.set(shown_combination(text))
             self._clear_error()
             return
-        if not text:
-            self._set_combination_internal("")
-            self._clear_error()
-            return
-        try:
-            parse_hotkey_combo(text)
-        except ValueError as exc:
-            self._show_error(str(exc))
+        problem = _problem_with(text)
+        if problem:
+            self._show_error(problem)
             return
         self._set_combination_internal(text)
         self._clear_error()
+
+    def _on_text_changed(self, *_args: object) -> None:
+        """Keep a message that is already showing about the text now in the box."""
+        if self._recording or not self._validation_error:
+            return
+        problem = _problem_with(_typed_combination(self._text_var.get()))
+        if problem:
+            self._show_error(problem)
+        else:
+            self._clear_error()
 
     def _set_combination_internal(self, combo: str) -> None:
         self._combination = combo
