@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, FileDown, FileUp, FolderOpen, LoaderCircle, Minus, Square, X, type LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { NavLink } from "react-router";
 import { api, errorText } from "../lib/api";
 import { isDirty } from "../lib/draft";
@@ -24,7 +24,16 @@ export function useAppInfo(): AppInfo | undefined {
   return useQuery({ queryKey: ["app"], queryFn: () => api.get<AppInfo>("/api/app") }).data;
 }
 
-export function engineStatus(app: AppInfo | undefined): { tone: Tone; label: string } {
+/** True once the core has been unreachable for five seconds. */
+export const LostContext = createContext(false);
+
+export function useEngineStatus(): { tone: Tone; label: string; app: AppInfo | undefined } {
+  const app = useAppInfo();
+  return { ...engineStatus(app, useContext(LostContext)), app };
+}
+
+export function engineStatus(app: AppInfo | undefined, lost: boolean): { tone: Tone; label: string } {
+  if (lost) return { tone: "destructive", label: "Not running" };
   if (!app) return { tone: "muted", label: "Connecting" };
   if (app.state === "recording") return { tone: "destructive", label: "Recording" };
   if (app.state === "transcribing") return { tone: "primary", label: "Transcribing" };
@@ -52,7 +61,7 @@ function WindowButton({ label, onClick, danger, children }: { label: string; onC
 
 /** The draggable strip above the content: engine status on the right, then the window buttons. */
 export function TopBar({ nativeTitlebar, onClose, children }: { nativeTitlebar: boolean; onClose: () => void; children?: ReactNode }) {
-  const status = engineStatus(useAppInfo());
+  const status = useEngineStatus();
   return (
     <div data-tauri-drag-region className="flex h-10 shrink-0 items-stretch justify-end">
       <div data-tauri-drag-region className="flex flex-1 items-center px-4">
@@ -90,8 +99,8 @@ function FooterButton({ label, icon: Icon, onClick }: { label: string; icon: Luc
 }
 
 export function Sidebar({ items }: { items: NavItem[] }) {
-  const app = useAppInfo();
-  const status = engineStatus(app);
+  const status = useEngineStatus();
+  const app = status.app;
   const { settings, discardSettings } = useStore();
   const client = useQueryClient();
   const [note, setNote] = useState("");
@@ -225,6 +234,7 @@ export function Prompts() {
           <DialogTitle>{prompt.license.title}</DialogTitle>
           <DialogDescription>Read and accept the licence to download and use this model.</DialogDescription>
           <pre className="selectable max-h-[46vh] overflow-y-auto rounded-lg border bg-muted/50 p-3 font-sans text-[12.5px] whitespace-pre-wrap">{prompt.license.text}</pre>
+          {prompt.license.url ? <p className="selectable -mt-2 truncate text-[12px] text-muted-foreground">Source: {prompt.license.url}</p> : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => answer(prompt.resolve, false)}>
               Cancel

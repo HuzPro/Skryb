@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Download, Play, RotateCcw, Search, Square, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Card } from "../components/parts";
+import { useAppInfo } from "../components/shell";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -83,9 +84,13 @@ function statusVariant(status: HistoryEntry["status"]): "destructive" | "default
 
 function HistorySettings() {
   const { settings, editSettings, confirm } = useStore();
+  const app = useAppInfo();
   const [note, setNote] = useState("");
   useServerEvent((name, data) => {
-    if (name === "history" && (data as { event?: string }).event === "deleted_all") setNote("");
+    if (name !== "history") return;
+    const event = data as { event?: string; error?: string };
+    if (event.event === "deleted_all") setNote("");
+    if (event.event === "changed" && event.error) setNote(`Could not delete everything: ${event.error}`);
   });
   const draft = settings?.draft;
   if (!draft) return null;
@@ -120,6 +125,16 @@ function HistorySettings() {
       <Button variant="destructive" size="sm" onClick={() => void deleteAll()}>
         Delete all
       </Button>
+      {app?.diagnostics_directory ? (
+        <div className="flex w-full items-center gap-2 border-t pt-2 text-[12.5px] text-muted-foreground">
+          <span className="min-w-0 truncate">
+            Kept in <span className="selectable text-foreground">{app.diagnostics_directory}</span>, with the logs. Use a local folder that is not synced or shared.
+          </span>
+          <Button variant="link" className="ml-auto text-[12.5px]" onClick={() => void api.post("/api/logs/open").catch((error: unknown) => setNote(errorText(error)))}>
+            Open
+          </Button>
+        </div>
+      ) : null}
     </Card>
   );
 }

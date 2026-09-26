@@ -8,7 +8,7 @@ export interface Snapshot {
   settings?: Settings | undefined;
 }
 
-export type QueryName = "app" | "models" | "writing" | "settings" | "engines" | "history";
+export type QueryName = "app" | "models" | "writing" | "settings" | "engines" | "history" | "microphones";
 
 export interface Reduction {
   snapshot: Snapshot;
@@ -28,13 +28,13 @@ interface EngineEvent {
 
 interface DownloadEvent {
   name: string;
-  state: "downloading" | "paused" | "completed" | "failed" | "cancelled";
+  state: "downloading" | "paused" | "completed" | "failed" | "cancelled" | "deleted";
   bytes_done: number;
   bytes_total: number;
   error: string;
 }
 
-/** The contract writes the engine event as `{loading|ready|failed, error, model}`; accept a state field or AppInfo-style flags. */
+/** The core sends `{state, loading, ready, error, model}`; the flags alone are read when `state` is missing. */
 export function engineState(data: EngineEvent): EngineState {
   const named = data.state ?? data.status;
   if (named === "loading" || named === "ready" || named === "failed") return named;
@@ -58,6 +58,7 @@ function applyDownload(models: Model[], event: DownloadEvent): Model[] {
     if (model.name !== event.name) return model;
     if (event.state === "completed") return { ...model, installed: true, download: null };
     if (event.state === "cancelled") return { ...model, download: null };
+    if (event.state === "deleted") return { ...model, installed: false, download: null };
     return {
       ...model,
       download: { state: event.state, bytes_done: event.bytes_done, bytes_total: event.bytes_total, error: event.error ?? "" },
@@ -80,7 +81,7 @@ export function reduceEvent(snapshot: Snapshot, name: string, data: unknown): Re
       const known = snapshot.models?.some((model) => model.name === event.name) ?? false;
       if (!snapshot.models || !known) return { snapshot, refetch: ["models"] };
       const models = applyDownload(snapshot.models, event);
-      const finished = event.state === "completed" || event.state === "cancelled";
+      const finished = event.state === "completed" || event.state === "cancelled" || event.state === "deleted";
       return { snapshot: { ...snapshot, models }, refetch: finished ? ["models"] : [] };
     }
     case "writing":
@@ -89,6 +90,8 @@ export function reduceEvent(snapshot: Snapshot, name: string, data: unknown): Re
       return { snapshot: { ...snapshot, settings: data as Settings }, refetch: [] };
     case "hardware":
       return { snapshot, refetch: ["engines"] };
+    case "microphones":
+      return { snapshot, refetch: ["microphones"] };
     case "history": {
       const kind = (data as { event?: string }).event;
       return { snapshot, refetch: kind === "changed" || kind === "deleted_all" ? ["history"] : [] };

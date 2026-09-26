@@ -26,6 +26,7 @@ HISTORY_SIZE = 2500
 LICENSE = {
     "id": "crisperwhisper-nc",
     "title": "CrisperWhisper licence (non-commercial research)",
+    "url": "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/main/LICENSE.md",
     "text": (
         "CrisperWhisper 2.0 - Non-Commercial Research Licence\n\n"
         "1. You may use the model weights and their outputs for non-commercial research only.\n"
@@ -50,6 +51,11 @@ MODELS = [
      "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
      "license_id": "crisperwhisper-nc"},
 ]
+
+BROKEN_MICROPHONE = "Microphone Array (Realtek(R) A"
+USB_MICROPHONE = {"name": "USB Microphone (Røde NT-USB Mi", "label": "USB Microphone (Røde NT-USB Mini)",
+                  "connected": True, "is_default": False}
+HOT_PLUG_AFTER_SECONDS = 45.0
 
 ENGINES = {
     "parakeet-tdt-0.6b-v3": [("nano_parakeet", "Parakeet (ONNX Runtime)", "Runs on the CPU with ONNX Runtime; no GPU needed.")],
@@ -128,7 +134,7 @@ def _history():
         elif roll < 0.07:
             status, has_audio = "Not saved", False
         entries.append({
-            "id": f"{at:%Y%m%dT%H%M%S}-{index:05d}", "at": at.isoformat(timespec="seconds"),
+            "id": f"{at:%Y%m%dT%H%M%SZ}-{index * 2654435761 % 16**8:08x}.{index % 40 + 3}", "at": at.isoformat(timespec="seconds"),
             "text": f"#{HISTORY_SIZE - index} {text}" if text.strip() else text,
             "audio_seconds": round(1.5 + rng.random() * 40, 1), "status": status, "error": error,
             "has_audio": has_audio, "kind": "edit" if index % 23 == 5 else "dictation",
@@ -203,14 +209,14 @@ class Core:
     def load_engine(self, model: str) -> None:
         self.app["engine"] = {"ready": False, "loading": True, "error": None, "model": model}
         self.app["state"] = "loading"
-        self.emit("engine", {"state": "loading", "error": None, "model": model})
+        self.emit("engine", {"state": "loading", "loading": True, "ready": False, "error": None, "model": model})
         self.emit("app", self.app)
 
         def done() -> None:
             with self.lock:
                 self.app["engine"] = {"ready": True, "loading": False, "error": None, "model": model}
                 self.app["state"] = "idle"
-            self.emit("engine", {"state": "ready", "error": None, "model": model})
+            self.emit("engine", {"state": "ready", "loading": False, "ready": True, "error": None, "model": model})
             self.emit("app", self.app)
 
         self.later(ENGINE_LOAD_SECONDS, done)
@@ -261,6 +267,13 @@ class Core:
                 level = max(0.0, 0.45 + 0.4 * math.sin(t * 2.3) * math.sin(t * 7.1))
                 self.emit("meter", {"level": round(level, 3)})
 
+    def hot_plug(self) -> None:
+        time.sleep(HOT_PLUG_AFTER_SECONDS)
+        with self.lock:
+            if not any(mic["name"].startswith("USB") for mic in self.microphones):
+                self.microphones.append(dict(USB_MICROPHONE))
+        self.emit("microphones", {"name": USB_MICROPHONE["label"], "will_be_used": False})
+
     def heartbeat(self) -> None:
         while True:
             time.sleep(15)
@@ -270,18 +283,16 @@ class Core:
 class Handler(BaseHTTPRequestHandler):
     core: Core
     token: str
-    protocol_version = "HTTP/1.1"
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"{datetime.now():%H:%M:%S.%f}"[:-3], self.command, self.path.split("?token=")[0], flush=True)
 
     # -- plumbing ---------------------------------------------------------
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin") or "*")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Max-Age", "600")
-        self.send_header("Vary", "Origin")
 
     def _send(self, status: int, body: object = None) -> None:
         data = b"" if body is None else json.dumps(body).encode()
@@ -318,7 +329,6 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("DELETE")
 
     def _dispatch(self, method: str) -> None:
-        # Read the whole body even when unused, or the next request on this keep-alive connection starts mid-body.
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
         self.body = json.loads(raw) if raw else None
@@ -435,6 +445,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(409, "This model is in use. Pick another model and save first.")
                 return
             model["installed"] = False
+            core.emit("download", {"name": model["name"], "state": "deleted", "bytes_done": 0, "bytes_total": 0, "error": ""})
         self._send(202)
 
     def _engines(self, method, rest, query) -> None:
@@ -461,12 +472,14 @@ class Handler(BaseHTTPRequestHandler):
         core = self.core
         if rest == ["meter"]:
             body = self._body()
+            if body["on"] and body["device"] == BROKEN_MICROPHONE:
+                self._error(400, "This microphone could not be opened.")
+                return
             core.meter_on = bool(body["on"])
             self._send(204)
             return
         if query.get("rescan") == ["1"] and not any(mic["name"].startswith("USB") for mic in core.microphones):
-            core.microphones.append({"name": "USB Microphone (Røde NT-USB Mi", "label": "USB Microphone (Røde NT-USB Mini)",
-                                     "connected": True, "is_default": False})
+            core.microphones.append(dict(USB_MICROPHONE))
         self._send(200, core.microphones)
 
     def _shortcuts(self, method, rest, query) -> None:
@@ -516,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(200, status)
             return
-        self._send(202)
+        self._send(202 if action in ("install", "cancel", "retry", "restart") else 204)
         core.emit("writing", status)
 
     def _transforms(self, method, rest, query) -> None:
@@ -583,7 +596,7 @@ def main() -> None:
     parser.add_argument("--gpu", action="store_true", help="the hardware probe finds a GPU, so Live is available")
     args = parser.parse_args()
     core = Core(first_run=args.first_run, gpu=args.gpu)
-    for work in (core.tick, core.meter, core.heartbeat):
+    for work in (core.tick, core.meter, core.heartbeat, core.hot_plug):
         threading.Thread(target=work, daemon=True).start()
     Handler.core, Handler.token = core, args.token
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
