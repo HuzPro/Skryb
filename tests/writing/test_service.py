@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes.writing import FakeChild, FakeLaunch
+from tests.fakes.writing import FakeChild, FakeLaunch, UnreachableDownloader
 from voicetotext.core.json_config_adapter import DEFAULT_CONFIG
 from voicetotext.output.dictionary_config import DictionaryConfig, LiteralRule, RegexRule
-from voicetotext.writing.install import WritingPaths
+from voicetotext.writing.install import DOWNLOAD_FAILED, WritingPaths
 from voicetotext.writing.learning import Learner
 from voicetotext.writing.llama_server import LlamaServer, ServerFiles, ServerState
 from voicetotext.writing.service import SERVER_FAILED_NOTICE, WritingService, spellings_from
@@ -52,6 +52,7 @@ class Rig:
             TransformStore(tmp_path / "transforms.json"),
             notify=self.notices.append,
             run_in_background=lambda action: action(),
+            make_downloader=UnreachableDownloader,
             open_path=self.opened.append,
         )
 
@@ -111,6 +112,20 @@ class TestStatus:
         rig.service.open_log()
 
         assert rig.opened == [rig.server.log_path]
+
+    def test_an_install_with_no_network_reads_as_one_sentence_and_open_log_shows_why(
+        self, tmp_path,
+    ):
+        rig = Rig(tmp_path, [], locate_files=False)
+
+        rig.service.install()
+        _wait_for(lambda: rig.service.status().state == "install_failed")
+        rig.service.open_log()
+        rig.service.dispose()
+
+        assert rig.service.status().detail == DOWNLOAD_FAILED
+        assert rig.opened == [tmp_path / "managed" / "install.log"]
+        assert "getaddrinfo failed" in rig.opened[0].read_text(encoding="utf-8")
 
 
 class TestWhatCleanupGets:

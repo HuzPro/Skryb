@@ -186,7 +186,10 @@ class WritingService:
         self._run_in_background(self._server.restart)
 
     def open_log(self) -> None:
-        log = self._server.log_path
+        log = (
+            self._paths.install_log if self._installer.progress.state == "failed"
+            else self._server.log_path
+        )
         if log.exists():
             self._open_path(log)
 

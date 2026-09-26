@@ -73,7 +73,9 @@ def status_text(status: WritingStatus) -> str:
             f"Downloading {share:.0%} ({status.bytes_done / _GB:.1f} of "
             f"{status.bytes_total / _GB:.1f} GB)"
         )
-    if status.state in ("failed", "install_failed"):
+    if status.state == "install_failed":
+        return status.detail
+    if status.state == "failed":
         return f"Failed: {last_line(status.detail) or 'no reason was given'}"
     if status.state == "starting":
         return "Starting..."
@@ -546,7 +548,7 @@ class TkWritingPage(ttk.Frame):
                 style="TButton" if status.state == "downloading" else PRIMARY_BUTTON_STYLE,
             )
             self._action_button.pack(side="right")
-        if status.state == "failed":
+        if status.state in ("failed", "install_failed"):
             self._log_button.pack(side="right", padx=(0, CONTROL_GAP))
 
     def _on_action(self) -> None:
