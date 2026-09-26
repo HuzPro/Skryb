@@ -41,10 +41,13 @@ class LastDictation:
         return self._send(text, output)
 
     def copy(self) -> bool:
-        """Put the last dictation on the clipboard; ``False`` when there is none."""
+        """Put the last dictation on the clipboard; ``False`` when there is none.
+
+        Trimmed: the spaces that fitted it to the caret belong to that paste.
+        """
         with self._lock:
             text, output = self._text, self._copy
-        return self._send(text, output)
+        return self._send(text.strip(), output)
 
     @staticmethod
     def _send(text: str, output: TextOutputHandler | None) -> bool:

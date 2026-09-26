@@ -18,6 +18,7 @@ from voicetotext.core.events import (
     RecordingResumedEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
+    RetryStartedEvent,
     StateChangedEvent,
     TranscriptionCompletedEvent,
     TranscriptionEmptyEvent,
@@ -190,6 +191,7 @@ class RecordAndTranscribeUseCase:
             audio, self._unfinished_audio = self._unfinished_audio, None
         if audio is None:
             return
+        self._event_bus.publish(RetryStartedEvent())
         requested_at = datetime.now(UTC)
         try:
             result = self._transcribe(audio)

@@ -200,3 +200,8 @@ class DeliveryFailedEvent(DomainEvent):
 @dataclass(frozen=True)
 class NoLastDictationEvent(DomainEvent):
     """Paste-last or copy-last was asked for before anything was dictated."""
+
+
+@dataclass(frozen=True)
+class RetryStartedEvent(DomainEvent):
+    """A cancelled or failed recording is being transcribed again."""
