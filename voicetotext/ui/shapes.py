@@ -7,7 +7,7 @@ which the server answers with a 400.
 
 import math
 from collections.abc import Iterable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TypeVar, cast
 
@@ -21,14 +21,14 @@ from voicetotext.output.dictionary_config import (
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_method import PasteMethod, normalized_process_name
-from voicetotext.recording.preferences import DUCK_MODES, RecordingPreferences
+from voicetotext.recording.preferences import DUCK_MODES
 from voicetotext.settings.service import CRISPERWHISPER_MODES
 from voicetotext.settings.settings_draft import SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
 from voicetotext.writing.install import INSTALL_BYTES
 from voicetotext.writing.llama_server import last_line
 from voicetotext.writing.service import WritingStatus
-from voicetotext.writing.settings import CLEANUP_LEVELS, WritingSettings, clamp_deadline
+from voicetotext.writing.settings import CLEANUP_LEVELS, clamp_deadline
 
 Json = dict[str, object]
 _T = TypeVar("_T")
@@ -95,14 +95,20 @@ def settings_json(draft: SettingsDraft) -> Json:
     }
 
 
-def draft_from_json(document: object) -> SettingsDraft:
+def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
+    """The settings the shell sent, over *saved*.
+
+    Starting from what is saved keeps a setting this contract does not
+    carry yet as it is, rather than resetting it to its default.
+    """
     settings = Fields(document, "settings")
     writing = settings.section("writing")
     recording = settings.section("recording")
     retention = settings.whole("history_retention_days")
     if retention < 0:
         raise ValueError("settings.history_retention_days cannot be negative.")
-    return SettingsDraft(
+    return replace(
+        saved,
         model_size=settings.text("model_size"),
         language=settings.text("language"),
         device=settings.text("device"),
@@ -115,7 +121,8 @@ def draft_from_json(document: object) -> SettingsDraft:
         capture_content=settings.flag("capture_content"),
         input_device=settings.text("input_device"),
         boost_quiet_speech=settings.flag("boost_quiet_speech"),
-        writing=WritingSettings(
+        writing=replace(
+            saved.writing,
             cleanup=writing.one_of("cleanup", CLEANUP_LEVELS),
             lists=writing.flag("lists"),
             deadline_seconds=clamp_deadline(writing.number("deadline_seconds")),
@@ -129,7 +136,8 @@ def draft_from_json(document: object) -> SettingsDraft:
         ),
         hotkey_bindings=bindings_from_json(settings.items("hotkey_bindings")),
         double_tap_locks_hold=settings.flag("double_tap_locks_hold"),
-        recording=RecordingPreferences(
+        recording=replace(
+            saved.recording,
             warn_when_silent=recording.flag("warn_when_silent"),
             preferred_devices=tuple(dict.fromkeys(
                 name.strip() for name in recording.texts("preferred_devices") if name.strip()

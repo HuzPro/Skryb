@@ -7,14 +7,19 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from dataclasses import dataclass
+
 import pytest
 
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
 from voicetotext.core.events import DownloadProgressEvent
 from voicetotext.core.state_machine import AppState
+from voicetotext.output.output_mode import OutputMode
 from voicetotext.recording.pill import DEFAULT_PILL_POSITION
+from voicetotext.settings.settings_draft import SettingsDraft
 from voicetotext.transcription.engine_types import HardwareProfile
+from voicetotext.ui.shapes import draft_from_json
 from voicetotext.writing.install import INSTALL_BYTES
 from voicetotext.writing.transforms import BUILTIN_TRANSFORMS
 
@@ -273,6 +278,25 @@ def test_settings_that_cannot_be_read_are_refused_naming_the_field(rig: Rig, cha
     assert body["error"] == "Those settings could not be read."
     assert named in body["detail"]
     assert rig.saved == []
+
+
+@dataclass(frozen=True)
+class _DraftWithALaterSetting(SettingsDraft):
+    pill_size: str = "large"
+
+
+def test_a_setting_the_shell_does_not_send_yet_keeps_its_saved_value(rig: Rig) -> None:
+    saved = _DraftWithALaterSetting(
+        model_size=PARAKEET, language="en", device="auto", engine="auto",
+        output_mode=OutputMode.DIRECT_PASTE, pill_size="small",
+    )
+    sent = _settings(rig)
+    sent["language"] = "de"
+
+    draft = draft_from_json(sent, saved)
+
+    assert isinstance(draft, _DraftWithALaterSetting)
+    assert (draft.pill_size, draft.language) == ("small", "de")
 
 
 def test_settings_wait_while_a_dictation_is_in_progress(rig: Rig) -> None:
