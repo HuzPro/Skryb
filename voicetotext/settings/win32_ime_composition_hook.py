@@ -40,6 +40,7 @@ class Win32ImeCompositionHook:
         self._window = window
         self._hwnd = window.winfo_id()
         self._restored = False
+        self._failure_logged = False
         user32 = _user32()
         self._call_original = user32.CallWindowProcW
         self._proc = ctypes.WINFUNCTYPE(
@@ -59,6 +60,13 @@ class Win32ImeCompositionHook:
     def _window_proc(
         self, hwnd: int, message: int, w_param: int, l_param: int,
     ) -> int:
+        try:
+            return self._answer(hwnd, message, w_param, l_param)
+        except Exception:
+            self._log_first_failure()
+            return int(_user32().DefWindowProcW(hwnd, message, w_param, l_param))
+
+    def _answer(self, hwnd: int, message: int, w_param: int, l_param: int) -> int:
         if (
             message == _WM_IME_COMPOSITION
             and l_param & _GCS_RESULTSTR
@@ -70,6 +78,12 @@ class Win32ImeCompositionHook:
                 self._original_proc, hwnd, message, w_param, l_param,
             ),
         )
+
+    def _log_first_failure(self) -> None:
+        if self._failure_logged:
+            return
+        self._failure_logged = True
+        _logger.exception("The IME window hook failed on a message; passing messages on.")
 
     def _reposted_composition_result(self, hwnd: int) -> bool:
         try:
@@ -133,6 +147,10 @@ def _user32() -> ctypes.CDLL:
         _LRESULT,
     ]
     user32.CallWindowProcW.restype = _LRESULT
+    user32.DefWindowProcW.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint, _ULONG_PTR, _LRESULT,
+    ]
+    user32.DefWindowProcW.restype = _LRESULT
     user32.PostMessageW.argtypes = [
         ctypes.c_void_p, ctypes.c_uint, _ULONG_PTR, _LRESULT,
     ]

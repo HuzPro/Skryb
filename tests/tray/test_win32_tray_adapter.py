@@ -6,6 +6,9 @@ the orchestration is driven with a fake backend and a fake dispatcher;
 ``create_hicon`` is exercised against real GDI (this module is win32-only).
 """
 
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -226,27 +229,40 @@ class TestExplorerRestartRecovery:
 
 
 class TestDeviceChanges:
-    def _backend(self, changes: list[str]) -> mod.Win32TrayBackend:
+    def _backend(
+        self, changes: list[str], dispatcher: RecordingDispatcher,
+    ) -> mod.Win32TrayBackend:
         backend = mod.Win32TrayBackend.__new__(mod.Win32TrayBackend)
         backend._on_devices_changed = lambda: changes.append("changed")
+        backend._dispatcher = dispatcher
         return backend
 
-    def test_a_device_plugged_in_or_out_is_reported(self, monkeypatch) -> None:
+    def test_a_device_plugged_in_or_out_is_handled_on_the_next_gui_drain_not_inside_the_window_procedure(
+        self, monkeypatch,
+    ) -> None:
         changes: list[str] = []
+        dispatcher = RecordingDispatcher()
         monkeypatch.setattr(mod, "_user32", MagicMock())
+        backend = self._backend(changes, dispatcher)
 
-        self._backend(changes)._window_proc(0, 0x0219, 0x0007, 0)
+        for _ in range(3):
+            backend._window_proc(0, 0x0219, 0x0007, 0)
 
-        assert changes == ["changed"]
+        assert changes == []
+        for action in dispatcher.actions:
+            action()
+        assert changes == ["changed"] * 3
 
     def test_other_device_messages_are_left_to_windows(self, monkeypatch) -> None:
         changes: list[str] = []
+        dispatcher = RecordingDispatcher()
         user32 = MagicMock()
         monkeypatch.setattr(mod, "_user32", user32)
 
-        self._backend(changes)._window_proc(0, 0x0219, 0x8000, 1234)
+        self._backend(changes, dispatcher)._window_proc(0, 0x0219, 0x8000, 1234)
 
         assert changes == []
+        assert dispatcher.actions == []
         user32.DefWindowProcW.assert_called_once_with(0, 0x0219, 0x8000, 1234)
 
 
@@ -261,6 +277,7 @@ class TestMicrophoneMenu:
         backend._list_microphones = lambda: (connected, chosen)
         backend._on_microphone_chosen = chosen_log.append
         backend._offered_microphones = []
+        backend._dispatcher = SyncDispatcher()
         return tray, backend
 
     def _menu_items(self, tray, backend, monkeypatch):
@@ -339,6 +356,7 @@ class TestRepeatLastDictationMenu:
         backend._on_microphone_chosen = None
         backend._offered_microphones = []
         backend._hwnd = 0
+        backend._dispatcher = SyncDispatcher()
         return tray, backend
 
     def test_paste_and_copy_last_sit_above_history_in_the_menu(self, monkeypatch):
@@ -427,6 +445,154 @@ class TestRepeatLastDictationMenu:
         assert calls == ["copy last"]
 
 
+class TestWindowProcedureNeverRunsAppCode:
+    """The tray window procedure runs inside Tk's event loop; a Tk call made
+    there aborts the process at the next Python callback Tk runs."""
+
+    def _backend(self, calls: list[str], dispatcher) -> mod.Win32TrayBackend:
+        backend = mod.Win32TrayBackend.__new__(mod.Win32TrayBackend)
+        backend._dispatcher = dispatcher
+        backend._get_state_label = lambda: "Idle - ready"
+        backend._on_settings_clicked = lambda: calls.append("settings")
+        backend._on_quit_clicked = lambda: calls.append("quit")
+        backend._on_history_clicked = lambda: calls.append("history")
+        backend._on_paste_last_clicked = None
+        backend._on_copy_last_clicked = lambda: calls.append("copy last")
+        backend._on_microphone_chosen = lambda name: calls.append(f"mic {name}")
+        backend._on_devices_changed = lambda: calls.append("devices changed")
+        backend._list_microphones = None
+        backend._offered_microphones = ["", "Microphone (Maono PD300X Microphone)", "Mic Été"]
+        backend._hwnd = 0
+        return backend
+
+    def test_menu_choices_run_on_the_next_gui_drain_not_inside_the_window_procedure(self):
+        calls: list[str] = []
+        dispatcher = RecordingDispatcher()
+        backend = self._backend(calls, dispatcher)
+
+        for command in (
+            mod._ID_SETTINGS, mod._ID_HISTORY, mod._ID_COPY_LAST,
+            mod._ID_FIRST_MICROPHONE + 2, mod._ID_FIRST_MICROPHONE, mod._ID_QUIT,
+            0, mod._ID_STATE, mod._ID_FIRST_MICROPHONE + 3,
+        ):
+            backend._dispatch_menu_command(command)
+
+        assert calls == []
+        for action in dispatcher.actions:
+            action()
+        assert calls == ["settings", "history", "copy last", "mic Mic Été", "mic ", "quit"]
+
+    def test_a_double_click_on_the_icon_opens_settings_on_the_next_gui_drain(
+        self, monkeypatch,
+    ):
+        calls: list[str] = []
+        dispatcher = RecordingDispatcher()
+        monkeypatch.setattr(mod, "_user32", MagicMock())
+
+        self._backend(calls, dispatcher)._window_proc(0, mod._WM_APP_TRAY, 1, 0x0203)
+
+        assert calls == []
+        dispatcher.actions[0]()
+        assert calls == ["settings"]
+
+    def test_odd_and_failing_messages_never_raise_into_windows(
+        self, monkeypatch, app_caplog,
+    ):
+        calls: list[str] = []
+        reported: list[object] = []
+        user32 = MagicMock()
+        user32.DefWindowProcW.return_value = 0
+        monkeypatch.setattr(mod, "_user32", user32)
+        monkeypatch.setattr(sys, "unraisablehook", reported.append)
+        backend = self._backend(calls, RecordingDispatcher())
+
+        def broken_label() -> str:
+            raise RuntimeError("state label is broken")
+
+        backend._get_state_label = broken_label
+        proc = mod._WNDPROC(backend._window_proc)
+
+        results = [
+            proc(None, message, w_param, l_param)
+            for message, w_param, l_param in [
+                (mod._WM_APP_TRAY, 0, 0),
+                (mod._WM_DEVICECHANGE, 0x0007, 0),
+                (0x0100, 0xE7, 0),
+                (0x0102, 0, 0),
+                (mod._WM_APP_TRAY, 1, 0x0205),
+                (mod._WM_APP_TRAY, 1, 0x007B),
+            ]
+        ]
+
+        assert reported == []
+        assert results == [0, 0, 0, 0, 0, 0]
+        failures = [r for r in app_caplog.records if "tray window failed" in r.getMessage()]
+        assert len(failures) == 1
+        assert calls == []
+
+
+_DEVICE_BROADCAST_WHILE_TK_RUNS = """
+import ctypes
+import threading
+import time
+import tkinter
+
+ctypes.windll.kernel32.WerSetFlags(0x20)
+ctypes.windll.kernel32.SetErrorMode(0x8003)
+
+from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
+from voicetotext.tray.win32_tray_adapter import Win32TrayBackend
+
+root = tkinter.Tk()
+root.withdraw()
+dispatcher = TkGuiThreadDispatcher(root)
+settles = []
+
+
+def devices_changed():
+    settles.append(root.after(1000, lambda: None))
+
+
+backend = Win32TrayBackend(
+    lambda: "Idle", None, root.quit,
+    on_devices_changed=devices_changed, dispatcher=dispatcher,
+)
+send = ctypes.windll.user32.SendNotifyMessageW
+send.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+
+
+def broadcast():
+    for _ in range(12):
+        time.sleep(0.04)
+        send(backend._hwnd, 0x0219, 0x0007, 0)
+
+
+threading.Thread(target=broadcast, daemon=True).start()
+root.after(1200, root.quit)
+root.mainloop()
+backend.destroy()
+print(len(settles))
+"""
+
+
+def test_devices_plugged_in_while_tk_runs_its_timers_no_longer_abort_the_process():
+    """Windows broadcasts a device change to every top-level window; handling
+    it with a Tk call inside the window procedure killed the process with
+    0xc0000409 at Tk's next Python callback. Runs in a child process, with no
+    visible window and no crash dialog, because that failure is an abort."""
+    completed = subprocess.run(
+        [sys.executable, "-c", _DEVICE_BROADCAST_WHILE_TK_RUNS],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "12"
+
+
 _TRAY = 0x10
 _TASKBAR = 0x20
 _NOTEPAD = 0x100
@@ -442,7 +608,7 @@ def _window(hwnd, cls, *, visible=True, iconic=False, owner=0, exstyle=0, cloake
 class FakeDesktop:
     """The windows on screen in Z order, and a foreground that can be refused."""
 
-    def __init__(self, windows, *, foreground, refuses_focus=False):
+    def __init__(self, windows, *, foreground, refuses_focus=False) -> None:
         self.windows = windows
         self.foreground = foreground
         self.refuses_focus = refuses_focus

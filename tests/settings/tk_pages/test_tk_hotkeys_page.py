@@ -156,3 +156,21 @@ def test_recording_one_shortcut_stops_recording_any_other(page, bridge):
     assert first.combination() == ""
     assert events == [True, True, False]
     assert bridge.running == 0
+
+
+def test_reloading_the_shortcuts_many_times_leaves_only_the_visible_boxes_listening_to_the_hooks(
+    tk_root, bridge,
+):
+    scheduled: list = []
+    page = TkHotkeysPage(tk_root, capture_bridge=bridge, schedule=scheduled.append)
+    try:
+        for _ in range(200):
+            page.set_bindings(_EVERY_KIND)
+        page.remove_dictation_row(page.dictation_rows()[-1])
+
+        bridge.emit_key("f9")
+
+        assert len(page.dictation_rows()) == 2
+        assert len(scheduled) == 2 + 3
+    finally:
+        page.destroy()
