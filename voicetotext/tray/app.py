@@ -14,6 +14,7 @@ from voicetotext.core.events import (
     MicrophoneSilentEvent,
     NoLastDictationEvent,
     RecordingCappedEvent,
+    RetryStartedEvent,
     StateChangedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
@@ -103,8 +104,8 @@ class SystemTrayApp:
         # error event even once the state machine has cycled back to
         # IDLE. The OS notification balloon can be silenced by Focus
         # Assist, hidden trays, or DND, so the icon is the only
-        # guaranteed second channel. Cleared when the user activates
-        # a new recording - that's the implicit acknowledgement.
+        # guaranteed second channel. Cleared when the user starts a new
+        # recording or retries the failed one - the implicit acknowledgement.
         self._error_sticky = False
         self._silence_reported = False
 
@@ -135,6 +136,7 @@ class SystemTrayApp:
         self._event_bus.subscribe(
             NoLastDictationEvent, self._handle_no_last_dictation,
         )
+        self._event_bus.subscribe(RetryStartedEvent, self._handle_retry_started)
 
     def run(self) -> None:
         self._icon = self._tray_factory(
@@ -292,6 +294,13 @@ class SystemTrayApp:
         if self._icon is None:
             return
         self._icon.notify("VoiceToText", "No dictation yet.")
+
+    def _handle_retry_started(self, _event: RetryStartedEvent) -> None:
+        self._error_sticky = False
+        if self._icon is None:
+            return
+        state = self._state_machine.state
+        self._icon.update_state(state, _STATE_LABELS.get(state, "Unknown"))
 
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
         self._pending_engine_failure = event.error

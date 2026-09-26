@@ -166,7 +166,7 @@ def test_paste_last_resends_the_final_text_through_the_chain_without_the_pipelin
     assert delivered.outputs[-1] == "Second — naïve café. "
     assert copied.outputs == []
     assert last.copy() is True
-    assert copied.outputs == ["Second — naïve café. "]
+    assert copied.outputs == ["Second — naïve café."]
 
 
 def test_nothing_is_repeated_before_the_first_dictation() -> None:

@@ -19,6 +19,7 @@ from voicetotext.output.last_dictation import LastDictation, LastDictationDecora
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+from voicetotext.tray.app import SystemTrayApp
 
 
 def _audio(seconds: float) -> AudioSegment:
@@ -95,6 +96,18 @@ def test_paste_last_resends_the_final_text_and_copy_last_only_writes_the_clipboa
     assert app.of_type(NoLastDictationEvent) == []
 
 
+def test_copy_last_leaves_out_the_spaces_that_fitted_it_to_the_caret_and_paste_last_keeps_them(
+) -> None:
+    app = App()
+    app.dictate(_audio(2.0), " and then naïve café ✓ 東京. ")
+
+    app.use_case.paste_last()
+    app.use_case.copy_last()
+
+    assert app.pasted.outputs == [" and then naïve café ✓ 東京. "] * 2
+    assert app.copied.outputs == ["and then naïve café ✓ 東京."]
+
+
 def test_asking_for_the_last_dictation_before_any_notifies_once_per_ask() -> None:
     app = App()
 
@@ -166,6 +179,28 @@ def test_a_failed_transcription_can_be_retried_and_a_second_failure_is_offered_a
     assert app.engine.transcribe_calls == [audio, audio, audio]
     assert app.pasted.outputs == ["worked the third time"]
     assert app.state_machine.state == AppState.IDLE
+
+
+def test_the_tray_icon_leaves_the_error_colour_after_a_successful_retry() -> None:
+    app = App()
+    icon = MagicMock()
+    icon.run.side_effect = lambda setup: setup(icon)
+    SystemTrayApp(
+        use_case=app.use_case,
+        state_machine=app.state_machine,
+        event_bus=app.event_bus,
+        hotkey_listener=MagicMock(),
+        tray_factory=lambda **_kwargs: icon,
+    ).run()
+    app.dictate(_audio(4.0), RuntimeError("CUDA failed with error out of memory"))
+    app.use_case.retry_last_recording()
+    assert icon.update_state.call_args.args == (AppState.ERROR, "Error")
+
+    app.engine.will_return(_result("worked the third time"))
+    app.use_case.retry_last_recording()
+
+    assert app.pasted.outputs == ["worked the third time"]
+    assert icon.update_state.call_args.args == (AppState.IDLE, "Idle - ready")
 
 
 def test_a_retry_failure_never_disturbs_a_recording_in_progress() -> None:
