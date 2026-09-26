@@ -2,6 +2,7 @@ import logging
 
 from voicetotext.output.key_sender import KeySender
 from voicetotext.output.modifier_key_state_reader import ModifierKeyStateReader
+from voicetotext.output.paste_method import PasteMethod
 from voicetotext.output.sleeper import Sleeper
 
 
@@ -30,9 +31,9 @@ class ModifierReleaseWaitingKeySender(KeySender):
         self._modifier_state = modifier_state
         self._sleeper = sleeper
 
-    def send_ctrl_v(self) -> None:
+    def send_paste(self, method: PasteMethod, text: str) -> None:
         self._wait_for_modifier_release()
-        self._inner.send_ctrl_v()
+        self._inner.send_paste(method, text)
 
     def _wait_for_modifier_release(self) -> None:
         for _ in range(_MAX_POLLS):

@@ -9,6 +9,9 @@ import pytest
 from tests.fakes.dispatcher import InlineActionDispatcher
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
+    MicrophoneAudioResumedEvent,
+    MicrophoneSilentEvent,
+    RecordingCapWarningEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
     StateChangedEvent,
@@ -21,8 +24,10 @@ from voicetotext.recording.overlay import (
     premultiplied_bgra,
 )
 from voicetotext.recording.pill import (
+    BOTTOM_MARGIN,
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
+    DEFAULT_PILL_POSITION,
     Button,
     Mode,
     button_centres,
@@ -30,6 +35,8 @@ from voicetotext.recording.pill import (
 )
 
 _FRAME_SECONDS = 1 / 60
+# A spot on the pill between its buttons.
+_WAVEFORM = (CANVAS_WIDTH // 2 - 20, 38)
 
 
 @pytest.fixture(autouse=True)
@@ -51,12 +58,30 @@ class FakeWindowApi:
         self.hand_cursor = False
         self.frame_waits = 0
         self.synced = True
+        self.work_area = (100, 50, 1100, 850)
+        self.origin = (0, 0)
+        self.moved_to: list[tuple[int, int]] = []
+        self.button_down = False
 
     def work_area_for_foreground(self) -> tuple[int, int, int, int]:
-        return (100, 50, 1100, 850)
+        return self.work_area
 
     def show_at(self, x: int, y: int) -> None:
         self.shown_at.append((x, y))
+        self.origin = (x, y)
+
+    def move_to(self, x: int, y: int) -> None:
+        # The cursor stays put on screen, so against the window it moves back.
+        if self.cursor is not None:
+            self.cursor = (
+                self.cursor[0] - (x - self.origin[0]),
+                self.cursor[1] - (y - self.origin[1]),
+            )
+        self.moved_to.append((x, y))
+        self.origin = (x, y)
+
+    def left_button_down(self) -> bool:
+        return self.button_down
 
     def push_frame(self, pixels: bytes) -> None:
         self.frames.append(pixels)
@@ -106,13 +131,19 @@ class FakeRoot:
 
 
 class Harness:
-    def __init__(self, estimate_level: float = 0.25) -> None:
+    def __init__(
+        self,
+        estimate_level: float = 0.25,
+        position: tuple[float, float] = DEFAULT_PILL_POSITION,
+    ) -> None:
         self.root = FakeRoot()
         self.bus = SimpleEventBus()
         self.api = FakeWindowApi()
         self.actions: list[str] = []
         self.presses = 0
         self.ticks = 0
+        self.position = position
+        self.saved: list[tuple[float, float]] = []
         self.overlay = RecordingOverlay(
             root=self.root,
             event_bus=self.bus,
@@ -125,6 +156,8 @@ class Harness:
             on_press=self._pressed,
             on_tick=self._ticked,
             clock=lambda: self.root.now,
+            load_position=lambda: self.position,
+            save_position=self.saved.append,
         )
 
     def _pressed(self) -> None:
@@ -145,6 +178,28 @@ class Harness:
         self.api.mouse(True, round(x), round(y))
         rx, ry, _ = button_centres(self.overlay.frame)[release_on or button]
         self.api.mouse(False, round(rx), round(ry))
+
+    def press(self, x: int = _WAVEFORM[0], y: int = _WAVEFORM[1]) -> None:
+        self.api.button_down = True
+        self.api.cursor = (x, y)
+        self.api.mouse(True, x, y)
+
+    def move_by(self, dx: int, dy: int) -> None:
+        x, y = self.api.cursor
+        self.api.cursor = (x + dx, y + dy)
+        self.root.run(_FRAME_SECONDS * 2)
+
+    def release(self) -> None:
+        self.api.button_down = False
+        self.api.mouse(False, *self.api.cursor)
+
+    def drag_by(self, dx: int, dy: int) -> None:
+        self.press()
+        self.move_by(dx, dy)
+        self.release()
+
+    def origin(self) -> tuple[int, int]:
+        return self.api.origin
 
 
 class TestAppearing:
@@ -413,6 +468,258 @@ class TestLeaving:
         assert len(harness.api.shown_at) == 1
 
 
+class TestPlacement:
+    def test_first_shows_exactly_where_it_always_has(self):
+        harness = Harness()
+
+        harness.start_recording()
+
+        assert harness.api.shown_at == [
+            (100 + (1000 - CANVAS_WIDTH) // 2, 850 - CANVAS_HEIGHT - BOTTOM_MARGIN),
+        ]
+
+    def test_shows_at_the_remembered_place_on_the_foreground_monitor(self):
+        harness = Harness(position=(0.0, 0.0))
+        harness.api.work_area = (-1920, 0, 0, 1040)
+
+        harness.start_recording()
+
+        assert harness.api.shown_at == [(-1920, 0)]
+
+
+class TestDragging:
+    def test_dragging_the_pill_moves_it_and_remembers_where_it_was_left(self):
+        harness = Harness()
+        harness.start_recording()
+        start = harness.origin()
+
+        harness.drag_by(-200, -300)
+
+        assert harness.origin() == (start[0] - 200, start[1] - 300)
+        [(across, down)] = harness.saved
+        assert across == pytest.approx((start[0] - 200 - 100) / (1000 - CANVAS_WIDTH))
+        assert down == pytest.approx(
+            (start[1] - 300 - 50) / (800 - CANVAS_HEIGHT - BOTTOM_MARGIN),
+        )
+
+    def test_the_pill_follows_the_cursor_all_the_way(self):
+        harness = Harness()
+        harness.start_recording()
+        start = harness.origin()
+        harness.press()
+
+        for _ in range(30):
+            harness.move_by(-7, -5)
+
+        assert harness.origin() == (start[0] - 210, start[1] - 150)
+        assert harness.saved == []
+        harness.release()
+        assert len(harness.saved) == 1
+
+    def test_it_stops_at_the_edges_of_the_work_area(self):
+        harness = Harness()
+        harness.start_recording()
+
+        harness.drag_by(-5000, 5000)
+
+        assert harness.origin() == (100, 850 - CANVAS_HEIGHT - BOTTOM_MARGIN)
+        assert harness.saved == [(0.0, 1.0)]
+
+    def test_a_drag_never_presses_a_button(self):
+        harness = Harness()
+        harness.start_recording()
+        finish = button_centres(harness.overlay.frame)[Button.FINISH]
+        harness.press()
+
+        harness.move_by(round(finish[0]) - _WAVEFORM[0], 0)
+        harness.move_by(0, 20)
+        harness.move_by(0, -20)
+        harness.api.button_down = False
+        harness.api.mouse(False, round(finish[0]), round(finish[1]))
+
+        assert harness.actions == []
+
+    def test_a_press_on_a_button_never_drags_the_pill(self):
+        harness = Harness()
+        harness.start_recording()
+        pause = button_centres(harness.overlay.frame)[Button.PAUSE]
+        harness.press(round(pause[0]), round(pause[1]))
+
+        harness.move_by(-150, -150)
+        harness.release()
+
+        assert harness.api.moved_to == []
+        assert harness.actions == []
+
+    def test_a_wobble_while_clicking_is_not_a_drag(self):
+        harness = Harness()
+        harness.start_recording()
+
+        harness.drag_by(2, -2)
+
+        assert harness.api.moved_to == []
+        assert harness.saved == []
+
+    def test_letting_go_off_the_pill_still_ends_the_drag(self):
+        harness = Harness()
+        harness.start_recording()
+        harness.press()
+        harness.move_by(-100, 0)
+
+        harness.api.button_down = False
+        harness.move_by(-100, 0)
+
+        assert len(harness.saved) == 1
+        assert len(harness.api.moved_to) == 1
+
+    def test_the_next_recording_comes_back_where_the_pill_was_left(self):
+        harness = Harness()
+        harness.start_recording()
+        harness.drag_by(-300, -200)
+        harness.position = harness.saved[-1]
+        moved = harness.origin()
+        harness.state("recording", "idle")
+        harness.root.run(2.0)
+
+        harness.start_recording()
+
+        assert harness.api.shown_at[-1] == moved
+
+    def test_dragging_works_while_transcribing_too(self):
+        harness = Harness()
+        harness.start_recording()
+        harness.state("recording", "transcribing")
+        harness.root.run(0.5)
+
+        harness.drag_by(0, -100)
+
+        assert len(harness.saved) == 1
+
+
+class TestDoubleClickReset:
+    def test_a_double_click_puts_the_pill_back_at_the_bottom_centre(self):
+        harness = Harness(position=(0.1, 0.2))
+        harness.start_recording()
+
+        harness.drag_by(0, 0)
+        harness.root.run(0.2)
+        harness.drag_by(0, 0)
+
+        assert harness.origin() == (100 + (1000 - CANVAS_WIDTH) // 2, 752)
+        assert harness.saved == [DEFAULT_PILL_POSITION]
+        assert harness.actions == []
+
+    def test_two_slow_clicks_are_not_a_double_click(self):
+        harness = Harness(position=(0.1, 0.2))
+        harness.start_recording()
+
+        harness.drag_by(0, 0)
+        harness.root.run(0.8)
+        harness.drag_by(0, 0)
+
+        assert harness.saved == []
+
+    def test_a_drag_then_a_click_is_not_a_double_click(self):
+        harness = Harness()
+        harness.start_recording()
+
+        harness.drag_by(-100, 0)
+        harness.drag_by(0, 0)
+
+        assert len(harness.saved) == 1
+        assert harness.saved[0] != DEFAULT_PILL_POSITION
+
+    def test_double_clicking_a_button_presses_it_twice_and_leaves_the_pill_be(self):
+        harness = Harness(position=(0.1, 0.2))
+        harness.start_recording()
+
+        harness.click(Button.PAUSE)
+        harness.click(Button.PAUSE)
+
+        assert harness.actions == ["pause", "pause"]
+        assert harness.saved == []
+
+
+class TestSilentMicrophone:
+    def test_a_silent_microphone_replaces_the_waveform_with_its_name(self):
+        harness = Harness()
+        harness.start_recording()
+
+        harness.bus.publish(MicrophoneSilentEvent(
+            device_name="Microphone (Maono PD300X Microphone)", seconds_silent=4.0,
+        ))
+        harness.root.run(0.1)
+
+        assert harness.overlay.frame.silent_microphone == "Maono PD300X Microphone"
+
+    def test_the_waveform_comes_back_with_the_audio(self):
+        harness = Harness()
+        harness.start_recording()
+        harness.bus.publish(MicrophoneSilentEvent(device_name="Windows default"))
+
+        harness.bus.publish(MicrophoneAudioResumedEvent())
+        harness.root.run(0.1)
+
+        assert harness.overlay.frame.silent_microphone == ""
+
+    def test_a_new_recording_starts_without_the_notice(self):
+        harness = Harness()
+        harness.start_recording()
+        harness.bus.publish(MicrophoneSilentEvent(device_name="Windows default"))
+        harness.state("recording", "idle")
+        harness.root.run(2.0)
+
+        harness.start_recording()
+
+        assert harness.overlay.frame.silent_microphone == ""
+
+
+class TestLimitCountdown:
+    def _warned(self) -> Harness:
+        harness = Harness()
+        harness.start_recording()
+        harness.bus.publish(RecordingCapWarningEvent(remaining_seconds=30.0))
+        return harness
+
+    def _after(self, harness: Harness, seconds: float) -> str:
+        """Let ``seconds`` pass between two frames, as a busy machine might."""
+        harness.root.now += seconds
+        harness.root.run(_FRAME_SECONDS)
+        return harness.overlay.frame.countdown
+
+    def test_counts_down_the_time_left_before_the_limit(self):
+        harness = self._warned()
+
+        assert self._after(harness, 0.0) == "0:30"
+        assert self._after(harness, 10.0) == "0:20"
+        assert self._after(harness, 9.5) == "0:11"
+
+    def test_the_countdown_stands_still_while_paused(self):
+        harness = self._warned()
+        self._after(harness, 5.0)
+
+        harness.bus.publish(RecordingPausedEvent())
+        paused = self._after(harness, 20.0)
+        harness.bus.publish(RecordingResumedEvent())
+
+        assert paused == "0:25"
+        assert self._after(harness, 5.0) == "0:20"
+
+    def test_never_counts_below_zero(self):
+        harness = self._warned()
+
+        assert self._after(harness, 45.0) == "0:00"
+
+    def test_a_new_recording_has_no_countdown(self):
+        harness = self._warned()
+        harness.state("recording", "idle")
+        harness.root.run(2.0)
+
+        harness.start_recording()
+
+        assert harness.overlay.frame.countdown == ""
+
+
 class TestMarshalling:
     def test_worker_thread_events_are_handed_to_the_gui_thread(self):
         dispatcher = MagicMock()
@@ -488,6 +795,29 @@ class TestWin32Window:
         window.handle_message(0x0202, (12 << 16) | 30)
 
         assert clicks == [(True, -5, 40), (False, 30, 12)]
+
+    def test_moving_never_activates_resizes_or_restacks_the_pill(self):
+        window = self._window()
+        window._hwnd = 7
+
+        window.move_to(-40, 300)
+
+        flags = window._user32.SetWindowPos.call_args.args[-1]
+        assert flags & 0x0010
+        assert flags & 0x0001
+        assert flags & 0x0004
+        assert window._origin == (-40, 300)
+
+    @pytest.mark.parametrize(("swapped", "button"), [(0, 0x01), (1, 0x02)])
+    def test_reads_the_primary_button_even_when_the_buttons_are_swapped(
+        self, swapped, button,
+    ):
+        window = self._window()
+        window._user32.GetSystemMetrics.return_value = swapped
+        window._user32.GetAsyncKeyState.return_value = -32768
+
+        assert window.left_button_down() is True
+        window._user32.GetAsyncKeyState.assert_called_once_with(button)
 
     def test_leaves_every_other_message_to_windows(self):
         window = self._window()

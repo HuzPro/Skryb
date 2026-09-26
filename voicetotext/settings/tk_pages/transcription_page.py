@@ -1,5 +1,6 @@
 import logging
 import tkinter
+from collections.abc import Callable
 from tkinter import ttk
 
 from voicetotext.settings.license_consent import (
@@ -43,6 +44,13 @@ _FALLBACK_MODELS: dict[TranscriptionMode, str] = {
 _NO_GPU_STREAMING_REASON = (
     "Streaming needs a CUDA or ROCm GPU, and none was detected."
 )
+_CHECKING_FOR_GPU_REASON = "Checking for a GPU..."
+
+ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
+
+
+def _run_now(action: Callable[[], None]) -> None:
+    action()
 
 
 class TkTranscriptionPage(ttk.Frame):
@@ -60,10 +68,12 @@ class TkTranscriptionPage(ttk.Frame):
         parent: tkinter.Misc,
         service: SettingsService,
         confirm_license: LicenseConsentPrompt = ask_license_consent,
+        schedule: ScheduleOnGuiThread = _run_now,
     ) -> None:
         super().__init__(parent)
         self._service = service
         self._confirm_license = confirm_license
+        self._schedule = schedule
         self.download_error = Signal()
         self.delete_error = Signal()
         self.model_auto_switched = Signal()
@@ -81,8 +91,6 @@ class TkTranscriptionPage(ttk.Frame):
         ttk.Label(self, text="Mode", style=HEADING_STYLE).pack(anchor="w")
         self._mode_selector = TkModeSelector(self)
         self._mode_selector.set_mode(self._mode)
-        if not self._service.supports_streaming_hardware():
-            self._mode_selector.disable_streaming(_NO_GPU_STREAMING_REASON)
         self._mode_selector.mode_changed.connect(self.apply_mode)
         self._mode_selector.pack(fill="x", pady=(0, 8))
 
@@ -103,6 +111,32 @@ class TkTranscriptionPage(ttk.Frame):
             anchor="w", pady=(8, 0),
         )
         self._build_form(draft)
+        self._gate_streaming_on_hardware()
+
+    def _gate_streaming_on_hardware(self) -> None:
+        """Keep Streaming off until a GPU is known, without waiting for one.
+
+        The probe imports torch, which can take many seconds, so the page
+        opens at once and updates itself when the probe reports back.
+        """
+        if self._service.hardware_probe_pending():
+            self._mode_selector.disable_streaming(_CHECKING_FOR_GPU_REASON)
+            self._service.request_hardware_probe(
+                lambda: self._schedule(self._on_hardware_probed),
+            )
+        elif not self._service.supports_streaming_hardware():
+            self._mode_selector.disable_streaming(_NO_GPU_STREAMING_REASON)
+
+    def _on_hardware_probed(self) -> None:
+        if not self.winfo_exists():
+            return
+        if self._service.supports_streaming_hardware():
+            self._mode_selector.enable_streaming()
+        else:
+            self._mode_selector.disable_streaming(_NO_GPU_STREAMING_REASON)
+        self._populate_engine_combo(
+            self.current_model(), current_engine=self.current_engine(),
+        )
 
     def _build_form(self, draft: object) -> None:
         form = ttk.Frame(self)

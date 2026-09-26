@@ -24,6 +24,7 @@ from voicetotext.bootstrap import (
     _resolve_pipeline_mode,
     _warmup_safely,
     apply_settings,
+    migrate_hotkey_bindings,
     migrate_language,
     migrate_output_mode,
 )
@@ -38,6 +39,7 @@ from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.hotkeys.actions import HotkeyActions
 from voicetotext.edit_capture.delivery_recording_decorator import (
     DeliveryRecordingDecorator,
 )
@@ -656,6 +658,71 @@ class TestMigrateLanguage:
         config.save.assert_not_called()
 
 
+class TestMigrateHotkeyBindings:
+    @pytest.mark.parametrize(("mode", "migrated_mode"), [
+        ("push_to_talk", "hold"), ("toggle", "toggle"), ("nonsense", "toggle"),
+    ])
+    def test_an_old_single_hotkey_becomes_one_dictation_shortcut_and_the_old_keys_go(
+        self, tmp_path: Path, mode: str, migrated_mode: str,
+    ):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({
+            "hotkey": {"combination": "ctrl+shift+alt+m", "mode": mode},
+            "output": {"mode": "direct_paste"},
+        }), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        saved = json.loads(path.read_text(encoding="utf-8"))["hotkey"]
+        assert saved["bindings"] == [
+            {"keys": "ctrl+shift+alt+m", "mode": migrated_mode, "action": "dictate"},
+        ]
+        assert "combination" not in saved and "mode" not in saved
+        assert saved["double_tap_locks_hold"] is True
+
+    def test_an_old_mode_without_a_combination_keeps_the_old_default_keys(
+        self, tmp_path: Path,
+    ):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"hotkey": {"mode": "push_to_talk"}}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        assert config.get("hotkey.bindings") == [
+            {"keys": "ctrl+alt+m", "mode": "hold", "action": "dictate"},
+        ]
+
+    def test_saved_bindings_win_over_leftover_old_keys(self, tmp_path: Path):
+        bindings = [
+            {"keys": "mouse4", "mode": "hold", "action": "dictate"},
+            {"keys": "f13", "mode": "press", "action": "paste_last"},
+        ]
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"hotkey": {
+            "bindings": bindings, "combination": "f12", "mode": "toggle",
+        }}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        assert config.get("hotkey.bindings") == bindings
+        assert config.get("hotkey.combination") is None
+
+    def test_a_config_already_on_bindings_is_not_rewritten(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        assert not path.exists()
+
+
 class TestBuildOutput:
     @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
     def test_should_return_decorator_wrapping_paste_and_clipboard_with_preserver(
@@ -756,8 +823,8 @@ class TestBuildOutput:
         preserver_cls.return_value.restore.side_effect = (
             lambda: clipboard.update(text="previous clipboard")
         )
-        sender_cls.return_value.send_ctrl_v.side_effect = (
-            lambda: tk_root.after(0, lambda: pasted.append(clipboard["text"]))
+        sender_cls.return_value.send_paste.side_effect = (
+            lambda _method, _text: tk_root.after(0, lambda: pasted.append(clipboard["text"]))
         )
         modifier_reader_cls.return_value.any_modifier_down.return_value = False
         dispatcher = TkGuiThreadDispatcher(tk_root)
@@ -836,7 +903,7 @@ class TestApplySettings:
 
         mock_build_output.assert_called_once_with(
             OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None,
-            _ignore_delivery, writing=None,
+            _ignore_delivery, writing=None, hooks=None,
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
@@ -885,11 +952,31 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_listener.assert_called_once_with(
-            config, use_case, bootstrap._paste_memory.observe_key,
+            config, use_case, bootstrap._hotkey_actions(use_case),
+            bootstrap._paste_memory.observe_key,
         )
         app.set_hotkey_listener.assert_called_once_with(
             mock_build_listener.return_value
         )
+
+    @patch("voicetotext.bootstrap._build_hotkey_listener")
+    def test_a_rebuilt_listener_keeps_every_shortcut_action_it_was_given(
+        self, mock_build_listener
+    ):
+        use_case = MagicMock()
+        actions = HotkeyActions(
+            dictate_activate=use_case.on_hotkey_activated,
+            dictate_deactivate=use_case.on_hotkey_deactivated,
+            paste_last=MagicMock(),
+            copy_last=MagicMock(),
+        )
+
+        apply_settings(
+            self._make_changes(hotkey_changed=True), MagicMock(), use_case,
+            MagicMock(), gui_dispatcher=MagicMock(), hotkey_actions=actions,
+        )
+
+        assert mock_build_listener.call_args.args[2] is actions
 
     @patch("voicetotext.bootstrap._build_hotkey_listener")
     def test_should_not_rebuild_hotkey_listener_when_hotkey_unchanged(
@@ -1090,7 +1177,7 @@ class TestWritingWiring:
 
         saved = json.loads(path.read_text(encoding="utf-8"))
         assert "batch" not in saved
-        assert saved["history"] == {"keep_days": 30}
+        assert saved["history"]["keep_days"] == 30
         assert config.get("writing.cleanup") == "light"
         assert config.get("hotkey.combination") == "ctrl+shift+alt+m"
 
@@ -1144,6 +1231,53 @@ class TestWritingWiring:
 
         assert started == ["server", "edits"]
 
+    def test_writing_notices_show_beside_the_dictation_not_in_the_tray(self, tmp_path):
+        from voicetotext.core.events import WritingNoticeEvent
+
+        bus = SimpleEventBus()
+        shown: list[str] = []
+        bootstrap._build_writing(
+            FakeConfig(), self._paths(tmp_path), bus, lambda: None, shown.append,
+        )
+
+        bus.publish(WritingNoticeEvent(message="Selection too long to edit"))
+
+        assert shown == ["Selection too long to edit"]
+
+    def test_every_shortcut_action_reaches_the_use_case(self):
+        use_case = MagicMock()
+
+        actions = bootstrap._hotkey_actions(use_case)
+
+        assert actions.edit_activate is use_case.on_edit_hotkey_activated
+        assert actions.edit_deactivate is use_case.on_edit_hotkey_deactivated
+        assert actions.paste_last is use_case.paste_last
+        assert actions.copy_last is use_case.copy_last
+        assert actions.dictate_activate is use_case.on_hotkey_activated
+
+    @patch("voicetotext.bootstrap._build_hotkey_listener")
+    def test_switching_learning_on_hands_the_new_edit_watcher_to_a_new_listener(
+        self, build_listener,
+    ):
+        from voicetotext.writing.settings import WritingSettings
+
+        app = MagicMock()
+        watcher = MagicMock()
+        changes = ChangeSet.between(
+            _draft(writing=WritingSettings(learn_words=False, learn_style=False)),
+            _draft(writing=WritingSettings()),
+        )
+
+        with patch("voicetotext.bootstrap._build_output"):
+            apply_settings(
+                changes, FakeConfig(), MagicMock(), app, gui_dispatcher=MagicMock(),
+                edit_capture=watcher,
+            )
+
+        assert changes.learning_turned_on
+        build_listener.assert_called_once()
+        app.set_hotkey_listener.assert_called_once_with(build_listener.return_value)
+
     def test_streaming_and_verbatim_dictation_add_no_writing_time(self):
         writing = MagicMock()
         writing.estimated_seconds.return_value = 1.25
@@ -1155,3 +1289,128 @@ class TestWritingWiring:
 
         assert batch == 1.25
         assert streaming == 0.0
+
+
+class TestAppAwareOutputChain:
+    def _hooks(self, failures: list, method=None):
+        from voicetotext.output.app_aware_delivery import DeliveryHooks
+        from voicetotext.output.last_dictation import LastDictation
+        from voicetotext.output.paste_method import PasteMethod
+
+        return DeliveryHooks(
+            last_dictation=LastDictation(),
+            paste_method=method or (lambda: PasteMethod.CTRL_V),
+            on_failed=lambda failure, text: failures.append((failure.value, text)),
+        )
+
+    @patch("voicetotext.bootstrap.text_field_focused", return_value=False)
+    @patch("voicetotext.bootstrap.read_caret_context", return_value=NO_CONTEXT)
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    @patch("voicetotext.bootstrap.Win32KeySender")
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_with_no_text_field_the_text_goes_to_the_clipboard_and_nothing_is_typed(
+        self, writer_cls, sender_cls, preserver_cls, _context, _field,
+    ):
+        failures: list = []
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda action: action()
+        hooks = self._hooks(failures)
+
+        output = _build_output(OutputMode.DIRECT_PASTE, dispatcher, hooks=hooks)
+        output.output("Meeting moved to Thursday.")
+
+        writer_cls.return_value.set_text.assert_called_once_with("Meeting moved to Thursday. ")
+        sender_cls.return_value.send_paste.assert_not_called()
+        preserver_cls.return_value.restore.assert_not_called()
+        assert failures == [("no_text_field", "Meeting moved to Thursday. ")]
+        assert hooks.last_dictation.text() == "Meeting moved to Thursday. "
+
+    @patch("voicetotext.bootstrap.caps_lock_enabled", return_value=False)
+    @patch("voicetotext.bootstrap.Win32ModifierKeyStateReader")
+    @patch("voicetotext.bootstrap.text_field_focused", return_value=True)
+    @patch("voicetotext.bootstrap.read_caret_context", return_value=NO_CONTEXT)
+    @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
+    @patch("voicetotext.bootstrap.Win32KeySender")
+    @patch("voicetotext.bootstrap.Win32ClipboardWriter")
+    def test_a_text_field_gets_the_paste_with_the_method_for_its_app(
+        self, writer_cls, sender_cls, preserver_cls, _context, _field,
+        modifier_reader_cls, _caps,
+    ):
+        from voicetotext.output.paste_method import PasteMethod
+
+        failures: list = []
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda action: action()
+        modifier_reader_cls.return_value.any_modifier_down.return_value = False
+        hooks = self._hooks(failures, method=lambda: PasteMethod.SHIFT_INSERT)
+
+        output = _build_output(OutputMode.DIRECT_PASTE, dispatcher, hooks=hooks)
+        output.output("ls -la")
+        hooks.last_dictation.paste()
+
+        assert sender_cls.return_value.send_paste.call_args_list == [
+            call(PasteMethod.SHIFT_INSERT, "ls -la"),
+            call(PasteMethod.SHIFT_INSERT, "ls -la"),
+        ]
+        assert preserver_cls.return_value.restore.call_count == 2
+        assert failures == []
+
+    def test_clipboard_only_and_streaming_never_ask_about_text_fields(self):
+        from voicetotext.output.app_aware_delivery import AppAwareDelivery
+        from voicetotext.output.last_dictation import LastDictationDecorator
+
+        hooks = self._hooks([])
+
+        clipboard = _build_output(OutputMode.CLIPBOARD_ONLY, MagicMock(), hooks=hooks)
+        streaming = _build_output(
+            OutputMode.DIRECT_PASTE, MagicMock(), pipeline_mode=PipelineMode.STREAMING,
+            hooks=hooks,
+        )
+        batch = _build_output(OutputMode.DIRECT_PASTE, MagicMock(), hooks=hooks)
+
+        assert isinstance(clipboard._inner, LastDictationDecorator)
+        assert isinstance(clipboard._inner._inner, GuiThreadOutputDecorator)
+        assert isinstance(streaming._inner, GuiThreadOutputDecorator)
+        assert isinstance(batch._inner._inner, AppAwareDelivery)
+
+    def test_a_changed_retention_restarts_history_pruning(self):
+        pruner = MagicMock()
+        changes = ChangeSet(
+            engine_reload_required=False, hotkey_changed=False, output_changed=False,
+            history_retention_changed=True,
+        )
+
+        apply_settings(
+            changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+            history_pruner=pruner,
+        )
+
+        pruner.prune_now.assert_called_once_with()
+
+    def test_an_unchanged_retention_prunes_nothing(self):
+        pruner = MagicMock()
+        changes = ChangeSet(
+            engine_reload_required=False, hotkey_changed=False, output_changed=False,
+        )
+
+        apply_settings(
+            changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+            history_pruner=pruner,
+        )
+
+        pruner.prune_now.assert_not_called()
+
+
+def _draft(**overrides):
+    from voicetotext.output.output_mode import OutputMode
+    from voicetotext.settings.settings_draft import SettingsDraft
+
+    fields = {
+        "model_size": "crisperwhisper-2.0-turbo",
+        "language": "en",
+        "device": "auto",
+        "engine": "auto",
+        "output_mode": OutputMode.DIRECT_PASTE,
+    }
+    fields.update(overrides)
+    return SettingsDraft(**fields)

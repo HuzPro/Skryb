@@ -1,9 +1,11 @@
 import json
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
-from voicetotext.core.config import ConfigurationStore
+from voicetotext.core.config import ConfigurationStore, ConfigValue
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -22,18 +24,33 @@ from voicetotext.core.json_config_adapter import (
     load_json_object,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.hotkeys.bindings import (
+    bindings_to_config,
+    migrate_legacy_hotkey,
+    parse_bindings,
+)
+from voicetotext.history.retention import history_retention_days
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
     save_dictionary,
 )
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.output.paste_method import paste_method_overrides
 from voicetotext.output.text_filter_decorator import load_dictionary
+from voicetotext.recording.pill import DEFAULT_PILL_POSITION
+from voicetotext.recording.preferences import (
+    RecordingPreferences,
+    save_pill_position,
+)
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwap
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
+from voicetotext.transcription.engine_factory import (
+    engine_candidates_ignoring_hardware,
+)
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_selector import (
     model_supports_batch as _model_supports_batch,
@@ -139,6 +156,8 @@ class SettingsService:
         self._download_listeners: list[DownloadEventListener] = []
         self._engine_listeners: list[EngineEventListener] = []
         self._state_listeners: list[StateChangeListener] = []
+        self._probe_lock = threading.Lock()
+        self._probe_waiters: list[Callable[[], None]] = []
 
         self._event_bus.subscribe(DownloadProgressEvent, self._fanout_progress)
         self._event_bus.subscribe(DownloadStateChangedEvent, self._fanout_state)
@@ -253,8 +272,6 @@ class SettingsService:
             language=self._config.get("transcription.language", "en"),
             device=self._config.get("transcription.device", "auto"),
             engine=self._config.get("transcription.engine", "auto"),
-            hotkey_combination=self._config.get("hotkey.combination", "ctrl+alt+m"),
-            hotkey_mode=self._config.get("hotkey.mode", "toggle"),
             output_mode=OutputMode.migrate(self._config.get("output.mode")),
             transcription_mode=TranscriptionMode.migrate(
                 self._config.get("transcription.mode")
@@ -269,6 +286,19 @@ class SettingsService:
                 self._config.get("audio.boost_quiet_speech", True) is not False
             ),
             writing=read_writing_settings(self._config),
+            hotkey_bindings=parse_bindings(self._config),
+            double_tap_locks_hold=(
+                self._config.get("hotkey.double_tap_locks_hold", True) is not False
+            ),
+            recording=RecordingPreferences.from_config(self._config),
+            history_retention_days=history_retention_days(self._config),
+            paste_method_overrides=tuple(
+                (process, method.value) for process, method in sorted(
+                    paste_method_overrides(
+                        self._config.get("output.paste_method_overrides", {}),
+                    ).items(),
+                )
+            ),
         )
 
     def _crisperwhisper_mode(self) -> str:
@@ -290,16 +320,24 @@ class SettingsService:
         self._config.set("transcription.language", draft.language)
         self._config.set("transcription.device", draft.device)
         self._config.set("transcription.engine", draft.engine)
-        self._config.set("hotkey.combination", draft.hotkey_combination)
-        self._config.set("hotkey.mode", draft.hotkey_mode)
+        self._config.set("hotkey.bindings", bindings_to_config(draft.hotkey_bindings))
+        self._config.set("hotkey.double_tap_locks_hold", draft.double_tap_locks_hold)
         self._config.set("output.mode", draft.output_mode.value)
         self._config.set("audio.input_device", draft.input_device)
         self._config.set("audio.boost_quiet_speech", draft.boost_quiet_speech)
+        draft.recording.save_to(self._config)
         self._config.set("transcription.mode", draft.transcription_mode.value)
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
         )
         write_writing_settings(self._config, draft.writing)
+        self._config.set("history.retention_days", draft.history_retention_days)
+        # A process name holds a dot, so the map is stored whole rather
+        # than key by dotted key.
+        self._config.set(
+            "output.paste_method_overrides",
+            cast(ConfigValue, dict(draft.paste_method_overrides)),
+        )
         self._config.save()
         self._invalidate_cache_on_engine_change(original, draft)
         return ChangeSet.between(original, draft)
@@ -329,6 +367,9 @@ class SettingsService:
             encoding="utf-8",
         )
 
+    def reset_pill_position(self) -> None:
+        save_pill_position(self._config, DEFAULT_PILL_POSITION)
+
     def diagnostics_directory(self) -> str:
         configured = self._config.get("diagnostics.directory", "")
         return configured if isinstance(configured, str) else ""
@@ -340,6 +381,7 @@ class SettingsService:
     def import_settings(self, path: Path) -> None:
         imported = load_json_object(path)
         self._config.replace_all(deep_merge_config(DEFAULT_CONFIG, imported))
+        migrate_legacy_hotkey(self._config)
         self._config.save()
 
     # ------------------------------------------------------------------
@@ -370,9 +412,12 @@ class SettingsService:
         info = ALL_MODELS.get(model_name)
         if info is None:
             return ()
+        hardware = self._hardware_detector.peek()
+        if hardware is None:
+            return engine_candidates_ignoring_hardware(info, self._registry)
         return rank_engines(
             info,
-            self._hardware_detector.detect(),
+            hardware,
             self._registry.all_descriptors(),
         )
 
@@ -383,10 +428,52 @@ class SettingsService:
         hardware hasn't been probed yet) cannot load a streaming model, so the
         UI uses this to keep the Streaming mode from being selected there.
         """
+        hardware = (
+            None if self._hardware_detector is None
+            else self._hardware_detector.peek()
+        )
+        return hardware is not None and hardware.kind != "cpu"
+
+    def hardware_probe_pending(self) -> bool:
+        """Whether the hardware answers above wait on a probe not yet run."""
         return (
             self._hardware_detector is not None
-            and self._hardware_detector.detect().kind != "cpu"
+            and self._hardware_detector.peek() is None
         )
+
+    def request_hardware_probe(self, on_done: Callable[[], None]) -> None:
+        """Probe the hardware on a daemon thread, then call *on_done* there.
+
+        The probe imports torch, so it never runs on the caller's thread.
+        Requests made while one is running share it. *on_done* runs on the
+        probe thread, so a GUI caller passes one already marshalled onto
+        its own thread.
+        """
+        with self._probe_lock:
+            self._probe_waiters.append(on_done)
+            if len(self._probe_waiters) > 1:
+                return
+        threading.Thread(
+            target=self._probe_hardware_then_notify,
+            daemon=True,
+            name="hardware-probe",
+        ).start()
+
+    def _probe_hardware_then_notify(self) -> None:
+        try:
+            self._probe_hardware()
+        finally:
+            self._notify_probe_waiters()
+
+    def _probe_hardware(self) -> None:
+        if self._hardware_detector is not None:
+            self._hardware_detector.detect()
+
+    def _notify_probe_waiters(self) -> None:
+        with self._probe_lock:
+            waiters, self._probe_waiters = self._probe_waiters, []
+        for notify in waiters:
+            notify()
 
     # ------------------------------------------------------------------
     # Engine hot-swap

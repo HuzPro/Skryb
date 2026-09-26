@@ -254,6 +254,20 @@ class TestVoiceEditInTheUseCase:
         assert captions == ["Editing selection", ""]
         assert output.outputs == ["CHANGE THURSDAY TO FRIDAY"]
 
+    def test_a_cancelled_voice_edit_is_never_offered_back_as_a_dictation(self):
+        from voicetotext.core.events import RecordingCancelledEvent
+
+        use_case, output, _, _, _, _ = self._use_case(Desktop(), ScriptedClient())
+        cancelled: list[RecordingCancelledEvent] = []
+        use_case._event_bus.subscribe(RecordingCancelledEvent, cancelled.append)
+
+        use_case.on_edit_hotkey_activated()
+        use_case.on_cancel()
+        use_case.retry_last_recording()
+
+        assert [event.recoverable for event in cancelled] == [False]
+        assert output.outputs == []
+
     def test_the_pill_estimate_includes_the_writing_time(self):
         from voicetotext.core.events import TranscriptionStartedEvent
 

@@ -10,6 +10,7 @@ from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     ErrorOccurredEvent,
     RecordingCancelledEvent,
+    RecordingCapWarningEvent,
     RecordingCappedEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
@@ -48,6 +49,7 @@ def _build_use_case(
     dispatcher: ActionDispatcher | None = None,
     initial_state: AppState = AppState.IDLE,
     max_recording_seconds: float = 600.0,
+    warn_before_cap_seconds: float = 0.0,
 ):
     event_bus = SimpleEventBus()
     state_machine = AppStateMachine(event_bus, initial_state=initial_state)
@@ -62,7 +64,8 @@ def _build_use_case(
         event_bus=event_bus,
         action_dispatcher=dispatcher or InlineActionDispatcher(),
         diagnostics=MagicMock(spec=SessionDiagnostics),
-        max_recording_seconds=max_recording_seconds,
+        max_recording_seconds=lambda: max_recording_seconds,
+        warn_before_cap_seconds=lambda: warn_before_cap_seconds,
     )
     return use_case, recorder, engine, output, event_bus, state_machine
 
@@ -532,6 +535,165 @@ class TestRecordingDurationCap:
 
         assert recorder.stop_recording.call_count == 1
         assert capped == []
+
+
+class TestRecordingLimitWarning:
+    """Half a minute before the limit the pill starts counting down and a
+    soft cue plays, so the end of a long dictation is never a surprise."""
+
+    @staticmethod
+    def _timers(MockTimer) -> list[float]:
+        return [call.args[0] for call in MockTimer.call_args_list]
+
+    @staticmethod
+    def _fire_latest_warning(MockTimer) -> None:
+        MockTimer.call_args_list[-1].args[1]()
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_the_warning_is_due_the_chosen_time_before_the_limit(self, MockTimer):
+        use_case, *_ = _build_use_case(
+            max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
+        )
+
+        use_case.on_hotkey_activated()
+
+        assert self._timers(MockTimer) == [600.0, 570.0]
+
+    @patch("voicetotext.transcription_use_case.time.monotonic")
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_the_warning_fires_exactly_once_with_the_time_left(
+        self, MockTimer, monotonic,
+    ):
+        use_case, _, _, _, event_bus, _ = _build_use_case(
+            max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
+        )
+        warnings: list[RecordingCapWarningEvent] = []
+        event_bus.subscribe(RecordingCapWarningEvent, warnings.append)
+        monotonic.return_value = 1000.0
+        use_case.on_hotkey_activated()
+
+        monotonic.return_value = 1570.0
+        self._fire_latest_warning(MockTimer)
+        self._fire_latest_warning(MockTimer)
+
+        assert [event.remaining_seconds for event in warnings] == [30.0]
+
+    @patch("voicetotext.transcription_use_case.time.monotonic")
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_paused_time_pushes_the_warning_back(self, MockTimer, monotonic):
+        use_case, *_ = _build_use_case(
+            max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
+        )
+        monotonic.return_value = 1000.0
+        use_case.on_hotkey_activated()
+        monotonic.return_value = 1100.0
+        use_case.on_pause_toggled()
+        monotonic.return_value = 5000.0
+
+        use_case.on_pause_toggled()
+
+        assert self._timers(MockTimer)[-2:] == [500.0, 470.0]
+
+    @patch("voicetotext.transcription_use_case.time.monotonic")
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_a_warning_due_while_paused_waits_for_the_resume(self, MockTimer, monotonic):
+        use_case, _, _, _, event_bus, _ = _build_use_case(
+            max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
+        )
+        warnings: list[RecordingCapWarningEvent] = []
+        event_bus.subscribe(RecordingCapWarningEvent, warnings.append)
+        monotonic.return_value = 1000.0
+        use_case.on_hotkey_activated()
+        monotonic.return_value = 1575.0
+        use_case.on_pause_toggled()
+
+        self._fire_latest_warning(MockTimer)
+        assert warnings == []
+        monotonic.return_value = 9000.0
+        use_case.on_pause_toggled()
+        self._fire_latest_warning(MockTimer)
+
+        assert self._timers(MockTimer)[-2:] == [25.0, 0.0]
+        assert [event.remaining_seconds for event in warnings] == [25.0]
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_a_limit_changed_after_startup_applies_to_the_next_recording(
+        self, MockTimer,
+    ):
+        limits = {"stop": 600.0, "warn": 30.0}
+        event_bus = SimpleEventBus()
+        recorder = MagicMock()
+        recorder.stop_recording.return_value = None
+        use_case = RecordAndTranscribeUseCase(
+            recorder=recorder,
+            engine=MagicMock(),
+            output=MagicMock(),
+            state_machine=AppStateMachine(event_bus),
+            event_bus=event_bus,
+            action_dispatcher=InlineActionDispatcher(),
+            diagnostics=MagicMock(spec=SessionDiagnostics),
+            max_recording_seconds=lambda: limits["stop"],
+            warn_before_cap_seconds=lambda: limits["warn"],
+        )
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        limits.update(stop=120.0, warn=10.0)
+        use_case.on_hotkey_activated()
+
+        assert self._timers(MockTimer) == [600.0, 570.0, 120.0, 110.0]
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_the_capped_notice_names_the_limit_that_was_in_force(self, MockTimer):
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case(
+            max_recording_seconds=90.0, warn_before_cap_seconds=30.0,
+        )
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("done")
+        capped: list[RecordingCappedEvent] = []
+        event_bus.subscribe(RecordingCappedEvent, capped.append)
+        use_case.on_hotkey_activated()
+
+        MockTimer.call_args_list[0].args[1]()
+
+        assert [event.max_duration_seconds for event in capped] == [90.0]
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_no_warning_is_scheduled_when_it_is_turned_off(self, MockTimer):
+        use_case, *_ = _build_use_case(
+            max_recording_seconds=600.0, warn_before_cap_seconds=0.0,
+        )
+
+        use_case.on_hotkey_activated()
+
+        assert self._timers(MockTimer) == [600.0]
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_a_limit_shorter_than_the_warning_warns_straight_away(self, MockTimer):
+        use_case, *_ = _build_use_case(
+            max_recording_seconds=20.0, warn_before_cap_seconds=30.0,
+        )
+
+        use_case.on_hotkey_activated()
+
+        assert self._timers(MockTimer) == [20.0, 0.0]
+
+    @patch("voicetotext.transcription_use_case.threading.Timer")
+    def test_stopping_cancels_the_warning_along_with_the_limit(self, MockTimer):
+        use_case, recorder, engine, _, event_bus, _ = _build_use_case(
+            warn_before_cap_seconds=30.0,
+        )
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("done")
+        warnings: list[RecordingCapWarningEvent] = []
+        event_bus.subscribe(RecordingCapWarningEvent, warnings.append)
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        self._fire_latest_warning(MockTimer)
+
+        assert MockTimer.return_value.cancel.call_count == 2
+        assert warnings == []
 
 
 class TestHotSwapOutput:

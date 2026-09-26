@@ -12,7 +12,12 @@ import numpy as np
 import pytest
 
 from voicetotext.core.exceptions import AudioRecorderError
+from tests.recording.test_input_devices import crowded_device_query
 from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.recording.input_devices import (
+    connected_preferred_microphone,
+    input_device_index,
+)
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 
@@ -398,3 +403,148 @@ class TestPausing:
         _feed(mock_sd, np.full((1024, 1), 0.1, dtype=np.float32))
 
         assert adapter.stop_recording() is not None
+
+
+class PreferredMicrophones(ChosenMicrophone):
+    """A chosen microphone plus an ordered wish list, matched on connection."""
+
+    def __init__(self, name, connected, preferred) -> None:
+        super().__init__(name, connected)
+        self.preferred = list(preferred)
+        self.broken = False
+
+    def adapter(self) -> SoundDeviceAdapter:
+        return SoundDeviceAdapter(
+            device_name=lambda: self.name,
+            on_device_missing=self.missing.append,
+            device_index=self.connected.get,
+            refresh_devices=self._rescan,
+            preferred_names=lambda: self.preferred,
+            find_preferred=self._find,
+        )
+
+    def _find(self, preferred):
+        if self.broken:
+            raise OSError("PortAudio not initialized")
+        return next((name for name in preferred if name in self.connected), None)
+
+
+class TestPreferredMicrophonesAtRecordingStart:
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_the_first_connected_preferred_microphone_beats_the_chosen_one(self, mock_sd):
+        mics = PreferredMicrophones(
+            "Built-in Mic",
+            {"Built-in Mic": 1, "Jabra": 5, "Blue Yeti": 9},
+            ["Unplugged Rode", "Blue Yeti", "Jabra"],
+        )
+        adapter = mics.adapter()
+
+        adapter.start_recording()
+
+        assert _opened_device(mock_sd) == 9
+        assert adapter.device_name == "Blue Yeti"
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_with_none_of_them_connected_the_chosen_microphone_is_used(self, mock_sd):
+        mics = PreferredMicrophones(
+            "Built-in Mic", {"Built-in Mic": 1}, ["Unplugged Rode", "Blue Yeti"],
+        )
+        adapter = mics.adapter()
+
+        adapter.start_recording()
+
+        assert _opened_device(mock_sd) == 1
+        assert adapter.device_name == "Built-in Mic"
+        assert mics.missing == []
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_with_nothing_connected_it_records_from_the_windows_default(self, mock_sd):
+        mics = PreferredMicrophones("USB Mic", {}, ["Blue Yeti"])
+        adapter = mics.adapter()
+
+        adapter.start_recording()
+
+        assert _opened_device(mock_sd) is None
+        assert adapter.device_name == ""
+        assert mics.missing == ["USB Mic"]
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_the_choice_is_made_again_at_every_start(self, mock_sd):
+        mics = PreferredMicrophones("Built-in Mic", {"Built-in Mic": 1}, ["Blue Yeti"])
+        adapter = mics.adapter()
+        adapter.start_recording()
+        adapter.stop_recording()
+
+        mics.connected["Blue Yeti"] = 9
+        adapter.start_recording()
+
+        assert _opened_device(mock_sd) == 9
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_a_broken_device_list_falls_back_to_the_chosen_microphone(self, mock_sd):
+        mics = PreferredMicrophones("Built-in Mic", {"Built-in Mic": 1}, ["Blue Yeti"])
+        mics.broken = True
+
+        mics.adapter().start_recording()
+
+        assert _opened_device(mock_sd) == 1
+
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_a_preferred_microphone_that_will_not_open_falls_back_to_the_default(
+        self, mock_sd,
+    ):
+        mock_sd.PortAudioError = type("PortAudioError", (Exception,), {})
+
+        def open_stream(**kwargs):
+            if kwargs["device"] is not None:
+                raise mock_sd.PortAudioError("Device unavailable")
+            return mock_sd.stream
+
+        mock_sd.InputStream.side_effect = open_stream
+        mics = PreferredMicrophones("", {"Blue Yeti": 9}, ["Blue Yeti"])
+        adapter = mics.adapter()
+
+        adapter.start_recording()
+
+        assert adapter.device_name == ""
+        assert mics.missing == ["Blue Yeti"]
+
+
+class TestChoosingAmongAThousandDevices:
+    @pytest.mark.parametrize(
+        ("preferred", "chosen", "opened"),
+        [
+            (
+                ["Unplugged Rode", "Headset (Jabra Evolve 20 MS Stereo)"],
+                "Microphone (Maono PD300X Microp",
+                "Headset (Jabra Evolve 20 MS Ste",
+            ),
+            (
+                ["Unplugged Rode", ""],
+                "Mikrofon (Gerät für Café ✓)",
+                "Mikrofon (Gerät für Café ✓)",
+            ),
+            (["Unplugged Rode"], "Unplugged Blue Yeti", ""),
+            ([], "", ""),
+        ],
+    )
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_first_connected_preference_then_the_chosen_one_then_the_default(
+        self, mock_sd, preferred, chosen, opened,
+    ):
+        adapter = SoundDeviceAdapter(
+            device_name=lambda: chosen,
+            device_index=lambda name: input_device_index(name, crowded_device_query),
+            refresh_devices=lambda: None,
+            preferred_names=lambda: preferred,
+            find_preferred=lambda wishes: connected_preferred_microphone(
+                wishes, crowded_device_query,
+            ),
+        )
+
+        adapter.start_recording()
+
+        assert adapter.device_name == opened
+        devices, _host_api = crowded_device_query()
+        device = _opened_device(mock_sd)
+        assert (devices[device]["name"] if device is not None else "") == opened
