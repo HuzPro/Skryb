@@ -37,6 +37,9 @@ dependencies = [
     # UI Automation client for reading the text around the caret in
     # the focused window. Pure Python over ctypes, MIT licensed.
     "comtypes>=1.4",
+    # Per-app volume (Core Audio sessions) for lowering other apps while
+    # recording. MIT licensed, over comtypes.
+    "pycaw>=20240210; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

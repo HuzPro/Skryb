@@ -33,6 +33,7 @@ from voicetotext.output.dictionary_config import (
     RegexRule,
 )
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
@@ -154,7 +155,7 @@ class TestEngineCandidatesFor:
 
 
 class _RecordingListener(DownloadEventListener, EngineEventListener):
-    def __init__(self):
+    def __init__(self) -> None:
         self.progress: list = []
         self.state: list = []
         self.completed: list = []
@@ -841,3 +842,39 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert config.get("audio.boost_quiet_speech") is False
     assert service.current_draft().input_device == "Microphone (Maono PD300X Microp"
     assert service.current_draft().boost_quiet_speech is False
+
+
+def test_recording_preferences_round_trip_through_saved_settings_without_a_rebuild() -> None:
+    service, config, _, _, _ = _build_service()
+    draft = service.current_draft()
+    assert draft.recording == RecordingPreferences()
+    chosen = RecordingPreferences(
+        warn_when_silent=False,
+        preferred_devices=("Microphone (Maono PD300X Microphone)", "Gerät für Café ✓"),
+        cues_enabled=False,
+        cue_volume=0.9,
+        duck_other_audio="lower",
+        duck_level=0.3,
+        max_duration_seconds=300.0,
+        warn_before_cap_seconds=15.0,
+    )
+
+    changes = service.apply_draft(replace(draft, recording=chosen))
+
+    assert service.current_draft().recording == chosen
+    assert config.get("recording.max_duration_seconds") == 300.0
+    assert config.get("audio.preferred_devices") == [
+        "Microphone (Maono PD300X Microphone)", "Gerät für Café ✓",
+    ]
+    assert changes.any_changed is False
+
+
+def test_resetting_the_pill_position_puts_it_back_at_the_bottom_centre() -> None:
+    service, config, _, _, _ = _build_service()
+    config.set("overlay.position.x", 0.1)
+    config.set("overlay.position.y", 0.2)
+
+    service.reset_pill_position()
+
+    assert (config.get("overlay.position.x"), config.get("overlay.position.y")) == (0.5, 1.0)
+    assert config.save_count >= 1

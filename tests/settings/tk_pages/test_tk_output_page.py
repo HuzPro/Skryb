@@ -43,3 +43,16 @@ class TestTkOutputPageButtons:
 
         for mode in OutputMode:
             assert mode.display_label in labels
+
+
+class TestResetPillPosition:
+    def test_the_button_resets_the_pill_and_says_where_it_will_appear(self, tk_root):
+        resets: list[bool] = []
+        widget = TkOutputPage(tk_root, on_reset_pill_position=lambda: resets.append(True))
+        try:
+            widget._reset_pill_button.invoke()
+
+            assert resets == [True]
+            assert "bottom centre" in widget._pill_status.cget("text")
+        finally:
+            widget.destroy()

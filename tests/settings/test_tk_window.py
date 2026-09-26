@@ -18,6 +18,7 @@ from voicetotext.core.events import (
 from voicetotext.core.color_scheme import ColorScheme
 from voicetotext.output.dictionary_config import DictionaryConfig, LiteralRule
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.signal import Signal
@@ -151,6 +152,34 @@ class TestInitial:
         assert isinstance(state_listener, TkStateBridge)
         assert isinstance(download_listener, TkDownloadBridge)
         assert service.subscribe_model_deleted.called
+
+
+class TestRecordingSettings:
+    def test_saving_carries_the_audio_page_recording_settings_unchanged(
+        self, tk_root, service,
+    ):
+        saved = RecordingPreferences(
+            warn_when_silent=False,
+            preferred_devices=("Microphone (Maono PD300X Microphone)",),
+            cue_volume=0.3,
+            duck_other_audio="mute",
+            max_duration_seconds=1800.0,
+            warn_before_cap_seconds=60.0,
+        )
+        service.current_draft.return_value = _draft(recording=saved)
+        window = _make_window(tk_root, service)
+        try:
+            window._on_save_clicked()
+
+            assert service.apply_draft.call_args.args[0].recording == saved
+        finally:
+            if window.winfo_exists():
+                window.destroy()
+
+    def test_the_output_page_can_reset_the_pill_position(self, window, service):
+        window.output_page()._reset_pill_button.invoke()
+
+        service.reset_pill_position.assert_called_once_with()
 
 
 class TestSettingsTransfer:
