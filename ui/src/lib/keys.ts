@@ -48,6 +48,12 @@ export function keyCaps(combo: string): string[] {
   return combo.split("+").filter((part) => part.trim()).map(keyCap);
 }
 
+/** The core reports a combination at every key press; it is complete once a key that is not a modifier joins it. */
+export function endsOnKey(combo: string): boolean {
+  const last = combo.split("+").map((part) => part.trim().toLowerCase()).filter(Boolean).at(-1);
+  return last !== undefined && !(last in MODIFIERS);
+}
+
 /** "ctrl+shift+alt+m" -> "Ctrl + Shift + Alt + M". */
 export function formatCombo(combo: string): string {
   return keyCaps(combo).join(" + ");
