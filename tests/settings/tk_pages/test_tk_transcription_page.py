@@ -31,7 +31,6 @@ def _draft(
 ) -> SettingsDraft:
     return SettingsDraft(
         model_size=model, language=language, device="auto", engine=engine,
-        hotkey_combination="ctrl+alt+m", hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE, transcription_mode=mode,
     )
 

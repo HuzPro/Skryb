@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from voicetotext.hotkeys.bindings import DEFAULT_BINDINGS, Binding
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
@@ -18,8 +19,6 @@ class SettingsDraft:
     language: str
     device: str
     engine: str
-    hotkey_combination: str
-    hotkey_mode: str
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
     crisperwhisper_mode: str = "intended"
@@ -28,6 +27,8 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
+    hotkey_bindings: tuple[Binding, ...] = DEFAULT_BINDINGS
+    double_tap_locks_hold: bool = True
 
 
 @dataclass(frozen=True)
@@ -62,8 +63,8 @@ class ChangeSet:
             or crisperwhisper_mode_changed
         )
         hotkey_changed = (
-            original.hotkey_combination != updated.hotkey_combination
-            or original.hotkey_mode != updated.hotkey_mode
+            original.hotkey_bindings != updated.hotkey_bindings
+            or original.double_tap_locks_hold != updated.double_tap_locks_hold
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
         # The pipeline runs in passthrough only while a CrisperWhisper model

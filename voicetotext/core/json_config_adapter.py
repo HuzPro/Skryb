@@ -17,8 +17,10 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "hotkey": {
-        "mode": "toggle",
-        "combination": "ctrl+alt+m",
+        "bindings": [
+            {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
+        ],
+        "double_tap_locks_hold": True,
     },
     "output": {
         "mode": "direct_paste",

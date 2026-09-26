@@ -60,6 +60,7 @@ if sys.platform != "win32":
         "output/test_win32_modifier_key_state_reader.py",
         "hotkeys/test_win32_keyboard_hook.py",
         "hotkeys/test_win32_hook_adapter.py",
+        "hotkeys/test_win32_mouse_hook.py",
         "recording/test_overlay.py",
         "settings/test_win32_capture_bridge.py",
         "tray/test_win32_tray_adapter.py",
