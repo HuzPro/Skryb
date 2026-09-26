@@ -39,3 +39,9 @@ scripts/_spike_out/
 
 /PLAN.md
 /PLAN-REVIEW-LOG.md
+
+# Tauri UI shell build output
+ui/node_modules/
+ui/src-tauri/target/
+ui/dist/
+ui/src-tauri/gen/
