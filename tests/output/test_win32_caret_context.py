@@ -8,15 +8,20 @@ way Chromium reports them. Nothing here imports ``comtypes``, so the file
 runs on any platform.
 """
 
+import functools
+import logging
 from types import SimpleNamespace
 
 import pytest
 
+from tests.fakes.config import FakeConfig
+from voicetotext.diagnostics.session import content_recording_enabled
 from voicetotext.output import win32_caret_context as module
 from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     CaretContext,
+    log_caret_text_when,
 )
 from voicetotext.output.win32_caret_context import (
     _context_from,
@@ -325,3 +330,43 @@ class TestReadCaretContext:
         )
 
         assert read_caret_context().selected == "here for water"
+
+
+@pytest.fixture()
+def capture_config():
+    """Caret logging wired to a config the way bootstrap wires it."""
+    config = FakeConfig({"diagnostics.enabled": True, "diagnostics.capture_content": False})
+    log_caret_text_when(functools.partial(content_recording_enabled, config))
+    yield config
+    log_caret_text_when(lambda: False)
+
+
+class TestWhatReachesTheLog:
+    _PRIVATE = "Dear Zoë, my PIN is 4471 — see you at the café. "
+
+    def _logged_line(self, app_caplog) -> str:
+        app_caplog.set_level(logging.DEBUG, logger="voicetotext")
+        app_caplog.clear()
+        _context_from(_automation_over(self._PRIVATE, 20, 20))
+        return next(
+            record.getMessage() for record in app_caplog.records
+            if record.getMessage().startswith("Caret context")
+        )
+
+    def test_the_text_around_the_cursor_stays_out_of_the_log_while_content_capture_is_off(
+        self, app_caplog, capture_config,
+    ):
+        line = self._logged_line(app_caplog)
+
+        assert line == "Caret context: 20 characters before, 0 selected, 28 after"
+        assert "4471" not in line and "Zoë" not in line
+
+    def test_the_text_is_quoted_once_content_capture_is_turned_on(
+        self, app_caplog, capture_config,
+    ):
+        capture_config.set("diagnostics.capture_content", True)
+
+        line = self._logged_line(app_caplog)
+
+        assert "'Dear Zoë, my PIN is '" in line
+        assert "4471" in line

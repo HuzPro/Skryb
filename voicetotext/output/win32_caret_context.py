@@ -13,6 +13,7 @@ from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     CaretContext,
+    caret_log_line,
 )
 from voicetotext.output.win32_edit_control_context import (
     foreground_has_caret,
@@ -28,8 +29,6 @@ _ALL_TEXT = -1
 
 # CUIAutomation8, the class that also serves pre-Windows-8 clients.
 _AUTOMATION_CLSID = "{E22AD333-B25F-460C-83D0-0581107395C9}"
-
-_LOGGED_TEXT_CHARS = 20
 
 
 class _TextRange(Protocol):
@@ -187,7 +186,7 @@ def _context_of(element: _Element) -> CaretContext:
             selection, document, uia.TextPatternRangeEndpoint_End,
         ),
     )
-    _log_context(context)
+    _logger.debug("Caret context: %s", caret_log_line(context))
     return context
 
 
@@ -245,15 +244,6 @@ def _clamp_to_document(adjacent: _TextRange, edge: int, document: _TextRange) ->
         adjacent.MoveEndpointByRange(edge, document, start)
     elif adjacent.CompareEndpoints(edge, document, end) > 0:
         adjacent.MoveEndpointByRange(edge, document, end)
-
-
-def _log_context(context: CaretContext) -> None:
-    _logger.debug(
-        "Caret context: before=%r selected=%r after=%r",
-        context.before[-_LOGGED_TEXT_CHARS:],
-        context.selected[:_LOGGED_TEXT_CHARS],
-        context.after[:_LOGGED_TEXT_CHARS],
-    )
 
 
 def _automation() -> _Automation:
