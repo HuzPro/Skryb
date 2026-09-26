@@ -1,3 +1,5 @@
+import tkinter
+
 import pytest
 
 from voicetotext.settings.tk_pages import history_page
@@ -44,20 +46,29 @@ def test_a_negative_period_means_forever(page):
     assert page.history_retention_days() == 0
 
 
-def test_delete_all_history_runs_only_after_confirming(tk_root, monkeypatch):
+def test_delete_all_history_runs_only_after_confirming_over_the_settings_window(
+    tk_root, monkeypatch,
+):
     deleted: list[bool] = []
+    asked: list[tuple] = []
     answers = iter([False, True])
-    monkeypatch.setattr(
-        history_page.messagebox, "askyesno", lambda *_a, **_k: next(answers),
-    )
-    page = TkHistoryPage(tk_root, delete_all_history=lambda: deleted.append(True))
+
+    def ask(parent, _theme, heading: str, _message: str) -> bool:
+        asked.append((parent, heading))
+        return next(answers)
+
+    monkeypatch.setattr(history_page, "confirm_deletion", ask)
+    window = tkinter.Toplevel(tk_root)
+    window.withdraw()
+    page = TkHistoryPage(window, delete_all_history=lambda: deleted.append(True))
     try:
         page._confirm_delete_all()
         page._confirm_delete_all()
     finally:
-        page.destroy()
+        window.destroy()
 
     assert deleted == [True]
+    assert asked == [(window, "Delete all history")] * 2
 
 
 def test_the_page_says_which_folder_the_history_lives_in(page):

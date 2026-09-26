@@ -5,7 +5,7 @@ import tkinter
 import tkinter.font
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 
 from voicetotext.core.color_scheme import detect_app_color_scheme
 from voicetotext.core.event_bus import EventBus
@@ -47,6 +47,7 @@ from voicetotext.settings.theme import (
     card,
     theme_for,
 )
+from voicetotext.settings.tk_discard_prompt import confirm_deletion
 from voicetotext.settings.win32_titlebar import show_with_titlebar
 from voicetotext.tray.duration_format import format_duration
 
@@ -444,12 +445,8 @@ class HistoryWindow:
 
     def _delete(self) -> None:
         entry = self._selected()
-        if entry is None:
-            return
-        if not messagebox.askyesno(
-            "Delete dictation",
-            "Delete this dictation's text and recording from history?",
-            parent=self._window,
+        if entry is None or not self._confirmed(
+            "Delete dictation", "Delete this dictation's text and recording from history?",
         ):
             return
         self._stop()
@@ -461,11 +458,9 @@ class HistoryWindow:
         )
 
     def _delete_all(self) -> None:
-        if not messagebox.askyesno(
+        if not self._confirmed(
             "Delete all history",
-            "Delete every saved dictation's text and recording? "
-            "This cannot be undone.",
-            parent=self._window,
+            "Delete every saved dictation's text and recording? This cannot be undone.",
         ):
             return
         self._stop()
@@ -474,6 +469,11 @@ class HistoryWindow:
             lambda: self._report_deleted(
                 lambda: delete_all_history(self._diagnostics_dir, utc_now()),
             ),
+        )
+
+    def _confirmed(self, heading: str, message: str) -> bool:
+        return self._window is not None and confirm_deletion(
+            self._window, self._theme, heading, message,
         )
 
     def _report_deleted(self, delete: Callable[[], int]) -> None:

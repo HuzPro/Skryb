@@ -1,7 +1,8 @@
 import tkinter
 from collections.abc import Callable
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
+from voicetotext.core.color_scheme import detect_app_color_scheme
 from voicetotext.history.retention import RETENTION_CHOICES
 from voicetotext.settings.theme import (
     CONTROL_GAP,
@@ -11,7 +12,9 @@ from voicetotext.settings.theme import (
     page_note,
     section_heading,
     switch,
+    theme_for,
 )
+from voicetotext.settings.tk_discard_prompt import confirm_deletion
 
 
 def _retention_label(days: int) -> str:
@@ -83,11 +86,11 @@ class TkHistoryPage(ttk.Frame):
     def _confirm_delete_all(self) -> None:
         if self._delete_all_history is None:
             return
-        if messagebox.askyesno(
+        if confirm_deletion(
+            self.winfo_toplevel(),
+            theme_for(detect_app_color_scheme()),
             "Delete all history",
-            "Delete every saved dictation's text and recording? "
-            "This cannot be undone.",
-            parent=self,
+            "Delete every saved dictation's text and recording? This cannot be undone.",
         ):
             self._delete_all_history()
 
