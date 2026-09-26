@@ -139,6 +139,15 @@ class TestApplyTheme:
         assert _pixel(container, "vtt_switch_off", 28) == DARK_THEME.strong_border
         assert _pixel(container, "vtt_check_off", 8) == DARK_THEME.surface
 
+    @pytest.mark.parametrize("theme", [LIGHT_THEME, DARK_THEME], ids=["light", "dark"])
+    def test_a_chosen_radio_button_shows_a_dot_inside_its_ring(self, container, theme):
+        apply_theme(container, theme)
+
+        assert "Radio.indicator" in str(ttk.Style(container).layout("TRadiobutton"))
+        assert _pixel(container, "vtt_radio_on", 8) == theme.accent
+        assert _pixel(container, "vtt_radio_on", 3) != theme.accent
+        assert _pixel(container, "vtt_radio_off", 8) == theme.surface
+
 
 class TestScrollArea:
     def test_shows_the_scrollbar_only_when_the_page_overflows(self):

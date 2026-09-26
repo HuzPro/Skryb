@@ -521,23 +521,6 @@ def _configure_indicators(style: ttk.Style, theme: Theme) -> None:
             background=[("active", background)],
             foreground=[("disabled", theme.disabled)],
         )
-    style.configure("TRadiobutton", indicatorsize=14, indicatormargin=(0, 0, 8, 0))
-    style.map(
-        "TRadiobutton",
-        indicatorbackground=[
-            ("disabled", theme.border), ("selected", theme.accent), ("!selected", theme.surface),
-        ],
-        indicatorforeground=[
-            ("disabled selected", theme.disabled), ("selected", theme.accent_foreground),
-            ("!selected", theme.surface),
-        ],
-        upperbordercolor=[
-            ("disabled", theme.border), ("selected", theme.accent), ("!selected", theme.strong_border),
-        ],
-        lowerbordercolor=[
-            ("disabled", theme.border), ("selected", theme.accent), ("!selected", theme.strong_border),
-        ],
-    )
 
 
 def _configure_buttons(style: ttk.Style, theme: Theme) -> None:
@@ -770,14 +753,14 @@ def _recolour_plain_widgets(widget: tkinter.Misc, theme: Theme) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Switch, checkbox and slider images
+# Switch, checkbox, radio and slider images
 # ---------------------------------------------------------------------------
 
-# ``clam`` draws a checkbox tick as an X, a slider as a bevelled box, and
-# has no switch at all, so these are small images drawn here once per
-# theme. The Tk images are named and refilled in place: a style element
-# holds on to its image by name, so a theme change repaints every switch
-# already on screen.
+# ``clam`` draws a checkbox tick as an X, a chosen radio as a ring with no
+# dot, a slider as a bevelled box, and has no switch at all, so these are
+# small images drawn here once per theme. The Tk images are named and
+# refilled in place: a style element holds on to its image by name, so a
+# theme change repaints every switch already on screen.
 _IMAGES: dict[str, tkinter.PhotoImage] = {}
 _SUPERSAMPLE = 4
 _SWITCH_SIZE = (34, 20)
@@ -796,12 +779,16 @@ def _install_images(
         else:
             _IMAGES[name] = tkinter.PhotoImage(name=name, data=data, format="png", master=container)
     _create_image_elements(style)
-    for layout, element in (("TCheckbutton", "Check.indicator"), ("Switch.TCheckbutton", "Switch.indicator")):
+    for layout, element, widget in (
+        ("TCheckbutton", "Check.indicator", "Checkbutton"),
+        ("Switch.TCheckbutton", "Switch.indicator", "Checkbutton"),
+        ("TRadiobutton", "Radio.indicator", "Radiobutton"),
+    ):
         style.layout(layout, [
-            ("Checkbutton.padding", {"sticky": "nswe", "children": [
+            (f"{widget}.padding", {"sticky": "nswe", "children": [
                 (element, {"side": "left", "sticky": ""}),
-                ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
-                    ("Checkbutton.label", {"sticky": "nswe"}),
+                (f"{widget}.focus", {"side": "left", "sticky": "w", "children": [
+                    (f"{widget}.label", {"sticky": "nswe"}),
                 ]}),
             ]}),
         ])
@@ -819,6 +806,7 @@ def _create_image_elements(style: ttk.Style) -> None:
     for element, prefix, width in (
         ("Switch.indicator", "vtt_switch", _SWITCH_SIZE[0] + 8),
         ("Check.indicator", "vtt_check", _CHECK_SIZE + 8),
+        ("Radio.indicator", "vtt_radio", _CHECK_SIZE + 8),
     ):
         if element not in elements:
             style.element_create(
@@ -846,6 +834,7 @@ def _theme_pngs(theme: Theme) -> dict[str, str]:
         state = "on" if on else "off"
         images[f"vtt_switch_{state}"] = _draw_switch(theme, on)
         images[f"vtt_check_{state}"] = _draw_check(theme, on)
+        images[f"vtt_radio_{state}"] = _draw_radio(theme, on)
     for name in list(images):
         faded = images[name].copy()
         faded.putalpha(faded.getchannel("A").point(lambda value: round(value * _DISABLED_ALPHA)))
@@ -907,6 +896,21 @@ def _draw_check(theme: Theme, on: bool) -> Image.Image:
             box, radius=4 * _SUPERSAMPLE, fill=theme.surface,
             outline=theme.strong_border, width=_SUPERSAMPLE,
         )
+    return image.resize((_CHECK_SIZE, _CHECK_SIZE), Image.Resampling.LANCZOS)
+
+
+def _draw_radio(theme: Theme, on: bool) -> Image.Image:
+    side = _CHECK_SIZE * _SUPERSAMPLE
+    image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse(
+        (0, 0, side - 1, side - 1), fill=theme.surface,
+        outline=theme.accent if on else theme.strong_border,
+        width=round(1.5 * _SUPERSAMPLE) if on else _SUPERSAMPLE,
+    )
+    if on:
+        inset = round(side * 0.28)
+        draw.ellipse((inset, inset, side - 1 - inset, side - 1 - inset), fill=theme.accent)
     return image.resize((_CHECK_SIZE, _CHECK_SIZE), Image.Resampling.LANCZOS)
 
 
