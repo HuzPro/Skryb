@@ -841,3 +841,46 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert config.get("audio.boost_quiet_speech") is False
     assert service.current_draft().input_device == "Microphone (Maono PD300X Microp"
     assert service.current_draft().boost_quiet_speech is False
+
+
+def test_history_retention_and_paste_methods_survive_a_restart(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    store = JsonConfigAdapter(path)
+    store.load()
+    service, *_ = _build_service(config_store=store)
+    assert service.current_draft().history_retention_days == 0
+    assert service.current_draft().paste_method_overrides == ()
+
+    changes = service.apply_draft(replace(
+        service.current_draft(),
+        history_retention_days=30,
+        paste_method_overrides=(("mintty.exe", "ctrl_shift_v"), ("vmconnect.exe", "type")),
+    ))
+    reloaded = JsonConfigAdapter(path)
+    reloaded.load()
+    restarted, *_ = _build_service(config_store=reloaded)
+
+    assert changes.history_retention_changed
+    assert restarted.current_draft().history_retention_days == 30
+    assert restarted.current_draft().paste_method_overrides == (
+        ("mintty.exe", "ctrl_shift_v"), ("vmconnect.exe", "type"),
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["output"][
+        "paste_method_overrides"
+    ] == {"mintty.exe": "ctrl_shift_v", "vmconnect.exe": "type"}
+
+
+def test_removing_every_paste_override_clears_them_all(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"output": {"paste_method_overrides": {
+        "Mintty.exe": "ctrl_v", "broken.exe": "middle_click",
+    }}}), encoding="utf-8")
+    store = JsonConfigAdapter(path)
+    store.load()
+    service, *_ = _build_service(config_store=store)
+    assert service.current_draft().paste_method_overrides == (("mintty.exe", "ctrl_v"),)
+
+    service.apply_draft(replace(service.current_draft(), paste_method_overrides=()))
+
+    assert store.get("output.paste_method_overrides") == {}
+    assert service.current_draft().history_retention_days == 0

@@ -28,6 +28,10 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
+    # 0 keeps history forever. Overrides are (process, method value) pairs,
+    # read at every paste, so neither needs a rebuild.
+    history_retention_days: int = 0
+    paste_method_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,7 @@ class ChangeSet:
     output_changed: bool
     mode_changed: bool = False
     diagnostics_changed: bool = False
+    history_retention_changed: bool = False
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
@@ -84,6 +89,9 @@ class ChangeSet:
             output_changed=output_changed,
             mode_changed=mode_changed,
             diagnostics_changed=original.capture_content != updated.capture_content,
+            history_retention_changed=(
+                original.history_retention_days != updated.history_retention_days
+            ),
         )
 
     @property
@@ -94,4 +102,5 @@ class ChangeSet:
             or self.output_changed
             or self.mode_changed
             or self.diagnostics_changed
+            or self.history_retention_changed
         )
