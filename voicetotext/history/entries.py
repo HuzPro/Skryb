@@ -18,9 +18,10 @@ EMPTY = "Empty"
 NOT_SAVED = "Not saved"
 
 _CAPTURE_HINT = (
-    "Dictations are listed here when \"Save recordings and transcripts "
-    "for diagnostics\" is on in Settings > Output."
+    "Dictations are listed here when \"Save dictation history (text and "
+    "audio)\" is on in Settings > Output."
 )
+_DELETED_EVENT = "history_deleted"
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,8 @@ class HistoryEntry:
 
     ``key`` is stable across re-reads of the same append-only log, so a
     selection survives a refresh. ``audio_path`` is where the recording
-    should be; the file itself may have been removed since.
+    should be; the file itself may have been removed since. ``seq`` is the
+    number the session gave the recording, which a deletion names.
     """
 
     key: tuple[str, int]
@@ -39,6 +41,8 @@ class HistoryEntry:
     audio_path: Path | None
     status: str
     error: str | None
+    seq: int | None = None
+    transcript_path: Path | None = None
 
     @property
     def is_cancelled(self) -> bool:
@@ -111,18 +115,30 @@ def _session_entries(session_dir: Path) -> list[HistoryEntry]:
             lines = stream.readlines()
     except (OSError, ValueError):
         return []
+    events = [
+        (line_number, event)
+        for line_number, event in enumerate(map(_parsed, lines))
+        if event is not None
+    ]
+    deleted = {
+        _seq(event.get("seq")) for _line_number, event in events
+        if event.get("event") == _DELETED_EVENT
+    }
+    deleted.discard(None)
     entries = []
-    for line_number, line in enumerate(lines):
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(event, dict):
-            continue
+    for line_number, event in events:
         entry = _entry(event, session_dir, line_number, started_at)
-        if entry is not None:
+        if entry is not None and entry.seq not in deleted:
             entries.append(entry)
     return entries
+
+
+def _parsed(line: str) -> dict | None:
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) else None
 
 
 def _entry(
@@ -132,9 +148,14 @@ def _entry(
     started_at: datetime,
 ) -> HistoryEntry | None:
     kind = event.get("event")
+    if event.get("history_deleted") is True:
+        return None
+    transcript = _session_file(session_dir, event.get("transcript_path"))
     if kind == "transcription":
         at = _timestamp(event.get("requested_at"), started_at)
-        text = _text(event, session_dir)
+        text = _text(event, transcript)
+        if _text_is_gone(event, text, transcript):
+            return None
     elif kind == "cancelled":
         at = _timestamp(event.get("at"), started_at)
         text = ""
@@ -150,7 +171,23 @@ def _entry(
         audio_path=_session_file(session_dir, event.get("audio_path")),
         status=_status(kind, text, error, event.get("is_empty")),
         error=error,
+        seq=_seq(event.get("index")),
+        transcript_path=transcript,
     )
+
+
+def _text_is_gone(event: dict, text: str, transcript: Path | None) -> bool:
+    """A result with words whose saved transcript has since been deleted."""
+    return (
+        not text.strip()
+        and event.get("is_empty") is False
+        and transcript is not None
+        and not transcript.is_file()
+    )
+
+
+def _seq(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _status(kind: str, text: str, error: str | None, is_empty: object) -> str:
@@ -165,13 +202,12 @@ def _status(kind: str, text: str, error: str | None, is_empty: object) -> str:
     return NOT_SAVED if is_empty is False else EMPTY
 
 
-def _text(event: dict, session_dir: Path) -> str:
+def _text(event: dict, transcript: Path | None) -> str:
     text = event.get("text")
     if isinstance(text, str) and text.strip():
         return text
     # The log line and the transcript file are written from the same
     # string, so the file only matters when the line lost its copy.
-    transcript = _session_file(session_dir, event.get("transcript_path"))
     if transcript is None:
         return ""
     try:

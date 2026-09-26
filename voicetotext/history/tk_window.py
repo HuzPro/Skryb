@@ -3,9 +3,10 @@ import threading
 import tkinter
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 
 from voicetotext.core.color_scheme import detect_color_scheme
+from voicetotext.core.timestamps import utc_now
 from voicetotext.history.entries import (
     HistoryEntry,
     empty_state_message,
@@ -13,6 +14,12 @@ from voicetotext.history.entries import (
     load_history,
     local_time,
     preview,
+)
+from voicetotext.history.management import (
+    default_export_name,
+    delete_all_history,
+    delete_entries,
+    export_audio,
 )
 from voicetotext.recording.audio_segment import load_wav
 from voicetotext.settings.theme import Theme, apply_theme, theme_for
@@ -176,6 +183,16 @@ class HistoryWindow:
         self._play_button.pack(side="left", padx=8)
         self._retry_button = ttk.Button(actions, text="Retry", command=self._retry)
         self._retry_button.pack(side="left")
+        self._export_button = ttk.Button(
+            actions, text="Save audio as...", command=self._export,
+        )
+        self._export_button.pack(side="left", padx=8)
+        self._delete_all_button = ttk.Button(
+            actions, text="Delete all", command=self._delete_all,
+        )
+        self._delete_all_button.pack(side="right")
+        self._delete_button = ttk.Button(actions, text="Delete", command=self._delete)
+        self._delete_button.pack(side="right", padx=8)
         self._status = ttk.Label(actions, text="")
         self._status.pack(side="left", fill="x", expand=True, padx=12)
 
@@ -280,6 +297,9 @@ class HistoryWindow:
             self._play_button, has_audio or self._playback_end is not None,
         )
         _set_enabled(self._retry_button, has_audio and not retrying)
+        _set_enabled(self._export_button, has_audio)
+        _set_enabled(self._delete_button, entry is not None)
+        _set_enabled(self._delete_all_button, bool(self._entries))
         self._retry_button.configure(
             text="Transcribe" if entry is not None and entry.is_cancelled else "Retry",
         )
@@ -333,6 +353,76 @@ class HistoryWindow:
         if selected is not None and selected.key == key:
             self._render_selection()
 
+    def _delete(self) -> None:
+        entry = self._selected()
+        if entry is None:
+            return
+        if not messagebox.askyesno(
+            "Delete dictation",
+            "Delete this dictation's text and recording from history?",
+            parent=self._window,
+        ):
+            return
+        self._stop()
+        self._show_status("Deleting…")
+        self._run_in_background(
+            lambda: self._report_deleted(
+                lambda: delete_entries(self._diagnostics_dir, [entry], utc_now()),
+            ),
+        )
+
+    def _delete_all(self) -> None:
+        if not messagebox.askyesno(
+            "Delete all history",
+            "Delete every saved dictation's text and recording? "
+            "This cannot be undone.",
+            parent=self._window,
+        ):
+            return
+        self._stop()
+        self._show_status("Deleting…")
+        self._run_in_background(
+            lambda: self._report_deleted(
+                lambda: delete_all_history(self._diagnostics_dir, utc_now()),
+            ),
+        )
+
+    def _report_deleted(self, delete: Callable[[], int]) -> None:
+        try:
+            delete()
+        except Exception as exc:  # noqa: BLE001 - reported in the window
+            _logger.warning("History deletion failed", exc_info=True)
+            self._schedule(
+                lambda: self._show_status(f"Could not delete: {exc}", error=True),
+            )
+            return
+        self._schedule(self.refresh)
+
+    def _export(self) -> None:
+        entry = self._selected()
+        if entry is None or not _audio_exists(entry):
+            return
+        selected = filedialog.asksaveasfilename(
+            parent=self._window,
+            title="Save audio as",
+            initialfile=default_export_name(entry),
+            defaultextension=".wav",
+            filetypes=(("WAV audio", "*.wav"), ("All files", "*.*")),
+        )
+        if not selected:
+            return
+        self._run_in_background(lambda: self._export_to(entry, Path(selected)))
+
+    def _export_to(self, entry: HistoryEntry, destination: Path) -> None:
+        try:
+            export_audio(self._diagnostics_dir, entry, destination)
+        except (OSError, ValueError) as exc:
+            self._schedule(
+                lambda: self._show_status(f"Could not save the audio: {exc}", error=True),
+            )
+            return
+        self._schedule(lambda: self._show_status(f"Saved {destination.name}."))
+
     def _toggle_play(self) -> None:
         if self._playback_end is not None:
             self._stop()
@@ -368,6 +458,8 @@ class HistoryWindow:
             _logger.debug("History playback stop failed", exc_info=True)
 
     def _show_status(self, message: str, error: bool = False) -> None:
+        if self._window is None:
+            return
         self._status.configure(
             text=message,
             foreground=(

@@ -81,6 +81,10 @@ class TkModeSelector(ttk.Frame):
         self._streaming_reason = reason
         self._buttons[TranscriptionMode.STREAMING].state(["disabled"])
 
+    def enable_streaming(self) -> None:
+        self._streaming_reason = ""
+        self._buttons[TranscriptionMode.STREAMING].state(["!disabled"])
+
     def is_streaming_enabled(self) -> bool:
         return "disabled" not in self._buttons[TranscriptionMode.STREAMING].state()
 

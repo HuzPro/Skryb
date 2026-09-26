@@ -1,5 +1,6 @@
 import pytest
 
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.tk_pages.audio_page import TkAudioPage
 
 
@@ -147,3 +148,138 @@ class TestBoost:
         page.set_boost_quiet_speech(False)
 
         assert page.boosts_quiet_speech() is False
+
+
+def _listed(page) -> list[str]:
+    return list(page._preferred_list.get(0, "end"))
+
+
+def _select(page, index: int) -> None:
+    page._preferred_list.selection_clear(0, "end")
+    page._preferred_list.selection_set(index)
+
+
+class TestPreferredMicrophones:
+    def test_add_selected_adds_the_picked_microphone_by_its_full_name(self, page):
+        _pick(page, "Microphone (Maono PD300X Microphone)")
+
+        page._add_selected()
+        page._add_selected()
+
+        assert page.recording_preferences().preferred_devices == (
+            "Microphone (Maono PD300X Microphone)",
+        )
+
+    def test_the_windows_default_is_not_a_microphone_to_prefer(self, page):
+        page._add_selected()
+
+        assert page.recording_preferences().preferred_devices == ()
+
+    def test_up_down_and_remove_reorder_the_list(self, page):
+        page.set_recording_preferences(RecordingPreferences(
+            preferred_devices=("Blue Yeti", "Gerät für Café ✓", "Jabra Evolve"),
+        ))
+
+        _select(page, 2)
+        page._move_preferred(-1)
+        page._move_preferred(-1)
+        page._move_preferred(-1)
+        _select(page, 1)
+        page._remove_preferred()
+        _select(page, 0)
+        page._move_preferred(1)
+        page._move_preferred(1)
+
+        assert page.recording_preferences().preferred_devices == (
+            "Gerät für Café ✓", "Jabra Evolve",
+        )
+
+    def test_buttons_do_nothing_without_a_selection(self, page):
+        page.set_recording_preferences(RecordingPreferences(
+            preferred_devices=("Blue Yeti", "Jabra Evolve"),
+        ))
+
+        page._move_preferred(1)
+        page._remove_preferred()
+
+        assert page.recording_preferences().preferred_devices == (
+            "Blue Yeti", "Jabra Evolve",
+        )
+
+    def test_microphones_that_are_not_plugged_in_say_so(self, page):
+        page.set_recording_preferences(RecordingPreferences(
+            preferred_devices=(
+                "Microphone (Maono PD300X Microphone)",
+                "Mikrofon (Gerät für Café ✓)",
+                "Blue Yeti",
+            ),
+        ))
+
+        assert _listed(page) == [
+            "Microphone (Maono PD300X Microphone)",
+            "Mikrofon (Gerät für Café ✓)",
+            "Blue Yeti (not connected)",
+        ]
+
+    def test_refreshing_updates_which_ones_are_connected(self, page, microphones):
+        page.set_recording_preferences(RecordingPreferences(preferred_devices=("Blue Yeti",)))
+        microphones.connected.append("Blue Yeti")
+
+        page._fill(rescan=True)
+
+        assert _listed(page) == ["Blue Yeti"]
+
+
+class TestSoundsAndLimit:
+    def test_every_setting_round_trips_through_the_page(self, page):
+        chosen = RecordingPreferences(
+            warn_when_silent=False,
+            preferred_devices=("Blue Yeti",),
+            cues_enabled=False,
+            cue_volume=0.25,
+            duck_other_audio="lower",
+            duck_level=0.35,
+            max_duration_seconds=1200.0,
+            warn_before_cap_seconds=45.0,
+        )
+
+        page.set_recording_preferences(chosen)
+
+        assert page.recording_preferences() == chosen
+
+    def test_the_limit_is_shown_in_minutes_and_saved_in_seconds(self, page):
+        page.set_recording_preferences(RecordingPreferences(max_duration_seconds=90.0))
+        assert page._limit_minutes.get() == "1.5"
+
+        page._limit_minutes.set("25")
+
+        assert page.recording_preferences().max_duration_seconds == 1500.0
+
+    @pytest.mark.parametrize(
+        ("minutes", "warn", "expected"),
+        [
+            ("ten", "", (600.0, 30.0)),
+            ("0", "-5", (60.0, 0.0)),
+            ("999", "9999", (3600.0, 300.0)),
+            ("nan", "inf", (600.0, 30.0)),
+            (" 12 ", "15", (720.0, 15.0)),
+        ],
+    )
+    def test_typed_nonsense_keeps_or_clamps_the_value(self, page, minutes, warn, expected):
+        page.set_recording_preferences(RecordingPreferences())
+
+        page._limit_minutes.set(minutes)
+        page._warn_seconds.set(warn)
+        preferences = page.recording_preferences()
+
+        assert (
+            preferences.max_duration_seconds, preferences.warn_before_cap_seconds,
+        ) == expected
+
+    def test_a_setting_the_page_does_not_show_is_kept_as_it_was(self, page):
+        page.set_recording_preferences(RecordingPreferences(duck_level=0.05))
+
+        page._duck.set("mute")
+
+        assert page.recording_preferences().duck_level == 0.05
+        assert page.recording_preferences().duck_other_audio == "mute"

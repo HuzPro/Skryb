@@ -16,8 +16,10 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
 )
 from voicetotext.core.color_scheme import ColorScheme
+from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.output.dictionary_config import DictionaryConfig, LiteralRule
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.signal import Signal
@@ -59,8 +61,6 @@ def _draft(**overrides) -> SettingsDraft:
         "language": "en",
         "device": "auto",
         "engine": "auto",
-        "hotkey_combination": "ctrl+alt+m",
-        "hotkey_mode": "toggle",
         "output_mode": OutputMode.DIRECT_PASTE,
     }
     fields.update(overrides)
@@ -88,6 +88,31 @@ def test_recording_consent_is_off_until_selected(
             window.destroy()
 
 
+def test_history_and_paste_settings_are_shown_and_saved(
+    tk_root: tkinter.Tk, service: MagicMock,
+) -> None:
+    service.current_draft.return_value = _draft(
+        history_retention_days=30,
+        paste_method_overrides=(("mintty.exe", "ctrl_shift_v"),),
+    )
+    deleted: list[bool] = []
+    window = _make_window(tk_root, service, delete_all_history=lambda: deleted.append(True))
+    try:
+        assert window.collect_draft().history_retention_days == 30
+        assert window.collect_draft().paste_method_overrides == (
+            ("mintty.exe", "ctrl_shift_v"),
+        )
+        window._on_delete_all_history()
+        window._on_save_clicked()
+        saved = service.apply_draft.call_args.args[0]
+        assert saved.history_retention_days == 30
+        assert saved.paste_method_overrides == (("mintty.exe", "ctrl_shift_v"),)
+        assert deleted == [True]
+    finally:
+        if window.winfo_exists():
+            window.destroy()
+
+
 def _reload_change() -> ChangeSet:
     return ChangeSet(
         engine_reload_required=True, hotkey_changed=False, output_changed=False,
@@ -108,6 +133,7 @@ def service():
     svc.can_apply_now.return_value = True
     svc.is_engine_swapping.return_value = False
     svc.supports_streaming_hardware.return_value = True
+    svc.hardware_probe_pending.return_value = False
     svc.engine_candidates_for.return_value = ()
     svc.apply_draft.return_value = _no_change()
     svc.dictionary_rules.return_value = DictionaryConfig()
@@ -133,7 +159,9 @@ def window(tk_root, service):
 class TestInitial:
     def test_should_populate_pages_from_current_draft(self, window):
         assert window.transcription_page().current_model() == _PARAKEET
-        assert window.hotkeys_page().current_combination() == "ctrl+alt+m"
+        assert window.hotkeys_page().bindings() == (
+            Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+        )
         assert window.output_page().current_mode() is OutputMode.DIRECT_PASTE
 
     def test_should_expose_save_button(self, window):
@@ -151,6 +179,34 @@ class TestInitial:
         assert isinstance(state_listener, TkStateBridge)
         assert isinstance(download_listener, TkDownloadBridge)
         assert service.subscribe_model_deleted.called
+
+
+class TestRecordingSettings:
+    def test_saving_carries_the_audio_page_recording_settings_unchanged(
+        self, tk_root, service,
+    ):
+        saved = RecordingPreferences(
+            warn_when_silent=False,
+            preferred_devices=("Microphone (Maono PD300X Microphone)",),
+            cue_volume=0.3,
+            duck_other_audio="mute",
+            max_duration_seconds=1800.0,
+            warn_before_cap_seconds=60.0,
+        )
+        service.current_draft.return_value = _draft(recording=saved)
+        window = _make_window(tk_root, service)
+        try:
+            window._on_save_clicked()
+
+            assert service.apply_draft.call_args.args[0].recording == saved
+        finally:
+            if window.winfo_exists():
+                window.destroy()
+
+    def test_the_output_page_can_reset_the_pill_position(self, window, service):
+        window.output_page()._reset_pill_button.invoke()
+
+        service.reset_pill_position.assert_called_once_with()
 
 
 class TestSettingsTransfer:
@@ -201,14 +257,18 @@ class TestSettingsTransfer:
 
 class TestCollectDraft:
     def test_should_collect_draft_from_all_pages(self, window):
-        window.hotkeys_page().set_combination("ctrl+shift+space")
-        window.hotkeys_page().set_mode("push_to_talk")
+        shortcuts = (
+            Binding("ctrl+shift+space", BindingMode.HOLD, BindingAction.DICTATE),
+            Binding("mouse4", BindingMode.TOGGLE, BindingAction.DICTATE),
+        )
+        window.hotkeys_page().set_bindings(shortcuts)
+        window.hotkeys_page().set_double_tap_locks_hold(False)
         window.output_page().set_mode(OutputMode.CLIPBOARD_ONLY)
 
         draft = window.collect_draft()
 
-        assert draft.hotkey_combination == "ctrl+shift+space"
-        assert draft.hotkey_mode == "push_to_talk"
+        assert draft.hotkey_bindings == shortcuts
+        assert draft.double_tap_locks_hold is False
         assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
 
     def test_should_preserve_saved_device_without_a_picker(
@@ -367,6 +427,22 @@ class TestSaveGuard:
         window.save_button().invoke()
 
         service.is_installed.assert_called_with(_PARAKEET)
+
+    def test_two_dictation_shortcuts_on_the_same_keys_block_save_with_a_reason(
+        self, tk_root, service,
+    ):
+        received: list[ChangeSet] = []
+        window = _make_window(tk_root, service, on_save=received.append)
+        window.hotkeys_page().set_bindings((
+            Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+            Binding("alt+ctrl+m", BindingMode.HOLD, BindingAction.DICTATE),
+        ))
+
+        window.save_button().invoke()
+
+        assert received == []
+        assert not service.apply_draft.called
+        assert "used twice" in window.status_label().cget("text")
 
 
 class TestDownloadBridge:
@@ -547,13 +623,14 @@ class TestCaptureCallback:
             tk_root, service, on_capture_state_changed=events.append,
         )
 
-        window.hotkeys_page().hotkey_capture().start_recording()
+        window.hotkeys_page().dictation_rows()[0].capture.start_recording()
 
         assert events == [True]
 
     def test_should_be_safe_when_no_capture_callback(self, window):
-        window.hotkeys_page().hotkey_capture().start_recording()
-        window.hotkeys_page().hotkey_capture().stop_recording()
+        capture = window.hotkeys_page().dictation_rows()[0].capture
+        capture.start_recording()
+        capture.stop_recording()
 
 
 class TestLifecycle:
@@ -634,6 +711,7 @@ class TestMode:
         svc.model_supports_streaming.side_effect = lambda n: n == _PARAKEET
         svc.model_supports_batch.return_value = True
         svc.supports_streaming_hardware.return_value = True
+        svc.hardware_probe_pending.return_value = False
         svc.engine_candidates_for.return_value = ()
         svc.dictionary_rules.return_value = DictionaryConfig()
         svc.license_acceptance_required.return_value = False

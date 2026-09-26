@@ -245,3 +245,33 @@ class TestTkHotkeyCaptureTextInput:
         widget.start_recording()
 
         assert widget.has_validation_error() is False
+
+
+class TestTkHotkeyCaptureTeardown:
+    def test_closing_mid_recording_releases_the_capture_hooks(self, tk_root, bridge):
+        stopped: list[bool] = []
+        widget = TkHotkeyCapture(tk_root, capture_bridge=bridge)
+        widget.recording_stopped.connect(lambda: stopped.append(True))
+        widget.start_recording()
+        bridge.emit_key("ctrl")
+
+        widget.destroy()
+
+        assert bridge.stop_calls == 1
+        assert stopped == [True]
+
+    def test_a_mouse_button_can_be_recorded_with_a_modifier(self, widget, bridge):
+        widget.start_recording()
+        bridge.emit_key("ctrl")
+        bridge.emit_key("mouse4")
+        widget.stop_recording()
+
+        assert widget.combination() == "ctrl+mouse4"
+
+    @pytest.mark.parametrize("typed", ["mouse5", "ctrl+f24", "alt+7", "mouse_middle"])
+    def test_new_key_names_can_be_typed(self, widget, typed):
+        widget.set_typed_text(typed)
+        widget.commit_typed_text()
+
+        assert widget.has_validation_error() is False
+        assert widget.combination() == typed

@@ -225,6 +225,31 @@ class TestExplorerRestartRecovery:
         shell.Shell_NotifyIconW.assert_not_called()
 
 
+class TestDeviceChanges:
+    def _backend(self, changes: list[str]) -> mod.Win32TrayBackend:
+        backend = mod.Win32TrayBackend.__new__(mod.Win32TrayBackend)
+        backend._on_devices_changed = lambda: changes.append("changed")
+        return backend
+
+    def test_a_device_plugged_in_or_out_is_reported(self, monkeypatch) -> None:
+        changes: list[str] = []
+        monkeypatch.setattr(mod, "_user32", MagicMock())
+
+        self._backend(changes)._window_proc(0, 0x0219, 0x0007, 0)
+
+        assert changes == ["changed"]
+
+    def test_other_device_messages_are_left_to_windows(self, monkeypatch) -> None:
+        changes: list[str] = []
+        user32 = MagicMock()
+        monkeypatch.setattr(mod, "_user32", user32)
+
+        self._backend(changes)._window_proc(0, 0x0219, 0x8000, 1234)
+
+        assert changes == []
+        user32.DefWindowProcW.assert_called_once_with(0, 0x0219, 0x8000, 1234)
+
+
 class TestMicrophoneMenu:
     def _backend(self, connected, chosen, chosen_log):
         from voicetotext.tray import win32_tray_adapter as tray
@@ -297,3 +322,183 @@ class TestMicrophoneMenu:
         backend._list_microphones = broken
 
         assert self._menu_items(tray, backend, monkeypatch) == []
+
+
+class TestRepeatLastDictationMenu:
+    def _backend(self, calls):
+        from voicetotext.tray import win32_tray_adapter as tray
+
+        backend = tray.Win32TrayBackend.__new__(tray.Win32TrayBackend)
+        backend._get_state_label = lambda: "Idle - ready"
+        backend._on_settings_clicked = lambda: calls.append("settings")
+        backend._on_quit_clicked = lambda: calls.append("quit")
+        backend._on_history_clicked = lambda: calls.append("history")
+        backend._on_paste_last_clicked = lambda: calls.append("paste last")
+        backend._on_copy_last_clicked = lambda: calls.append("copy last")
+        backend._list_microphones = None
+        backend._on_microphone_chosen = None
+        backend._offered_microphones = []
+        backend._hwnd = 0
+        return tray, backend
+
+    def test_paste_and_copy_last_sit_above_history_in_the_menu(self, monkeypatch):
+        tray, backend = self._backend([])
+        labels: list[str] = []
+        user32 = MagicMock()
+        user32.AppendMenuW.side_effect = (
+            lambda menu, flags, item, label: labels.append(label)
+        )
+        user32.TrackPopupMenu.return_value = 0
+        monkeypatch.setattr(tray, "_user32", user32)
+
+        backend._show_context_menu()
+
+        items = [label for label in labels if label]
+        assert items[1:4] == ["Paste last dictation", "Copy last dictation", "History..."]
+
+    def _open_menu_and_choose(self, monkeypatch, desktop, command, calls):
+        tray, backend = self._backend(calls)
+        backend._hwnd = _TRAY
+        backend._on_paste_last_clicked = (
+            lambda: calls.append(("paste last", desktop.foreground))
+        )
+        desktop.choice = command
+        monkeypatch.setattr(tray, "_user32", desktop)
+        monkeypatch.setattr(tray, "_dwmapi", desktop)
+        monkeypatch.setattr(tray, "_run_in_background", lambda work: work())
+        monkeypatch.setattr(tray, "_FOCUS_RESTORE_SECONDS", 0.05)
+        backend._show_context_menu()
+        return tray
+
+    def test_paste_last_hands_the_focus_back_to_the_app_the_user_was_in(
+        self, monkeypatch,
+    ):
+        desktop = FakeDesktop([_window(_NOTEPAD, "Notepad")], foreground=_NOTEPAD)
+        calls: list = []
+
+        tray = self._open_menu_and_choose(monkeypatch, desktop, mod._ID_PASTE_LAST, calls)
+
+        assert desktop.focus_requests == [_TRAY, _NOTEPAD]
+        assert calls == [("paste last", _NOTEPAD)]
+        assert tray is mod
+
+    def test_when_the_taskbar_took_the_click_the_app_below_it_gets_the_focus(
+        self, monkeypatch,
+    ):
+        desktop = FakeDesktop(
+            [
+                _window(_TASKBAR, "Shell_TrayWnd"),
+                _window(0x201, "tooltips_class32", exstyle=0x80),
+                _window(0x202, "Hidden", visible=False),
+                _window(0x203, "Chrome_WidgetWin_1", iconic=True),
+                _window(0x204, "#32770", owner=0x999),
+                _window(0x205, "ApplicationFrameWindow", cloaked=True),
+                _window(_NOTEPAD, "Notepad"),
+                _window(0x300, "Chrome_WidgetWin_1"),
+            ],
+            foreground=_TASKBAR,
+        )
+        calls: list = []
+
+        self._open_menu_and_choose(monkeypatch, desktop, mod._ID_PASTE_LAST, calls)
+
+        assert desktop.focus_requests == [_TRAY, _NOTEPAD]
+        assert calls == [("paste last", _NOTEPAD)]
+
+    def test_when_the_focus_cannot_be_handed_back_paste_last_still_runs(
+        self, monkeypatch,
+    ):
+        desktop = FakeDesktop(
+            [_window(_NOTEPAD, "Notepad")], foreground=_NOTEPAD, refuses_focus=True,
+        )
+        calls: list = []
+
+        self._open_menu_and_choose(monkeypatch, desktop, mod._ID_PASTE_LAST, calls)
+
+        assert calls == [("paste last", _TRAY)]
+
+    def test_copy_last_leaves_the_focus_alone(self, monkeypatch):
+        desktop = FakeDesktop([_window(_NOTEPAD, "Notepad")], foreground=_NOTEPAD)
+        calls: list = []
+
+        self._open_menu_and_choose(monkeypatch, desktop, mod._ID_COPY_LAST, calls)
+
+        assert desktop.focus_requests == [_TRAY]
+        assert calls == ["copy last"]
+
+
+_TRAY = 0x10
+_TASKBAR = 0x20
+_NOTEPAD = 0x100
+
+
+def _window(hwnd, cls, *, visible=True, iconic=False, owner=0, exstyle=0, cloaked=False):
+    return {
+        "hwnd": hwnd, "cls": cls, "visible": visible, "iconic": iconic,
+        "owner": owner, "exstyle": exstyle, "cloaked": cloaked,
+    }
+
+
+class FakeDesktop:
+    """The windows on screen in Z order, and a foreground that can be refused."""
+
+    def __init__(self, windows, *, foreground, refuses_focus=False):
+        self.windows = windows
+        self.foreground = foreground
+        self.refuses_focus = refuses_focus
+        self.focus_requests: list[int] = []
+        self.choice = 0
+
+    def _find(self, hwnd):
+        return next((w for w in self.windows if w["hwnd"] == hwnd), _window(hwnd, "?"))
+
+    def CreatePopupMenu(self):  # noqa: N802 (Win32 name)
+        return 55
+
+    def AppendMenuW(self, *_args):  # noqa: N802
+        return 1
+
+    def GetCursorPos(self, _point):  # noqa: N802
+        return 1
+
+    def TrackPopupMenu(self, *_args):  # noqa: N802
+        return self.choice
+
+    def DestroyMenu(self, _menu):  # noqa: N802
+        return 1
+
+    def GetForegroundWindow(self):  # noqa: N802
+        return self.foreground
+
+    def SetForegroundWindow(self, hwnd):  # noqa: N802
+        self.focus_requests.append(hwnd)
+        if hwnd == _TRAY or not self.refuses_focus:
+            self.foreground = hwnd
+        return 1
+
+    def GetClassNameW(self, hwnd, buffer, _length):  # noqa: N802
+        buffer.value = self._find(hwnd)["cls"]
+        return len(buffer.value)
+
+    def GetTopWindow(self, _parent):  # noqa: N802
+        return self.windows[0]["hwnd"] if self.windows else 0
+
+    def GetWindow(self, hwnd, command):  # noqa: N802
+        if command == mod._GW_OWNER:
+            return self._find(hwnd)["owner"]
+        order = [w["hwnd"] for w in self.windows]
+        position = order.index(hwnd) + 1
+        return order[position] if position < len(order) else 0
+
+    def IsWindowVisible(self, hwnd):  # noqa: N802
+        return self._find(hwnd)["visible"]
+
+    def IsIconic(self, hwnd):  # noqa: N802
+        return self._find(hwnd)["iconic"]
+
+    def GetWindowLongW(self, hwnd, _index):  # noqa: N802
+        return self._find(hwnd)["exstyle"]
+
+    def DwmGetWindowAttribute(self, hwnd, _attribute, value, _size):  # noqa: N802
+        value._obj.value = 1 if self._find(hwnd)["cloaked"] else 0
+        return 0

@@ -16,8 +16,8 @@ from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import DEFAULT_MODEL
-from voicetotext.transcription.torch_hardware_detector import (
-    TorchHardwareDetector,
+from voicetotext.transcription.cached_hardware_detector import (
+    CachedHardwareDetector,
 )
 from voicetotext.__main__ import (
     _Startup,
@@ -308,7 +308,7 @@ class TestBindingStartupOrder:
         assert build_app.call_args.kwargs["registry"] is startup.registry
         assert isinstance(
             build_app.call_args.kwargs["hardware_detector"],
-            TorchHardwareDetector,
+            CachedHardwareDetector,
         )
         app.run.assert_called_once_with()
 

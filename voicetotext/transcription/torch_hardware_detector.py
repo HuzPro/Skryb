@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 
+from voicetotext.core.rocm_env import prepare_rocm_environment
 from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.hardware_detector import HardwareDetector
 
@@ -14,6 +15,7 @@ _CPU_PROFILE = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
 
 
 def _import_torch() -> object | None:
+    prepare_rocm_environment()
     try:
         import torch  # type: ignore[import-not-found]
     except ImportError:
@@ -44,6 +46,9 @@ class TorchHardwareDetector(HardwareDetector):
                 self._detected.device_name,
                 self._detected.gfx_arch,
             )
+        return self._detected
+
+    def peek(self) -> HardwareProfile | None:
         return self._detected
 
     def _detect_once(self) -> HardwareProfile:

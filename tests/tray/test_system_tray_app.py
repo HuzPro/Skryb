@@ -2,14 +2,16 @@ from unittest.mock import MagicMock, patch
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
+    MicrophoneConnectedEvent,
     MicrophoneMissingEvent,
+    MicrophoneSilentEvent,
     EngineLoadFailedEvent,
     ErrorOccurredEvent,
     RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
-    WritingNoticeEvent,
+    WritingServerFailedEvent,
 )
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.tray.app import SystemTrayApp, format_duration
@@ -674,8 +676,82 @@ class TestMicrophoneMissingNotification:
             assert update_call.args[0] != AppState.ERROR
 
 
-class TestWritingNotices:
-    def test_a_writing_notice_becomes_one_tray_balloon(self):
+class TestMicrophoneNotices:
+    def _running_app(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+        return app, icon
+
+    def _record(self, app) -> None:
+        app._event_bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
+
+    def test_a_silent_microphone_gets_one_balloon_per_recording(self):
+        app, icon = self._running_app()
+        self._record(app)
+
+        for _ in range(4):
+            app._event_bus.publish(MicrophoneSilentEvent(
+                device_name="Microphone (Maono PD300X Microphone)", seconds_silent=6.0,
+            ))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "No audio from Microphone (Maono PD300X Microphone). Check it is "
+            "unmuted or pick another microphone from the tray menu.",
+        )
+
+    def test_the_next_recording_can_warn_again(self):
+        app, icon = self._running_app()
+        for _ in range(3):
+            self._record(app)
+            app._event_bus.publish(MicrophoneSilentEvent(device_name="Windows default"))
+            app._event_bus.publish(
+                StateChangedEvent(old_state="recording", new_state="idle"),
+            )
+
+        assert icon.notify.call_count == 3
+
+    def test_a_preferred_microphone_plugged_in_says_it_will_be_used(self):
+        app, icon = self._running_app()
+
+        app._event_bus.publish(MicrophoneConnectedEvent(
+            name="Headset (Jabra Evolve 20 MS Stereo)", will_be_used=True,
+        ))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "Using Headset (Jabra Evolve 20 MS Stereo) for the next dictation.",
+        )
+
+    def test_any_other_new_microphone_points_at_the_tray_menu(self):
+        app, icon = self._running_app()
+
+        app._event_bus.publish(MicrophoneConnectedEvent(name="Mikrofon (Gerät für Café ✓)"))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "New microphone: Mikrofon (Gerät für Café ✓). Choose it from the tray "
+            "Microphone menu.",
+        )
+
+    def test_nothing_is_shown_before_the_tray_icon_exists(self):
+        app = _build_app()
+
+        app._event_bus.publish(MicrophoneConnectedEvent(name="USB Mic"))
+        app._event_bus.publish(MicrophoneSilentEvent(device_name="USB Mic"))
+
+
+
+class TestNoLastDictation:
+    def test_asking_for_the_last_dictation_before_any_shows_a_balloon(self):
+        from voicetotext.core.events import NoLastDictationEvent
+
         icon = MagicMock()
 
         def factory(**kwargs):
@@ -685,12 +761,33 @@ class TestWritingNotices:
         app = _build_app(tray_factory=factory)
         app.run()
 
-        app._event_bus.publish(WritingNoticeEvent(message="Selection too long to edit"))
+        app._event_bus.publish(NoLastDictationEvent())
 
-        icon.notify.assert_called_once_with("VoiceToText", "Selection too long to edit")
+        icon.notify.assert_called_once_with("VoiceToText", "No dictation yet.")
+
+
+class TestWritingServerFailure:
+    def test_the_writing_server_giving_up_becomes_one_tray_balloon(self):
+        icon = MagicMock()
+
+        def factory(**kwargs):
+            icon.run.side_effect = lambda setup: setup(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.run()
+
+        app._event_bus.publish(WritingServerFailedEvent(
+            message="The writing model could not start. Dictation works without cleanup.",
+        ))
+
+        icon.notify.assert_called_once_with(
+            "VoiceToText",
+            "The writing model could not start. Dictation works without cleanup.",
+        )
         icon.update_state.assert_not_called()
 
-    def test_a_notice_before_the_icon_exists_is_ignored(self):
+    def test_a_failure_before_the_icon_exists_is_ignored(self):
         app = _build_app()
 
-        app._event_bus.publish(WritingNoticeEvent(message="The writing model could not start."))
+        app._event_bus.publish(WritingServerFailedEvent(message="The writing model could not start."))

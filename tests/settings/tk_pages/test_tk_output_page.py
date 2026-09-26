@@ -43,3 +43,87 @@ class TestTkOutputPageButtons:
 
         for mode in OutputMode:
             assert mode.display_label in labels
+
+
+class TestResetPillPosition:
+    def test_the_button_resets_the_pill_and_says_where_it_will_appear(self, tk_root):
+        resets: list[bool] = []
+        widget = TkOutputPage(tk_root, on_reset_pill_position=lambda: resets.append(True))
+        try:
+            widget._reset_pill_button.invoke()
+
+            assert resets == [True]
+            assert "bottom centre" in widget._pill_status.cget("text")
+        finally:
+            widget.destroy()
+class TestTkOutputPageHistory:
+    def test_the_history_checkbox_is_the_saved_history_switch(self, page):
+        page.set_capture_content(True)
+
+        assert page.captures_content() is True
+
+    def test_retention_offers_forever_and_the_usual_periods(self, page):
+        page.set_history_retention_days(0)
+
+        assert list(page._retention_box.cget("values")) == [
+            "Forever", "7 days", "30 days", "90 days",
+        ]
+        assert page.history_retention_days() == 0
+        page._retention.set("90 days")
+        assert page.history_retention_days() == 90
+
+    def test_a_hand_edited_period_is_kept_rather_than_reset(self, page):
+        page.set_history_retention_days(14)
+
+        assert page.history_retention_days() == 14
+        assert "14 days" in page._retention_box.cget("values")
+
+    def test_delete_all_history_runs_only_after_confirming(self, tk_root, monkeypatch):
+        from voicetotext.settings.tk_pages import output_page
+
+        deleted: list[bool] = []
+        answers = iter([False, True])
+        monkeypatch.setattr(
+            output_page.messagebox, "askyesno", lambda *_a, **_k: next(answers),
+        )
+        page = TkOutputPage(tk_root, delete_all_history=lambda: deleted.append(True))
+        try:
+            page._confirm_delete_all()
+            page._confirm_delete_all()
+        finally:
+            page.destroy()
+
+        assert deleted == [True]
+
+
+class TestTkOutputPagePasteMethods:
+    def test_adding_an_app_stores_its_exe_name_and_method(self, page):
+        page._new_process.set("  Mintty ")
+        page._new_method.set("Ctrl+Shift+V")
+        page._add_override()
+        page._new_process.set("vmconnect.exe")
+        page._new_method.set("Type the text")
+        page._add_override()
+        page._new_process.set("   ")
+        page._add_override()
+
+        assert page.paste_method_overrides() == (
+            ("mintty.exe", "ctrl_shift_v"), ("vmconnect.exe", "type"),
+        )
+
+    def test_adding_the_same_app_again_replaces_its_method(self, page):
+        page.set_paste_method_overrides((("mintty.exe", "ctrl_v"),))
+        page._new_process.set("MINTTY.EXE")
+        page._new_method.set("Shift+Insert")
+        page._add_override()
+
+        assert page.paste_method_overrides() == (("mintty.exe", "shift_insert"),)
+
+    def test_removing_the_selected_app_drops_only_that_one(self, page):
+        page.set_paste_method_overrides(
+            (("code.exe", "ctrl_shift_v"), ("mintty.exe", "shift_insert"), ("x.exe", "junk")),
+        )
+        page._paste_table.selection_set("code.exe")
+        page._remove_override()
+
+        assert page.paste_method_overrides() == (("mintty.exe", "shift_insert"),)

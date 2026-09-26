@@ -145,6 +145,9 @@ class VoiceToTextApp:
     def release_hotkey(self) -> None:
         self._use_case.on_hotkey_deactivated()
 
+    def press_escape(self) -> None:
+        self._use_case.on_cancel()
+
     def trigger_engine_swap(
         self, model_name: str = "parakeet-tdt-0.6b-v3",
     ) -> None:

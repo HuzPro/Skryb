@@ -6,6 +6,7 @@ import pytest
 from voicetotext.core.exceptions import OutputError
 from voicetotext.output import win32_key_sender as wks
 from voicetotext.output.key_sender import KeySender
+from voicetotext.output.paste_method import PasteMethod
 from voicetotext.output.win32_key_sender import Win32KeySender
 
 
@@ -19,7 +20,7 @@ class TestWin32KeySenderSendCtrlV:
     def test_should_inject_ctrl_down_v_down_v_up_ctrl_up(self, mock_user32):
         mock_user32.SendInput.return_value = 4
 
-        Win32KeySender().send_ctrl_v()
+        Win32KeySender().send_paste(PasteMethod.CTRL_V, "")
 
         mock_user32.SendInput.assert_called_once()
         count, events, _ = mock_user32.SendInput.call_args.args
@@ -38,7 +39,7 @@ class TestWin32KeySenderSendCtrlV:
     def test_should_tag_every_injected_event_as_ours(self, mock_user32):
         mock_user32.SendInput.return_value = 4
 
-        Win32KeySender().send_ctrl_v()
+        Win32KeySender().send_paste(PasteMethod.CTRL_V, "")
 
         _, events, _ = mock_user32.SendInput.call_args.args
         tags = [events[i].union.ki.dwExtraInfo for i in range(4)]
@@ -53,7 +54,7 @@ class TestWin32KeySenderSendCtrlV:
     def test_should_pass_the_real_input_struct_size(self, mock_user32):
         mock_user32.SendInput.return_value = 4
 
-        Win32KeySender().send_ctrl_v()
+        Win32KeySender().send_paste(PasteMethod.CTRL_V, "")
 
         _, _, size = mock_user32.SendInput.call_args.args
         assert size == ctypes.sizeof(wks._Input)
@@ -63,9 +64,51 @@ class TestWin32KeySenderSendCtrlV:
         mock_user32.SendInput.return_value = 0
 
         with pytest.raises(OutputError):
-            Win32KeySender().send_ctrl_v()
+            Win32KeySender().send_paste(PasteMethod.CTRL_V, "")
 
 
 class TestWin32KeySenderIsAKeySender:
     def test_should_satisfy_key_sender_protocol(self):
         assert isinstance(Win32KeySender(), KeySender)
+
+
+class TestWin32KeySenderPasteMethods:
+    @patch.object(wks, "_user32")
+    def test_shift_insert_marks_insert_as_the_navigation_key(self, mock_user32):
+        mock_user32.SendInput.return_value = 4
+
+        Win32KeySender().send_paste(PasteMethod.SHIFT_INSERT, "")
+
+        _, events, _ = mock_user32.SendInput.call_args.args
+        sequence = [
+            (events[i].union.ki.wVk, events[i].union.ki.dwFlags) for i in range(4)
+        ]
+        assert sequence == [
+            (0x10, 0),
+            (0x2D, 0x0001),
+            (0x2D, 0x0001 | _KEYEVENTF_KEYUP),
+            (0x10, _KEYEVENTF_KEYUP),
+        ]
+
+    @patch.object(wks, "_user32")
+    def test_typing_sends_every_character_as_tagged_unicode_keystrokes(
+        self, mock_user32,
+    ):
+        text = ("Grüße 🎙️ naïve café, 東京 → done.\n" * 120)[:5000]
+        typed: list[int] = []
+
+        def send_input(count, events, size):
+            for index in range(count):
+                ki = events[index].union.ki
+                assert ki.dwExtraInfo == wks.VOICETOTEXT_INPUT_TAG
+                assert ki.dwFlags & 0x0004
+                if not ki.dwFlags & _KEYEVENTF_KEYUP:
+                    typed.append(ki.wScan)
+            return count
+
+        mock_user32.SendInput.side_effect = send_input
+
+        Win32KeySender().send_paste(PasteMethod.TYPE, text)
+
+        units = b"".join(unit.to_bytes(2, "little") for unit in typed)
+        assert units.decode("utf-16-le") == text

@@ -25,6 +25,8 @@ class FakeConfig(ConfigurationStore):
             current = current[part]
         if current is None or isinstance(current, (str, int, float, bool)):
             return current
+        if isinstance(current, list):
+            return cast(list[object], current)
         return default
 
     def set(self, key: str, value: ConfigValue) -> None:

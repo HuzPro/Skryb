@@ -10,7 +10,9 @@ from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
     DomainEvent,
     ErrorOccurredEvent,
+    NoLastDictationEvent,
     RecordingCancelledEvent,
+    RecordingCapWarningEvent,
     RecordingCappedEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
@@ -28,6 +30,7 @@ from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.last_dictation import LastDictation
 from voicetotext.recording.audio_segment import AudioSegment, load_wav
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.transcription.engine import TranscriptionEngine
@@ -51,6 +54,14 @@ def _no_writing_time(_audio_seconds: float) -> float:
     return 0.0
 
 
+def _default_cap() -> float:
+    return _DEFAULT_MAX_RECORDING_SECONDS
+
+
+def _no_warning() -> float:
+    return 0.0
+
+
 class RecordAndTranscribeUseCase:
 
     def __init__(
@@ -62,12 +73,14 @@ class RecordAndTranscribeUseCase:
         event_bus: EventBus,
         action_dispatcher: ActionDispatcher,
         diagnostics: SessionDiagnostics,
-        max_recording_seconds: float = _DEFAULT_MAX_RECORDING_SECONDS,
+        max_recording_seconds: Callable[[], float] = _default_cap,
         streaming_controller: LiveStreamingController | None = None,
         is_streaming_mode: Callable[[], bool] | None = None,
         prepare_audio: Callable[[AudioSegment], AudioSegment] | None = None,
         voice_edit: VoiceEditor | None = None,
         writing_seconds: Callable[[float], float] = _no_writing_time,
+        warn_before_cap_seconds: Callable[[], float] = _no_warning,
+        last_dictation: LastDictation | None = None,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -76,7 +89,10 @@ class RecordAndTranscribeUseCase:
         self._event_bus = event_bus
         self._dispatcher = action_dispatcher
         self._diagnostics = diagnostics
+        # Both limits are asked at every start, so a saved change applies to
+        # the next recording.
         self._max_recording_seconds = max_recording_seconds
+        self._warn_before_cap_seconds = warn_before_cap_seconds
         self._streaming = streaming_controller
         self._is_streaming_mode = is_streaming_mode or (lambda: False)
         # Runs on the audio the engine hears only; history keeps the original.
@@ -98,10 +114,14 @@ class RecordAndTranscribeUseCase:
         # to enforce the duration cap, cancelled when the user stops
         # normally or replaced when the recording finishes auto-stopped.
         self._cap_timer: threading.Timer | None = None
+        self._cap_warning_timer: threading.Timer | None = None
         # Paused time does not count towards the cap: the cap bounds the
         # audio, and a pause records none.
         self._paused = False
-        self._cap_remaining = max_recording_seconds
+        self._cap_seconds = _DEFAULT_MAX_RECORDING_SECONDS
+        self._warn_seconds = 0.0
+        self._cap_warned = False
+        self._cap_remaining = self._cap_seconds
         self._cap_started_at = 0.0
         self._voice_edit = voice_edit
         # How long the writing model will add, from the audio length; it
@@ -110,6 +130,11 @@ class RecordAndTranscribeUseCase:
         # The selection a voice edit will replace, from its start until the
         # recording is transcribed or dropped.
         self._editing: Selection | None = None
+        self._last_dictation = last_dictation or LastDictation()
+        # The last recording that was cancelled or failed to transcribe,
+        # kept in memory so the notice beside it can still transcribe it.
+        self._unfinished_audio: AudioSegment | None = None
+        self._unfinished_lock = threading.Lock()
         event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
     def on_hotkey_activated(self) -> None:
@@ -132,6 +157,70 @@ class RecordAndTranscribeUseCase:
 
     def is_recording(self) -> bool:
         return self._state_machine.state == AppState.RECORDING
+
+    def paste_last(self) -> None:
+        """Deliver the last dictation's final text again, as output is set up now."""
+        self._dispatcher.dispatch(
+            lambda: self._repeat_last_dictation(self._last_dictation.paste),
+        )
+
+    def copy_last(self) -> None:
+        """Put the last dictation's final text on the clipboard, nothing more."""
+        self._dispatcher.dispatch(
+            lambda: self._repeat_last_dictation(self._last_dictation.copy),
+        )
+
+    def retry_last_recording(self) -> None:
+        """Transcribe the last cancelled or failed recording and deliver it."""
+        self._dispatcher.dispatch(self._transcribe_unfinished)
+
+    def _repeat_last_dictation(self, send: Callable[[], bool]) -> None:
+        if not send():
+            self._event_bus.publish(NoLastDictationEvent())
+
+    def _keep_unfinished(self, audio: AudioSegment | None) -> bool:
+        if audio is None or audio.duration_seconds < _MIN_DURATION_SECONDS:
+            return False
+        with self._unfinished_lock:
+            self._unfinished_audio = audio
+        return True
+
+    def _transcribe_unfinished(self) -> None:
+        with self._unfinished_lock:
+            audio, self._unfinished_audio = self._unfinished_audio, None
+        if audio is None:
+            return
+        requested_at = datetime.now(UTC)
+        try:
+            result = self._transcribe(audio)
+        except Exception as exc:  # noqa: BLE001 - offered again beside the failure
+            self._report_unfinished_failure(audio, exc, requested_at)
+            return
+        self._deliver_transcribed_text(result)
+        self._diagnostics.transcription_finished(audio, result, requested_at)
+        self._event_bus.publish(
+            TranscriptionCompletedEvent(
+                text=result.text,
+                transcription_seconds=result.transcription_seconds,
+            )
+        )
+
+    def _report_unfinished_failure(
+        self, audio: AudioSegment, error: Exception, requested_at: datetime,
+    ) -> None:
+        # No state change: a new dictation may already be under way.
+        _logger.error("Transcribing the kept recording failed: %s", error)
+        self._diagnostics.transcription_finished(audio, error, requested_at)
+        self._event_bus.publish(
+            TranscriptionFailedEvent(
+                error=str(error), recoverable=self._keep_unfinished(audio),
+            )
+        )
+
+    def _transcribe(self, audio: AudioSegment) -> TranscriptionResult:
+        heard = self._prepare_audio(audio)
+        with self._engine_lock:
+            return self._engine.transcribe(heard)
 
     def retranscribe(
         self, wav_path: Path, on_done: Callable[[str | Exception], None],
@@ -177,7 +266,7 @@ class RecordAndTranscribeUseCase:
                 return
             self._cancel_cap_timer()
             self._paused = False
-            self._editing = None
+            editing, self._editing = self._editing, None
             try:
                 audio = self._recorder.stop_recording()
             except Exception as exc:
@@ -188,7 +277,13 @@ class RecordAndTranscribeUseCase:
                 )
                 return
             self._state_machine.transition_to(AppState.IDLE)
-            self._event_bus.publish(RecordingCancelledEvent())
+            # A voice edit's audio is an instruction, not text to paste, so
+            # it is never offered back as a dictation.
+            self._event_bus.publish(
+                RecordingCancelledEvent(
+                    recoverable=editing is None and self._keep_unfinished(audio),
+                ),
+            )
             _logger.info("Recording cancelled.")
             self._dispatcher.dispatch(
                 lambda: self._diagnostics.recording_cancelled(audio),
@@ -321,7 +416,7 @@ class RecordAndTranscribeUseCase:
 
     def _start_recording(self, caption: str = "") -> None:
         self._paused = False
-        self._cap_remaining = self._max_recording_seconds
+        self._reset_cap()
         try:
             self._recorder.start_recording()
         except Exception as e:
@@ -341,7 +436,7 @@ class RecordAndTranscribeUseCase:
             self._event_bus.publish(ErrorOccurredEvent(error=str(exc)))
             return
         self._paused = False
-        self._cap_remaining = self._max_recording_seconds
+        self._reset_cap()
         self._streaming_active = True
         self._state_machine.transition_to(AppState.RECORDING)
         self._event_bus.publish(RecordingStartedEvent())
@@ -409,6 +504,12 @@ class RecordAndTranscribeUseCase:
         if result.is_empty:
             self._announce_empty_transcription(result)
 
+    def _reset_cap(self) -> None:
+        self._cap_seconds = self._max_recording_seconds()
+        self._warn_seconds = self._warn_before_cap_seconds()
+        self._cap_warned = False
+        self._cap_remaining = self._cap_seconds
+
     def _schedule_cap_timer(self) -> None:
         self._cap_started_at = time.monotonic()
         self._cap_timer = threading.Timer(
@@ -417,12 +518,37 @@ class RecordAndTranscribeUseCase:
         )
         self._cap_timer.daemon = True
         self._cap_timer.start()
+        if self._warn_seconds > 0 and not self._cap_warned:
+            self._cap_warning_timer = threading.Timer(
+                max(self._cap_remaining - self._warn_seconds, 0.0),
+                self._on_cap_warning_due,
+            )
+            self._cap_warning_timer.daemon = True
+            self._cap_warning_timer.start()
 
     def _cancel_cap_timer(self) -> None:
-        if self._cap_timer is None:
-            return
-        self._cap_timer.cancel()
+        for timer in (self._cap_timer, self._cap_warning_timer):
+            if timer is not None:
+                timer.cancel()
         self._cap_timer = None
+        self._cap_warning_timer = None
+
+    def _on_cap_warning_due(self) -> None:
+        self._dispatcher.dispatch(self._warn_of_cap)
+
+    def _warn_of_cap(self) -> None:
+        with self._action_lock:
+            if (
+                self._state_machine.state != AppState.RECORDING
+                or self._paused
+                or self._cap_warned
+            ):
+                return
+            self._cap_warned = True
+            remaining = self._cap_remaining - (time.monotonic() - self._cap_started_at)
+            self._event_bus.publish(
+                RecordingCapWarningEvent(remaining_seconds=max(remaining, 0.0)),
+            )
 
     def _on_cap_timer_fired(self) -> None:
         # Timer thread → worker thread, so the auto-stop takes the
@@ -438,11 +564,11 @@ class RecordAndTranscribeUseCase:
                 return
             _logger.info(
                 "Recording auto-stopped: %.0fs cap reached.",
-                self._max_recording_seconds,
+                self._cap_seconds,
             )
             self._event_bus.publish(
                 RecordingCappedEvent(
-                    max_duration_seconds=self._max_recording_seconds,
+                    max_duration_seconds=self._cap_seconds,
                 )
             )
             self._end_capture()
@@ -509,10 +635,13 @@ class RecordAndTranscribeUseCase:
             self._diagnostics.transcription_finished(
                 audio, exc, requested_at,
             )
+            recoverable = editing is None and self._keep_unfinished(audio)
             self._report_error(
                 "Transcription failed",
                 exc,
-                lambda message: TranscriptionFailedEvent(error=message),
+                lambda message: TranscriptionFailedEvent(
+                    error=message, recoverable=recoverable,
+                ),
             )
 
     def _transcribe_and_publish(
@@ -521,9 +650,7 @@ class RecordAndTranscribeUseCase:
         requested_at: datetime,
         editing: Selection | None = None,
     ) -> None:
-        heard = self._prepare_audio(audio)
-        with self._engine_lock:
-            result = self._engine.transcribe(heard)
+        result = self._transcribe(audio)
         # The output stage runs the text pipeline, writing model included,
         # on this thread; timing it apart keeps the transcription estimate
         # about transcribing alone.

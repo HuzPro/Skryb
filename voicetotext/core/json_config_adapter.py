@@ -17,14 +17,18 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "hotkey": {
-        "mode": "toggle",
-        "combination": "ctrl+alt+m",
+        "bindings": [
+            {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
+        ],
+        "double_tap_locks_hold": True,
     },
     "output": {
         "mode": "direct_paste",
+        "paste_method_overrides": {},
     },
     "overlay": {
         "enabled": True,
+        "position": {"x": 0.5, "y": 1.0},
     },
     "transcription": {
         "device": "auto",
@@ -35,6 +39,16 @@ DEFAULT_CONFIG = {
     },
     "audio": {
         "sample_rate": 16000,
+        "warn_when_silent": True,
+        "preferred_devices": [],
+        "cues_enabled": True,
+        "cue_volume": 0.6,
+        "duck_other_audio": "off",
+        "duck_level": 0.2,
+    },
+    "recording": {
+        "max_duration_seconds": 600.0,
+        "warn_before_cap_seconds": 30.0,
     },
     "diagnostics": {
         "enabled": True,
@@ -53,6 +67,9 @@ DEFAULT_CONFIG = {
         "after_dictation_transform": "",
         "runtime_path": "",
         "model_path": "",
+    },
+    "history": {
+        "retention_days": 0,
     },
 }
 

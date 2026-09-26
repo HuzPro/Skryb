@@ -89,10 +89,12 @@ class TkSettingsWindow(tkinter.Toplevel):
         confirm_license: LicenseConsentPrompt = ask_license_consent,
         microphones: Microphones | None = None,
         writing: WritingService | None = None,
+        delete_all_history: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
         # The first-run window has no writing model to manage yet.
         self._writing = writing
+        self._delete_all_history = delete_all_history
         self._microphones = microphones or Microphones()
         self._shown_page: ttk.Frame | None = None
         # Hide immediately so the half-built, not-yet-themed window never
@@ -171,6 +173,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         draft = self._service.current_draft()
         self._transcription_page = TkTranscriptionPage(
             content, self._service, confirm_license=self._confirm_license,
+            schedule=self._schedule,
         )
         self._transcription_page.download_error.connect(self._on_download_error)
         self._transcription_page.delete_error.connect(self._on_delete_error)
@@ -184,7 +187,14 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._on_recording_state_changed,
         )
         self._audio_page = TkAudioPage(content, self._microphones)
-        self._output_page = TkOutputPage(content)
+        self._output_page = TkOutputPage(
+            content,
+            on_reset_pill_position=self._service.reset_pill_position,
+            delete_all_history=(
+                None if self._delete_all_history is None
+                else self._on_delete_all_history
+            ),
+        )
         self._dictionary_page = TkDictionaryPage(content)
         self._dictionary_page.set_dictionary(self._service.dictionary_rules())
         self._writing_page = (
@@ -246,12 +256,15 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._logs_folder_button.pack(side="right", padx=(0, 8))
 
     def _apply_initial_draft(self, draft: SettingsDraft) -> None:
-        self._hotkeys_page.set_combination(draft.hotkey_combination)
-        self._hotkeys_page.set_mode(draft.hotkey_mode)
+        self._hotkeys_page.set_bindings(draft.hotkey_bindings)
+        self._hotkeys_page.set_double_tap_locks_hold(draft.double_tap_locks_hold)
         self._output_page.set_mode(draft.output_mode)
         self._output_page.set_capture_content(draft.capture_content)
+        self._output_page.set_history_retention_days(draft.history_retention_days)
+        self._output_page.set_paste_method_overrides(draft.paste_method_overrides)
         self._audio_page.set_device(draft.input_device)
         self._audio_page.set_boost_quiet_speech(draft.boost_quiet_speech)
+        self._audio_page.set_recording_preferences(draft.recording)
         if self._writing_page is not None:
             self._writing_page.set_settings(draft.writing)
 
@@ -270,6 +283,12 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._show_status(f"Could not set logs folder: {exc}", error=True)
             return
         self._show_status("Logs folder applies from the next launch.")
+
+    def _on_delete_all_history(self) -> None:
+        if self._delete_all_history is None:
+            return
+        self._delete_all_history()
+        self._show_status("Deleting all history in the background.")
 
     def _on_export_settings(self) -> None:
         selected = filedialog.asksaveasfilename(
@@ -349,12 +368,13 @@ class TkSettingsWindow(tkinter.Toplevel):
             language=self._transcription_page.current_language(),
             device=self._service.current_draft().device,
             engine=self._transcription_page.current_engine(),
-            hotkey_combination=self._hotkeys_page.current_combination(),
-            hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
             capture_content=self._output_page.captures_content(),
             input_device=self._audio_page.current_device(),
             boost_quiet_speech=self._audio_page.boosts_quiet_speech(),
+            recording=self._audio_page.recording_preferences(),
+            history_retention_days=self._output_page.history_retention_days(),
+            paste_method_overrides=self._output_page.paste_method_overrides(),
             transcription_mode=self._transcription_page.current_mode(),
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()
@@ -364,6 +384,8 @@ class TkSettingsWindow(tkinter.Toplevel):
                 if self._writing_page is not None
                 else self._service.current_draft().writing
             ),
+            hotkey_bindings=self._hotkeys_page.bindings(),
+            double_tap_locks_hold=self._hotkeys_page.double_tap_locks_hold(),
         )
 
     def _on_save_clicked(self) -> None:
@@ -374,6 +396,10 @@ class TkSettingsWindow(tkinter.Toplevel):
             )
             return
 
+        shortcut_problem = self._hotkeys_page.validation_error()
+        if shortcut_problem:
+            self._show_status(shortcut_problem, error=True)
+            return
         draft = self.collect_draft()
         if not self._service.is_installed(draft.model_size):
             self._show_status(

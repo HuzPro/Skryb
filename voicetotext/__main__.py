@@ -43,10 +43,17 @@ def _apply_torch_env_overrides() -> None:
     flash / mem-efficient attention kernels on AMD ROCm. The flag is a
     no-op on NVIDIA / CPU, so it is set unconditionally; ``setdefault``
     lets a user explicitly opt out by exporting ``=0`` first.
+
+    ``ROCM_SDK_TARGET_FAMILY`` is answered here so no torch import ever
+    runs ROCm's own ``offload-arch`` probe, which flashes a console window
+    under the windowless launcher.
     """
     if os.environ.get("VOICETOTEXT_DISABLE_CUDA_CACHE") == "1":
         os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
     os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    from voicetotext.core.rocm_env import prepare_rocm_environment
+
+    prepare_rocm_environment()
 
 
 def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
@@ -265,13 +272,21 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     )
 
     startup.await_torch_prewarm()
+    from voicetotext.transcription.cached_hardware_detector import (
+        CachedHardwareDetector,
+    )
     from voicetotext.transcription.torch_hardware_detector import (
         TorchHardwareDetector,
+    )
+    from voicetotext.transcription.win32_display_adapters import (
+        display_adapter_fingerprint,
     )
 
     # Held, not called: the GPU probe imports torch, so only the code
     # that actually needs an answer gets to pay for one.
-    hardware_detector = TorchHardwareDetector()
+    hardware_detector = CachedHardwareDetector(
+        TorchHardwareDetector(), config, display_adapter_fingerprint,
+    )
     from voicetotext.transcription.model_info import DEFAULT_MODEL
 
     if not startup.model_was_configured:
