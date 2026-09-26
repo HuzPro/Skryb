@@ -677,3 +677,65 @@ class TestMode:
         status = mode_window.status_label().cget("text")
         assert _PARAKEET in status
         assert _BATCH_ONLY in status
+
+
+class TestWritingSection:
+    def test_the_writing_page_sits_between_output_and_dictionary(self, tk_root, service):
+        from tests.settings.tk_pages.test_tk_writing_page import FakeWriting
+
+        window = _make_window(tk_root, service, writing=FakeWriting())
+        try:
+            assert window.sidebar_labels() == [
+                "Transcription", "Audio", "Hotkeys", "Output", "Writing", "Dictionary",
+            ]
+            assert window.writing_page() is not None
+        finally:
+            window.destroy()
+
+    def test_the_first_run_window_has_no_writing_page(self, window):
+        assert "Writing" not in window.sidebar_labels()
+        assert window.writing_page() is None
+
+    def test_save_applies_the_writing_settings_and_saves_edited_transformations(
+        self, tk_root, service,
+    ):
+        from tests.settings.tk_pages.test_tk_writing_page import FakeWriting
+        from voicetotext.writing.settings import WritingSettings
+
+        writing = FakeWriting()
+        applied: list[ChangeSet] = []
+        window = _make_window(tk_root, service, writing=writing, on_save=applied.append)
+        page = window.writing_page()
+        assert page is not None
+        page.set_settings(WritingSettings(cleanup="polished", style_notes="Cheers ✓"))
+        page._transform_name.set("Pirate")
+        page._transform_text.set("Talk like a pirate, keep every fact.")
+        page.add_transform()
+
+        window._on_save_clicked()
+
+        draft = service.apply_draft.call_args.args[0]
+        assert draft.writing.cleanup == "polished"
+        assert draft.writing.style_notes == "Cheers ✓"
+        assert "save_transforms" in writing.calls
+        assert writing.saved["Pirate"] == "Talk like a pirate, keep every fact."
+        assert applied[0].output_changed
+
+    def test_forgetting_learned_words_in_the_dictionary_blocks_them_on_save(
+        self, tk_root, service,
+    ):
+        from tests.settings.tk_pages.test_tk_writing_page import FakeWriting
+
+        service.dictionary_rules.return_value = DictionaryConfig(rules=(
+            LiteralRule(spoken=("Jon",), replacement="John", learned=True),
+            LiteralRule(spoken=("vtt",), replacement="VoiceToText"),
+        ))
+        writing = FakeWriting()
+        window = _make_window(tk_root, service, writing=writing)
+        window.dictionary_page().forget_learned_words()
+
+        window._on_save_clicked()
+
+        saved = service.save_dictionary_rules.call_args.args[0]
+        assert saved.rules == (LiteralRule(spoken=("vtt",), replacement="VoiceToText"),)
+        assert "forget_learned_words [('Jon', 'John')]" in writing.calls

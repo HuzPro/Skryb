@@ -45,6 +45,7 @@ from voicetotext.settings.service import (
 from voicetotext.settings.settings_draft import SettingsDraft
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ALL_MODELS
+from voicetotext.writing.settings import WritingSettings
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 
@@ -841,3 +842,41 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert config.get("audio.boost_quiet_speech") is False
     assert service.current_draft().input_device == "Microphone (Maono PD300X Microp"
     assert service.current_draft().boost_quiet_speech is False
+
+
+class TestWritingSettings:
+    def test_every_writing_field_round_trips_through_the_config(self):
+        service, config, *_ = _build_service()
+        writing = WritingSettings(
+            cleanup="polished",
+            lists=False,
+            deadline_seconds=12.5,
+            context=False,
+            learn_words=False,
+            learn_style=False,
+            style_notes="British spelling ✓\nno exclamation marks",
+            after_dictation_transform="Casual",
+            runtime_path="C:/tools/llama café/llama-server.exe",
+            model_path="D:/models/Qwen3.5-4B-Q4_K_M.gguf",
+        )
+
+        service.apply_draft(replace(service.current_draft(), writing=writing))
+
+        assert service.current_draft().writing == writing
+        assert config.get("writing.cleanup") == "polished"
+        assert config.get("writing.deadline_seconds") == 12.5
+
+    def test_missing_or_nonsense_writing_values_read_as_the_defaults(self):
+        service, *_ = _build_service(config_overrides={
+            "writing.cleanup": "aggressive",
+            "writing.deadline_seconds": "soon",
+            "writing.lists": "yes",
+            "writing.style_notes": 42,
+        })
+
+        assert service.current_draft().writing == WritingSettings()
+
+    def test_the_deadline_is_kept_between_half_a_second_and_thirty(self):
+        service, *_ = _build_service(config_overrides={"writing.deadline_seconds": 90})
+
+        assert service.current_draft().writing.deadline_seconds == 30.0

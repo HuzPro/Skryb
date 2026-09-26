@@ -283,4 +283,15 @@ def _recolour_plain_widgets(widget: tkinter.Misc, theme: Theme) -> None:
             )
         elif isinstance(child, tkinter.Canvas):
             child.configure(bg=theme.background, highlightthickness=0)
+        elif isinstance(child, tkinter.Text):
+            child.configure(
+                bg=theme.surface,
+                fg=theme.foreground,
+                insertbackground=theme.foreground,
+                selectbackground=theme.select_background,
+                selectforeground=theme.select_foreground,
+                highlightthickness=0,
+                borderwidth=0,
+                font=_BODY_FONT,
+            )
         _recolour_plain_widgets(child, theme)

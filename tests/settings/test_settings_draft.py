@@ -3,6 +3,7 @@ import pytest
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
+from voicetotext.writing.settings import WritingSettings
 
 
 def _make_draft(**overrides) -> SettingsDraft:
@@ -182,3 +183,24 @@ class TestLeavingVerbatimTranscription:
         changes = ChangeSet.between(original, updated)
 
         assert changes.output_changed is True
+
+
+class TestWritingChanges:
+    def test_any_writing_change_rebuilds_output_so_it_applies_live(self):
+        before = _make_draft()
+        after = _make_draft(writing=WritingSettings(cleanup="polished"))
+
+        changes = ChangeSet.between(before, after)
+
+        assert changes.output_changed
+        assert not changes.writing_server_changed
+        assert not changes.engine_reload_required
+
+    def test_a_new_runtime_or_model_path_restarts_the_writing_server(self):
+        before = _make_draft()
+        runtime = _make_draft(writing=WritingSettings(runtime_path="C:/llama/llama-server.exe"))
+        model = _make_draft(writing=WritingSettings(model_path="D:/models/mine.gguf"))
+
+        assert ChangeSet.between(before, runtime).writing_server_changed
+        assert ChangeSet.between(before, model).writing_server_changed
+        assert not ChangeSet.between(before, before).writing_server_changed

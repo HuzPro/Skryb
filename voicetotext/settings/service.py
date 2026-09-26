@@ -24,7 +24,7 @@ from voicetotext.core.json_config_adapter import (
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
-    dictionary_to_json,
+    save_dictionary,
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.text_filter_decorator import load_dictionary
@@ -54,6 +54,10 @@ from voicetotext.transcription.model_info import has_crisperwhisper_modes
 
 CRISPERWHISPER_MODES: tuple[str, ...] = ("intended", "verbatim")
 from voicetotext.transcription.model_manager import ModelManager
+from voicetotext.writing.settings import (
+    read_writing_settings,
+    write_writing_settings,
+)
 
 
 class DownloadEventListener(ABC):
@@ -264,6 +268,7 @@ class SettingsService:
             boost_quiet_speech=(
                 self._config.get("audio.boost_quiet_speech", True) is not False
             ),
+            writing=read_writing_settings(self._config),
         )
 
     def _crisperwhisper_mode(self) -> str:
@@ -294,6 +299,7 @@ class SettingsService:
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
         )
+        write_writing_settings(self._config, draft.writing)
         self._config.save()
         self._invalidate_cache_on_engine_change(original, draft)
         return ChangeSet.between(original, draft)
@@ -344,13 +350,7 @@ class SettingsService:
         return load_dictionary(self._dictionary_path)
 
     def save_dictionary_rules(self, dictionary: DictionaryConfig) -> None:
-        self._dictionary_path.parent.mkdir(parents=True, exist_ok=True)
-        self._dictionary_path.write_text(
-            json.dumps(
-                dictionary_to_json(dictionary), ensure_ascii=False, indent=2,
-            ) + "\n",
-            encoding="utf-8",
-        )
+        save_dictionary(self._dictionary_path, dictionary)
 
     # ------------------------------------------------------------------
     # Engine + device queries (hardware-aware)

@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -835,7 +836,7 @@ class TestApplySettings:
 
         mock_build_output.assert_called_once_with(
             OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None,
-            _ignore_delivery,
+            _ignore_delivery, writing=None,
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
@@ -1064,3 +1065,93 @@ class TestMicrophoneWiring:
         bootstrap._choose_microphone(config, "Microphone (Maono PD300X Microp")
 
         assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"
+
+
+class TestWritingWiring:
+    def _paths(self, tmp_path: Path) -> AppPaths:
+        paths = AppPaths(base=tmp_path)
+        paths.ensure_dirs()
+        session = paths.diagnostics_dir / "session"
+        session.mkdir()
+        paths.activate_session(session)
+        return paths
+
+    def test_the_stale_batch_block_is_dropped_and_history_is_left_alone(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({
+            "batch": {"cleanup": "none", "deadline_seconds": 2, "model_path": "C:/old.gguf"},
+            "history": {"keep_days": 30},
+            "hotkey": {"combination": "ctrl+shift+alt+m"},
+        }), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        bootstrap.migrate_stale_batch_block(config)
+
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        assert "batch" not in saved
+        assert saved["history"] == {"keep_days": 30}
+        assert config.get("writing.cleanup") == "light"
+        assert config.get("hotkey.combination") == "ctrl+shift+alt+m"
+
+    def test_a_config_without_a_batch_block_is_not_rewritten(self):
+        config = FakeConfig({"hotkey.combination": "f9"})
+
+        bootstrap.migrate_stale_batch_block(config)
+
+        assert config.save_count == 0
+
+    def test_learning_alone_runs_the_edit_watcher_but_writes_no_edits_log(self, tmp_path):
+        paths = self._paths(tmp_path)
+        learner = MagicMock()
+
+        capture = _build_edit_capture(FakeConfig(), paths, learner)
+        assert capture is not None
+        capture._recorder.delivered("Ship it to Jon.", "batch", "direct_paste")
+
+        learner.observe.assert_called_once()
+        assert not (paths.session_dir / "edits.jsonl").exists()
+
+    def test_learning_switched_off_in_settings_leaves_the_watcher_off(self, tmp_path):
+        config = FakeConfig({"writing.learn_words": False, "writing.learn_style": False})
+
+        assert _build_edit_capture(config, self._paths(tmp_path), MagicMock()) is None
+
+    def test_the_edits_log_and_the_learner_both_receive_events_when_both_are_on(self, tmp_path):
+        paths = self._paths(tmp_path)
+        learner = MagicMock()
+        config = FakeConfig({
+            "diagnostics.capture_edits": True,
+            "diagnostics.capture_content": True,
+        })
+
+        capture = _build_edit_capture(config, paths, learner)
+        assert capture is not None
+        capture._recorder.delivered("Ship it to Jon.", "batch", "direct_paste")
+
+        learner.observe.assert_called_once()
+        assert (paths.session_dir / "edits.jsonl").read_text(encoding="utf-8").count("\n") == 1
+
+    def test_background_work_starts_on_the_first_idle_and_only_once(self):
+        bus = SimpleEventBus()
+        started: list[str] = []
+        bootstrap._start_once_idle(bus, lambda: started.append("server"), lambda: started.append("edits"))
+
+        bus.publish(StateChangedEvent(old_state="loading", new_state="error"))
+        assert started == []
+        bus.publish(StateChangedEvent(old_state="error", new_state="idle"))
+        bus.publish(StateChangedEvent(old_state="recording", new_state="idle"))
+
+        assert started == ["server", "edits"]
+
+    def test_streaming_and_verbatim_dictation_add_no_writing_time(self):
+        writing = MagicMock()
+        writing.estimated_seconds.return_value = 1.25
+
+        batch = bootstrap._writing_seconds(FakeConfig(), writing, 30.0)
+        streaming = bootstrap._writing_seconds(
+            FakeConfig({"transcription.mode": "streaming"}), writing, 30.0,
+        )
+
+        assert batch == 1.25
+        assert streaming == 0.0

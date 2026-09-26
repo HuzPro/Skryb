@@ -312,3 +312,52 @@ class TestDelete:
         page.delete_button().invoke()
 
         assert "select a rule" in page.message().lower()
+
+
+class TestLearnedWords:
+    _LEARNED = LiteralRule(("Jon",), "John", learned=True)
+    _MANUAL = LiteralRule(("git hub",), "GitHub")
+
+    def test_learned_rules_carry_a_learned_tag(self, page: TkDictionaryPage) -> None:
+        page.set_dictionary(DictionaryConfig(rules=(self._MANUAL, self._LEARNED)))
+
+        assert page.rule_labels() == [
+            "[literal] git hub  ->  GitHub",
+            "[literal] Jon  ->  John  (learned)",
+        ]
+
+    def test_forget_all_learned_words_removes_only_learned_rules_and_remembers_them(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        aisha = LiteralRule(("Aisha",), "Aïsha", learned=True)
+        page.set_dictionary(DictionaryConfig(rules=(self._LEARNED, self._MANUAL, aisha)))
+
+        page.forget_learned_words()
+
+        assert page.dictionary().rules == (self._MANUAL,)
+        assert page.forgotten_learned_words() == (("Jon", "John"), ("Aisha", "Aïsha"))
+        assert page.is_dirty()
+
+    def test_deleting_one_learned_word_remembers_just_that_one(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.set_dictionary(DictionaryConfig(rules=(self._MANUAL, self._LEARNED)))
+
+        page.select_rule(1)
+        page.delete_selected_rule()
+        page.select_rule(0)
+        page.delete_selected_rule()
+
+        assert page.forgotten_learned_words() == (("Jon", "John"),)
+
+    def test_editing_a_learned_word_turns_it_into_a_manual_rule(
+        self, page: TkDictionaryPage,
+    ) -> None:
+        page.set_dictionary(DictionaryConfig(rules=(self._LEARNED,)))
+
+        page.select_rule(0)
+        _type_rule(page, "Jon", "Jonathan")
+        page.update_selected_rule()
+
+        assert page.dictionary().rules == (LiteralRule(("Jon",), "Jonathan"),)
+        assert page.forgotten_learned_words() == ()
