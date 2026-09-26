@@ -320,18 +320,29 @@ def test_a_model_that_is_not_installed_cannot_be_chosen(rig: Rig) -> None:
     )
 
 
-def test_settings_export_and_import_round_trip_through_a_file(rig: Rig, tmp_path: Path) -> None:
+def test_settings_export_and_import_round_trip_through_a_file_and_apply_at_once(
+    rig: Rig, tmp_path: Path,
+) -> None:
     exported = tmp_path / "Réglages exportés.json"
     assert rig.call("POST", "/api/settings/export", {"path": str(exported)})[0] == 204
     document = json.loads(exported.read_text(encoding="utf-8"))
     assert document["transcription"]["model_size"] == PARAKEET
 
     document["output"]["mode"] = "paste_and_clipboard"
+    document["hotkey"] = {"bindings": [{"keys": "ctrl+shift+f9", "mode": "hold", "action": "dictate"}]}
     exported.write_text(json.dumps(document), encoding="utf-8")
     stream = rig.events()
     assert rig.call("POST", "/api/settings/import", {"path": str(exported)})[0] == 204
     assert stream.until("settings")["output_mode"] == "paste_and_clipboard"
     stream.close()
+    assert [(c.output_changed, c.hotkey_changed, c.engine_reload_required) for c in rig.saved] == [
+        (True, True, False),
+    ]
+
+    rig.state_machine.transition_to(AppState.RECORDING)
+    assert rig.call("POST", "/api/settings/import", {"path": str(exported)})[0] == 409
+    rig.state_machine.transition_to(AppState.TRANSCRIBING)
+    rig.state_machine.transition_to(AppState.IDLE)
 
     broken = tmp_path / "broken.json"
     broken.write_text("{", encoding="utf-8")
@@ -464,15 +475,18 @@ def test_engines_answer_before_the_gpu_probe_and_the_probe_reports_later(make_ri
 # -- microphones and shortcuts -------------------------------------------------------------
 
 
-def test_microphones_list_the_default_the_connected_ones_and_a_chosen_one_now_unplugged(rig: Rig) -> None:
+def test_microphones_list_the_connected_ones_and_a_chosen_one_now_unplugged_but_not_the_windows_default(
+    rig: Rig,
+) -> None:
+    status, with_default_chosen = rig.call("GET", "/api/microphones")
     rig.config.set("audio.input_device", "USB Mic (unplugged) ✓")
 
-    status, microphones = rig.call("GET", "/api/microphones")
+    microphones = rig.call("GET", "/api/microphones")[1]
     rig.call("GET", "/api/microphones?rescan=1")
 
     assert status == 200
+    assert with_default_chosen == microphones[:2]
     assert microphones == [
-        _microphone("", "Windows default", connected=True, default=True),
         _microphone("Microphone (Maono PD300X)", "Microphone (Maono PD300X)", connected=True),
         _microphone(
             "Headset (Jabra Evolve2 65 Mon", "Headset (Jabra Evolve2 65 Mono)", connected=True,
@@ -482,8 +496,8 @@ def test_microphones_list_the_default_the_connected_ones_and_a_chosen_one_now_un
     assert rig.microphones.rescans == 1
 
 
-def _microphone(name: str, label: str, *, connected: bool, default: bool = False) -> dict[str, Any]:
-    return {"name": name, "label": label, "connected": connected, "is_default": default}
+def _microphone(name: str, label: str, *, connected: bool) -> dict[str, Any]:
+    return {"name": name, "label": label, "connected": connected, "is_default": False}
 
 
 def test_the_level_meter_streams_the_loudest_level_and_stops_when_asked(rig: Rig) -> None:

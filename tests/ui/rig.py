@@ -97,6 +97,7 @@ class Rig:
         installed: tuple[str, ...] = (PARAKEET,),
         hardware: FakeHardwareDetector | None = None,
         retranscribe: Callable[[Path, Callable[[RetryOutcome], None]], None] | None = None,
+        play: Callable[[Path], None] | None = None,
         heartbeat_seconds: float = 15.0,
         on_save: Callable[[ChangeSet], None] | None = None,
     ) -> None:
@@ -161,7 +162,7 @@ class Rig:
             history=None if first_run else HistoryService(
                 self.history_dir,
                 retranscribe or _never_retranscribes,
-                play=self.played.append,
+                play=play or self.played.append,
                 stop=self._count_stop,
             ),
             first_run=first_run,

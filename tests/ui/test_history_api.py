@@ -165,6 +165,25 @@ def test_a_failed_retry_is_reported_and_an_entry_without_audio_cannot_be_played(
     assert seeded.played == []
 
 
+def test_a_recording_that_cannot_be_played_asks_for_speakers_instead_of_a_bare_error(
+    make_rig: Callable[..., Rig],
+) -> None:
+    def no_speakers(_wav: Path) -> None:
+        raise OSError("Error querying device -1")
+
+    rig = make_rig(play=no_speakers)
+    _seed(rig.history_dir)
+    playable = next(entry for entry in _history(rig) if entry["has_audio"])
+
+    status, body = rig.call("POST", f"/api/history/{playable['id']}/play")
+
+    assert status == 500
+    assert body == {
+        "error": "The recording could not be played. Check that speakers or headphones are connected.",
+        "detail": "Error querying device -1",
+    }
+
+
 @pytest.mark.parametrize(
     "entry_id",
     ["nonsense", "..%2F..%2Fsecrets.1", "20260920T080000Z-00000000.999999", "20260920T080000Z-00000000.x"],
