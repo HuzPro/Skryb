@@ -555,3 +555,39 @@ class TestBestEffortWrites:
         assert not (paths.session_dir / "session.jsonl").exists()
         assert not (paths.session_dir / "audio").exists()
         assert not (paths.session_dir / "transcripts").exists()
+
+
+class TestVoiceEdits:
+    def test_a_voice_edit_is_logged_like_a_dictation_with_its_instruction_as_text(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(
+            paths, FakeConfig({"diagnostics.capture_content": True}), _REGISTRY, _HARDWARE,
+        )
+        instruction = TranscriptionResult("change Thursday to Friday", "en", 1.0, 0.1)
+
+        diagnostics.transcription_finished(
+            _audio(), instruction, datetime.now(UTC), kind="edit", output_seconds=0.4,
+        )
+
+        event = [e for e in _events(paths) if e["event"] == "transcription"][0]
+        assert event["kind"] == "edit"
+        assert event["text"] == "change Thursday to Friday"
+        assert event["output_seconds"] == 0.4
+
+    def test_the_transcription_estimate_leaves_out_the_time_spent_after_the_engine(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = _session_paths(tmp_path)
+        diagnostics = SessionDiagnostics(paths, FakeConfig(), _REGISTRY, _HARDWARE)
+        for _ in range(3):
+            requested = datetime.now(UTC) - timedelta(seconds=3.0)
+            diagnostics.transcription_finished(
+                _audio(), TranscriptionResult("hi", "en", 1.0, 0.1), requested,
+                output_seconds=2.5,
+            )
+
+        estimate = diagnostics.estimate_transcription_seconds(1.0)
+
+        assert estimate is not None and estimate < 1.0

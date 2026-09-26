@@ -282,3 +282,12 @@ class TestVoiceLevel:
 
         assert 0.0 <= value <= 1.0
         assert 0.0 <= level.update(0.05, 1 / 30) <= 1.0
+
+
+def test_a_caption_is_drawn_above_the_controls_without_moving_them():
+    plain = _recording_frame()
+    captioned = _recording_frame(caption="Editing selection")
+
+    assert render(plain).tobytes() != render(captioned).tobytes()
+    assert button_centres(plain) == button_centres(captioned)
+    assert hit_test(captioned, *button_centres(captioned)[Button.FINISH][:2]) is Button.FINISH

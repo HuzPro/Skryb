@@ -9,7 +9,8 @@ class DomainEvent:
 
 @dataclass(frozen=True)
 class RecordingStartedEvent(DomainEvent):
-    pass
+    # A few words the pill shows above itself, such as "Editing selection".
+    caption: str = ""
 
 
 @dataclass(frozen=True)
@@ -136,3 +137,10 @@ class ModelDeletedEvent(DomainEvent):
     flips from "Delete" back to "Download" without a manual refresh.
     """
     name: str = ""
+
+
+@dataclass(frozen=True)
+class WritingNoticeEvent(DomainEvent):
+    """Something about the writing model the user should hear about once."""
+
+    message: str = ""
