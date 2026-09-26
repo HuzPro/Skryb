@@ -611,6 +611,19 @@ def _cancel_with_escape(use_case: RecordAndTranscribeUseCase) -> bool:
     return True
 
 
+def _report_history_deletion(
+    history_window: HistoryWindow,
+    settings_window: TkSettingsWindow | None,
+    deleted: bool,
+) -> None:
+    """Refresh the history list and replace Settings' "Deleting all history" status."""
+    history_window.refresh()
+    if settings_window is not None and settings_window.is_open():
+        settings_window.status_label().configure(
+            text="History deleted." if deleted else "Could not delete all history.",
+        )
+
+
 def _load_engine_with_fallback(
     config: JsonConfigAdapter,
     paths: AppPaths,
@@ -1261,7 +1274,11 @@ def build_app(
             writing=writing,
             delete_all_history=lambda: delete_all_in_background(
                 paths.diagnostics_dir,
-                on_done=lambda: gui_dispatcher.dispatch(history_window.refresh),
+                on_done=lambda deleted: gui_dispatcher.dispatch(
+                    lambda: _report_history_deletion(
+                        history_window, settings_window_ref["current"], deleted,
+                    ),
+                ),
             ),
         )
         settings_window_ref["current"] = window
@@ -1281,6 +1298,7 @@ def build_app(
         paths.diagnostics_dir,
         retranscribe=record_and_transcribe_use_case.retranscribe,
         schedule=gui_dispatcher.dispatch,
+        saves_history=functools.partial(content_recording_enabled, config),
     )
     notice = Notice(root)
     RecoveryNotices(

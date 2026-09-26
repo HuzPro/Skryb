@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 import tkinter
 from tkinter import filedialog
@@ -5,7 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.history.test_tk_window import _dictation, _log, _write_wav
+from tests.output.test_tk_gui_thread_dispatcher import _pump_until
 from tests.settings.tk_pages.test_tk_audio_page import FakeMicrophones
+from voicetotext.history.entries import load_history
+from voicetotext.history.management import delete_all_in_background
+from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 
 from voicetotext.core.events import (
     DownloadCompletedEvent,
@@ -109,6 +115,50 @@ def test_history_and_paste_settings_are_shown_and_saved(
         assert saved.paste_method_overrides == (("mintty.exe", "ctrl_shift_v"),)
         assert deleted == [True]
     finally:
+        if window.winfo_exists():
+            window.destroy()
+
+
+def test_the_footer_says_history_was_deleted_once_the_background_deletion_finishes(
+    tk_root: tkinter.Tk, service: MagicMock, tmp_path: Path,
+) -> None:
+    from voicetotext.bootstrap import _report_history_deletion
+
+    texts = ["Grüße aus Köln", "東京で会いましょう", "Grüße aus Köln", "", "déjà vu ✓"]
+    session = _log(tmp_path, [
+        _dictation(index, text) for index, text in enumerate(texts * 400, start=1)
+    ])
+    for index in range(1, 6):
+        _write_wav(session / "audio" / f"{index:04d}.wav", seconds=0.1)
+    gui = TkGuiThreadDispatcher(tk_root)
+    history_window = MagicMock()
+    window = _make_window(
+        tk_root, service,
+        delete_all_history=lambda: delete_all_in_background(
+            tmp_path,
+            on_done=lambda deleted: gui.dispatch(
+                lambda: _report_history_deletion(history_window, window, deleted),
+            ),
+        ),
+    )
+    status = window.status_label()
+    # Earlier windows' Tk variables must be freed here, not by a collection
+    # on the deletion thread: off the main loop, Tk stalls that thread.
+    gc.collect()
+    try:
+        window._on_delete_all_history()
+        assert status.cget("text") == "Deleting all history in the background."
+
+        _pump_until(
+            tk_root, lambda: status.cget("text") == "History deleted.", timeout=30,
+        )
+
+        assert status.cget("text") == "History deleted."
+        history_window.refresh.assert_called_once_with()
+        assert load_history(tmp_path) == []
+        assert list((session / "audio").iterdir()) == []
+    finally:
+        gui.cancel()
         if window.winfo_exists():
             window.destroy()
 

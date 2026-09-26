@@ -76,9 +76,10 @@ def retranscribe() -> FakeRetranscribe:
 def open_history(tk_root, tmp_path, retranscribe, no_real_window):
     windows: list[HistoryWindow] = []
 
-    def open_() -> HistoryWindow:
+    def open_(saves_history: Callable[[], bool] = lambda: False) -> HistoryWindow:
         history = HistoryWindow(
-            tk_root, tmp_path, retranscribe, _run_now, run_in_background=_run_now,
+            tk_root, tmp_path, retranscribe, _run_now,
+            saves_history=saves_history, run_in_background=_run_now,
         )
         history.show()
         windows.append(history)
@@ -322,6 +323,20 @@ def test_an_empty_logs_folder_explains_how_to_get_history(
 
     assert _rows(history) == []
     assert history._hint.cget("text").startswith("No dictations yet.")
+
+
+def test_an_empty_history_stops_asking_to_turn_saving_on_once_it_is_on(
+    tmp_path, open_history,
+) -> None:
+    saving = [False]
+    history = open_history(saves_history=lambda: saving[0])
+    assert "Save dictation history" in history._hint.cget("text")
+
+    saving[0] = True
+    history.refresh()
+
+    assert _rows(history) == []
+    assert history._hint.cget("text") == "No dictations yet."
 
 
 def test_lists_thousands_of_dictations(tmp_path, open_history) -> None:
