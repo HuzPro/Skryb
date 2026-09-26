@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     },
     "output": {
         "mode": "direct_paste",
+        "paste_method_overrides": {},
     },
     "overlay": {
         "enabled": True,
@@ -54,6 +55,9 @@ DEFAULT_CONFIG = {
         "capture_content": False,
         "retain_sessions": 50,
         "directory": "",
+    },
+    "history": {
+        "retention_days": 0,
     },
 }
 

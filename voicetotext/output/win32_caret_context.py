@@ -15,6 +15,7 @@ from voicetotext.output.caret_context import (
     CaretContext,
 )
 from voicetotext.output.win32_edit_control_context import (
+    foreground_has_caret,
     read_edit_control_context,
 )
 
@@ -64,6 +65,8 @@ class _PatternHandle(Protocol):
 
 
 class _Element(Protocol):
+    @property
+    def CurrentControlType(self) -> int: ...  # noqa: N802 (COM name)
     def GetCurrentPattern(  # noqa: N802 (COM name)
         self, pattern_id: int,
     ) -> _PatternHandle: ...
@@ -99,6 +102,42 @@ def read_ui_automation_context() -> CaretContext:
     except Exception:
         _logger.debug("Reading the caret context failed.", exc_info=True)
         return NO_CONTEXT
+
+
+def text_field_focused() -> bool:
+    """Whether the keyboard focus is somewhere text can be pasted. Never raises.
+
+    A system caret answers first and cheaply. Otherwise UI Automation is
+    asked what the focused element is. When neither can answer, the paste
+    goes ahead as it always did: an unreadable app must not lose dictation.
+    """
+    try:
+        if foreground_has_caret():
+            return True
+    except OSError:
+        _logger.debug("The foreground thread has no GUI state to read.")
+    try:
+        return focused_element_takes_text()
+    except Exception:
+        _logger.debug("UI Automation could not describe the focus.", exc_info=True)
+        return True
+
+
+def focused_element_takes_text() -> bool:
+    """Whether the focused element is an edit field or document, or holds a value.
+
+    Raises when UI Automation cannot answer.
+    """
+    uia = _uia()
+    element = _automation().GetFocusedElement()
+    if element.CurrentControlType in (
+        uia.UIA_EditControlTypeId, uia.UIA_DocumentControlTypeId,
+    ):
+        return True
+    return any(
+        element.GetCurrentPattern(pattern)
+        for pattern in (uia.UIA_TextPatternId, uia.UIA_ValuePatternId)
+    )
 
 
 def caret_context_of_hwnd(hwnd: int) -> CaretContext:

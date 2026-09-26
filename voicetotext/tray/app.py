@@ -12,6 +12,7 @@ from voicetotext.core.events import (
     MicrophoneConnectedEvent,
     MicrophoneMissingEvent,
     MicrophoneSilentEvent,
+    NoLastDictationEvent,
     RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionEmptyEvent,
@@ -126,6 +127,7 @@ class SystemTrayApp:
         )
         self._event_bus.subscribe(
             MicrophoneConnectedEvent, self._handle_microphone_connected,
+            NoLastDictationEvent, self._handle_no_last_dictation,
         )
 
     def run(self) -> None:
@@ -274,6 +276,10 @@ class SystemTrayApp:
                 "Microphone menu."
             )
         self._icon.notify("VoiceToText", message)
+    def _handle_no_last_dictation(self, _event: NoLastDictationEvent) -> None:
+        if self._icon is None:
+            return
+        self._icon.notify("VoiceToText", "No dictation yet.")
 
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
         self._pending_engine_failure = event.error

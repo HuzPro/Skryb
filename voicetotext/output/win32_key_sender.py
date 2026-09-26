@@ -2,14 +2,29 @@ import ctypes
 import ctypes.wintypes as _wt
 
 from voicetotext.core.exceptions import OutputError
+from voicetotext.output.paste_method import PasteMethod, utf16_chunks
 
 
 _user32 = ctypes.windll.user32
 
 _INPUT_KEYBOARD = 1
+_KEYEVENTF_EXTENDEDKEY = 0x0001
 _KEYEVENTF_KEYUP = 0x0002
+_KEYEVENTF_UNICODE = 0x0004
+_VK_SHIFT = 0x10
 _VK_CONTROL = 0x11
+_VK_INSERT = 0x2D
 _VK_V = 0x56
+
+# Insert sits on the navigation block; without the extended flag an app
+# reading the scan code sees numpad 0.
+_EXTENDED_KEYS = frozenset({_VK_INSERT})
+
+_COMBINATIONS = {
+    PasteMethod.CTRL_V: (_VK_CONTROL, _VK_V),
+    PasteMethod.CTRL_SHIFT_V: (_VK_CONTROL, _VK_SHIFT, _VK_V),
+    PasteMethod.SHIFT_INSERT: (_VK_SHIFT, _VK_INSERT),
+}
 
 # ``dwExtraInfo`` is an ULONG_PTR - it MUST be pointer-sized or SendInput
 # silently injects nothing on 64-bit Windows. ``c_size_t`` matches a
@@ -76,32 +91,67 @@ _user32.SendInput.restype = _wt.UINT
 
 class Win32KeySender:
 
-    def send_ctrl_v(self) -> None:
-        _send_ctrl_v()
+    def send_paste(self, method: PasteMethod, text: str) -> None:
+        if method is PasteMethod.TYPE:
+            _type_text(text)
+        else:
+            _send_combination(_COMBINATIONS[method])
 
 
 def _key_event(virtual_key: int, *, key_up: bool) -> _Input:
+    flags = _KEYEVENTF_KEYUP if key_up else 0
+    if virtual_key in _EXTENDED_KEYS:
+        flags |= _KEYEVENTF_EXTENDEDKEY
     event = _Input()
     event.type = _INPUT_KEYBOARD
     event.union.ki = _KeybdInput(
         wVk=virtual_key,
         wScan=0,
-        dwFlags=_KEYEVENTF_KEYUP if key_up else 0,
+        dwFlags=flags,
         time=0,
         dwExtraInfo=VOICETOTEXT_INPUT_TAG,
     )
     return event
 
 
-def _send_ctrl_v() -> None:
-    events = (_Input * 4)(
-        _key_event(_VK_CONTROL, key_up=False),
-        _key_event(_VK_V, key_up=False),
-        _key_event(_VK_V, key_up=True),
-        _key_event(_VK_CONTROL, key_up=True),
+def _unicode_event(code_unit: int, *, key_up: bool) -> _Input:
+    event = _Input()
+    event.type = _INPUT_KEYBOARD
+    event.union.ki = _KeybdInput(
+        wVk=0,
+        wScan=code_unit,
+        dwFlags=_KEYEVENTF_UNICODE | (_KEYEVENTF_KEYUP if key_up else 0),
+        time=0,
+        dwExtraInfo=VOICETOTEXT_INPUT_TAG,
     )
+    return event
+
+
+def _send_combination(virtual_keys: tuple[int, ...]) -> None:
+    presses = [_key_event(vk, key_up=False) for vk in virtual_keys]
+    releases = [_key_event(vk, key_up=True) for vk in reversed(virtual_keys)]
+    _send([*presses, *releases], "paste")
+
+
+def _type_text(text: str) -> None:
+    for chunk in utf16_chunks(text):
+        _send(
+            [
+                event
+                for unit in chunk
+                for event in (
+                    _unicode_event(unit, key_up=False),
+                    _unicode_event(unit, key_up=True),
+                )
+            ],
+            "typed",
+        )
+
+
+def _send(inputs: list[_Input], what: str) -> None:
+    events = (_Input * len(inputs))(*inputs)
     sent = _user32.SendInput(len(events), events, ctypes.sizeof(_Input))
     if sent != len(events):
         raise OutputError(
-            f"SendInput injected {sent} of {len(events)} Ctrl+V key events."
+            f"SendInput injected {sent} of {len(events)} {what} key events."
         )
