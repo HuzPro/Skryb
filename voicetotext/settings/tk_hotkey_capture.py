@@ -130,8 +130,11 @@ class TkHotkeyCapture(ttk.Frame):
     def destroy(self) -> None:
         # The capture hooks swallow every key system-wide, so a window
         # closed mid-recording must not leave them installed.
-        self.stop_recording()
-        super().destroy()
+        try:
+            self.stop_recording()
+        finally:
+            self._bridge.key_pressed.disconnect(self._on_bridge_key_raw)
+            super().destroy()
 
     def set_typed_text(self, text: str) -> None:
         self._text_var.set(text)
