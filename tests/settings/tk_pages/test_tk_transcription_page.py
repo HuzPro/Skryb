@@ -46,6 +46,7 @@ def service() -> MagicMock:
     result.current_draft.return_value = _draft()
     result.engine_candidates_for.return_value = ()
     result.supports_streaming_hardware.return_value = True
+    result.hardware_probe_pending.return_value = False
     result.license_acceptance_required.return_value = False
     return result
 
@@ -71,6 +72,7 @@ def streaming_service() -> MagicMock:
         _BATCH_ONLY, _PARAKEET,
     }
     result.supports_streaming_hardware.return_value = True
+    result.hardware_probe_pending.return_value = False
     result.engine_candidates_for.return_value = ()
     result.license_acceptance_required.return_value = False
     return result

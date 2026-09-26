@@ -108,6 +108,7 @@ def service():
     svc.can_apply_now.return_value = True
     svc.is_engine_swapping.return_value = False
     svc.supports_streaming_hardware.return_value = True
+    svc.hardware_probe_pending.return_value = False
     svc.engine_candidates_for.return_value = ()
     svc.apply_draft.return_value = _no_change()
     svc.dictionary_rules.return_value = DictionaryConfig()
@@ -634,6 +635,7 @@ class TestMode:
         svc.model_supports_streaming.side_effect = lambda n: n == _PARAKEET
         svc.model_supports_batch.return_value = True
         svc.supports_streaming_hardware.return_value = True
+        svc.hardware_probe_pending.return_value = False
         svc.engine_candidates_for.return_value = ()
         svc.dictionary_rules.return_value = DictionaryConfig()
         svc.license_acceptance_required.return_value = False
