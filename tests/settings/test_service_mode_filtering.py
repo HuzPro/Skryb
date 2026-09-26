@@ -20,7 +20,6 @@ def _gpu(kind: str) -> HardwareProfile:
 def _draft(mode: TranscriptionMode) -> SettingsDraft:
     return SettingsDraft(
         model_size=_PARAKEET, language="en", device="auto", engine="auto",
-        hotkey_combination="ctrl+alt+m", hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE, transcription_mode=mode,
     )
 
@@ -29,7 +28,6 @@ class TestSettingsDraftMode:
     def test_should_default_transcription_mode_to_batch(self):
         draft = SettingsDraft(
             model_size=_PARAKEET, language="en", device="auto", engine="auto",
-            hotkey_combination="x", hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
 

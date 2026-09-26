@@ -16,6 +16,7 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
 )
 from voicetotext.core.color_scheme import ColorScheme
+from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.output.dictionary_config import DictionaryConfig, LiteralRule
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.model_view import ModelView
@@ -59,8 +60,6 @@ def _draft(**overrides) -> SettingsDraft:
         "language": "en",
         "device": "auto",
         "engine": "auto",
-        "hotkey_combination": "ctrl+alt+m",
-        "hotkey_mode": "toggle",
         "output_mode": OutputMode.DIRECT_PASTE,
     }
     fields.update(overrides)
@@ -134,7 +133,9 @@ def window(tk_root, service):
 class TestInitial:
     def test_should_populate_pages_from_current_draft(self, window):
         assert window.transcription_page().current_model() == _PARAKEET
-        assert window.hotkeys_page().current_combination() == "ctrl+alt+m"
+        assert window.hotkeys_page().bindings() == (
+            Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+        )
         assert window.output_page().current_mode() is OutputMode.DIRECT_PASTE
 
     def test_should_expose_save_button(self, window):
@@ -202,14 +203,18 @@ class TestSettingsTransfer:
 
 class TestCollectDraft:
     def test_should_collect_draft_from_all_pages(self, window):
-        window.hotkeys_page().set_combination("ctrl+shift+space")
-        window.hotkeys_page().set_mode("push_to_talk")
+        shortcuts = (
+            Binding("ctrl+shift+space", BindingMode.HOLD, BindingAction.DICTATE),
+            Binding("mouse4", BindingMode.TOGGLE, BindingAction.DICTATE),
+        )
+        window.hotkeys_page().set_bindings(shortcuts)
+        window.hotkeys_page().set_double_tap_locks_hold(False)
         window.output_page().set_mode(OutputMode.CLIPBOARD_ONLY)
 
         draft = window.collect_draft()
 
-        assert draft.hotkey_combination == "ctrl+shift+space"
-        assert draft.hotkey_mode == "push_to_talk"
+        assert draft.hotkey_bindings == shortcuts
+        assert draft.double_tap_locks_hold is False
         assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
 
     def test_should_preserve_saved_device_without_a_picker(
@@ -368,6 +373,22 @@ class TestSaveGuard:
         window.save_button().invoke()
 
         service.is_installed.assert_called_with(_PARAKEET)
+
+    def test_two_dictation_shortcuts_on_the_same_keys_block_save_with_a_reason(
+        self, tk_root, service,
+    ):
+        received: list[ChangeSet] = []
+        window = _make_window(tk_root, service, on_save=received.append)
+        window.hotkeys_page().set_bindings((
+            Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+            Binding("alt+ctrl+m", BindingMode.HOLD, BindingAction.DICTATE),
+        ))
+
+        window.save_button().invoke()
+
+        assert received == []
+        assert not service.apply_draft.called
+        assert "used twice" in window.status_label().cget("text")
 
 
 class TestDownloadBridge:
@@ -548,13 +569,14 @@ class TestCaptureCallback:
             tk_root, service, on_capture_state_changed=events.append,
         )
 
-        window.hotkeys_page().hotkey_capture().start_recording()
+        window.hotkeys_page().dictation_rows()[0].capture.start_recording()
 
         assert events == [True]
 
     def test_should_be_safe_when_no_capture_callback(self, window):
-        window.hotkeys_page().hotkey_capture().start_recording()
-        window.hotkeys_page().hotkey_capture().stop_recording()
+        capture = window.hotkeys_page().dictation_rows()[0].capture
+        capture.start_recording()
+        capture.stop_recording()
 
 
 class TestLifecycle:

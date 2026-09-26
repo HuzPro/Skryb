@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from voicetotext.bootstrap import (
     _resolve_pipeline_mode,
     _warmup_safely,
     apply_settings,
+    migrate_hotkey_bindings,
     migrate_language,
     migrate_output_mode,
 )
@@ -37,6 +39,7 @@ from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
+from voicetotext.hotkeys.actions import HotkeyActions
 from voicetotext.edit_capture.delivery_recording_decorator import (
     DeliveryRecordingDecorator,
 )
@@ -655,6 +658,71 @@ class TestMigrateLanguage:
         config.save.assert_not_called()
 
 
+class TestMigrateHotkeyBindings:
+    @pytest.mark.parametrize(("mode", "migrated_mode"), [
+        ("push_to_talk", "hold"), ("toggle", "toggle"), ("nonsense", "toggle"),
+    ])
+    def test_an_old_single_hotkey_becomes_one_dictation_shortcut_and_the_old_keys_go(
+        self, tmp_path: Path, mode: str, migrated_mode: str,
+    ):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({
+            "hotkey": {"combination": "ctrl+shift+alt+m", "mode": mode},
+            "output": {"mode": "direct_paste"},
+        }), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        saved = json.loads(path.read_text(encoding="utf-8"))["hotkey"]
+        assert saved["bindings"] == [
+            {"keys": "ctrl+shift+alt+m", "mode": migrated_mode, "action": "dictate"},
+        ]
+        assert "combination" not in saved and "mode" not in saved
+        assert saved["double_tap_locks_hold"] is True
+
+    def test_an_old_mode_without_a_combination_keeps_the_old_default_keys(
+        self, tmp_path: Path,
+    ):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"hotkey": {"mode": "push_to_talk"}}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        assert config.get("hotkey.bindings") == [
+            {"keys": "ctrl+alt+m", "mode": "hold", "action": "dictate"},
+        ]
+
+    def test_saved_bindings_win_over_leftover_old_keys(self, tmp_path: Path):
+        bindings = [
+            {"keys": "mouse4", "mode": "hold", "action": "dictate"},
+            {"keys": "f13", "mode": "press", "action": "paste_last"},
+        ]
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"hotkey": {
+            "bindings": bindings, "combination": "f12", "mode": "toggle",
+        }}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        assert config.get("hotkey.bindings") == bindings
+        assert config.get("hotkey.combination") is None
+
+    def test_a_config_already_on_bindings_is_not_rewritten(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_hotkey_bindings(config)
+
+        assert not path.exists()
+
+
 class TestBuildOutput:
     @patch("voicetotext.bootstrap.Win32ClipboardPreserver")
     def test_should_return_decorator_wrapping_paste_and_clipboard_with_preserver(
@@ -884,11 +952,31 @@ class TestApplySettings:
         apply_settings(changes, config, use_case, app, gui_dispatcher=dispatcher)
 
         mock_build_listener.assert_called_once_with(
-            config, use_case, bootstrap._paste_memory.observe_key,
+            config, use_case, bootstrap._hotkey_actions(use_case),
+            bootstrap._paste_memory.observe_key,
         )
         app.set_hotkey_listener.assert_called_once_with(
             mock_build_listener.return_value
         )
+
+    @patch("voicetotext.bootstrap._build_hotkey_listener")
+    def test_a_rebuilt_listener_keeps_every_shortcut_action_it_was_given(
+        self, mock_build_listener
+    ):
+        use_case = MagicMock()
+        actions = HotkeyActions(
+            dictate_activate=use_case.on_hotkey_activated,
+            dictate_deactivate=use_case.on_hotkey_deactivated,
+            paste_last=MagicMock(),
+            copy_last=MagicMock(),
+        )
+
+        apply_settings(
+            self._make_changes(hotkey_changed=True), MagicMock(), use_case,
+            MagicMock(), gui_dispatcher=MagicMock(), hotkey_actions=actions,
+        )
+
+        assert mock_build_listener.call_args.args[2] is actions
 
     @patch("voicetotext.bootstrap._build_hotkey_listener")
     def test_should_not_rebuild_hotkey_listener_when_hotkey_unchanged(

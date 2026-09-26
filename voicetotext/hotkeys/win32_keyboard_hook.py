@@ -2,6 +2,7 @@ import ctypes
 import ctypes.wintypes as _wt
 import logging
 import threading
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 
 from voicetotext.core.exceptions import HotkeyError
@@ -70,8 +71,9 @@ _kernel32.GetModuleHandleW.restype = _wt.HMODULE
 _kernel32.GetCurrentThreadId.restype = _wt.DWORD
 
 
-# Decides what to do with each key event. Receives ``(is_key_down, vk)`` and
-# returns True to SUPPRESS the key (stop it reaching other applications).
+# Decides what to do with each key or mouse-button event. Receives
+# ``(is_key_down, vk)`` and returns True to SUPPRESS it (stop it reaching
+# other applications).
 KeyEventHandler = Callable[[bool, int], bool]
 
 # Watches key events without a say in suppression. Receives
@@ -86,12 +88,13 @@ def ignore_key_event(is_key_down: bool, vk: int, flags: int, extra: int) -> None
     return None
 
 
-class Win32KeyboardHook:
-    """A low-level keyboard hook running on its own message-pump thread.
+class Win32LowLevelHook(ABC):
+    """A low-level input hook running on its own message-pump thread.
 
-    A ``WH_KEYBOARD_LL`` hook only fires on a thread that pumps messages, so
-    ``start`` spawns a daemon thread that installs the hook and runs a
-    ``GetMessage`` loop; ``stop`` posts ``WM_QUIT`` to break it and unhooks.
+    A ``WH_KEYBOARD_LL``/``WH_MOUSE_LL`` hook only fires on a thread that
+    pumps messages, so ``start`` spawns a daemon thread that installs the
+    hook and runs a ``GetMessage`` loop; ``stop`` posts ``WM_QUIT`` to break
+    it and unhooks.
 
     ``start`` blocks on a readiness event until the worker has published its
     thread id AND created its message queue (via ``SetWindowsHookExW``), so
@@ -100,13 +103,11 @@ class Win32KeyboardHook:
     GC collects mid-flight would crash the interpreter.
     """
 
-    def __init__(
-        self,
-        handler: KeyEventHandler,
-        observer: KeyObserver = ignore_key_event,
-    ) -> None:
+    _hook_type: int
+    _device: str
+
+    def __init__(self, handler: KeyEventHandler) -> None:
         self._handler = handler
-        self._observer = observer
         self._proc = _HOOKPROC(self._hook_proc)
         self._thread: threading.Thread | None = None
         self._thread_id: int = 0
@@ -140,7 +141,8 @@ class Win32KeyboardHook:
         self._thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
         if self._thread.is_alive():
             raise HotkeyError(
-                "Keyboard hook thread did not exit; the hook may still be installed."
+                f"The {self._device} hook thread did not exit; "
+                "the hook may still be installed."
             )
         self._thread = None
         self._thread_id = 0
@@ -168,11 +170,11 @@ class Win32KeyboardHook:
 
     def _install_hook(self) -> None:
         self._hook = _user32.SetWindowsHookExW(
-            _WH_KEYBOARD_LL, self._proc, _kernel32.GetModuleHandleW(None), 0,
+            self._hook_type, self._proc, _kernel32.GetModuleHandleW(None), 0,
         )
         if not self._hook:
             raise HotkeyError(
-                "Could not install the global keyboard hook "
+                f"Could not install the global {self._device} hook "
                 "(SetWindowsHookExW returned NULL)."
             )
 
@@ -191,6 +193,26 @@ class Win32KeyboardHook:
         if n_code == _HC_ACTION and self._dispatch(w_param, l_param):
             return _SUPPRESS
         return _user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+    @abstractmethod
+    def _dispatch(self, message: int, l_param: int) -> bool:
+        """Hand one hook message to the handler; True to swallow it."""
+
+
+class Win32KeyboardHook(Win32LowLevelHook):
+    """Every key down and up, for a handler that may swallow it and an
+    observer that watches whatever the handler let through."""
+
+    _hook_type = _WH_KEYBOARD_LL
+    _device = "keyboard"
+
+    def __init__(
+        self,
+        handler: KeyEventHandler,
+        observer: KeyObserver = ignore_key_event,
+    ) -> None:
+        super().__init__(handler)
+        self._observer = observer
 
     def _dispatch(self, message: int, l_param: int) -> bool:
         info = ctypes.cast(
