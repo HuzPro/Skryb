@@ -347,7 +347,11 @@ class CoreApi:
         return ApiResponse(200, settings_json(self._service.current_draft()))
 
     def _put_settings(self, request: ApiRequest) -> ApiResponse:
-        draft = _read(draft_from_json, request.body, "Those settings could not be read.")
+        saved = self._service.current_draft()
+        draft = _read(
+            lambda body: draft_from_json(body, saved), request.body,
+            "Those settings could not be read.",
+        )
         if self._first_run and not self._service.any_model_installed():
             raise ApiError(400, "Please download at least one model before saving.")
         _check_shortcuts(draft.hotkey_bindings)
