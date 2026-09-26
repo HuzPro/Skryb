@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-sidebar: var(--sidebar);
+  --color-card: var(--card);
+  --color-popover: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-selected: var(--selected);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --font-sans: Inter, system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif;
+}
+
+:root {
+  --background: #f7f7f8;
+  --sidebar: #efeff1;
+  --card: #ffffff;
+  --foreground: #18181b;
+  --muted: #f1f1f3;
+  --muted-foreground: #6b6b74;
+  --border: #e3e3e7;
+  --input: #d6d6dc;
+  --ring: #2563eb;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --accent: #ececef;
+  --selected: #eef3ff;
+  --destructive: #d92d20;
+  --success: #15803d;
+  --warning: #b45309;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f0f11;
+    --sidebar: #0a0a0c;
+    --card: #17171a;
+    --foreground: #ececef;
+    --muted: #1e1e22;
+    --muted-foreground: #9a9aa4;
+    --border: #26262b;
+    --input: #35353c;
+    --ring: #4f8bff;
+    --primary: #3b7bf6;
+    --primary-foreground: #ffffff;
+    --accent: #212126;
+    --selected: #15213a;
+    --destructive: #f26b5f;
+    --success: #4ade80;
+    --warning: #f5b544;
+    color-scheme: dark;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow: hidden;
+  }
+  input,
+  textarea,
+  .selectable {
+    user-select: text;
+  }
+  button {
+    cursor: default;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--input);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  input[type="range"] {
+    accent-color: var(--primary);
+  }
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+  }
+}
