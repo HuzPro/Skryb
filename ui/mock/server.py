@@ -502,6 +502,11 @@ class Handler(BaseHTTPRequestHandler):
         if rest == ["forget-learned"]:
             core.dictionary["rules"] = [r for r in core.dictionary["rules"] if not (r["kind"] == "literal" and r["learned"])]
             self._send(204)
+        elif method == "DELETE" and rest[:1] == ["learned"] and len(rest) == 2:
+            rules = core.dictionary["rules"]
+            kept = [r for r in rules if not (r["kind"] == "literal" and r["learned"] and r["spoken"][0].strip() == rest[1].strip())]
+            core.dictionary["rules"] = kept
+            self._send(204) if len(kept) < len(rules) else self._error(404, "That learned word is no longer in the dictionary.")
         elif method == "PUT":
             core.dictionary = self._body()
             self._send(204)

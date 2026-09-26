@@ -73,6 +73,12 @@ export async function chooseOpenPath(title: string, name: string, extension: str
   return typeof chosen === "string" ? chosen : null;
 }
 
+export async function chooseFolder(title: string, defaultPath: string): Promise<string | null> {
+  if (!inTauri) return window.prompt(title, defaultPath);
+  const chosen = await open({ title, defaultPath, multiple: false, directory: true });
+  return typeof chosen === "string" ? chosen : null;
+}
+
 export async function copyText(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }

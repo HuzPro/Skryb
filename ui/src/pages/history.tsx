@@ -10,7 +10,7 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
-import { chooseSavePath, copyText } from "../lib/platform";
+import { chooseFolder, chooseSavePath, copyText } from "../lib/platform";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
 import type { HistoryEntry } from "../lib/types";
@@ -96,6 +96,16 @@ function HistorySettings() {
   if (!draft) return null;
   const days = draft.history_retention_days;
   const choices = [...new Set([...RETENTION_DAYS, Math.max(days, 0)])].sort((a, b) => a - b);
+  const changeFolder = async (current: string) => {
+    const path = await chooseFolder("Choose where logs and history are kept", current);
+    if (!path) return;
+    try {
+      await api.put("/api/logs/directory", { path });
+      setNote(`From the next start, logs and history are kept in ${path}.`);
+    } catch (error) {
+      setNote(errorText(error));
+    }
+  };
   const deleteAll = async () => {
     if (!(await confirm("Delete all history", "Delete every saved dictation's text and recording? This cannot be undone.", "Delete all"))) return;
     try {
@@ -130,7 +140,10 @@ function HistorySettings() {
           <span className="min-w-0 truncate">
             Kept in <span className="selectable text-foreground">{app.diagnostics_directory}</span>, with the logs. Use a local folder that is not synced or shared.
           </span>
-          <Button variant="link" className="ml-auto text-[12.5px]" onClick={() => void api.post("/api/logs/open").catch((error: unknown) => setNote(errorText(error)))}>
+          <Button variant="link" className="ml-auto text-[12.5px]" onClick={() => void changeFolder(app.diagnostics_directory)}>
+            Change…
+          </Button>
+          <Button variant="link" className="text-[12.5px]" onClick={() => void api.post("/api/logs/open").catch((error: unknown) => setNote(errorText(error)))}>
             Open
           </Button>
         </div>

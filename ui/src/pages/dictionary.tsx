@@ -142,17 +142,26 @@ export function DictionaryPage() {
     editRules((rules) => (index < rules.length ? rules.map((other, at) => (at === index ? rule : other)) : [...rules, rule]));
     return true;
   };
-  const forgetLearned = async () => {
-    if (!(await confirm("Forget all learned words?", "Removes every word the app learned from your corrections. It will not learn them again.", "Forget"))) return;
+  /** Forgetting is saved at once, so it cannot be discarded; unsaved edits to other rules stay. */
+  const forget = async (request: () => Promise<void>, gone: (rule: LiteralRule) => boolean) => {
     try {
-      await api.post("/api/dictionary/forget-learned");
+      await request();
       const fresh = await api.get<Dictionary>("/api/dictionary");
-      editRules((rules) => rules.filter((rule) => !(rule.kind === "literal" && rule.learned)));
+      editRules((rules) => rules.filter((rule) => !(rule.kind === "literal" && rule.learned && gone(rule))));
       dispatchDictionary({ type: "loaded", value: fresh });
       client.setQueryData(["dictionary"], fresh);
     } catch (failure) {
       setError(errorText(failure));
     }
+  };
+  const forgetLearned = async () => {
+    if (!(await confirm("Forget all learned words?", "Removes every word the app learned from your corrections. It will not learn them again.", "Forget"))) return;
+    await forget(() => api.post("/api/dictionary/forget-learned"), () => true);
+  };
+  const forgetWord = async (word: LiteralRule) => {
+    const spoken = word.spoken[0]?.trim() ?? "";
+    if (!(await confirm("Forget this learned word?", `Removes “${spoken}” → “${word.replacement}”. It will not be learned again.`, "Forget"))) return;
+    await forget(() => api.del(`/api/dictionary/learned/${encodeURIComponent(spoken)}`), (rule) => rule.spoken[0]?.trim() === spoken);
   };
 
   return (
@@ -230,9 +239,15 @@ export function DictionaryPage() {
                     <Button variant="ghost" size="icon" aria-label="Edit rule" onClick={() => setEditing({ index, editor: editorFor(rule) })}>
                       <Pencil />
                     </Button>
-                    <Button variant="ghost" size="icon" aria-label="Delete rule" onClick={() => editRules((rules) => rules.filter((_, at) => at !== index))}>
-                      <Trash2 />
-                    </Button>
+                    {rule.kind === "literal" && rule.learned ? (
+                      <Button variant="ghost" size="icon" aria-label="Forget learned word" title="Forget learned word" onClick={() => void forgetWord(rule)}>
+                        <Trash2 />
+                      </Button>
+                    ) : (
+                      <Button variant="ghost" size="icon" aria-label="Delete rule" onClick={() => editRules((rules) => rules.filter((_, at) => at !== index))}>
+                        <Trash2 />
+                      </Button>
+                    )}
                   </span>
                 </div>
               ),
