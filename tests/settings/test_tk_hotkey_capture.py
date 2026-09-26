@@ -265,6 +265,22 @@ class TestTkHotkeyCaptureTextInput:
 
         assert received == []
 
+    def test_the_red_message_follows_the_text_as_it_is_edited(self, widget):
+        widget.set_combination("ctrl+alt+m")
+        widget.set_typed_text("zzk")
+        widget.commit_typed_text()
+        assert widget._error_label.cget("text") == "Invalid combination: Unknown key: zzk"
+
+        widget.set_typed_text("zzkw")
+        assert widget._error_label.cget("text") == "Invalid combination: Unknown key: zzkw"
+        widget.set_typed_text("ctrl+ü")
+        assert widget._error_label.cget("text") == "Invalid combination: Unknown key: ü"
+
+        widget.set_typed_text("ctrl+shift+f9")
+        assert widget.has_validation_error() is False
+        assert not widget._error_label.winfo_manager()
+        assert widget.combination() == "ctrl+alt+m"
+
     def test_should_clear_error_when_recording_starts(self, widget):
         widget.set_typed_text("nonsense")
         widget.commit_typed_text()
