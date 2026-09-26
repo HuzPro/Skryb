@@ -332,3 +332,92 @@ def test_lists_thousands_of_dictations(tmp_path, open_history) -> None:
     rows = _rows(history)
     assert len(rows) == 4000
     assert rows[0][1] == "dictation number 4000"
+
+
+def _answer_confirmations(monkeypatch, answer: bool) -> list[str]:
+    asked: list[str] = []
+
+    def ask(title: str, _message: str, **_kwargs) -> bool:
+        asked.append(title)
+        return answer
+
+    monkeypatch.setattr(tk_window.messagebox, "askyesno", ask)
+    return asked
+
+
+def test_delete_asks_first_then_removes_only_the_selected_dictation(
+    tmp_path, open_history, monkeypatch,
+) -> None:
+    session = _log(tmp_path, [
+        _dictation(1, "Send it over."),
+        _dictation(2, "Send it over."),
+        _dictation(3, "Send it over."),
+    ])
+    for index in (1, 2, 3):
+        _write_wav(session / "audio" / f"{index:04d}.wav")
+    history = open_history()
+    _select(history, 1)
+    asked = _answer_confirmations(monkeypatch, answer=False)
+
+    history._delete_button.invoke()
+    assert len(_rows(history)) == 3
+
+    _answer_confirmations(monkeypatch, answer=True)
+    history._delete_button.invoke()
+
+    assert asked == ["Delete dictation"]
+    assert [row[1] for row in _rows(history)] == ["Send it over."] * 2
+    assert not (session / "audio" / "0002.wav").exists()
+    assert (session / "audio" / "0001.wav").exists()
+    assert (session / "audio" / "0003.wav").exists()
+
+
+def test_delete_all_clears_the_list_after_confirming(
+    tmp_path, open_history, monkeypatch,
+) -> None:
+    _log(tmp_path, [_dictation(i, f"note {i} — ✓") for i in range(1, 41)])
+    history = open_history()
+    _answer_confirmations(monkeypatch, answer=True)
+
+    history._delete_all_button.invoke()
+
+    assert _rows(history) == []
+    assert not _enabled(history._delete_all_button)
+    assert not _enabled(history._delete_button)
+
+
+def test_save_audio_as_copies_the_recording_under_a_dated_name(
+    tmp_path, open_history, monkeypatch,
+) -> None:
+    session = _log(tmp_path, [_dictation(1, "keep this recording")])
+    _write_wav(session / "audio" / "0001.wav", seconds=1.0)
+    destination = tmp_path / "chosen.wav"
+    offered: dict = {}
+
+    def ask_where(**options) -> str:
+        offered.update(options)
+        return str(destination)
+
+    monkeypatch.setattr(tk_window.filedialog, "asksaveasfilename", ask_where)
+    history = open_history()
+    _select(history, 0)
+
+    history._export_button.invoke()
+
+    assert offered["initialfile"].startswith("dictation-")
+    assert offered["initialfile"].endswith(".wav")
+    assert destination.read_bytes() == (session / "audio" / "0001.wav").read_bytes()
+    assert history._status.cget("text") == "Saved chosen.wav."
+    assert [row[1] for row in _rows(history)] == ["keep this recording"]
+
+
+def test_save_audio_as_is_unavailable_without_a_recording(
+    tmp_path, open_history,
+) -> None:
+    _log(tmp_path, [_dictation(1, "no audio kept", audio_path="")])
+    history = open_history()
+
+    _select(history, 0)
+
+    assert not _enabled(history._export_button)
+    assert _enabled(history._delete_button)
