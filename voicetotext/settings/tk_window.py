@@ -233,8 +233,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._logs_folder_button.pack(side="right", padx=(0, 8))
 
     def _apply_initial_draft(self, draft: SettingsDraft) -> None:
-        self._hotkeys_page.set_combination(draft.hotkey_combination)
-        self._hotkeys_page.set_mode(draft.hotkey_mode)
+        self._hotkeys_page.set_bindings(draft.hotkey_bindings)
+        self._hotkeys_page.set_double_tap_locks_hold(draft.double_tap_locks_hold)
         self._output_page.set_mode(draft.output_mode)
         self._output_page.set_capture_content(draft.capture_content)
         self._audio_page.set_device(draft.input_device)
@@ -334,8 +334,6 @@ class TkSettingsWindow(tkinter.Toplevel):
             language=self._transcription_page.current_language(),
             device=self._service.current_draft().device,
             engine=self._transcription_page.current_engine(),
-            hotkey_combination=self._hotkeys_page.current_combination(),
-            hotkey_mode=self._hotkeys_page.current_mode(),
             output_mode=self._output_page.current_mode(),
             capture_content=self._output_page.captures_content(),
             input_device=self._audio_page.current_device(),
@@ -344,6 +342,8 @@ class TkSettingsWindow(tkinter.Toplevel):
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()
             ),
+            hotkey_bindings=self._hotkeys_page.bindings(),
+            double_tap_locks_hold=self._hotkeys_page.double_tap_locks_hold(),
         )
 
     def _on_save_clicked(self) -> None:
@@ -354,6 +354,10 @@ class TkSettingsWindow(tkinter.Toplevel):
             )
             return
 
+        shortcut_problem = self._hotkeys_page.validation_error()
+        if shortcut_problem:
+            self._show_status(shortcut_problem, error=True)
+            return
         draft = self.collect_draft()
         if not self._service.is_installed(draft.model_size):
             self._show_status(

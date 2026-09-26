@@ -38,11 +38,12 @@ class PasteMemory:
         self._hwnd = 0
         self._clicks = 0
         self._held: set[int] = set()
-        self._hotkey: frozenset[int] = frozenset()
+        self._hotkeys: tuple[frozenset[int], ...] = ()
 
-    def set_hotkey(self, vks: Iterable[int]) -> None:
+    def set_hotkeys(self, key_sets: Iterable[Iterable[int]]) -> None:
+        """The shortcuts' keys, whose presses are not typing."""
         with self._lock:
-            self._hotkey = frozenset(vks)
+            self._hotkeys = tuple(frozenset(vks) for vks in key_sets)
 
     def remember(self, text: str) -> None:
         """Record a paste that is about to land in the foreground window."""
@@ -106,7 +107,9 @@ class PasteMemory:
         )
 
     def _is_hotkey_press(self, vk: int) -> bool:
-        return vk in self._hotkey and self._hotkey - {vk} <= self._held
+        return any(
+            vk in hotkey and hotkey - {vk} <= self._held for hotkey in self._hotkeys
+        )
 
 
 def read_or_remember(

@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 
 
 class HotkeyListener(ABC):
@@ -10,14 +9,6 @@ class HotkeyListener(ABC):
 
     @abstractmethod
     def stop(self) -> None:
-        pass
-
-    @abstractmethod
-    def set_on_activate(self, callback: Callable[[], None]) -> None:
-        pass
-
-    @abstractmethod
-    def set_on_deactivate(self, callback: Callable[[], None]) -> None:
         pass
 
     @abstractmethod

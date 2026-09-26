@@ -127,6 +127,12 @@ class TkHotkeyCapture(ttk.Frame):
             self._text_var.set(self._combination)
         self.recording_stopped.emit()
 
+    def destroy(self) -> None:
+        # The capture hooks swallow every key system-wide, so a window
+        # closed mid-recording must not leave them installed.
+        self.stop_recording()
+        super().destroy()
+
     def set_typed_text(self, text: str) -> None:
         self._text_var.set(text)
 

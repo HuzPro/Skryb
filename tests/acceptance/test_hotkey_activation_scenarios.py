@@ -1,17 +1,84 @@
-"""Hotkey activation modes - toggle vs push-to-talk - and their
+"""Hotkey activation modes - toggle vs hold - and their
 interaction with in-flight transcription."""
 
 from tests.acceptance.app_fixture import VoiceToTextApp
+from tests.fakes.hotkeys import FakeClock, FakeTimers
 from voicetotext.core.state_machine import AppState
 from voicetotext.hotkeys import keys
 from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
-from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
+from voicetotext.hotkeys.hold_strategy import HoldStrategy
 
 
 _CTRL = keys.HotkeyKey(keys.VK_LCONTROL)
 _ALT = keys.HotkeyKey(keys.VK_LMENU)
 _M = keys.from_char("m")
 _W = keys.from_char("w")
+_MOUSE4 = keys.HotkeyKey(keys.VK_XBUTTON1)
+
+
+class _LockableHold:
+    def __init__(self, app: VoiceToTextApp) -> None:
+        self.clock = FakeClock()
+        self.timers = FakeTimers()
+        self.strategy = HoldStrategy(
+            (_MOUSE4,), double_tap_locks=True,
+            clock=self.clock, make_timer=self.timers.make,
+        )
+        self.strategy.set_callbacks(app.press_hotkey, app.release_hotkey)
+
+    def tap(self) -> None:
+        self.strategy.on_key_press(_MOUSE4)
+        self.clock.now += 0.09
+        self.strategy.on_key_release(_MOUSE4)
+        self.clock.now += 0.09
+
+    def let_the_window_pass(self) -> None:
+        self.clock.now += 1.0
+        self.timers.fire_all()
+
+
+class TestDoubleTapLock:
+    def test_a_double_tap_keeps_recording_until_the_next_press(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        voice_to_text_app.user_speaks("hands free")
+        hold = _LockableHold(voice_to_text_app)
+
+        hold.tap()
+        hold.tap()
+        hold.let_the_window_pass()
+
+        assert voice_to_text_app.state == AppState.RECORDING
+
+        hold.tap()
+        hold.let_the_window_pass()
+
+        assert voice_to_text_app.typed_text == "hands free"
+        assert voice_to_text_app.state == AppState.IDLE
+
+    def test_after_a_locked_recording_is_cancelled_the_next_press_starts_a_new_one(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        hold = _LockableHold(voice_to_text_app)
+        hold.tap()
+        hold.tap()
+        voice_to_text_app.press_escape()
+        assert voice_to_text_app.state == AppState.IDLE
+
+        hold.strategy.on_key_press(_MOUSE4)
+
+        assert voice_to_text_app.state == AppState.RECORDING
+
+    def test_a_single_tap_records_only_until_the_window_closes(
+        self, voice_to_text_app: VoiceToTextApp
+    ):
+        hold = _LockableHold(voice_to_text_app)
+
+        hold.tap()
+        assert voice_to_text_app.state == AppState.RECORDING
+        hold.let_the_window_pass()
+
+        assert voice_to_text_app.state == AppState.IDLE
 
 
 class TestPushToTalk:
@@ -99,7 +166,7 @@ class TestExactSequenceMatching:
         self, voice_to_text_app: VoiceToTextApp
     ):
         voice_to_text_app.user_speaks("held sequence")
-        strategy = PushToTalkStrategy(keys=(_CTRL, _M))
+        strategy = HoldStrategy(keys=(_CTRL, _M))
         strategy.set_callbacks(
             voice_to_text_app.press_hotkey, voice_to_text_app.release_hotkey
         )

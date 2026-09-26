@@ -1,5 +1,6 @@
 import pytest
 
+from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
@@ -11,8 +12,6 @@ def _make_draft(**overrides) -> SettingsDraft:
         language="en",
         device="auto",
         engine="auto",
-        hotkey_combination="ctrl+alt+m",
-        hotkey_mode="toggle",
         output_mode=OutputMode.DIRECT_PASTE,
     )
     base.update(overrides)
@@ -27,8 +26,10 @@ class TestSettingsDraftConstruction:
         assert draft.language == "en"
         assert draft.device == "auto"
         assert draft.engine == "auto"
-        assert draft.hotkey_combination == "ctrl+alt+m"
-        assert draft.hotkey_mode == "toggle"
+        assert draft.hotkey_bindings == (
+            Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+        )
+        assert draft.double_tap_locks_hold is True
         assert draft.output_mode is OutputMode.DIRECT_PASTE
 
     def test_should_be_immutable(self):
@@ -89,20 +90,34 @@ class TestChangeSetFromDrafts:
         assert changes.hotkey_changed is False
         assert changes.output_changed is False
 
-    def test_should_flag_hotkey_change_when_combination_differs(self):
-        original = _make_draft(hotkey_combination="ctrl+alt+m")
-        updated = _make_draft(hotkey_combination="f12")
+    def test_should_flag_hotkey_change_when_a_shortcut_is_added(self):
+        original = _make_draft()
+        updated = _make_draft(hotkey_bindings=original.hotkey_bindings + (
+            Binding("mouse4", BindingMode.HOLD, BindingAction.DICTATE),
+        ))
 
         changes = ChangeSet.between(original, updated)
 
         assert changes.hotkey_changed is True
         assert changes.engine_reload_required is False
 
-    def test_should_flag_hotkey_change_when_mode_differs(self):
-        original = _make_draft(hotkey_mode="toggle")
-        updated = _make_draft(hotkey_mode="push_to_talk")
+    def test_should_flag_hotkey_change_when_a_mode_differs(self):
+        original = _make_draft(hotkey_bindings=(
+            Binding("f12", BindingMode.TOGGLE, BindingAction.DICTATE),
+        ))
+        updated = _make_draft(hotkey_bindings=(
+            Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+        ))
 
         changes = ChangeSet.between(original, updated)
+
+        assert changes.hotkey_changed is True
+
+    def test_should_flag_hotkey_change_when_the_double_tap_lock_is_switched(self):
+        changes = ChangeSet.between(
+            _make_draft(double_tap_locks_hold=True),
+            _make_draft(double_tap_locks_hold=False),
+        )
 
         assert changes.hotkey_changed is True
 

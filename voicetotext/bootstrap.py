@@ -32,10 +32,13 @@ from voicetotext.edit_capture.observer import Win32EditObserver
 from voicetotext.edit_capture.recorder import EditRecorder
 from voicetotext.edit_capture.win32_foreground import foreground_hwnd
 from voicetotext.edit_capture.win32_input import caps_lock_enabled, click_count
-from voicetotext.hotkeys.key_parser import parse_hotkey_combo
+from voicetotext.hotkeys.actions import HotkeyActions, strategies_for
+from voicetotext.hotkeys.bindings import (
+    BindingAction,
+    migrate_legacy_hotkey,
+    parse_bindings,
+)
 from voicetotext.hotkeys.listener import HotkeyListener
-from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
-from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.win32_keyboard_hook import KeyObserver, ignore_key_event
 from voicetotext.output.caps_lock_uppercase_decorator import (
@@ -153,6 +156,14 @@ def migrate_language(config: JsonConfigAdapter) -> None:
         return
     _logger.info("Migrating transcription language %r -> 'en'.", current)
     config.set("transcription.language", "en")
+    config.save()
+
+
+def migrate_hotkey_bindings(config: JsonConfigAdapter) -> None:
+    """Turn a single ``hotkey.combination``/``hotkey.mode`` into ``hotkey.bindings``."""
+    if not migrate_legacy_hotkey(config):
+        return
+    _logger.info("Migrated the hotkey to shortcut bindings.")
     config.save()
 
 
@@ -330,26 +341,42 @@ def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
     return config.get("transcription.crisperwhisper_mode", "intended") == "verbatim"
 
 
+def _hotkey_actions(use_case: RecordAndTranscribeUseCase) -> HotkeyActions:
+    return HotkeyActions(
+        dictate_activate=use_case.on_hotkey_activated,
+        dictate_deactivate=use_case.on_hotkey_deactivated,
+    )
+
+
 def _build_hotkey_listener(
     config: JsonConfigAdapter,
     use_case: RecordAndTranscribeUseCase,
+    actions: HotkeyActions,
     observer: KeyObserver = ignore_key_event,
 ) -> HotkeyListener:
-    combo_string = config.get("hotkey.combination", "ctrl+alt+m")
-    keys = parse_hotkey_combo(combo_string)
-    _paste_memory.set_hotkey(key.vk for key in keys)
-
-    if config.get("hotkey.mode") == "push_to_talk":
-        strategy = PushToTalkStrategy(keys=keys)
-    else:
-        strategy = ToggleStrategy(keys=keys)
-
-    listener = Win32HookAdapter(
-        strategy, observer, cancel=functools.partial(_cancel_with_escape, use_case),
+    bindings = parse_bindings(config)
+    _paste_memory.set_hotkeys(
+        [key.vk for key in binding.keys] for binding in bindings
     )
-    listener.set_on_activate(use_case.on_hotkey_activated)
-    listener.set_on_deactivate(use_case.on_hotkey_deactivated)
-    return listener
+    return Win32HookAdapter(
+        strategies_for(
+            bindings, actions,
+            double_tap_locks_hold=(
+                config.get("hotkey.double_tap_locks_hold", True) is not False
+            ),
+        ),
+        observer,
+        cancel=functools.partial(_cancel_with_escape, use_case),
+        listen_to_mouse=any(binding.uses_mouse() for binding in bindings),
+    )
+
+
+def _describe_dictation_shortcuts(config: JsonConfigAdapter) -> str:
+    return ", ".join(
+        f"{binding.combo} ({binding.mode.value})"
+        for binding in parse_bindings(config)
+        if binding.action is BindingAction.DICTATE
+    ) or "none"
 
 
 
@@ -822,6 +849,7 @@ def build_app(
     migrate_engine_field(config)
     migrate_output_mode(config)
     migrate_language(config)
+    migrate_hotkey_bindings(config)
 
     if event_bus is None:
         event_bus = SimpleEventBus()
@@ -896,8 +924,10 @@ def build_app(
         prepare_audio=functools.partial(_prepare_audio, config),
     )
 
+    hotkey_actions = _hotkey_actions(record_and_transcribe_use_case)
     listener = _build_hotkey_listener(
-        config, record_and_transcribe_use_case, _key_observer(edit_capture),
+        config, record_and_transcribe_use_case, hotkey_actions,
+        _key_observer(edit_capture),
     )
     overlay = (
         RecordingOverlay(
@@ -956,6 +986,7 @@ def build_app(
                 dictionary_path=paths.dictionary_path,
                 models_dir=paths.models_dir,
                 edit_capture=edit_capture,
+                hotkey_actions=hotkey_actions,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
@@ -989,13 +1020,11 @@ def build_app(
     )
 
     config.save()
-    combo = config.get("hotkey.combination", "ctrl+alt+m")
-    mode = config.get("hotkey.mode", "toggle")
     model_name = config.get("transcription.model_size")
     _logger.info(
         "Tray online. Loading '%s' in the background. "
-        "Hotkey %s (%s mode) will queue until ready.",
-        model_name, combo, mode,
+        "Dictation shortcuts %s will queue until ready.",
+        model_name, _describe_dictation_shortcuts(config),
     )
 
     _spawn_engine_load_thread(
@@ -1017,6 +1046,7 @@ def apply_settings(
     dictionary_path: Path | None = None,
     models_dir: Path | None = None,
     edit_capture: Win32EditObserver | None = None,
+    hotkey_actions: HotkeyActions | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -1037,6 +1067,7 @@ def apply_settings(
 
     if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(
-            config, use_case, _key_observer(edit_capture),
+            config, use_case, hotkey_actions or _hotkey_actions(use_case),
+            _key_observer(edit_capture),
         )
         app.set_hotkey_listener(new_listener)
