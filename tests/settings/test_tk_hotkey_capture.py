@@ -138,10 +138,38 @@ class TestTkHotkeyCaptureRecording:
 
         bridge.emit_key("ctrl")
         assert widget.is_recording() is True
-        assert widget.display_text() == "ctrl"
+        assert widget.display_text() == "Ctrl"
 
         bridge.emit_key("m")
-        assert widget.display_text() == "ctrl+m"
+        assert widget.display_text() == "Ctrl + M"
+
+    @pytest.mark.parametrize(
+        ("combo", "shown"),
+        [
+            ("ctrl+shift+alt+m", "Ctrl + Shift + Alt + M"),
+            ("f13", "F13"),
+            ("ctrl+mouse4", "Ctrl + Mouse4"),
+            ("", ""),
+        ],
+    )
+    def test_a_combination_reads_like_the_key_caps(self, widget, combo, shown):
+        widget.set_combination(combo)
+
+        assert widget.display_text() == shown
+        assert widget.combination() == combo
+
+    def test_committing_the_shown_text_unchanged_keeps_the_stored_form(self, widget):
+        received: list[str] = []
+        widget.set_combination("ctrl+shift+alt+m")
+        widget.combination_changed.connect(received.append)
+
+        widget.commit_typed_text()
+        widget.set_typed_text("  Ctrl + Alt + F12 ")
+        widget.commit_typed_text()
+
+        assert received == ["ctrl+alt+f12"]
+        assert widget.combination() == "ctrl+alt+f12"
+        assert widget.display_text() == "Ctrl + Alt + F12"
 
 
 class TestTkHotkeyCaptureBridgeLifecycle:

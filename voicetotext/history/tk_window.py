@@ -5,9 +5,13 @@ from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from voicetotext.core.color_scheme import detect_color_scheme
+from voicetotext.core.color_scheme import detect_app_color_scheme
 from voicetotext.core.timestamps import utc_now
 from voicetotext.history.entries import (
+    CANCELLED,
+    EMPTY,
+    FAILED,
+    NOT_SAVED,
     HistoryEntry,
     empty_state_message,
     filter_entries,
@@ -22,8 +26,19 @@ from voicetotext.history.management import (
     export_audio,
 )
 from voicetotext.recording.audio_segment import load_wav
-from voicetotext.settings.theme import Theme, apply_theme, theme_for
-from voicetotext.settings.win32_titlebar import set_titlebar_dark
+from voicetotext.settings.theme import (
+    BODY_FONT,
+    CARD_MUTED_STYLE,
+    CONTROL_GAP,
+    DANGER_BUTTON_STYLE,
+    MUTED_STYLE,
+    PAGE_TEXT_WRAP,
+    Theme,
+    apply_theme,
+    card,
+    theme_for,
+)
+from voicetotext.settings.win32_titlebar import show_with_titlebar
 from voicetotext.tray.duration_format import format_duration
 
 _logger = logging.getLogger(__name__)
@@ -33,12 +48,15 @@ RetryOutcome = str | Exception
 Retranscribe = Callable[[Path, Callable[[RetryOutcome], None]], None]
 
 _COLUMNS = (
-    ("time", "Time", 130, False),
+    ("time", "When", 130, False),
     ("text", "Text", 420, True),
-    ("duration", "Length", 60, False),
-    ("status", "Status", 80, False),
+    ("duration", "Length", 64, False),
+    ("status", "Status", 84, False),
 )
+_ROW_TAGS = {FAILED: "failed", CANCELLED: "quiet", EMPTY: "quiet", NOT_SAVED: "quiet"}
 _TRANSCRIBING = "Transcribing…"
+_NO_MATCHES = "No dictations match your search."
+_PADDING = 16
 
 
 def _start_daemon_thread(work: Callable[[], None]) -> None:
@@ -91,6 +109,7 @@ class HistoryWindow:
         self._window: tkinter.Toplevel | None = None
         self._entries: list[HistoryEntry] = []
         self._shown: list[HistoryEntry] = []
+        self._hint_text = ""
         # ``None`` marks a retry still running.
         self._retries: dict[tuple[str, int], RetryOutcome | None] = {}
         self._playback_end: str | None = None
@@ -100,8 +119,7 @@ class HistoryWindow:
         if self._window is None:
             self._build()
         window = self._window
-        set_titlebar_dark(window, dark=self._theme.is_dark)
-        window.deiconify()
+        show_with_titlebar(window, dark=self._theme.is_dark)
         window.lift()
         window.focus_force()
         self.refresh()
@@ -109,7 +127,8 @@ class HistoryWindow:
     def refresh(self) -> None:
         if self._window is None:
             return
-        self._hint.configure(text="Loading…")
+        self._hint_text = "Loading…"
+        self._show_hint(self._hint_text)
         self._run_in_background(self._load)
 
     def close(self) -> None:
@@ -132,30 +151,43 @@ class HistoryWindow:
         window.minsize(560, 420)
         window.protocol("WM_DELETE_WINDOW", self.close)
         self._window = window
-        self._theme: Theme = theme_for(detect_color_scheme())
+        self._theme: Theme = theme_for(detect_app_color_scheme())
 
         self._build_toolbar(window)
-        self._build_list(window)
         self._build_detail(window)
+        self._build_list(window)
         apply_theme(window, self._theme)
-        self._style_list()
+        self._tree.tag_configure("failed", foreground=self._theme.danger)
+        self._tree.tag_configure("quiet", foreground=self._theme.muted)
         self._render_selection()
 
     def _build_toolbar(self, window: tkinter.Toplevel) -> None:
         toolbar = ttk.Frame(window)
-        toolbar.pack(side="top", fill="x", padx=12, pady=(12, 4))
-        ttk.Label(toolbar, text="Search").pack(side="left")
+        toolbar.pack(side="top", fill="x", padx=_PADDING, pady=(_PADDING, 10))
+        ttk.Label(toolbar, text="Search", style=MUTED_STYLE).pack(side="left")
         self._query = tkinter.StringVar(master=window)
         self._query.trace_add("write", lambda *_args: self._show_filtered())
-        self._search = ttk.Entry(toolbar, textvariable=self._query)
-        self._search.pack(side="left", fill="x", expand=True, padx=8)
-        ttk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
-        self._hint = ttk.Label(window, text="", wraplength=780, justify="left")
-        self._hint.pack(side="top", fill="x", padx=12)
+        self._search = ttk.Entry(toolbar, textvariable=self._query, font=BODY_FONT)
+        self._search.pack(side="left", fill="x", expand=True, padx=(CONTROL_GAP, 16))
+        self._delete_all_button = ttk.Button(
+            toolbar, text="Delete all", style=DANGER_BUTTON_STYLE, command=self._delete_all,
+        )
+        self._delete_all_button.pack(side="right")
+        self._delete_button = ttk.Button(toolbar, text="Delete", command=self._delete)
+        self._delete_button.pack(side="right", padx=CONTROL_GAP)
+        self._export_button = ttk.Button(
+            toolbar, text="Save audio as...", command=self._export,
+        )
+        self._export_button.pack(side="right")
+        ttk.Button(toolbar, text="Refresh", command=self.refresh).pack(
+            side="right", padx=(0, CONTROL_GAP),
+        )
 
     def _build_list(self, window: tkinter.Toplevel) -> None:
-        frame = ttk.Frame(window)
-        frame.pack(side="top", fill="both", expand=True, padx=12, pady=4)
+        frame = card(window, padding=1)
+        frame.pack(side="top", fill="both", expand=True, padx=_PADDING)
+        frame.rowconfigure(1, weight=1)
+        frame.columnconfigure(0, weight=1)
         self._tree = ttk.Treeview(
             frame,
             columns=[name for name, *_rest in _COLUMNS],
@@ -165,67 +197,59 @@ class HistoryWindow:
         for name, heading, width, stretch in _COLUMNS:
             self._tree.heading(name, text=heading, anchor="w")
             self._tree.column(name, width=width, stretch=stretch, anchor="w")
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._tree.yview)
-        self._tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self._tree.pack(side="left", fill="both", expand=True)
+        self._scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._tree.yview)
+        self._tree.configure(yscrollcommand=self._scroll_list)
+        self._tree.grid(row=1, column=0, sticky="nsew")
         self._tree.bind("<<TreeviewSelect>>", lambda _event: self._render_selection())
+        self._hint = ttk.Label(
+            frame, text="", style=CARD_MUTED_STYLE, wraplength=PAGE_TEXT_WRAP,
+            justify="center",
+        )
+
+    def _scroll_list(self, first: str, last: str) -> None:
+        # With nothing to scroll the bar would be a thumb filling its trough.
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            self._scrollbar.grid_remove()
+        else:
+            self._scrollbar.grid(row=1, column=1, sticky="ns")
+        self._scrollbar.set(first, last)
 
     def _build_detail(self, window: tkinter.Toplevel) -> None:
+        bottom = ttk.Frame(window)
+        bottom.pack(side="bottom", fill="x", padx=_PADDING, pady=(12, _PADDING))
         self._detail = tkinter.Text(
-            window, height=7, wrap="word", state="disabled", relief="flat",
-            padx=8, pady=6, font=("Segoe UI", 10),
+            bottom, height=6, wrap="word", state="disabled",
         )
-        self._detail.pack(side="top", fill="x", padx=12, pady=4)
-        actions = ttk.Frame(window)
-        actions.pack(side="top", fill="x", padx=12, pady=(4, 12))
+        self._detail.pack(side="top", fill="x")
+        actions = ttk.Frame(bottom)
+        actions.pack(side="top", fill="x", pady=(10, 0))
         self._copy_button = ttk.Button(actions, text="Copy", command=self._copy)
         self._copy_button.pack(side="left")
         self._play_button = ttk.Button(actions, text="Play", command=self._toggle_play)
-        self._play_button.pack(side="left", padx=8)
+        self._play_button.pack(side="left", padx=CONTROL_GAP)
         self._retry_button = ttk.Button(actions, text="Retry", command=self._retry)
         self._retry_button.pack(side="left")
-        self._export_button = ttk.Button(
-            actions, text="Save audio as...", command=self._export,
+        self._status = ttk.Label(bottom, text="", style=MUTED_STYLE, justify="left")
+        self._status.pack(side="top", fill="x", pady=(6, 0))
+        self._status.bind(
+            "<Configure>",
+            lambda event: self._status.configure(wraplength=max(event.width, 200)),
         )
-        self._export_button.pack(side="left", padx=8)
-        self._delete_all_button = ttk.Button(
-            actions, text="Delete all", command=self._delete_all,
-        )
-        self._delete_all_button.pack(side="right")
-        self._delete_button = ttk.Button(actions, text="Delete", command=self._delete)
-        self._delete_button.pack(side="right", padx=8)
-        self._status = ttk.Label(actions, text="")
-        self._status.pack(side="left", fill="x", expand=True, padx=12)
 
-    def _style_list(self) -> None:
-        # ``apply_theme`` styles what the settings window uses; a Treeview
-        # and a Text are not among them.
-        theme = self._theme
-        style = ttk.Style(self._window)
-        style.configure(
-            "Treeview",
-            background=theme.surface,
-            fieldbackground=theme.surface,
-            foreground=theme.foreground,
-            borderwidth=0,
-            rowheight=24,
-        )
-        style.map(
-            "Treeview",
-            background=[("selected", theme.select_background)],
-            foreground=[("selected", theme.select_foreground)],
-        )
-        style.configure(
-            "Treeview.Heading",
-            background=theme.background,
-            foreground=theme.foreground,
-            relief="flat",
-        )
-        self._detail.configure(
-            bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.foreground, highlightthickness=0,
-        )
+    def _show_hint(self, text: str) -> None:
+        """Say why the list is empty in the middle of it, or anything else above it."""
+        if not text and self._entries and not self._shown:
+            text = _NO_MATCHES
+        self._hint.configure(text=text)
+        if not text:
+            self._hint.grid_remove()
+            self._hint.place_forget()
+        elif self._tree.get_children():
+            self._hint.place_forget()
+            self._hint.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=8)
+        else:
+            self._hint.grid_remove()
+            self._hint.place(in_=self._tree, relx=0.5, rely=0.5, anchor="center")
 
     # ------------------------------------------------------------------
     # Loading and listing
@@ -243,9 +267,9 @@ class HistoryWindow:
         if self._window is None:
             return
         self._entries = entries
-        self._hint.configure(text=empty_state_message(
+        self._hint_text = empty_state_message(
             entries, self._diagnostics_dir, saving=self._saves_history(),
-        ))
+        )
         self._show_filtered()
 
     def _show_filtered(self) -> None:
@@ -263,9 +287,11 @@ class HistoryWindow:
                     format_duration(entry.audio_seconds),
                     entry.status,
                 ),
+                tags=(_ROW_TAGS[entry.status],) if entry.status in _ROW_TAGS else (),
             )
         if selected is not None:
             self._reselect(selected.key)
+        self._show_hint(self._hint_text)
         self._render_selection()
 
     def _reselect(self, key: tuple[str, int]) -> None:

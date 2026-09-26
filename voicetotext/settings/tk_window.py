@@ -1,3 +1,4 @@
+import re
 import sys
 import tkinter
 from collections.abc import Callable
@@ -5,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, ttk
 
-from voicetotext.core.color_scheme import ColorScheme, detect_color_scheme
+from voicetotext.core.color_scheme import ColorScheme, detect_app_color_scheme
 from voicetotext.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
@@ -17,6 +18,7 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
     StateChangedEvent,
 )
+from voicetotext.core.work_area import foreground_work_area
 from voicetotext.settings.download_progress import DownloadProgressSnapshot
 from voicetotext.settings.license_consent import (
     LicenseConsentPrompt,
@@ -25,29 +27,84 @@ from voicetotext.settings.license_consent import (
 )
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
+from voicetotext.settings.tk_discard_prompt import (
+    UnsavedChangesPrompt,
+    ask_save_discard_cancel,
+)
 from voicetotext.settings.tk_download_bridge import TkDownloadBridge
 from voicetotext.settings.tk_engine_bridge import TkEngineBridge
 from voicetotext.settings.tk_hotkey_capture import CaptureBridge
 from voicetotext.recording.input_devices import Microphones
 from voicetotext.settings.tk_pages.audio_page import TkAudioPage
 from voicetotext.settings.tk_pages.dictionary_page import TkDictionaryPage
+from voicetotext.settings.tk_pages.history_page import TkHistoryPage
 from voicetotext.settings.tk_pages.hotkeys_page import TkHotkeysPage
 from voicetotext.settings.tk_pages.output_page import TkOutputPage
 from voicetotext.settings.tk_pages.transcription_page import TkTranscriptionPage
 from voicetotext.settings.tk_pages.writing_page import TkWritingPage
+from voicetotext.settings.tk_sidebar import TkSidebar
 from voicetotext.settings.tk_state_bridge import TkStateBridge
-from voicetotext.settings.theme import Theme, apply_theme, theme_for
+from voicetotext.settings.theme import (
+    CONTROL_GAP,
+    DIVIDER_STYLE,
+    MUTED_STYLE,
+    PAGE_PADDING,
+    PRIMARY_BUTTON_STYLE,
+    ScrollArea,
+    Theme,
+    apply_theme,
+    divider,
+    theme_for,
+)
 from voicetotext.settings.win32_ime_composition_hook import (
     Win32ImeCompositionHook,
 )
-from voicetotext.settings.win32_titlebar import set_titlebar_dark
+from voicetotext.settings.win32_titlebar import show_with_titlebar
 from voicetotext.writing.service import WritingService
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 ChangeSetCallback = Callable[[ChangeSet], None]
 CaptureStateCallback = Callable[[bool], None]
 
-_SECTIONS = ["Transcription", "Audio", "Hotkeys", "Output", "Writing", "Dictionary"]
+# Key, sidebar glyph, title. The glyphs are ones Segoe UI Symbol draws in
+# a single colour.
+_SECTIONS = (
+    ("transcription", "◉", "Transcription"),
+    ("audio", "♫", "Microphone & sounds"),
+    ("shortcuts", "⌨", "Shortcuts"),
+    ("output", "⇥", "Output"),
+    ("writing", "✎", "Writing"),
+    ("history", "↺", "History"),
+    ("dictionary", "≡", "Dictionary"),
+)
+_SIZE = (980, 800)
+# Tk's geometry leaves the title bar out of the height.
+_CAPTION_ALLOWANCE = 40
+_WHEEL_NOTCH = 120
+_POSITION = re.compile(r"([+-]-?\d+)([+-]-?\d+)$")
+# Where the window was last closed, so reopening it in the same session
+# puts it back instead of recentring it.
+_session_position: tuple[int, int] | None = None
+
+
+def window_placement(
+    work_area: tuple[int, int, int, int], remembered: tuple[int, int] | None,
+) -> tuple[int, int, int, int]:
+    """Width, height, x, y: centred in the work area, or where it was closed.
+
+    Either way the whole window, footer included, stays inside the work
+    area; Windows' own cascade can leave the footer under the taskbar.
+    """
+    left, top, right, bottom = work_area
+    width = min(_SIZE[0], right - left)
+    height = min(_SIZE[1], bottom - top - _CAPTION_ALLOWANCE)
+    x, y = remembered or (
+        (left + right - width) // 2,
+        (top + bottom - height - _CAPTION_ALLOWANCE) // 2,
+    )
+    x = max(left, min(x, right - width))
+    y = max(top, min(y, bottom - height - _CAPTION_ALLOWANCE))
+    return width, height, x, y
 
 
 def _run_now(action: Callable[[], None]) -> None:
@@ -63,7 +120,7 @@ def _ignore_capture(_recording: bool) -> None:
 
 
 class TkSettingsWindow(tkinter.Toplevel):
-    """Top-level Tk settings window: sidebar nav + frame-swap pages + footer.
+    """Top-level Tk settings window: sidebar nav + scrolling pages + footer.
 
     Depends only on :class:`SettingsService` and never imports domain types
     directly. Engine, state, and download events arrive on the event bus
@@ -90,15 +147,19 @@ class TkSettingsWindow(tkinter.Toplevel):
         microphones: Microphones | None = None,
         writing: WritingService | None = None,
         delete_all_history: Callable[[], None] | None = None,
+        ask_unsaved: UnsavedChangesPrompt = ask_save_discard_cancel,
     ) -> None:
         super().__init__(master)
         # The first-run window has no writing model to manage yet.
         self._writing = writing
         self._delete_all_history = delete_all_history
+        self._ask_unsaved = ask_unsaved
         self._microphones = microphones or Microphones()
         self._shown_page: ttk.Frame | None = None
+        self._shown_area: ScrollArea | None = None
+        self._placed = False
         # Hide immediately so the half-built, not-yet-themed window never
-        # flashes on screen; ``show`` reveals it once it is dark-themed.
+        # flashes on screen; ``show`` reveals it once it is themed.
         self.withdraw()
         self._service = service
         self._first_run = first_run
@@ -109,15 +170,15 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._confirm_license = confirm_license
         self._pending_changes: ChangeSet | None = None
         self._closing = False
-        # ``None`` means follow the OS light/dark setting at open time.
+        # ``None`` means follow the Windows app light/dark setting at open time.
         if color_scheme is None:
-            color_scheme = detect_color_scheme()
+            color_scheme = detect_app_color_scheme()
         self._theme: Theme = theme_for(color_scheme)
 
         self.title("VoiceToText Setup" if first_run else "VoiceToText Settings")
-        self.geometry("980x800")
+        self.geometry("{}x{}".format(*_SIZE))
         self.minsize(860, 640)
-        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
         self._engine_bridge = TkEngineBridge(schedule, self)
         self._state_bridge = TkStateBridge(schedule, self)
@@ -125,7 +186,7 @@ class TkSettingsWindow(tkinter.Toplevel):
 
         self._build_ui()
         apply_theme(self, self._theme)
-        set_titlebar_dark(self, dark=self._theme.is_dark)
+        self._scroll_pages_with_the_wheel()
         if sys.platform == "win32":
             self._install_ime_composition_hook()
 
@@ -150,30 +211,23 @@ class TkSettingsWindow(tkinter.Toplevel):
 
     def _build_ui(self) -> None:
         self._build_footer()
+        divider(self).pack(side="bottom", fill="x")
 
         body = ttk.Frame(self)
         body.pack(side="top", fill="both", expand=True)
-
-        self._sidebar = tkinter.Listbox(
-            body, width=16, exportselection=False, activestyle="none",
-        )
-        for label in _SECTIONS:
-            if label == "Writing" and self._writing is None:
-                continue
-            self._sidebar.insert("end", f"  {label}")
-        self._sidebar.bind("<<ListboxSelect>>", self._on_sidebar_select)
-        # Inset from the window edge so the tabs are not flush against it.
-        self._sidebar.pack(side="left", fill="y", padx=(12, 4), pady=(12, 0))
-
         content = ttk.Frame(body)
-        content.pack(side="left", fill="both", expand=True, padx=(4, 12), pady=(12, 0))
         content.rowconfigure(0, weight=1)
         content.columnconfigure(0, weight=1)
+        sections = [
+            section for section in _SECTIONS
+            if section[0] != "writing" or self._writing is not None
+        ]
+        areas = {key: ScrollArea(content, title) for key, _glyph, title in sections}
 
         draft = self._service.current_draft()
         self._transcription_page = TkTranscriptionPage(
-            content, self._service, confirm_license=self._confirm_license,
-            schedule=self._schedule,
+            areas["transcription"].body, self._service,
+            confirm_license=self._confirm_license, schedule=self._schedule,
         )
         self._transcription_page.download_error.connect(self._on_download_error)
         self._transcription_page.delete_error.connect(self._on_delete_error)
@@ -181,86 +235,104 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._on_model_auto_switched,
         )
         self._hotkeys_page = TkHotkeysPage(
-            content, self._capture_bridge, self._schedule,
+            areas["shortcuts"].body, self._capture_bridge, self._schedule,
         )
         self._hotkeys_page.recording_state_changed.connect(
             self._on_recording_state_changed,
         )
-        self._audio_page = TkAudioPage(content, self._microphones)
+        self._audio_page = TkAudioPage(areas["audio"].body, self._microphones)
         self._output_page = TkOutputPage(
-            content,
+            areas["output"].body,
             on_reset_pill_position=self._service.reset_pill_position,
+        )
+        self._history_page = TkHistoryPage(
+            areas["history"].body,
+            logs_folder=str(self._service.diagnostics_directory()),
             delete_all_history=(
                 None if self._delete_all_history is None
                 else self._on_delete_all_history
             ),
         )
-        self._dictionary_page = TkDictionaryPage(content)
+        self._dictionary_page = TkDictionaryPage(areas["dictionary"].body)
         self._dictionary_page.set_dictionary(self._service.dictionary_rules())
         self._writing_page = (
-            TkWritingPage(content, self._writing, self._schedule)
+            TkWritingPage(areas["writing"].body, self._writing, self._schedule)
             if self._writing is not None
             else None
         )
 
-        self._pages: list[ttk.Frame] = [
-            self._transcription_page,
-            self._audio_page,
-            self._hotkeys_page,
-            self._output_page,
-            *([self._writing_page] if self._writing_page is not None else []),
-            self._dictionary_page,
-        ]
-        for page in self._pages:
-            page.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
+        pages: dict[str, ttk.Frame | None] = {
+            "transcription": self._transcription_page,
+            "audio": self._audio_page,
+            "shortcuts": self._hotkeys_page,
+            "output": self._output_page,
+            "writing": self._writing_page,
+            "history": self._history_page,
+            "dictionary": self._dictionary_page,
+        }
+        self._pages: list[ttk.Frame] = []
+        self._areas: list[ScrollArea] = []
+        for key, _glyph, _title in sections:
+            page = pages[key]
+            if page is None:
+                continue
+            page.pack(fill="x")
+            areas[key].grid(row=0, column=0, sticky="nsew")
+            self._pages.append(page)
+            self._areas.append(areas[key])
+
+        self._sidebar = TkSidebar(
+            body, [(glyph, title) for _key, glyph, title in sections], self._show_page,
+        )
+        self._sidebar.pack(side="left", fill="y")
+        ttk.Frame(body, style=DIVIDER_STYLE, width=1).pack(side="left", fill="y")
+        content.pack(side="left", fill="both", expand=True)
 
         self._apply_initial_draft(draft)
-
-        self._sidebar.selection_set(0)
+        self._saved_draft = self.collect_draft()
         self._show_page(0)
 
     def _build_footer(self) -> None:
-        footer = ttk.Frame(self)
-        footer.pack(side="bottom", fill="x", padx=12, pady=8)
-
-        self._status_label = ttk.Label(
-            footer, text="", foreground=self._theme.status_neutral,
-        )
-        self._status_label.pack(side="left", fill="x", expand=True)
+        footer = ttk.Frame(self, padding=(PAGE_PADDING, 12))
+        footer.pack(side="bottom", fill="x")
 
         button_text = "Save & Start" if self._first_run else "Save & Apply"
         self._save_button = ttk.Button(
-            footer, text=button_text, command=self._on_save_clicked,
+            footer, text=button_text, style=PRIMARY_BUTTON_STYLE,
+            command=self._on_save_clicked,
         )
         self._save_button.pack(side="right")
-
         self._export_settings_button = ttk.Button(
-            footer,
-            text="Export...",
-            command=self._on_export_settings,
+            footer, text="Export...", command=self._on_export_settings,
         )
-        self._export_settings_button.pack(side="right", padx=(0, 8))
-
         self._import_settings_button = ttk.Button(
-            footer,
-            text="Import...",
-            command=self._on_import_settings,
+            footer, text="Import...", command=self._on_import_settings,
         )
-        self._import_settings_button.pack(side="right", padx=(0, 8))
-
         self._logs_folder_button = ttk.Button(
-            footer,
-            text="Logs folder...",
-            command=self._on_choose_logs_folder,
+            footer, text="Logs folder...", command=self._on_choose_logs_folder,
         )
-        self._logs_folder_button.pack(side="right", padx=(0, 8))
+        for button in (
+            self._export_settings_button,
+            self._import_settings_button,
+            self._logs_folder_button,
+        ):
+            button.pack(side="left", padx=(0, CONTROL_GAP))
+        self._status_label = ttk.Label(
+            footer, text="", style=MUTED_STYLE, justify="left",
+            foreground=self._theme.status_neutral,
+        )
+        self._status_label.pack(side="left", fill="x", expand=True, padx=(8, 16))
+        self._status_label.bind(
+            "<Configure>",
+            lambda event: self._status_label.configure(wraplength=max(event.width, 120)),
+        )
 
     def _apply_initial_draft(self, draft: SettingsDraft) -> None:
         self._hotkeys_page.set_bindings(draft.hotkey_bindings)
         self._hotkeys_page.set_double_tap_locks_hold(draft.double_tap_locks_hold)
         self._output_page.set_mode(draft.output_mode)
-        self._output_page.set_capture_content(draft.capture_content)
-        self._output_page.set_history_retention_days(draft.history_retention_days)
+        self._history_page.set_capture_content(draft.capture_content)
+        self._history_page.set_history_retention_days(draft.history_retention_days)
         self._output_page.set_paste_method_overrides(draft.paste_method_overrides)
         self._audio_page.set_device(draft.input_device)
         self._audio_page.set_boost_quiet_speech(draft.boost_quiet_speech)
@@ -320,6 +392,7 @@ class TkSettingsWindow(tkinter.Toplevel):
             self._show_status(f"Could not import settings: {exc}", error=True)
             return
         self._apply_imported_draft()
+        self._saved_draft = self.collect_draft()
         self._show_status("Settings imported.")
 
     def _apply_imported_draft(self) -> None:
@@ -331,28 +404,57 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._transcription_page.set_crisperwhisper_mode(draft.crisperwhisper_mode)
         self._apply_initial_draft(draft)
 
-    def _on_sidebar_select(self, _event: tkinter.Event) -> None:
-        selection = self._sidebar.curselection()
-        if selection:
-            self._show_page(selection[0])
-
     def _show_page(self, index: int) -> None:
         page = self._pages[index]
         if self._shown_page is self._audio_page and page is not self._audio_page:
             self._audio_page.on_hidden()
-        page.tkraise()
+        self._areas[index].tkraise()
+        self._sidebar.select(index)
         if page is self._audio_page and self._shown_page is not page:
             self._audio_page.on_shown()
         self._shown_page = page
+        self._shown_area = self._areas[index]
+
+    def _scroll_pages_with_the_wheel(self) -> None:
+        # Over a combobox or spinbox the wheel would change its value rather
+        # than scroll the page, changing settings by accident on the way
+        # down a long page; both are set by clicking instead.
+        self.bind_class("TCombobox", "<MouseWheel>", "")
+        self.bind_class("TSpinbox", "<MouseWheel>", "")
+        self.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Control-Tab>", lambda _event: self._step_page(1))
+        self.bind("<Control-Shift-Tab>", lambda _event: self._step_page(-1))
+
+    def _on_mousewheel(self, event: tkinter.Event) -> None:
+        if self._shown_area is None or isinstance(
+            event.widget, (tkinter.Text, tkinter.Listbox, ttk.Treeview),
+        ):
+            return
+        notches = -event.delta / _WHEEL_NOTCH
+        self._shown_area.scroll(round(notches) or (1 if notches > 0 else -1))
+
+    def _step_page(self, step: int) -> None:
+        current = self._pages.index(self._shown_page) if self._shown_page else 0
+        self._show_page((current + step) % len(self._pages))
 
     def show(self) -> None:
         """Reveal and focus the window (also the single-instance focus path)."""
-        # Set the dark caption BEFORE mapping: the title bar is painted when
-        # the window maps, so the attribute must already be in place.
-        set_titlebar_dark(self, dark=self._theme.is_dark)
-        self.deiconify()
+        if not self._placed:
+            self._place_on_screen()
+            self._placed = True
+        show_with_titlebar(self, dark=self._theme.is_dark)
         self.lift()
         self.focus_force()
+
+    def _place_on_screen(self) -> None:
+        width, height, x, y = window_placement(self._work_area(), _session_position)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _work_area(self) -> tuple[int, int, int, int]:
+        try:
+            return foreground_work_area()
+        except OSError:
+            return 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
 
     def is_open(self) -> bool:
         """True while the window is alive and not in the process of closing."""
@@ -369,11 +471,11 @@ class TkSettingsWindow(tkinter.Toplevel):
             device=self._service.current_draft().device,
             engine=self._transcription_page.current_engine(),
             output_mode=self._output_page.current_mode(),
-            capture_content=self._output_page.captures_content(),
+            capture_content=self._history_page.captures_content(),
             input_device=self._audio_page.current_device(),
             boost_quiet_speech=self._audio_page.boosts_quiet_speech(),
             recording=self._audio_page.recording_preferences(),
-            history_retention_days=self._output_page.history_retention_days(),
+            history_retention_days=self._history_page.history_retention_days(),
             paste_method_overrides=self._output_page.paste_method_overrides(),
             transcription_mode=self._transcription_page.current_mode(),
             crisperwhisper_mode=(
@@ -387,6 +489,23 @@ class TkSettingsWindow(tkinter.Toplevel):
             hotkey_bindings=self._hotkeys_page.bindings(),
             double_tap_locks_hold=self._hotkeys_page.double_tap_locks_hold(),
         )
+
+    def has_unsaved_changes(self) -> bool:
+        return (
+            self.collect_draft() != self._saved_draft
+            or self._dictionary_page.is_dirty()
+            or (self._writing_page is not None and self._writing_page.transforms_dirty())
+        )
+
+    def _on_close_requested(self) -> None:
+        if not self.has_unsaved_changes():
+            self.close()
+            return
+        answer = self._ask_unsaved(self, self._theme)
+        if answer == "save":
+            self._on_save_clicked()
+        elif answer == "discard":
+            self.close()
 
     def _on_save_clicked(self) -> None:
         if self._first_run and not self._service.any_model_installed():
@@ -596,6 +715,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         if self._closing:
             return
         self._closing = True
+        self._remember_position()
         self._service.unsubscribe_engine(self._engine_bridge)
         self._service.unsubscribe_state_changes(self._state_bridge)
         self._service.unsubscribe_downloads(self._download_bridge)
@@ -606,6 +726,12 @@ class TkSettingsWindow(tkinter.Toplevel):
         # closes the window mid-callback does not destroy widgets it is
         # still executing within.
         self.after_idle(self._destroy_if_exists)
+
+    def _remember_position(self) -> None:
+        global _session_position
+        position = _POSITION.search(self.wm_geometry())
+        if self._placed and position:
+            _session_position = (int(position.group(1)), int(position.group(2)))
 
     def _destroy_if_exists(self) -> None:
         if self.winfo_exists():
@@ -623,6 +749,9 @@ class TkSettingsWindow(tkinter.Toplevel):
 
     def output_page(self) -> TkOutputPage:
         return self._output_page
+
+    def history_page(self) -> TkHistoryPage:
+        return self._history_page
 
     def dictionary_page(self) -> TkDictionaryPage:
         return self._dictionary_page
@@ -646,9 +775,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         return not self._save_button.instate(["disabled"])
 
     def sidebar_labels(self) -> list[str]:
-        return [
-            self._sidebar.get(i).strip() for i in range(self._sidebar.size())
-        ]
+        return self._sidebar.labels()
 
     def _model_list(self):
         return self._transcription_page.model_list()

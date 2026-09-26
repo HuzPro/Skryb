@@ -34,7 +34,7 @@ from voicetotext.settings.theme import DARK_THEME, LIGHT_THEME
 from voicetotext.settings.tk_download_bridge import TkDownloadBridge
 from voicetotext.settings.tk_engine_bridge import TkEngineBridge
 from voicetotext.settings.tk_state_bridge import TkStateBridge
-from voicetotext.settings.tk_window import TkSettingsWindow
+from voicetotext.settings.tk_window import TkSettingsWindow, window_placement
 from voicetotext.settings.transcription_mode import TranscriptionMode
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
@@ -86,7 +86,7 @@ def test_recording_consent_is_off_until_selected(
     window = _make_window(tk_root, service)
     try:
         assert window.collect_draft().capture_content is False
-        window._output_page.set_capture_content(True)
+        window.history_page().set_capture_content(True)
         assert window.collect_draft().capture_content is True
         window._on_save_clicked()
         assert service.apply_draft.call_args.args[0].capture_content is True
@@ -816,7 +816,8 @@ class TestMode:
 
     def test_should_show_every_sidebar_section(self, mode_window):
         assert mode_window.sidebar_labels() == [
-            "Transcription", "Audio", "Hotkeys", "Output", "Dictionary",
+            "Transcription", "Microphone & sounds", "Shortcuts", "Output", "History",
+            "Dictionary",
         ]
 
     def test_should_include_mode_in_collected_draft(self, mode_window):
@@ -848,13 +849,14 @@ class TestMode:
 
 
 class TestWritingSection:
-    def test_the_writing_page_sits_between_output_and_dictionary(self, tk_root, service):
+    def test_the_writing_page_sits_between_output_and_history(self, tk_root, service):
         from tests.settings.tk_pages.test_tk_writing_page import FakeWriting
 
         window = _make_window(tk_root, service, writing=FakeWriting())
         try:
             assert window.sidebar_labels() == [
-                "Transcription", "Audio", "Hotkeys", "Output", "Writing", "Dictionary",
+                "Transcription", "Microphone & sounds", "Shortcuts", "Output", "Writing",
+                "History", "Dictionary",
             ]
             assert window.writing_page() is not None
         finally:
@@ -907,3 +909,93 @@ class TestWritingSection:
         saved = service.save_dictionary_rules.call_args.args[0]
         assert saved.rules == (LiteralRule(spoken=("vtt",), replacement="VoiceToText"),)
         assert "forget_learned_words [('Jon', 'John')]" in writing.calls
+
+
+class TestClosingWithUnsavedChanges:
+    def _window(self, tk_root, service, answer: str):
+        asked: list[str] = []
+
+        def ask(_parent, _theme) -> str:
+            asked.append(answer)
+            return answer
+
+        return _make_window(tk_root, service, ask_unsaved=ask), asked
+
+    def test_closing_an_untouched_window_does_not_ask(self, tk_root, service):
+        window, asked = self._window(tk_root, service, "cancel")
+
+        window._on_close_requested()
+
+        assert asked == []
+        assert not window.is_open()
+
+    def test_cancel_keeps_the_window_and_the_edit(self, tk_root, service):
+        window, asked = self._window(tk_root, service, "cancel")
+        try:
+            window.history_page().set_capture_content(True)
+
+            window._on_close_requested()
+
+            assert asked == ["cancel"]
+            assert window.is_open()
+            assert window.collect_draft().capture_content is True
+            service.apply_draft.assert_not_called()
+        finally:
+            window.destroy()
+
+    def test_discard_closes_without_saving(self, tk_root, service):
+        window, asked = self._window(tk_root, service, "discard")
+        window.output_page().set_mode(OutputMode.CLIPBOARD_ONLY)
+
+        window._on_close_requested()
+
+        assert asked == ["discard"]
+        assert not window.is_open()
+        service.apply_draft.assert_not_called()
+
+    def test_save_saves_the_edit_then_closes(self, tk_root, service):
+        window, _asked = self._window(tk_root, service, "save")
+        window.dictionary_page().set_dictionary(DictionaryConfig())
+        window.dictionary_page().fillers_check().invoke()
+
+        window._on_close_requested()
+
+        assert service.save_dictionary_rules.called
+        assert not window.is_open()
+
+    def test_an_import_counts_as_saved(self, tk_root, service, monkeypatch):
+        window, asked = self._window(tk_root, service, "cancel")
+        monkeypatch.setattr(
+            "voicetotext.settings.tk_window.filedialog.askopenfilename",
+            lambda **_kwargs: "C:/exports/settings café ✓.json",
+        )
+        service.current_draft.return_value = _draft(output_mode=OutputMode.CLIPBOARD_ONLY)
+
+        window.import_settings_button().invoke()
+        window._on_close_requested()
+
+        assert asked == []
+        assert not window.is_open()
+
+
+class TestPlacement:
+    def test_opens_centred_in_the_work_area_of_a_1080p_screen(self):
+        assert window_placement((0, 0, 1920, 1040), None) == (980, 800, 470, 100)
+
+    def test_a_short_laptop_screen_shrinks_the_window_to_keep_the_footer_visible(self):
+        width, height, x, y = window_placement((0, 0, 1366, 728), None)
+
+        assert (width, height) == (980, 688)
+        assert y + height + 40 <= 728
+        assert x == 193
+
+    def test_a_screen_left_of_the_main_one_is_used_as_is(self):
+        width, height, x, y = window_placement((-2560, 0, 0, 1400), None)
+
+        assert -2560 <= x and x + width <= 0
+        assert 0 <= y and y + height + 40 <= 1400
+
+    def test_the_last_position_is_reused_but_pulled_back_on_screen(self):
+        assert window_placement((0, 0, 1920, 1040), (300, 120))[2:] == (300, 120)
+        assert window_placement((0, 0, 1920, 1040), (1800, 900))[2:] == (940, 200)
+        assert window_placement((0, 0, 1920, 1040), (-400, -50))[2:] == (0, 0)

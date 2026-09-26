@@ -15,7 +15,9 @@ ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 
 
 class NoticeDisplay(Protocol):
-    def show(self, message: str, buttons: Sequence[NoticeAction] = ()) -> None: ...
+    def show(
+        self, message: str, buttons: Sequence[NoticeAction] = (), *, warning: bool = False,
+    ) -> None: ...
 
 
 class RecoveryNotices:
@@ -51,7 +53,10 @@ class RecoveryNotices:
         if not isinstance(event, TranscriptionFailedEvent):
             return
         retry: list[NoticeAction] = [("Retry", self._retry)] if event.recoverable else []
-        self._show("Transcription failed.", [*retry, ("Open history", self._open_history)])
+        self._show(
+            "Transcription failed.", [*retry, ("Open history", self._open_history)],
+            warning=True,
+        )
 
     def _on_delivery_failed(self, event: DomainEvent) -> None:
         if not isinstance(event, DeliveryFailedEvent):
@@ -60,16 +65,20 @@ class RecoveryNotices:
             self._show(
                 "The paste did not land.",
                 [("Paste again", self._paste_again), ("Copy", self._copy_again)],
+                warning=True,
             )
         else:
             self._show(
                 "Nothing to paste into. The text is on your clipboard.",
                 [("Open history", self._open_history)],
+                warning=True,
             )
 
     def _on_recording_cancelled(self, event: DomainEvent) -> None:
         if isinstance(event, RecordingCancelledEvent) and event.recoverable:
             self._show("Recording cancelled.", [("Transcribe anyway", self._retry)])
 
-    def _show(self, message: str, buttons: list[NoticeAction]) -> None:
-        self._schedule(lambda: self._notice.show(message, buttons))
+    def _show(
+        self, message: str, buttons: list[NoticeAction], *, warning: bool = False,
+    ) -> None:
+        self._schedule(lambda: self._notice.show(message, buttons, warning=warning))

@@ -49,8 +49,8 @@ typed into the active window. If anything misbehaves, run
 
 ## Privacy
 
-Audio and transcripts are not saved by default. Settings > Output > Privacy
-lets you opt into saving them in the logs folder. Changes apply when you save.
+Audio and transcripts are not saved by default. Settings > History > Save
+history lets you opt into saving them in the logs folder. Changes apply when you save.
 Ordinary logs contain timing and status information, without transcript text.
 
 The default folder is `%APPDATA%\VoiceToText\diagnostics`. Use a local folder
