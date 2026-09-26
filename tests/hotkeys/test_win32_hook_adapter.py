@@ -1,6 +1,12 @@
+import ctypes
+import sys
 from unittest.mock import MagicMock
 
+import pytest
+
+from voicetotext.core.exceptions import HotkeyError
 from voicetotext.hotkeys import keys
+from voicetotext.hotkeys import win32_keyboard_hook as wkh
 from voicetotext.hotkeys.actions import HotkeyActions, strategies_for
 from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.hotkeys.listener import HotkeyListener
@@ -188,6 +194,17 @@ class TestWin32HookAdapterLifecycle:
         adapter._mouse_hook.start.assert_called_once()
         adapter._mouse_hook.stop.assert_called_once()
 
+    def test_the_mouse_hook_is_removed_even_when_the_keyboard_hook_thread_is_stuck(self):
+        adapter = Win32HookAdapter([], listen_to_mouse=True)
+        adapter._hook = MagicMock()
+        adapter._hook.stop.side_effect = HotkeyError("keyboard hook thread did not exit")
+        adapter._mouse_hook = MagicMock()
+
+        with pytest.raises(HotkeyError):
+            adapter.stop()
+
+        adapter._mouse_hook.stop.assert_called_once()
+
     def test_no_mouse_hook_is_installed_when_no_shortcut_uses_the_mouse(self):
         adapter = Win32HookAdapter([])
         adapter._hook = MagicMock()
@@ -201,3 +218,33 @@ class TestWin32HookAdapterLifecycle:
 class TestWin32HookAdapterIsAHotkeyListener:
     def test_should_implement_hotkey_listener_interface(self):
         assert isinstance(Win32HookAdapter([]), HotkeyListener)
+
+
+class TestInjectedTextThroughTheRealHookProc:
+    """Events fed to the keyboard hook's ctypes thunk, as Windows would."""
+
+    def _press(self, adapter: Win32HookAdapter, message: int, vk: int, scan_code: int = 0) -> int:
+        info = wkh._KBDLLHOOKSTRUCT(vkCode=vk, scanCode=scan_code, flags=0x10)
+        return adapter._hook._proc(wkh._HC_ACTION, message, ctypes.addressof(info))
+
+    def test_text_injected_in_the_middle_of_a_shortcut_does_not_break_it(self, monkeypatch):
+        reported: list[object] = []
+        monkeypatch.setattr(sys, "unraisablehook", reported.append)
+        user32 = MagicMock()
+        user32.CallNextHookEx.return_value = 0
+        monkeypatch.setattr(wkh, "_user32", user32)
+        calls = Calls()
+        adapter = _adapter(
+            calls, Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+        )
+
+        self._press(adapter, wkh._WM_KEYDOWN, keys.VK_LCONTROL)
+        for unit in memoryview("héllo 😀".encode("utf-16-le")).cast("H"):
+            self._press(adapter, wkh._WM_KEYDOWN, 0xE7, unit)
+            self._press(adapter, wkh._WM_KEYUP, 0xE7, unit)
+        self._press(adapter, wkh._WM_KEYDOWN, 0)
+        self._press(adapter, wkh._WM_SYSKEYDOWN, keys.VK_LMENU)
+        self._press(adapter, wkh._WM_SYSKEYDOWN, _M)
+
+        assert calls.log == ["dictate on"]
+        assert reported == []

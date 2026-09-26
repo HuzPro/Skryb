@@ -1,4 +1,5 @@
 import ctypes
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -85,3 +86,43 @@ def test_start_installs_a_mouse_hook_and_stop_removes_it(mock_user32, mock_kerne
 
     assert mock_user32.SetWindowsHookExW.call_args.args[0] == wmh._WH_MOUSE_LL
     mock_user32.UnhookWindowsHookEx.assert_called_once_with(777)
+
+
+@pytest.mark.parametrize("message", [
+    wmh._WM_MBUTTONDOWN, wmh._WM_XBUTTONDOWN, wmh._WM_XBUTTONUP, _WM_MOUSEMOVE,
+])
+def test_a_button_event_without_its_mouse_data_is_passed_on_unread(monkeypatch, message):
+    reported: list[object] = []
+    monkeypatch.setattr(sys, "unraisablehook", reported.append)
+    user32 = MagicMock()
+    user32.CallNextHookEx.return_value = 3
+    monkeypatch.setattr(wkh, "_user32", user32)
+    handler = MagicMock(return_value=True)
+    hook = Win32MouseHook(handler)
+
+    assert hook._proc(wkh._HC_ACTION, message, 0) == 3
+    handler.assert_not_called()
+    assert reported == []
+
+
+def test_a_failing_handler_lets_every_button_through_and_is_logged_once(
+    monkeypatch, app_caplog,
+):
+    reported: list[object] = []
+    monkeypatch.setattr(sys, "unraisablehook", reported.append)
+    user32 = MagicMock()
+    user32.CallNextHookEx.return_value = 0
+    monkeypatch.setattr(wkh, "_user32", user32)
+    hook = Win32MouseHook(MagicMock(side_effect=RuntimeError("strategy broke")))
+    info, lparam = _lparam(0x0001 << 16)
+
+    results = [
+        hook._proc(wkh._HC_ACTION, message, lparam)
+        for _ in range(200)
+        for message in (wmh._WM_XBUTTONDOWN, wmh._WM_XBUTTONUP)
+    ]
+
+    assert set(results) == {0}
+    failures = [r for r in app_caplog.records if "mouse hook failed" in r.getMessage()]
+    assert len(failures) == 1
+    assert reported == []
