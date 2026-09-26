@@ -45,7 +45,8 @@ _BREATHING_RATE = 0.18
 
 _RECORDING_FILL = (12, 12, 14)
 _TRANSCRIBING_FILL = (38, 38, 42)
-_PROGRESS_FILL = (92, 92, 104)
+# The dark theme accent, blended into the bar so the white label stays readable.
+_PROGRESS_FILL = (76, 96, 138)
 _BORDER = (255, 255, 255, 26)
 _BUTTON_FILL = (58, 58, 62)
 _BUTTON_HOVER_FILL = (82, 82, 88)
@@ -61,7 +62,8 @@ _LABEL_SIZE = 12
 _CAPTION_SIZE = 9
 _CAPTION_HEIGHT = 12.0
 _CAPTION_PADDING = 7.0
-_AMBER = (255, 184, 48)
+# The dark theme warning colour (#fbbf24).
+_AMBER = (251, 191, 36)
 _NOTICE_TEXT = "No audio from"
 _NOTICE_SIZE = 11
 _NOTICE_LINE_OFFSET = 7.0

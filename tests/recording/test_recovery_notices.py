@@ -14,9 +14,13 @@ from voicetotext.recording.recovery_notices import RecoveryNotices
 class FakeNotice:
     def __init__(self) -> None:
         self.shown: list[tuple[str, list[NoticeAction]]] = []
+        self.warnings: list[bool] = []
 
-    def show(self, message: str, buttons: Sequence[NoticeAction] = ()) -> None:
+    def show(
+        self, message: str, buttons: Sequence[NoticeAction] = (), *, warning: bool = False,
+    ) -> None:
         self.shown.append((message, list(buttons)))
+        self.warnings.append(warning)
 
     def labels(self) -> list[str]:
         return [label for label, _action in self.shown[-1][1]]
@@ -99,6 +103,21 @@ def test_a_cancel_offers_transcribe_anyway_only_when_there_is_audio() -> None:
 
     assert setup.notice.shown[0][0] == "Recording cancelled."
     assert setup.calls == ["retry"]
+
+
+def test_failures_are_marked_as_warnings_and_a_cancel_is_not() -> None:
+    warned = []
+    for event in (
+        TranscriptionFailedEvent(error="CUDA OOM", recoverable=True),
+        DeliveryFailedEvent(reason="not_landed", text="Ship it."),
+        DeliveryFailedEvent(reason="no_text_field", text="Zoë ✓"),
+        RecordingCancelledEvent(recoverable=True),
+    ):
+        setup = Setup()
+        setup.publish_on_worker(event)
+        warned.extend(setup.notice.warnings)
+
+    assert warned == [True, True, True, False]
 
 
 def test_an_empty_transcription_shows_no_notice() -> None:

@@ -5,9 +5,10 @@ import tkinter
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
-from voicetotext.core.color_scheme import ColorScheme, detect_color_scheme
+from voicetotext.core.color_scheme import ColorScheme, detect_app_color_scheme
+from voicetotext.core.work_area import foreground_work_area
 from voicetotext.recording.pill import CANVAS_HEIGHT
-from voicetotext.settings.theme import Theme, theme_for
+from voicetotext.settings.theme import BODY_FONT, Theme, theme_for
 
 NoticeAction = tuple[str, Callable[[], None]]
 
@@ -17,8 +18,8 @@ _MAX_BUTTONS = 3
 # just above the pill's full height, so the two never overlap.
 _PILL_BOTTOM_MARGIN = 26
 _GAP_ABOVE_PILL = 8
-_FONT = ("Segoe UI", 10)
-_BUTTON_FONT = ("Segoe UI", 10, "bold")
+_PADDING = 12
+_STRIP_WIDTH = 3
 
 _GWL_EXSTYLE = -20
 _WS_EX_TOPMOST = 0x00000008
@@ -29,18 +30,6 @@ _HWND_TOPMOST = -1
 _SWP_NOACTIVATE = 0x0010
 _SW_HIDE = 0
 _SW_SHOWNOACTIVATE = 4
-_MONITOR_DEFAULTTONEAREST = 2
-
-
-class _MonitorInfo(ctypes.Structure):
-    """``MONITORINFO`` in plain ctypes, so the module imports off Windows."""
-
-    _fields_ = [
-        ("cbSize", ctypes.c_ulong),
-        ("rcMonitor", ctypes.c_long * 4),
-        ("rcWork", ctypes.c_long * 4),
-        ("dwFlags", ctypes.c_ulong),
-    ]
 
 
 class NoticeWindowApi(Protocol):
@@ -63,12 +52,6 @@ class Win32NoticeWindow:
         user32.SetWindowLongW.restype = ctypes.c_long
         user32.GetForegroundWindow.argtypes = []
         user32.GetForegroundWindow.restype = ctypes.c_void_p
-        user32.MonitorFromWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-        user32.MonitorFromWindow.restype = ctypes.c_void_p
-        user32.GetMonitorInfoW.argtypes = [
-            ctypes.c_void_p, ctypes.POINTER(_MonitorInfo),
-        ]
-        user32.GetMonitorInfoW.restype = ctypes.c_int
         user32.SetWindowPos.argtypes = [
             ctypes.c_void_p, ctypes.c_void_p,
             ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
@@ -86,15 +69,7 @@ class Win32NoticeWindow:
         )
 
     def work_area(self) -> tuple[int, int, int, int]:
-        monitor = self._user32.MonitorFromWindow(
-            self._user32.GetForegroundWindow(), _MONITOR_DEFAULTTONEAREST,
-        )
-        info = _MonitorInfo()
-        info.cbSize = ctypes.sizeof(info)
-        if not self._user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
-            raise OSError("GetMonitorInfoW failed")
-        left, top, right, bottom = info.rcWork
-        return left, top, right, bottom
+        return foreground_work_area()
 
     def show(self, hwnd: int, x: int, y: int, width: int, height: int) -> None:
         self._user32.SetWindowPos(
@@ -117,7 +92,8 @@ class Notice:
     appearance nor a click on it moves the focus off the app the text is
     going to. The buttons are classic Tk buttons: unlike ``ttk.Button``
     they have no click-to-focus binding. A new notice replaces the one
-    showing, and each hides itself after ten seconds.
+    showing, and each hides itself after ten seconds. A strip down the
+    left edge is the accent colour, or amber when something went wrong.
     """
 
     def __init__(
@@ -125,7 +101,7 @@ class Notice:
         root: tkinter.Misc,
         window_api: NoticeWindowApi | None = None,
         *,
-        color_scheme: Callable[[], ColorScheme] = detect_color_scheme,
+        color_scheme: Callable[[], ColorScheme] = detect_app_color_scheme,
     ) -> None:
         self._root = root
         self._window_api = window_api
@@ -147,10 +123,14 @@ class Notice:
     def buttons(self) -> list[tkinter.Button]:
         return list(self._buttons)
 
-    def show(self, message: str, buttons: Sequence[NoticeAction] = ()) -> None:
+    def show(
+        self, message: str, buttons: Sequence[NoticeAction] = (), *, warning: bool = False,
+    ) -> None:
         window = self._window or self._build()
         self._cancel_auto_hide()
-        self._fill(window, message, buttons[:_MAX_BUTTONS], theme_for(self._color_scheme()))
+        self._fill(
+            window, message, buttons[:_MAX_BUTTONS], theme_for(self._color_scheme()), warning,
+        )
         window.update_idletasks()
         api = self._api()
         self._hwnd = int(window.wm_frame(), 16)
@@ -202,20 +182,26 @@ class Notice:
         message: str,
         actions: Sequence[NoticeAction],
         theme: Theme,
+        warning: bool,
     ) -> None:
         for child in window.winfo_children():
             child.destroy()
         frame = tkinter.Frame(
-            window, bg=theme.surface, padx=12, pady=6,
-            highlightthickness=1, highlightbackground=theme.border,
+            window, bg=theme.surface, highlightthickness=1,
+            highlightbackground=theme.border, highlightcolor=theme.border,
         )
         frame.pack(fill="both", expand=True)
+        tkinter.Frame(
+            frame, bg=theme.warning if warning else theme.accent, width=_STRIP_WIDTH,
+        ).pack(side="left", fill="y")
         tkinter.Label(
-            frame, text=message, bg=theme.surface, fg=theme.foreground, font=_FONT,
-        ).pack(side="left", padx=(0, 8))
+            frame, text=message, bg=theme.surface, fg=theme.foreground, font=BODY_FONT,
+        ).pack(side="left", padx=(_PADDING, _PADDING + 4), pady=_PADDING)
         self._buttons = [
             self._button(frame, label, action, theme) for label, action in actions
         ]
+        if self._buttons:
+            self._buttons[-1].pack_configure(padx=(0, _PADDING))
 
     def _button(
         self,
@@ -226,12 +212,12 @@ class Notice:
     ) -> tkinter.Button:
         button = tkinter.Button(
             parent, text=label, command=lambda: self._press(action),
-            bg=theme.surface, fg=theme.accent,
-            activebackground=theme.select_background, activeforeground=theme.accent,
+            bg=theme.border, fg=theme.foreground,
+            activebackground=theme.strong_border, activeforeground=theme.foreground,
             relief="flat", borderwidth=0, highlightthickness=0, takefocus=0,
-            font=_BUTTON_FONT, padx=8, pady=2, cursor="hand2",
+            font=BODY_FONT, padx=12, pady=3, cursor="hand2",
         )
-        button.pack(side="left")
+        button.pack(side="left", padx=(0, _PADDING // 2), pady=_PADDING)
         return button
 
     def _press(self, action: Callable[[], None]) -> None:
