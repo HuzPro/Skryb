@@ -1,4 +1,6 @@
+import gc
 from pathlib import Path
+import threading
 import tkinter
 from tkinter import filedialog
 from unittest.mock import MagicMock
@@ -631,6 +633,45 @@ class TestCaptureCallback:
         capture = window.hotkeys_page().dictation_rows()[0].capture
         capture.start_recording()
         capture.stop_recording()
+
+    def test_keys_a_hook_thread_captures_reach_the_shortcut_box_only_through_the_gui_queue(
+        self, tk_root, service,
+    ):
+        scheduled: list = []
+        bridge = FakeCaptureBridge()
+        window = TkSettingsWindow(
+            tk_root, service, capture_bridge=bridge, schedule=scheduled.append,
+            microphones=FakeMicrophones([]),
+        )
+        try:
+            capture = window.hotkeys_page().dictation_rows()[0].capture
+            capture.start_recording()
+            failures: list[BaseException] = []
+
+            def hook_thread() -> None:
+                try:
+                    for name in ("ctrl", "shift", "f9", "f9"):
+                        bridge.key_pressed.emit(name)
+                except BaseException as exc:
+                    failures.append(exc)
+
+            # Widgets earlier tests dropped are still waiting for the cyclic
+            # GC; collected on the worker, their Tk variables would call Tk
+            # from the wrong thread.
+            gc.collect()
+            worker = threading.Thread(target=hook_thread, name="capture-hook")
+            worker.start()
+            worker.join(timeout=5)
+
+            assert not worker.is_alive()
+            assert failures == []
+            assert capture.display_text() == ""
+            assert scheduled
+            for action in scheduled:
+                action()
+            assert capture.display_text() == "ctrl+shift+f9"
+        finally:
+            window.destroy()
 
 
 class TestLifecycle:
