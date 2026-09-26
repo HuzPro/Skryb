@@ -66,6 +66,7 @@ class _TrackingService:
         )
         self.trigger_engine_swap = MagicMock()
         self.supports_streaming_hardware = MagicMock(return_value=True)
+        self.hardware_probe_pending = MagicMock(return_value=False)
         self.engine_candidates_for = MagicMock(return_value=())
         self.dictionary_rules = MagicMock(return_value=DictionaryConfig())
         self.save_dictionary_rules = MagicMock()

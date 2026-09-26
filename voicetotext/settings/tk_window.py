@@ -164,6 +164,7 @@ class TkSettingsWindow(tkinter.Toplevel):
         draft = self._service.current_draft()
         self._transcription_page = TkTranscriptionPage(
             content, self._service, confirm_license=self._confirm_license,
+            schedule=self._schedule,
         )
         self._transcription_page.download_error.connect(self._on_download_error)
         self._transcription_page.delete_error.connect(self._on_delete_error)

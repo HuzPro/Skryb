@@ -1,4 +1,5 @@
 import json
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
@@ -34,6 +35,9 @@ from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.model_view import ModelView
 from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
 from voicetotext.settings.transcription_mode import TranscriptionMode
+from voicetotext.transcription.engine_factory import (
+    engine_candidates_ignoring_hardware,
+)
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.engine_selector import (
     model_supports_batch as _model_supports_batch,
@@ -135,6 +139,8 @@ class SettingsService:
         self._download_listeners: list[DownloadEventListener] = []
         self._engine_listeners: list[EngineEventListener] = []
         self._state_listeners: list[StateChangeListener] = []
+        self._probe_lock = threading.Lock()
+        self._probe_waiters: list[Callable[[], None]] = []
 
         self._event_bus.subscribe(DownloadProgressEvent, self._fanout_progress)
         self._event_bus.subscribe(DownloadStateChangedEvent, self._fanout_state)
@@ -370,9 +376,12 @@ class SettingsService:
         info = ALL_MODELS.get(model_name)
         if info is None:
             return ()
+        hardware = self._hardware_detector.peek()
+        if hardware is None:
+            return engine_candidates_ignoring_hardware(info, self._registry)
         return rank_engines(
             info,
-            self._hardware_detector.detect(),
+            hardware,
             self._registry.all_descriptors(),
         )
 
@@ -383,10 +392,52 @@ class SettingsService:
         hardware hasn't been probed yet) cannot load a streaming model, so the
         UI uses this to keep the Streaming mode from being selected there.
         """
+        hardware = (
+            None if self._hardware_detector is None
+            else self._hardware_detector.peek()
+        )
+        return hardware is not None and hardware.kind != "cpu"
+
+    def hardware_probe_pending(self) -> bool:
+        """Whether the hardware answers above wait on a probe not yet run."""
         return (
             self._hardware_detector is not None
-            and self._hardware_detector.detect().kind != "cpu"
+            and self._hardware_detector.peek() is None
         )
+
+    def request_hardware_probe(self, on_done: Callable[[], None]) -> None:
+        """Probe the hardware on a daemon thread, then call *on_done* there.
+
+        The probe imports torch, so it never runs on the caller's thread.
+        Requests made while one is running share it. *on_done* runs on the
+        probe thread, so a GUI caller passes one already marshalled onto
+        its own thread.
+        """
+        with self._probe_lock:
+            self._probe_waiters.append(on_done)
+            if len(self._probe_waiters) > 1:
+                return
+        threading.Thread(
+            target=self._probe_hardware_then_notify,
+            daemon=True,
+            name="hardware-probe",
+        ).start()
+
+    def _probe_hardware_then_notify(self) -> None:
+        try:
+            self._probe_hardware()
+        finally:
+            self._notify_probe_waiters()
+
+    def _probe_hardware(self) -> None:
+        if self._hardware_detector is not None:
+            self._hardware_detector.detect()
+
+    def _notify_probe_waiters(self) -> None:
+        with self._probe_lock:
+            waiters, self._probe_waiters = self._probe_waiters, []
+        for notify in waiters:
+            notify()
 
     # ------------------------------------------------------------------
     # Engine hot-swap
