@@ -59,6 +59,7 @@ from voicetotext.output.app_aware_delivery import (
 from voicetotext.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
+from voicetotext.output.caret_context import log_caret_text_when
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -1084,6 +1085,7 @@ def build_app(
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
     diagnostics = SessionDiagnostics(paths, config, registry, hardware_detector)
     atexit.register(diagnostics.dispose)
+    log_caret_text_when(functools.partial(content_recording_enabled, config))
     # The learner adds words to dictionary.json from the edit-capture thread;
     # the rebuilt output chain is what puts them to use. Both callbacks are
     # bound late: they only run once the app is up.

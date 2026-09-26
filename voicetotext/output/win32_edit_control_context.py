@@ -17,6 +17,7 @@ from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     CaretContext,
+    caret_log_line,
 )
 
 
@@ -36,8 +37,6 @@ _MESSAGE_TIMEOUT_MS = 200
 _CLASS_NAME_BUFFER_CHARS = 256
 _EDIT_CLASS_MARKER = "EDIT"
 _RICH_EDIT_CLASS_MARKER = "RICHEDIT"
-
-_LOGGED_TEXT_CHARS = 20
 
 _NO_WPARAM = 0
 _NO_LPARAM = 0
@@ -97,7 +96,7 @@ def _context_of(hwnd: int) -> CaretContext:
         selected=text[start:end],
         after=text[end:end + CONTEXT_CHARS],
     )
-    _log_context(context)
+    _logger.debug("Edit control context: %s", caret_log_line(context))
     return context
 
 
@@ -196,15 +195,6 @@ def _send(hwnd: int, message: int, wparam: object, lparam: object) -> int:
     if not delivered:
         raise OSError(f"window {hwnd:#x} did not answer message {message:#x}")
     return int(result.value)
-
-
-def _log_context(context: CaretContext) -> None:
-    _logger.debug(
-        "Edit control context: before=%r selected=%r after=%r",
-        context.before[-_LOGGED_TEXT_CHARS:],
-        context.selected[:_LOGGED_TEXT_CHARS],
-        context.after[:_LOGGED_TEXT_CHARS],
-    )
 
 
 @cache

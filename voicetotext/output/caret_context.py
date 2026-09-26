@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 _NEWLINES = "\n\r"
@@ -23,6 +24,38 @@ class CaretContext:
 
 
 NO_CONTEXT = CaretContext("", "", "")
+
+_LOGGED_TEXT_CHARS = 20
+
+
+def _never() -> bool:
+    return False
+
+
+_logs_caret_text: Callable[[], bool] = _never
+
+
+def log_caret_text_when(enabled: Callable[[], bool]) -> None:
+    """Let caret log lines quote the text around the cursor while ``enabled()`` holds.
+
+    That text belongs to whichever app has the focus, so otherwise a log
+    line only says how long each part is.
+    """
+    global _logs_caret_text
+    _logs_caret_text = enabled
+
+
+def caret_log_line(context: CaretContext) -> str:
+    if _logs_caret_text():
+        return (
+            f"before={context.before[-_LOGGED_TEXT_CHARS:]!r} "
+            f"selected={context.selected[:_LOGGED_TEXT_CHARS]!r} "
+            f"after={context.after[:_LOGGED_TEXT_CHARS]!r}"
+        )
+    return (
+        f"{len(context.before)} characters before, {len(context.selected)} selected, "
+        f"{len(context.after)} after"
+    )
 
 
 def fit_to_context(text: str, context: CaretContext) -> str:
