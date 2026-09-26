@@ -1,6 +1,7 @@
 """A small toast beside the dictation that never takes the keyboard focus."""
 
 import ctypes
+import functools
 import tkinter
 from collections.abc import Callable, Sequence
 from typing import Protocol
@@ -13,6 +14,8 @@ from voicetotext.settings.theme import BODY_FONT, Theme, theme_for
 NoticeAction = tuple[str, Callable[[], None]]
 
 _AUTO_HIDE_MS = 10_000
+# Tk paints after the window is shown; this is long enough for it to finish.
+_PAINT_MS = 30
 _MAX_BUTTONS = 3
 # The pill sits 26 px above the bottom of the work area; the notice sits
 # just above the pill's full height, so the two never overlap.
@@ -26,6 +29,10 @@ _WS_EX_TOPMOST = 0x00000008
 _WS_EX_TOOLWINDOW = 0x00000080
 _WS_EX_NOACTIVATE = 0x08000000
 _NO_ACTIVATE_STYLES = _WS_EX_TOPMOST | _WS_EX_TOOLWINDOW | _WS_EX_NOACTIVATE
+_WS_EX_LAYERED = 0x00080000
+_LWA_ALPHA = 0x00000002
+_TRANSPARENT = 0
+_OPAQUE = 255
 _HWND_TOPMOST = -1
 _SWP_NOACTIVATE = 0x0010
 _SW_HIDE = 0
@@ -38,11 +45,15 @@ class NoticeWindowApi(Protocol):
     def prepare(self, hwnd: int) -> None: ...
     def work_area(self) -> tuple[int, int, int, int]: ...
     def show(self, hwnd: int, x: int, y: int, width: int, height: int) -> None: ...
+    def reveal(self, hwnd: int) -> None: ...
     def hide(self, hwnd: int) -> None: ...
 
 
 class Win32NoticeWindow:
-    """No-activate styles, placement on the foreground monitor, show and hide."""
+    """No-activate styles, placement on the foreground monitor, show and hide.
+
+    ``show`` maps the window fully transparent; ``reveal`` makes it opaque.
+    """
 
     def __init__(self) -> None:
         user32 = ctypes.WinDLL("user32")
@@ -60,23 +71,32 @@ class Win32NoticeWindow:
         user32.SetWindowPos.restype = ctypes.c_int
         user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
         user32.ShowWindow.restype = ctypes.c_int
+        user32.SetLayeredWindowAttributes.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_uint32,
+        ]
+        user32.SetLayeredWindowAttributes.restype = ctypes.c_int
         self._user32 = user32
 
     def prepare(self, hwnd: int) -> None:
         style = self._user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
         self._user32.SetWindowLongW(
-            hwnd, _GWL_EXSTYLE, ctypes.c_long(style | _NO_ACTIVATE_STYLES).value,
+            hwnd, _GWL_EXSTYLE,
+            ctypes.c_long(style | _NO_ACTIVATE_STYLES | _WS_EX_LAYERED).value,
         )
 
     def work_area(self) -> tuple[int, int, int, int]:
         return foreground_work_area()
 
     def show(self, hwnd: int, x: int, y: int, width: int, height: int) -> None:
+        self._user32.SetLayeredWindowAttributes(hwnd, 0, _TRANSPARENT, _LWA_ALPHA)
         self._user32.SetWindowPos(
             hwnd, ctypes.c_void_p(_HWND_TOPMOST), x, y, width, height,
             _SWP_NOACTIVATE,
         )
         self._user32.ShowWindow(hwnd, _SW_SHOWNOACTIVATE)
+
+    def reveal(self, hwnd: int) -> None:
+        self._user32.SetLayeredWindowAttributes(hwnd, 0, _OPAQUE, _LWA_ALPHA)
 
     def hide(self, hwnd: int) -> None:
         self._user32.ShowWindow(hwnd, _SW_HIDE)
@@ -90,10 +110,13 @@ class Notice:
     focus when it maps any other kind. It gets ``WS_EX_NOACTIVATE`` while
     still hidden and is shown with ``SW_SHOWNOACTIVATE``, so neither its
     appearance nor a click on it moves the focus off the app the text is
-    going to. The buttons are classic Tk buttons: unlike ``ttk.Button``
-    they have no click-to-focus binding. A new notice replaces the one
-    showing, and each hides itself after ten seconds. A strip down the
-    left edge is the accent colour, or amber when something went wrong.
+    going to. It is shown see-through and made opaque only once Tk has
+    painted it, since Tk draws after the window appears and the first frame
+    would be half empty. The buttons are classic Tk buttons: unlike
+    ``ttk.Button`` they have no click-to-focus binding. A new notice
+    replaces the one showing, and each hides itself after ten seconds. A
+    strip down the left edge is the accent colour, or amber when something
+    went wrong.
     """
 
     def __init__(
@@ -109,6 +132,7 @@ class Notice:
         self._window: tkinter.Toplevel | None = None
         self._hwnd = 0
         self._hide_after: str | None = None
+        self._shown = 0
         self._buttons: list[tkinter.Button] = []
         self._message = ""
 
@@ -146,6 +170,13 @@ class Notice:
         )
         self._message = message
         self._hide_after = window.after(_AUTO_HIDE_MS, self.hide)
+        self._shown += 1
+        reveal = functools.partial(self._reveal, self._shown)
+        self._root.after(_PAINT_MS, lambda: self._root.after_idle(reveal))
+
+    def _reveal(self, shown: int) -> None:
+        if shown == self._shown and self.visible:
+            self._api().reveal(self._hwnd)
 
     def hide(self) -> None:
         if self._hide_after is None:
