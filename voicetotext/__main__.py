@@ -26,6 +26,9 @@ if TYPE_CHECKING:
     from voicetotext.ui.api_server import ApiServer
     from voicetotext.ui.launcher import ShellLauncher
 
+_MB_ICONERROR = 0x10
+_MB_SETFOREGROUND = 0x10000
+_MB_TOPMOST = 0x40000
 SETUP_NOT_FINISHED = (
     "Setup was closed before a speech model was installed, so VoiceToText will close. "
     "Start VoiceToText again to finish setting it up."
@@ -440,7 +443,10 @@ def _try_show_message(title: str, message: str) -> None:
     try:
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
+        # No window of ours is in front to own it, so it asks to be on top.
+        ctypes.windll.user32.MessageBoxW(
+            None, message, title, _MB_ICONERROR | _MB_SETFOREGROUND | _MB_TOPMOST,
+        )
     except Exception:
         pass
 
