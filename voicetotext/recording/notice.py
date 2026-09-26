@@ -14,8 +14,8 @@ from voicetotext.recording.pill import CANVAS_HEIGHT
 NoticeAction = tuple[str, Callable[[], None]]
 
 _AUTO_HIDE_MS = 10_000
-# Tk paints after the window is shown; this is long enough for it to finish.
-_PAINT_MS = 30
+# Shown even if Windows never asks one of its widgets to paint.
+_REVEAL_ANYWAY_MS = 250
 _MAX_BUTTONS = 3
 # The pill sits 26 px above the bottom of the work area; the notice sits
 # just above the pill's full height, so the two never overlap.
@@ -133,9 +133,10 @@ class Notice:
     focus when it maps any other kind. It gets ``WS_EX_NOACTIVATE`` while
     still hidden and is shown with ``SW_SHOWNOACTIVATE``, so neither its
     appearance nor a click on it moves the focus off the app the text is
-    going to. It is shown see-through and made opaque only once Tk has
-    painted it, since Tk draws after the window appears and the first frame
-    would be half empty. The buttons are classic Tk buttons: unlike
+    going to. It is shown see-through and made opaque only once every widget
+    in it has painted: Tk draws each widget separately, when idle after
+    Windows asks it to, so a notice revealed on a timer can show a frame
+    with some widgets still blank. The buttons are classic Tk buttons: unlike
     ``ttk.Button`` they have no click-to-focus binding. A new notice
     replaces the one showing, and each hides itself after ten seconds. A
     strip down the left edge is the accent colour, or amber when something
@@ -156,6 +157,7 @@ class Notice:
         self._hwnd = 0
         self._hide_after: str | None = None
         self._shown = 0
+        self._revealed = 0
         self._buttons: list[tkinter.Button] = []
         self._message = ""
 
@@ -175,9 +177,11 @@ class Notice:
     ) -> None:
         window = self._window or self._build()
         self._cancel_auto_hide()
-        self._fill(
+        self._shown += 1
+        widgets = self._fill(
             window, message, buttons[:_MAX_BUTTONS], _PALETTES[self._color_scheme()], warning,
         )
+        self._reveal_once_painted(widgets, self._shown)
         window.update_idletasks()
         api = self._api()
         self._hwnd = int(window.wm_frame(), 16)
@@ -193,12 +197,25 @@ class Notice:
         )
         self._message = message
         self._hide_after = window.after(_AUTO_HIDE_MS, self.hide)
-        self._shown += 1
-        reveal = functools.partial(self._reveal, self._shown)
-        self._root.after(_PAINT_MS, lambda: self._root.after_idle(reveal))
+
+    def _reveal_once_painted(self, widgets: Sequence[tkinter.Widget], shown: int) -> None:
+        # A widget's own Expose handler queues its drawing before this
+        # binding runs, so the reveal queued here runs after the drawing.
+        reveal = functools.partial(self._reveal, shown)
+        waiting = set(widgets)
+
+        def painted(event: "tkinter.Event[tkinter.Misc]") -> None:
+            waiting.discard(event.widget)
+            if not waiting:
+                self._root.after_idle(reveal)
+
+        for widget in widgets:
+            widget.bind("<Expose>", painted, add="+")
+        self._root.after(_REVEAL_ANYWAY_MS, reveal)
 
     def _reveal(self, shown: int) -> None:
-        if shown == self._shown and self.visible:
+        if shown == self._shown and shown != self._revealed and self.visible:
+            self._revealed = shown
             self._api().reveal(self._hwnd)
 
     def hide(self) -> None:
@@ -237,7 +254,8 @@ class Notice:
         actions: Sequence[NoticeAction],
         theme: Palette,
         warning: bool,
-    ) -> None:
+    ) -> list[tkinter.Widget]:
+        """Build the notice's content and return every widget that paints."""
         for child in window.winfo_children():
             child.destroy()
         frame = tkinter.Frame(
@@ -245,17 +263,20 @@ class Notice:
             highlightbackground=theme.border, highlightcolor=theme.border,
         )
         frame.pack(fill="both", expand=True)
-        tkinter.Frame(
+        strip = tkinter.Frame(
             frame, bg=theme.warning if warning else theme.accent, width=_STRIP_WIDTH,
-        ).pack(side="left", fill="y")
-        tkinter.Label(
+        )
+        strip.pack(side="left", fill="y")
+        text = tkinter.Label(
             frame, text=message, bg=theme.surface, fg=theme.foreground, font=_BODY_FONT,
-        ).pack(side="left", padx=(_PADDING, _PADDING + 4), pady=_PADDING)
+        )
+        text.pack(side="left", padx=(_PADDING, _PADDING + 4), pady=_PADDING)
         self._buttons = [
             self._button(frame, label, action, theme) for label, action in actions
         ]
         if self._buttons:
             self._buttons[-1].pack_configure(padx=(0, _PADDING))
+        return [frame, strip, text, *self._buttons]
 
     def _button(
         self,
