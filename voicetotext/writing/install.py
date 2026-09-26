@@ -14,6 +14,7 @@ import threading
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -63,9 +64,19 @@ MODEL_GGUF = Artifact(
 )
 INSTALL_BYTES = RUNTIME_ZIP.size + MODEL_GGUF.size
 
+DOWNLOAD_FAILED = (
+    "Could not download the writing model. Check your internet connection and try again."
+)
+DOWNLOAD_CORRUPTED = "The download was corrupted; try again."
+INSTALL_FAILED = "Could not install the writing model. Open the log for details."
+
 
 class InstallError(Exception):
-    pass
+    """``str()`` is the sentence the Writing page shows; ``detail`` is what went wrong."""
+
+    def __init__(self, message: str, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail or message
 
 
 class FileDownloader(Protocol):
@@ -93,6 +104,10 @@ class WritingPaths:
     @property
     def downloads_dir(self) -> Path:
         return self.root / "downloads"
+
+    @property
+    def install_log(self) -> Path:
+        return self.root / "install.log"
 
 
 def managed_root() -> Path:
@@ -164,6 +179,22 @@ class InstallJob:
         cancel_event: threading.Event,
         pause_event: threading.Event,
     ) -> None:
+        """Install, or raise an :class:`InstallError` whose details are in the install log."""
+        try:
+            self._install(on_progress, cancel_event, pause_event)
+        except InstallError as failure:
+            self._log_failure(failure.detail, cancel_event)
+            raise
+        except Exception as exc:
+            self._log_failure(repr(exc), cancel_event)
+            raise InstallError(INSTALL_FAILED, repr(exc)) from exc
+
+    def _install(
+        self,
+        on_progress: Callable[[int, int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
         total = self.total_bytes
         done = 0
 
@@ -194,21 +225,45 @@ class InstallJob:
     ) -> Path:
         staged = self._paths.downloads_dir / artifact.file_name
         if not _has_size(staged, artifact.size):
-            self._downloader.download(
-                FileDownloadPlan(url=artifact.url, target=staged, expected_size=artifact.size),
-                advance,
-                cancel_event,
-                pause_event,
-            )
+            self._download(artifact, staged, advance, cancel_event, pause_event)
         if cancel_event.is_set():
             raise InstallError("Cancelled")
         if not _has_size(staged, artifact.size):
             staged.unlink(missing_ok=True)
-            raise InstallError(f"{artifact.file_name} is not the expected size.")
+            raise InstallError(
+                DOWNLOAD_CORRUPTED, f"{artifact.file_name} is not the expected size.",
+            )
         if sha256_of(staged) != artifact.sha256:
             staged.unlink(missing_ok=True)
-            raise InstallError(f"{artifact.file_name} failed its checksum. Try again.")
+            raise InstallError(DOWNLOAD_CORRUPTED, f"{artifact.file_name} failed its checksum.")
         return staged
+
+    def _download(
+        self,
+        artifact: Artifact,
+        staged: Path,
+        advance: Callable[[int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
+        plan = FileDownloadPlan(url=artifact.url, target=staged, expected_size=artifact.size)
+        try:
+            self._downloader.download(plan, advance, cancel_event, pause_event)
+        except Exception as exc:
+            if cancel_event.is_set() or pause_event.is_set():
+                raise
+            raise InstallError(
+                DOWNLOAD_FAILED, f"Downloading {artifact.url} failed: {exc}",
+            ) from exc
+
+    def _log_failure(self, detail: str, cancel_event: threading.Event) -> None:
+        if cancel_event.is_set():
+            return
+        _logger.warning("Writing model install failed: %s", detail)
+        try:
+            _write_install_log(self._paths.install_log, detail)
+        except OSError:
+            _logger.warning("Could not write %s.", self._paths.install_log, exc_info=True)
 
     def _unpack_runtime(self, archive: Path) -> None:
         target = self._paths.runtime_exe.parent
@@ -219,13 +274,23 @@ class InstallJob:
         except (zipfile.BadZipFile, OSError) as exc:
             shutil.rmtree(partial, ignore_errors=True)
             archive.unlink(missing_ok=True)
-            raise InstallError(f"The runtime archive could not be unpacked: {exc}") from exc
+            raise InstallError(
+                DOWNLOAD_CORRUPTED, f"The runtime archive could not be unpacked: {exc}",
+            ) from exc
         if not (partial / self._paths.runtime_exe.name).is_file():
             shutil.rmtree(partial, ignore_errors=True)
-            raise InstallError("The runtime archive has no llama-server.exe.")
+            raise InstallError(DOWNLOAD_CORRUPTED, "The runtime archive has no llama-server.exe.")
         shutil.rmtree(target, ignore_errors=True)
         partial.rename(target)
         archive.unlink(missing_ok=True)
+
+
+def _write_install_log(path: Path, detail: str) -> None:
+    """Keep the last failure where the Writing page's Open log button finds it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"{datetime.now(UTC).isoformat()} install failed: {detail}\n", encoding="utf-8",
+    )
 
 
 def _extract(archive: Path, destination: Path) -> None:
@@ -312,7 +377,6 @@ class WritingInstaller:
         self._update(InstallProgress("completed"))
 
     def _on_failed(self, event: DownloadFailedEvent) -> None:
-        _logger.warning("Writing model install failed: %s", event.error)
         self._update(InstallProgress("failed", error=event.error))
 
     def _update(self, progress: InstallProgress) -> None:

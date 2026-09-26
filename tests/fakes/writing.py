@@ -1,9 +1,27 @@
 import json
 import subprocess
 import threading
+from collections.abc import Callable
 from typing import IO
 
+from voicetotext.downloads.chunked_file_downloader import FileDownloadPlan
 from voicetotext.writing.client import WritingUnavailable
+
+
+class UnreachableDownloader:
+    """Fails the way requests does with no network, URL and all."""
+
+    def download(
+        self,
+        plan: FileDownloadPlan,
+        on_progress: Callable[[int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
+        raise ConnectionError(
+            "HTTPSConnectionPool(host='example.invalid', port=443): Max retries exceeded "
+            f"with url: {plan.url}\n(Caused by NameResolutionError(getaddrinfo failed))",
+        )
 
 
 class FakeClock:

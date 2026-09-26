@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from voicetotext.settings.tk_pages.writing_page import TkWritingPage, status_text
+from voicetotext.writing.install import DOWNLOAD_FAILED
 from voicetotext.writing.service import WritingStatus
 from voicetotext.writing.settings import WritingSettings
 from voicetotext.writing.transforms import BUILTIN_TRANSFORMS
@@ -140,8 +141,8 @@ class TestStatus:
                 "Failed: ggml_vulkan: out of device memory", "Retry", True, False,
             ),
             (
-                WritingStatus("install_failed", "tiny.gguf failed its checksum. Try again."),
-                "Failed: tiny.gguf failed its checksum. Try again.", "Retry", False, False,
+                WritingStatus("install_failed", DOWNLOAD_FAILED),
+                DOWNLOAD_FAILED, "Retry", True, False,
             ),
             (WritingStatus("stopped"), "Starts once dictation is ready.", "", False, False),
         ],
