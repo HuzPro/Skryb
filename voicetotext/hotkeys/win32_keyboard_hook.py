@@ -24,6 +24,14 @@ _SUPPRESS = 1
 
 _KEY_DOWN_MESSAGES = frozenset({_WM_KEYDOWN, _WM_SYSKEYDOWN})
 _KEY_UP_MESSAGES = frozenset({_WM_KEYUP, _WM_SYSKEYUP})
+_KEY_MESSAGES = _KEY_DOWN_MESSAGES | _KEY_UP_MESSAGES
+
+# Codes no key on a keyboard produces: 0 and 0xFF come from scan codes with
+# no virtual key, and VK_PACKET carries a character injected as text. None
+# can be part of a shortcut, so they only ever go past the handler.
+_VK_PACKET = 0xE7
+_VK_NONE = 0xFF
+_NOT_KEYS = frozenset({0, _VK_PACKET, _VK_NONE})
 
 _READY_TIMEOUT_SECONDS = 2.0
 _JOIN_TIMEOUT_SECONDS = 2.0
@@ -101,6 +109,9 @@ class Win32LowLevelHook(ABC):
     ``stop`` can never race ahead and drop the ``WM_QUIT`` that frees the
     thread. The hook proc is pinned on the instance - a ``WINFUNCTYPE`` the
     GC collects mid-flight would crash the interpreter.
+
+    Nothing raised while handling an event leaves the hook proc: the first
+    failure is logged and every failing event is passed on unchanged.
     """
 
     _hook_type: int
@@ -114,6 +125,7 @@ class Win32LowLevelHook(ABC):
         self._hook: int | None = None
         self._ready = threading.Event()
         self._start_error: Exception | None = None
+        self._failure_logged = False
 
     def start(self) -> None:
         if self._thread is not None:
@@ -190,9 +202,24 @@ class Win32LowLevelHook(ABC):
             _user32.DispatchMessageW(ctypes.byref(message))
 
     def _hook_proc(self, n_code: int, w_param: int, l_param: int) -> int:
-        if n_code == _HC_ACTION and self._dispatch(w_param, l_param):
+        if n_code == _HC_ACTION and l_param and self._swallows(w_param, l_param):
             return _SUPPRESS
         return _user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+    def _swallows(self, message: int, l_param: int) -> bool:
+        try:
+            return self._dispatch(message, l_param)
+        except Exception:
+            self._log_first_failure()
+            return False
+
+    def _log_first_failure(self) -> None:
+        if self._failure_logged:
+            return
+        self._failure_logged = True
+        _logger.exception(
+            "The %s hook failed on an event; passing events on.", self._device,
+        )
 
     @abstractmethod
     def _dispatch(self, message: int, l_param: int) -> bool:
@@ -215,19 +242,19 @@ class Win32KeyboardHook(Win32LowLevelHook):
         self._observer = observer
 
     def _dispatch(self, message: int, l_param: int) -> bool:
+        if message not in _KEY_MESSAGES:
+            return False
         info = ctypes.cast(
             l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT),
         ).contents
-        if message in _KEY_DOWN_MESSAGES:
-            return self._handle_then_observe(True, info)
-        if message in _KEY_UP_MESSAGES:
-            return self._handle_then_observe(False, info)
-        return False
+        return self._handle_then_observe(message in _KEY_DOWN_MESSAGES, info)
 
     def _handle_then_observe(
         self, is_key_down: bool, info: _KBDLLHOOKSTRUCT,
     ) -> bool:
-        suppress = self._handler(is_key_down, info.vkCode)
+        suppress = info.vkCode not in _NOT_KEYS and self._handler(
+            is_key_down, info.vkCode,
+        )
         # A swallowed key never reached the focused app, so watchers of
         # what the user typed there must not see it either.
         if not suppress:

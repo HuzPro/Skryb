@@ -54,9 +54,11 @@ class Win32HookAdapter(HotkeyListener):
             self._mouse_hook.start()
 
     def stop(self) -> None:
-        self._hook.stop()
-        if self._mouse_hook is not None:
-            self._mouse_hook.stop()
+        try:
+            self._hook.stop()
+        finally:
+            if self._mouse_hook is not None:
+                self._mouse_hook.stop()
 
     def pause(self) -> None:
         self._paused = True
