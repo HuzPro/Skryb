@@ -353,7 +353,16 @@ class Win32TrayBackend:
     restarted and dropped our icon. NOT unit-tested end-to-end (it needs a
     live shell); the :class:`Win32TrayAdapter` orchestration is tested with
     a fake backend.
+
+    The window procedure runs inside Tk's event loop, where any Tk call
+    leaves ``_tkinter`` without the thread state its next Python callback
+    needs, and that callback aborts the process. So every app callback is
+    handed to the GUI dispatcher and runs on its next drain. The menu
+    itself stays here: its modal loop runs Tcl timers, which need the state
+    the event loop left in place.
     """
+
+    _failure_logged = False
 
     def __init__(
         self,
@@ -366,7 +375,10 @@ class Win32TrayBackend:
         on_devices_changed: Callable[[], None] | None = None,
         on_paste_last_clicked: Callable[[], None] | None = None,
         on_copy_last_clicked: Callable[[], None] | None = None,
+        *,
+        dispatcher: GuiThreadDispatcher,
     ) -> None:
+        self._dispatcher = dispatcher
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
@@ -446,12 +458,20 @@ class Win32TrayBackend:
         _shell32.Shell_NotifyIconW(_NIM_MODIFY, ctypes.byref(self._nid))
 
     def _window_proc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+        try:
+            if self._handled(msg, wparam, lparam):
+                return 0
+        except Exception:
+            self._log_first_failure()
+        return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    def _handled(self, msg: int, wparam: int, lparam: int) -> bool:
         if msg == _WM_APP_TRAY:
             self._handle_tray_event(lparam & 0xFFFF)
-            return 0
+            return True
         if msg == _WM_TASKBAR_CREATED:
             self._readd_after_explorer_restart()
-            return 0
+            return True
         # Windows sends this to every top-level window when any device is
         # plugged in or out; this window is top-level for broadcasts anyway.
         if (
@@ -459,8 +479,14 @@ class Win32TrayBackend:
             and wparam == _DBT_DEVNODES_CHANGED
             and self._on_devices_changed is not None
         ):
-            self._on_devices_changed()
-        return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+            self._dispatcher.dispatch(self._on_devices_changed)
+        return False
+
+    def _log_first_failure(self) -> None:
+        if self._failure_logged:
+            return
+        self._failure_logged = True
+        _logger.exception("The tray window failed on a message; passing messages on.")
 
     def _readd_after_explorer_restart(self) -> None:
         if not self._added:
@@ -472,7 +498,7 @@ class Win32TrayBackend:
         if mouse_message in (_WM_RBUTTONUP, _WM_CONTEXTMENU):
             self._show_context_menu()
         elif mouse_message == _WM_LBUTTONDBLCLK and self._on_settings_clicked:
-            self._on_settings_clicked()
+            self._dispatcher.dispatch(self._on_settings_clicked)
 
     def _show_context_menu(self) -> None:
         menu = _user32.CreatePopupMenu()
@@ -528,21 +554,29 @@ class Win32TrayBackend:
         _user32.AppendMenuW(menu, _MF_POPUP, submenu, "Microphone")
 
     def _dispatch_menu_command(self, command: int, previous: int = 0) -> None:
+        if command == _ID_PASTE_LAST and self._on_paste_last_clicked is not None:
+            self._paste_last_into(previous, self._on_paste_last_clicked)
+            return
+        action = self._menu_action(command)
+        if action is not None:
+            self._dispatcher.dispatch(action)
+
+    def _menu_action(self, command: int) -> Callable[[], None] | None:
         offset = command - _ID_FIRST_MICROPHONE
         if 0 <= offset < len(self._offered_microphones):
-            if self._on_microphone_chosen is not None:
-                self._on_microphone_chosen(self._offered_microphones[offset])
-            return
-        if command == _ID_SETTINGS and self._on_settings_clicked is not None:
-            self._on_settings_clicked()
-        elif command == _ID_HISTORY and self._on_history_clicked is not None:
-            self._on_history_clicked()
-        elif command == _ID_PASTE_LAST and self._on_paste_last_clicked is not None:
-            self._paste_last_into(previous, self._on_paste_last_clicked)
-        elif command == _ID_COPY_LAST and self._on_copy_last_clicked is not None:
-            self._on_copy_last_clicked()
-        elif command == _ID_QUIT:
-            self._on_quit_clicked()
+            return self._microphone_choice(self._offered_microphones[offset])
+        return {
+            _ID_SETTINGS: self._on_settings_clicked,
+            _ID_HISTORY: self._on_history_clicked,
+            _ID_COPY_LAST: self._on_copy_last_clicked,
+            _ID_QUIT: self._on_quit_clicked,
+        }.get(command)
+
+    def _microphone_choice(self, name: str) -> Callable[[], None] | None:
+        choose = self._on_microphone_chosen
+        if choose is None:
+            return None
+        return lambda: choose(name)
 
     @staticmethod
     def _paste_last_into(previous: int, paste: Callable[[], None]) -> None:
@@ -599,6 +633,7 @@ class Win32TrayAdapter:
             on_history_clicked, list_microphones, on_microphone_chosen,
             on_devices_changed,
             on_paste_last_clicked, on_copy_last_clicked,
+            dispatcher=dispatcher,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
