@@ -168,6 +168,28 @@ def _load_v2(document: dict[object, object]) -> DictionaryConfig:
     return DictionaryConfig(options=options, rules=tuple(rules))
 
 
+def dictionary_from_json(document: dict[object, object]) -> DictionaryConfig:
+    """``dictionary_to_json``'s options and rules, for input that has to be whole.
+
+    Raises ``ValueError`` naming the first part that is not valid, where
+    reading the saved file skips it.
+    """
+    raw_options, raw_rules = document.get("options"), document.get("rules")
+    options = (
+        _load_options(cast(dict[object, object], raw_options))
+        if isinstance(raw_options, dict) else None
+    )
+    if options is None or not isinstance(raw_rules, list):
+        raise ValueError("The dictionary needs true or false options and a list of rules.")
+    rules: list[DictionaryRule] = []
+    for index, raw_rule in enumerate(cast(list[object], raw_rules)):
+        rule = _load_rule(raw_rule, index)
+        if rule is None:
+            raise ValueError(f"Dictionary rule {index + 1} is not valid.")
+        rules.append(rule)
+    return DictionaryConfig(options=options, rules=tuple(rules))
+
+
 def _is_version_two(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value == 2
 
