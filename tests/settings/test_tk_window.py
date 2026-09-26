@@ -718,7 +718,7 @@ class TestCaptureCallback:
             assert scheduled
             for action in scheduled:
                 action()
-            assert capture.display_text() == "ctrl+shift+f9"
+            assert capture.display_text() == "Ctrl + Shift + F9"
         finally:
             window.destroy()
 

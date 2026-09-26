@@ -330,7 +330,7 @@ def test_an_empty_history_stops_asking_to_turn_saving_on_once_it_is_on(
 ) -> None:
     saving = [False]
     history = open_history(saves_history=lambda: saving[0])
-    assert "Save dictation history" in history._hint.cget("text")
+    assert "Save history" in history._hint.cget("text")
 
     saving[0] = True
     history.refresh()
