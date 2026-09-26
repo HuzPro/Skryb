@@ -181,8 +181,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         )
         self._audio_page = TkAudioPage(content, self._microphones)
         self._output_page = TkOutputPage(
-            content, on_reset_pill_position=self._service.reset_pill_position,
             content,
+            on_reset_pill_position=self._service.reset_pill_position,
             delete_all_history=(
                 None if self._delete_all_history is None
                 else self._on_delete_all_history

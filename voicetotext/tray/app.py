@@ -127,6 +127,8 @@ class SystemTrayApp:
         )
         self._event_bus.subscribe(
             MicrophoneConnectedEvent, self._handle_microphone_connected,
+        )
+        self._event_bus.subscribe(
             NoLastDictationEvent, self._handle_no_last_dictation,
         )
 

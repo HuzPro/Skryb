@@ -66,6 +66,23 @@ class TkOutputPage(ttk.Frame):
             self._buttons[mode] = button
         self._build_paste_methods()
         self._build_history()
+        self._build_pill()
+
+    def _build_pill(self) -> None:
+        ttk.Label(self, text="Recording pill", style=HEADING_STYLE).pack(
+            anchor="w", pady=(24, 8),
+        )
+        ttk.Label(
+            self,
+            text="Drag the pill to move it; it stays there for the next dictation.",
+            wraplength=560,
+        ).pack(anchor="w")
+        self._reset_pill_button = ttk.Button(
+            self, text="Reset pill position", command=self._reset_pill_position,
+        )
+        self._reset_pill_button.pack(anchor="w", pady=(8, 0))
+        self._pill_status = ttk.Label(self, text="")
+        self._pill_status.pack(anchor="w", pady=(4, 0))
 
     def _build_paste_methods(self) -> None:
         ttk.Label(self, text="Paste method per app", style=HEADING_STYLE).pack(
@@ -159,20 +176,6 @@ class TkOutputPage(ttk.Frame):
         ):
             self._delete_all_history()
 
-        ttk.Label(self, text="Recording pill", style=HEADING_STYLE).pack(
-            anchor="w", pady=(24, 8),
-        )
-        ttk.Label(
-            self,
-            text="Drag the pill to move it; it stays there for the next dictation.",
-            wraplength=560,
-        ).pack(anchor="w")
-        self._reset_pill_button = ttk.Button(
-            self, text="Reset pill position", command=self._reset_pill_position,
-        )
-        self._reset_pill_button.pack(anchor="w", pady=(8, 0))
-        self._pill_status = ttk.Label(self, text="")
-        self._pill_status.pack(anchor="w", pady=(4, 0))
 
     def _reset_pill_position(self) -> None:
         self._on_reset_pill_position()
