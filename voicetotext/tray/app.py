@@ -10,6 +10,7 @@ from voicetotext.core.events import (
     EngineLoadFailedEvent,
     ErrorOccurredEvent,
     MicrophoneMissingEvent,
+    NoLastDictationEvent,
     RecordingCappedEvent,
     StateChangedEvent,
     TranscriptionEmptyEvent,
@@ -117,6 +118,9 @@ class SystemTrayApp:
         )
         self._event_bus.subscribe(
             MicrophoneMissingEvent, self._handle_microphone_missing,
+        )
+        self._event_bus.subscribe(
+            NoLastDictationEvent, self._handle_no_last_dictation,
         )
 
     def run(self) -> None:
@@ -241,6 +245,11 @@ class SystemTrayApp:
             f"Can't find the microphone \"{event.name}\". Using the Windows "
             "default until it's back.",
         )
+
+    def _handle_no_last_dictation(self, _event: NoLastDictationEvent) -> None:
+        if self._icon is None:
+            return
+        self._icon.notify("VoiceToText", "No dictation yet.")
 
     def _handle_engine_load_failed(self, event: EngineLoadFailedEvent) -> None:
         self._pending_engine_failure = event.error

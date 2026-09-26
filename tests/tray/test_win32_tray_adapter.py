@@ -297,3 +297,45 @@ class TestMicrophoneMenu:
         backend._list_microphones = broken
 
         assert self._menu_items(tray, backend, monkeypatch) == []
+
+
+class TestRepeatLastDictationMenu:
+    def _backend(self, calls):
+        from voicetotext.tray import win32_tray_adapter as tray
+
+        backend = tray.Win32TrayBackend.__new__(tray.Win32TrayBackend)
+        backend._get_state_label = lambda: "Idle - ready"
+        backend._on_settings_clicked = lambda: calls.append("settings")
+        backend._on_quit_clicked = lambda: calls.append("quit")
+        backend._on_history_clicked = lambda: calls.append("history")
+        backend._on_paste_last_clicked = lambda: calls.append("paste last")
+        backend._on_copy_last_clicked = lambda: calls.append("copy last")
+        backend._list_microphones = None
+        backend._on_microphone_chosen = None
+        backend._offered_microphones = []
+        backend._hwnd = 0
+        return tray, backend
+
+    def test_paste_and_copy_last_sit_above_history_in_the_menu(self, monkeypatch):
+        tray, backend = self._backend([])
+        labels: list[str] = []
+        user32 = MagicMock()
+        user32.AppendMenuW.side_effect = (
+            lambda menu, flags, item, label: labels.append(label)
+        )
+        user32.TrackPopupMenu.return_value = 0
+        monkeypatch.setattr(tray, "_user32", user32)
+
+        backend._show_context_menu()
+
+        items = [label for label in labels if label]
+        assert items[1:4] == ["Paste last dictation", "Copy last dictation", "History..."]
+
+    def test_choosing_them_calls_paste_last_and_copy_last(self):
+        calls: list[str] = []
+        tray, backend = self._backend(calls)
+
+        backend._dispatch_menu_command(tray._ID_PASTE_LAST)
+        backend._dispatch_menu_command(tray._ID_COPY_LAST)
+
+        assert calls == ["paste last", "copy last"]
