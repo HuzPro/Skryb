@@ -352,6 +352,24 @@ def test_the_logs_folder_the_pill_and_setup_are_one_call_each(rig: Rig) -> None:
     assert position == DEFAULT_PILL_POSITION
 
 
+def test_a_new_logs_folder_is_kept_for_the_next_start_and_one_that_is_not_there_is_refused(
+    rig: Rig, tmp_path: Path,
+) -> None:
+    chosen = tmp_path / "Journaux dictée"
+    chosen.mkdir()
+    (chosen / "notes.txt").write_text("x", encoding="utf-8")
+    running_in = rig.call("GET", "/api/app")[1]["diagnostics_directory"]
+
+    for refused in (tmp_path / "missing", "relative\\logs", "   ", chosen / "notes.txt"):
+        assert rig.call("PUT", "/api/logs/directory", {"path": str(refused)})[0] == 400
+    assert rig.config.get("diagnostics.directory", "") == ""
+
+    assert rig.call("PUT", "/api/logs/directory", {"path": str(chosen)})[0] == 204
+
+    assert rig.config.get("diagnostics.directory") == str(chosen)
+    assert rig.call("GET", "/api/app")[1]["diagnostics_directory"] == running_in
+
+
 def test_first_run_setup_needs_a_model_and_has_no_history_or_writing_yet(make_rig) -> None:
     rig = make_rig(first_run=True, installed=())
     settings = _settings(rig)
@@ -581,6 +599,41 @@ def test_removing_learned_words_stops_them_being_learned_again(rig: Rig, monkeyp
     assert forgotten == [(), (("farhan", "Farhān"),), (("tokyo", "東京"),)]
     kinds = [(rule["kind"], rule.get("learned")) for rule in rig.call("GET", "/api/dictionary")[1]["rules"]]
     assert kinds == [("literal", False), ("regex", None)]
+
+
+def test_forgetting_one_learned_word_removes_only_it_and_stops_it_being_learned_again(
+    rig: Rig, monkeypatch,
+) -> None:
+    forgotten: list[tuple[tuple[str, str], ...]] = []
+    monkeypatch.setattr(rig.writing, "forget_learned_words", forgotten.append)
+    slashed = {
+        "kind": "literal", "spoken": ["ümit / o'neil"], "replacement": "Ümit O'Neil",
+        "case_sensitive": False, "whole_words": True, "phonetic": False, "enabled": True,
+        "learned": True,
+    }
+    rig.call("PUT", "/api/dictionary", {**_DICTIONARY, "rules": [*_DICTIONARY["rules"], slashed]})
+    rig.saved.clear()
+
+    assert rig.call("DELETE", "/api/dictionary/learned/%C3%BCmit%20%2F%20o'neil")[0] == 204
+    assert rig.call("DELETE", "/api/dictionary/learned/tokyo")[0] == 204
+
+    assert forgotten[1:] == [(("ümit / o'neil", "Ümit O'Neil"),), (("tokyo", "東京"),)]
+    rules = rig.call("GET", "/api/dictionary")[1]["rules"]
+    assert [rule.get("spoken", rule.get("pattern")) for rule in rules] == [
+        ["aisha", "ayesha"], ["farhan"], r"\bteh\b",
+    ]
+    assert [changes.output_changed for changes in rig.saved] == [True, True]
+
+
+def test_forgetting_a_word_that_was_not_learned_changes_nothing(rig: Rig) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+    rig.saved.clear()
+
+    assert rig.call("DELETE", "/api/dictionary/learned/aisha")[0] == 404
+    assert rig.call("DELETE", "/api/dictionary/learned/nobody")[0] == 404
+
+    assert rig.call("GET", "/api/dictionary") == (200, _DICTIONARY)
+    assert rig.saved == []
 
 
 def test_a_dictionary_with_a_broken_rule_is_refused_and_the_saved_one_is_kept(rig: Rig) -> None:

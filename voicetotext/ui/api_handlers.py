@@ -269,6 +269,7 @@ class CoreApi:
             ("GET", "/api/dictionary", self._get_dictionary),
             ("PUT", "/api/dictionary", self._put_dictionary),
             ("POST", "/api/dictionary/forget-learned", self._forget_learned_words),
+            ("DELETE", "/api/dictionary/learned/{spoken}", self._forget_learned_word),
             ("GET", "/api/writing", self._writing_status),
             *(
                 ("POST", f"/api/writing/{action}", functools.partial(self._writing_action, action))
@@ -287,6 +288,7 @@ class CoreApi:
             ("POST", "/api/settings/export", self._export_settings),
             ("POST", "/api/settings/import", self._import_settings),
             ("POST", "/api/logs/open", self._open_logs),
+            ("PUT", "/api/logs/directory", self._set_logs_directory),
             ("POST", "/api/pill/reset-position", self._reset_pill_position),
             ("POST", "/api/setup/done", self._setup_done),
         ]
@@ -434,6 +436,16 @@ class CoreApi:
 
     def _open_logs(self, _request: ApiRequest) -> ApiResponse:
         self._open_path(self._diagnostics_dir)
+        return _NO_CONTENT
+
+    def _set_logs_directory(self, request: ApiRequest) -> ApiResponse:
+        folder = _path_from(request)
+        if not folder.is_absolute() or not folder.is_dir():
+            raise ApiError(400, f"'{folder}' is not a folder on this PC.")
+        try:
+            self._service.set_diagnostics_directory(str(folder))
+        except OSError as exc:
+            raise ApiError(400, f"Could not save the logs folder: {exc}") from exc
         return _NO_CONTENT
 
     def _setup_done(self, _request: ApiRequest) -> ApiResponse:
@@ -597,15 +609,29 @@ class CoreApi:
         return _NO_CONTENT
 
     def _forget_learned_words(self, _request: ApiRequest) -> ApiResponse:
+        self._forget_learned(lambda _spoken: True)
+        return _NO_CONTENT
+
+    def _forget_learned_word(self, request: ApiRequest) -> ApiResponse:
+        spoken = request.params["spoken"].strip()
+        if not self._forget_learned(lambda first: first == spoken):
+            raise ApiError(404, "That learned word is no longer in the dictionary.")
+        return _NO_CONTENT
+
+    def _forget_learned(self, chosen: Callable[[str], bool]) -> bool:
+        """Drop the learned words whose first spoken form is *chosen*, for good."""
         current = self._service.dictionary_rules()
+        forgotten = {pair for pair in learned_pairs(current) if chosen(pair[0])}
+        if not forgotten:
+            return False
         kept = tuple(
             rule for rule in current.rules
-            if not (isinstance(rule, LiteralRule) and rule.learned)
+            if not (isinstance(rule, LiteralRule) and rule.learned and chosen(rule.spoken[0].strip()))
         )
         self._service.save_dictionary_rules(replace(current, rules=kept))
-        self._forget(learned_pairs(current))
+        self._forget(forgotten)
         self._on_save(_OUTPUT_ONLY)
-        return _NO_CONTENT
+        return True
 
     def _forget(self, pairs: set[tuple[str, str]]) -> None:
         if self._writing is not None:
