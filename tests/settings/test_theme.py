@@ -7,6 +7,8 @@ from voicetotext.core.color_scheme import ColorScheme
 from voicetotext.settings.theme import (
     DARK_THEME,
     LIGHT_THEME,
+    _scroll_region_height,
+    _should_show_scrollbar,
     apply_theme,
     theme_for,
 )
@@ -121,3 +123,38 @@ class TestApplyTheme:
         assert ttk.Style(container).lookup("TLabel", "foreground") == (
             LIGHT_THEME.foreground
         )
+
+    def test_a_theme_change_repaints_the_switches_already_on_screen(self, container):
+        apply_theme(container, LIGHT_THEME)
+        light_track = _pixel(container, "vtt_switch_on", 6)
+        apply_theme(container, DARK_THEME)
+        dark_track = _pixel(container, "vtt_switch_on", 6)
+
+        assert light_track == LIGHT_THEME.accent
+        assert dark_track == DARK_THEME.accent
+
+    def test_a_switch_that_is_off_is_not_drawn_in_the_on_colour(self, container):
+        apply_theme(container, DARK_THEME)
+
+        assert _pixel(container, "vtt_switch_off", 28) == DARK_THEME.strong_border
+        assert _pixel(container, "vtt_check_off", 8) == DARK_THEME.surface
+
+
+class TestScrollArea:
+    def test_shows_the_scrollbar_only_when_the_page_overflows(self):
+        assert _should_show_scrollbar(200, 100) is True
+        assert _should_show_scrollbar(100, 100) is False
+        assert _should_show_scrollbar(80, 100) is False
+
+    def test_a_short_page_cannot_be_scrolled_into_empty_space(self):
+        assert _scroll_region_height(80, 100) == 100
+        assert _scroll_region_height(200, 100) == 200
+
+
+def _pixel(widget, image: str, x: int) -> str:
+    """The colour of *image* at column *x*, half way down, as ``#rrggbb``."""
+    height = int(widget.tk.call("image", "height", image))
+    value = widget.tk.call(image, "get", x, height // 2)
+    channels = value.split() if isinstance(value, str) else value
+    red, green, blue = (int(channel) for channel in channels[:3])
+    return f"#{red:02x}{green:02x}{blue:02x}"

@@ -1,17 +1,43 @@
 import tkinter
 from collections.abc import Callable
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
-from voicetotext.history.retention import RETENTION_CHOICES
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_method import PasteMethod, normalized_process_name
-from voicetotext.settings.theme import HEADING_STYLE
+from voicetotext.settings.theme import (
+    BODY_FONT,
+    CARD_BODY_STYLE,
+    CARD_MUTED_STYLE,
+    CARD_PADDING,
+    CONTROL_GAP,
+    RADIO_TITLE_STYLE,
+    RowGroup,
+    card,
+    combobox,
+    page_note,
+    section_heading,
+    set_card_selected,
+)
 
-_PASTE_HINT = "Leave empty to use Ctrl+V everywhere; mintty gets Shift+Insert automatically."
-
-
-def _retention_label(days: int) -> str:
-    return "Forever" if days <= 0 else f"{days} days"
+_PASTE_HINT = (
+    "For apps that do not take Ctrl+V: type the app's .exe name, pick how to paste "
+    "into it and click Add. mintty gets Shift+Insert automatically."
+)
+_MODE_CARDS: dict[OutputMode, tuple[str, str]] = {
+    OutputMode.DIRECT_PASTE: (
+        "Paste only", "Types into the app and leaves your clipboard as it was.",
+    ),
+    OutputMode.PASTE_AND_CLIPBOARD: (
+        "Paste and copy", "Types into the app and keeps the text on the clipboard.",
+    ),
+    OutputMode.CLIPBOARD_ONLY: (
+        "Clipboard only", "Copies the text; you paste it where you want.",
+    ),
+}
+_MODE_WRAP = 140
+_RADIO_INDENT = 22
+_PILL_HINT = "Drag the pill to move it; it stays there for the next dictation."
+_PILL_RESET = "Reset. The pill will appear at the bottom centre next time."
 
 
 def _ignore() -> None:
@@ -19,19 +45,17 @@ def _ignore() -> None:
 
 
 class TkOutputPage(ttk.Frame):
-    """Page for how transcribed text reaches the focused window, and history.
+    """Page for how transcribed text reaches the focused window.
 
-    Renders one radio button per :class:`OutputMode`, all bound to a
-    single ``StringVar`` holding the enum value, so the page maps a
-    selection straight back to the canonical mode. ``delete_all_history``
-    runs after the user confirms; without it the button is left out.
+    One radio per :class:`OutputMode`, each on its own card, all bound to
+    a single ``StringVar`` holding the enum value, so the page maps a
+    selection straight back to the canonical mode.
     """
 
     def __init__(
         self,
         parent: tkinter.Misc,
         on_reset_pill_position: Callable[[], None] = _ignore,
-        delete_all_history: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_reset_pill_position = on_reset_pill_position
@@ -39,10 +63,7 @@ class TkOutputPage(ttk.Frame):
             master=self, value=OutputMode.DIRECT_PASTE.value,
         )
         self._buttons: dict[OutputMode, ttk.Radiobutton] = {}
-        self._capture_content = tkinter.BooleanVar(master=self, value=False)
-        self._retention = tkinter.StringVar(master=self, value=_retention_label(0))
-        self._retention_days: dict[str, int] = {}
-        self._delete_all_history = delete_all_history
+        self._cards: dict[OutputMode, ttk.Frame] = {}
         self._overrides: dict[str, PasteMethod] = {}
         self._new_process = tkinter.StringVar(master=self)
         self._new_method = tkinter.StringVar(
@@ -50,99 +71,79 @@ class TkOutputPage(ttk.Frame):
         )
         self._build()
         self.set_mode(OutputMode.DIRECT_PASTE)
-        self.set_history_retention_days(0)
 
     def _build(self) -> None:
-        heading = ttk.Label(self, text="Output Mode", style=HEADING_STYLE)
-        heading.pack(anchor="w", pady=(0, 8))
-        for mode in OutputMode:
-            button = ttk.Radiobutton(
-                self,
-                text=mode.display_label,
-                value=mode.value,
-                variable=self._var,
-            )
-            button.pack(anchor="w", pady=2)
-            self._buttons[mode] = button
+        section_heading(self, "Paste", first=True)
+        modes = ttk.Frame(self)
+        modes.pack(fill="x")
+        modes.columnconfigure(tuple(range(len(OutputMode))), weight=1, uniform="mode")
+        for column, mode in enumerate(OutputMode):
+            self._mode_card(modes, column, mode)
         self._build_paste_methods()
-        self._build_history()
         self._build_pill()
 
+    def _mode_card(self, parent: ttk.Frame, column: int, mode: OutputMode) -> None:
+        title, description = _MODE_CARDS[mode]
+        mode_card = card(parent, padding=CARD_PADDING)
+        mode_card.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 10, 0))
+        button = ttk.Radiobutton(
+            mode_card, text=title, value=mode.value, variable=self._var,
+            command=self._refresh_selection, style=RADIO_TITLE_STYLE,
+        )
+        button.pack(anchor="w")
+        hint = ttk.Label(
+            mode_card, text=description, style=CARD_MUTED_STYLE,
+            wraplength=_MODE_WRAP, justify="left",
+        )
+        hint.pack(anchor="w", padx=(_RADIO_INDENT, 0), pady=(2, 0))
+        for widget in (mode_card, hint):
+            widget.bind("<Button-1>", lambda _event: button.invoke())
+        self._buttons[mode] = button
+        self._cards[mode] = mode_card
+
     def _build_pill(self) -> None:
-        ttk.Label(self, text="Recording pill", style=HEADING_STYLE).pack(
-            anchor="w", pady=(24, 8),
+        section_heading(self, "Recording pill")
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        row = rows.add(
+            "Pill position", _PILL_HINT,
+            lambda parent: ttk.Button(
+                parent, text="Reset position", command=self._reset_pill_position,
+            ),
         )
-        ttk.Label(
-            self,
-            text="Drag the pill to move it; it stays there for the next dictation.",
-            wraplength=560,
-        ).pack(anchor="w")
-        self._reset_pill_button = ttk.Button(
-            self, text="Reset pill position", command=self._reset_pill_position,
-        )
-        self._reset_pill_button.pack(anchor="w", pady=(8, 0))
-        self._pill_status = ttk.Label(self, text="")
-        self._pill_status.pack(anchor="w", pady=(4, 0))
+        assert isinstance(row.control, ttk.Button)
+        self._reset_pill_button = row.control
+        self._pill_status = row.description
 
     def _build_paste_methods(self) -> None:
-        ttk.Label(self, text="Paste method per app", style=HEADING_STYLE).pack(
-            anchor="w", pady=(24, 8),
-        )
+        section_heading(self, "Paste method per app")
+        page_note(self, _PASTE_HINT).pack(anchor="w", pady=(0, CONTROL_GAP))
+        table = card(self, padding=(1, 1, 1, CARD_PADDING))
+        table.pack(fill="x")
         self._paste_table = ttk.Treeview(
-            self, columns=("app", "method"), show="headings", height=3,
+            table, columns=("app", "method"), show="headings", height=3,
             selectmode="browse",
         )
         self._paste_table.heading("app", text="App", anchor="w")
         self._paste_table.heading("method", text="Paste method", anchor="w")
-        self._paste_table.column("app", width=240, anchor="w")
+        self._paste_table.column("app", width=260, anchor="w")
         self._paste_table.column("method", width=160, anchor="w")
-        self._paste_table.pack(anchor="w", fill="x")
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x", pady=(6, 0))
-        ttk.Entry(row, textvariable=self._new_process, width=24).pack(side="left")
-        ttk.Combobox(
+        self._paste_table.pack(fill="x")
+        row = ttk.Frame(table, style=CARD_BODY_STYLE)
+        row.pack(fill="x", padx=CARD_PADDING - 1, pady=(CARD_PADDING - 2, 0))
+        ttk.Entry(row, textvariable=self._new_process, width=22, font=BODY_FONT).pack(
+            side="left", fill="x", expand=True,
+        )
+        combobox(
             row,
             textvariable=self._new_method,
             values=[method.display_label for method in PasteMethod],
-            state="readonly",
-            width=16,
-        ).pack(side="left", padx=8)
+            width=14,
+        ).pack(side="left", padx=CONTROL_GAP)
         ttk.Button(row, text="Add", command=self._add_override).pack(side="left")
         ttk.Button(row, text="Remove", command=self._remove_override).pack(
-            side="left", padx=(8, 0),
+            side="left", padx=(CONTROL_GAP, 0),
         )
-        ttk.Label(self, text=_PASTE_HINT, wraplength=560).pack(
-            anchor="w", pady=(4, 0),
-        )
-
-    def _build_history(self) -> None:
-        ttk.Label(self, text="History", style=HEADING_STYLE).pack(
-            anchor="w", pady=(24, 8),
-        )
-        ttk.Checkbutton(
-            self, text="Save dictation history (text and audio)",
-            variable=self._capture_content,
-        ).pack(anchor="w")
-        ttk.Label(
-            self,
-            text=(
-                "Off by default. Saves speech and text in the logs folder.\n"
-                "Applies when you save. Existing recordings are kept.\n"
-                "Use a local folder that is not synced or shared."
-            ),
-            wraplength=560,
-        ).pack(anchor="w", pady=(4, 0))
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x", pady=(8, 0))
-        ttk.Label(row, text="Keep history for").pack(side="left")
-        self._retention_box = ttk.Combobox(
-            row, textvariable=self._retention, state="readonly", width=12,
-        )
-        self._retention_box.pack(side="left", padx=8)
-        if self._delete_all_history is not None:
-            ttk.Button(
-                row, text="Delete all history", command=self._confirm_delete_all,
-            ).pack(side="left", padx=(16, 0))
 
     def _add_override(self) -> None:
         process = normalized_process_name(self._new_process.get())
@@ -165,36 +166,9 @@ class TkOutputPage(ttk.Frame):
                 "", "end", iid=process, values=(process, method.display_label),
             )
 
-    def _confirm_delete_all(self) -> None:
-        if self._delete_all_history is None:
-            return
-        if messagebox.askyesno(
-            "Delete all history",
-            "Delete every saved dictation's text and recording? "
-            "This cannot be undone.",
-            parent=self,
-        ):
-            self._delete_all_history()
-
-
     def _reset_pill_position(self) -> None:
         self._on_reset_pill_position()
-        self._pill_status.configure(text="The pill will appear at the bottom centre.")
-
-    def captures_content(self) -> bool:
-        return self._capture_content.get()
-
-    def set_capture_content(self, enabled: bool) -> None:
-        self._capture_content.set(enabled)
-
-    def history_retention_days(self) -> int:
-        return self._retention_days.get(self._retention.get(), 0)
-
-    def set_history_retention_days(self, days: int) -> None:
-        choices = sorted({*RETENTION_CHOICES, max(days, 0)})
-        self._retention_days = {_retention_label(choice): choice for choice in choices}
-        self._retention_box.configure(values=list(self._retention_days))
-        self._retention.set(_retention_label(days))
+        self._pill_status.configure(text=_PILL_RESET)
 
     def paste_method_overrides(self) -> tuple[tuple[str, str], ...]:
         return tuple(
@@ -215,6 +189,11 @@ class TkOutputPage(ttk.Frame):
 
     def set_mode(self, mode: OutputMode) -> None:
         self._var.set(mode.value)
+        self._refresh_selection()
 
     def radio_buttons(self) -> list[ttk.Radiobutton]:
         return list(self._buttons.values())
+
+    def _refresh_selection(self) -> None:
+        for mode, mode_card in self._cards.items():
+            set_card_selected(mode_card, mode is self.current_mode())

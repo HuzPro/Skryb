@@ -51,14 +51,13 @@ def page(tk_root, microphones):
 
 
 def _pick(page, label: str) -> None:
-    page._choice.set(label)
-    page._picker.event_generate("<<ComboboxSelected>>")
+    page._choose(label)
     page.update()
 
 
 class TestChoosing:
     def test_offers_the_default_first_then_full_microphone_names(self, page):
-        assert list(page._picker["values"]) == [
+        assert page.microphone_labels() == [
             "Windows default",
             "Microphone (Maono PD300X Microphone)",
             "Mikrofon (Gerät für Café ✓)",
@@ -89,7 +88,7 @@ class TestChoosing:
         page._fill(rescan=True)
 
         assert microphones.rescans == 1
-        assert "USB Mic" in page._picker["values"]
+        assert "USB Mic" in page.microphone_labels()
 
 
 class TestLevelMeter:
@@ -151,12 +150,7 @@ class TestBoost:
 
 
 def _listed(page) -> list[str]:
-    return list(page._preferred_list.get(0, "end"))
-
-
-def _select(page, index: int) -> None:
-    page._preferred_list.selection_clear(0, "end")
-    page._preferred_list.selection_set(index)
+    return page.preferred_labels()
 
 
 class TestPreferredMicrophones:
@@ -180,27 +174,26 @@ class TestPreferredMicrophones:
             preferred_devices=("Blue Yeti", "Gerät für Café ✓", "Jabra Evolve"),
         ))
 
-        _select(page, 2)
-        page._move_preferred(-1)
-        page._move_preferred(-1)
-        page._move_preferred(-1)
-        _select(page, 1)
-        page._remove_preferred()
-        _select(page, 0)
-        page._move_preferred(1)
-        page._move_preferred(1)
+        page._move_preferred(2, -1)
+        page._move_preferred(1, -1)
+        page._move_preferred(0, -1)
+        page._remove_preferred(1)
+        page._move_preferred(0, 1)
+        page._move_preferred(1, 1)
 
         assert page.recording_preferences().preferred_devices == (
             "Gerät für Café ✓", "Jabra Evolve",
         )
 
-    def test_buttons_do_nothing_without_a_selection(self, page):
+    def test_moving_past_either_end_or_removing_nothing_changes_nothing(self, page):
         page.set_recording_preferences(RecordingPreferences(
             preferred_devices=("Blue Yeti", "Jabra Evolve"),
         ))
 
-        page._move_preferred(1)
-        page._remove_preferred()
+        page._move_preferred(0, -1)
+        page._move_preferred(1, 1)
+        page._move_preferred(5, -1)
+        page._remove_preferred(7)
 
         assert page.recording_preferences().preferred_devices == (
             "Blue Yeti", "Jabra Evolve",

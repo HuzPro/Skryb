@@ -5,13 +5,17 @@ from typing import Protocol
 
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.settings.signal import Signal
+from voicetotext.settings.theme import (
+    CARD_BODY_STYLE,
+    KEYCAP_ENTRY_STYLE,
+    ROW_TITLE_FONT,
+    SMALL_BUTTON_STYLE,
+)
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 
 _RECORD_LABEL = "Record"
 _STOP_LABEL = "Stop Recording"
-_DEFAULT_PLACEHOLDER = "Type a combination, or click Record"
-_RECORDING_PLACEHOLDER = "Press keys, then click Stop"
 _ESCAPE_NAME = "esc"
 
 
@@ -28,13 +32,29 @@ def _run_now(action: Callable[[], None]) -> None:
     action()
 
 
-class TkHotkeyCapture(ttk.Frame):
-    """Entry + Record/Stop control for capturing a global hotkey combination.
+def shown_combination(combo: str) -> str:
+    """``"ctrl+shift+m"`` as the key caps read: ``"Ctrl + Shift + M"``."""
+    return " + ".join(
+        part.upper() if len(part) == 1 else part[:1].upper() + part[1:]
+        for part in combo.split("+")
+        if part
+    )
 
-    Recording is driven by an injected :class:`CaptureBridge` (the native
-    Win32 hook in production, a fake in tests). The bridge emits canonical
-    key names on its worker thread; ``schedule`` marshals each onto the GUI
-    thread before it touches the entry. Typed text is validated against
+
+def _typed_combination(text: str) -> str:
+    """What the user typed, in the form the config stores: ``"ctrl+m"``."""
+    return "+".join(part.strip().lower() for part in text.strip().split("+"))
+
+
+class TkHotkeyCapture(ttk.Frame):
+    """A key-cap field + Record/Stop control for capturing a global hotkey.
+
+    The field shows the combination the way the keys read ("Ctrl + Alt +
+    M"); what it stores is the config form ("ctrl+alt+m"). Recording is
+    driven by an injected :class:`CaptureBridge` (the native Win32 hook in
+    production, a fake in tests). The bridge emits canonical key names on
+    its worker thread; ``schedule`` marshals each onto the GUI thread
+    before it touches the field. Typed text is validated against
     :func:`parse_hotkey_combo`.
     """
 
@@ -44,7 +64,7 @@ class TkHotkeyCapture(ttk.Frame):
         capture_bridge: CaptureBridge,
         schedule: ScheduleOnGuiThread = _run_now,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent, style=CARD_BODY_STYLE)
         self._bridge = capture_bridge
         self._schedule = schedule
         self._combination = ""
@@ -59,21 +79,24 @@ class TkHotkeyCapture(ttk.Frame):
         self._bridge.key_pressed.connect(self._on_bridge_key_raw)
 
     def _build(self) -> None:
-        row = ttk.Frame(self)
-        row.pack(fill="x")
-
-        self._entry = ttk.Entry(row, textvariable=self._text_var)
-        self._entry.pack(side="left", fill="x", expand=True)
+        self.columnconfigure(0, weight=1)
+        self._entry = ttk.Entry(
+            self, textvariable=self._text_var, style=KEYCAP_ENTRY_STYLE,
+            font=ROW_TITLE_FONT, width=12,
+        )
+        self._entry.grid(row=0, column=0, sticky="ew")
         self._entry.bind("<Return>", self._on_entry_commit)
         self._entry.bind("<FocusOut>", self._on_entry_commit)
 
         self._record_button = ttk.Button(
-            row, text=_RECORD_LABEL, width=14, command=self._toggle_record,
+            self, text=_RECORD_LABEL, width=13, style=SMALL_BUTTON_STYLE,
+            command=self._toggle_record,
         )
-        self._record_button.pack(side="left", padx=(8, 0))
+        self._record_button.grid(row=0, column=1, sticky="ns", padx=(6, 0))
 
-        self._error_label = ttk.Label(self, text="", foreground="#d33b3b")
-        self._error_label.pack(anchor="w", pady=(2, 0))
+        self._error_label = ttk.Label(
+            self, text="", style="CardDanger.TLabel", wraplength=240, justify="left",
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -84,7 +107,7 @@ class TkHotkeyCapture(ttk.Frame):
 
     def set_combination(self, combo: str) -> None:
         self._combination = combo
-        self._text_var.set(combo)
+        self._text_var.set(shown_combination(combo))
         self._clear_error()
 
     def is_recording(self) -> bool:
@@ -124,7 +147,7 @@ class TkHotkeyCapture(ttk.Frame):
         if self._recorded_parts:
             self._set_combination_internal("+".join(self._recorded_parts))
         else:
-            self._text_var.set(self._combination)
+            self._text_var.set(shown_combination(self._combination))
         self.recording_stopped.emit()
 
     def destroy(self) -> None:
@@ -165,7 +188,7 @@ class TkHotkeyCapture(ttk.Frame):
         if self._recorded_parts and self._recorded_parts[-1] == name:
             return
         self._recorded_parts.append(name)
-        self._text_var.set("+".join(self._recorded_parts))
+        self._text_var.set(shown_combination("+".join(self._recorded_parts)))
 
     def _on_entry_commit(self, _event: tkinter.Event) -> None:
         self._on_text_committed()
@@ -173,8 +196,9 @@ class TkHotkeyCapture(ttk.Frame):
     def _on_text_committed(self) -> None:
         if self._recording:
             return
-        text = self._text_var.get().strip()
+        text = _typed_combination(self._text_var.get())
         if text == self._combination:
+            self._text_var.set(shown_combination(text))
             self._clear_error()
             return
         if not text:
@@ -191,13 +215,15 @@ class TkHotkeyCapture(ttk.Frame):
 
     def _set_combination_internal(self, combo: str) -> None:
         self._combination = combo
-        self._text_var.set(combo)
+        self._text_var.set(shown_combination(combo))
         self.combination_changed.emit(combo)
 
     def _show_error(self, message: str) -> None:
         self._validation_error = message
         self._error_label.configure(text=f"Invalid combination: {message}")
+        self._error_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
     def _clear_error(self) -> None:
         self._validation_error = ""
         self._error_label.configure(text="")
+        self._error_label.grid_remove()

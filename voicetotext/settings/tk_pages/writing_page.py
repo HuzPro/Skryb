@@ -3,7 +3,31 @@ from collections.abc import Callable
 from dataclasses import replace
 from tkinter import filedialog, ttk
 
-from voicetotext.settings.theme import HEADING_STYLE
+from voicetotext.settings.theme import (
+    BODY_FONT,
+    CARD_BODY_STYLE,
+    CARD_MUTED_STYLE,
+    CARD_PADDING,
+    CARD_TEXT_STYLE,
+    CARD_TEXT_WRAP,
+    CARD_TITLE_STYLE,
+    CONTROL_GAP,
+    DANGER_BUTTON_STYLE,
+    LINK_BUTTON_STYLE,
+    PAGE_LINK_BUTTON_STYLE,
+    PRIMARY_BUTTON_STYLE,
+    RADIO_TITLE_STYLE,
+    THIN_PROGRESS_STYLE,
+    RowGroup,
+    card,
+    combobox,
+    divider,
+    hide_while_empty,
+    page_note,
+    section_heading,
+    set_card_selected,
+    switch,
+)
 from voicetotext.writing.install import INSTALL_BYTES
 from voicetotext.writing.llama_server import last_line
 from voicetotext.writing.service import WritingService, WritingStatus
@@ -18,21 +42,26 @@ from voicetotext.writing.transforms import BUILTIN_TRANSFORMS, valid_transforms
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 
 _GB = 1_000_000_000
-_WRAP = 380
 _NO_TRANSFORM = "None"
 _CLEANUP_CHOICES = (
     ("off", "Off", "Paste exactly what was recognised."),
     ("light", "Light", "Fix fillers, slips and changes of mind, keep my wording."),
     ("polished", "Polished", "Also tidy grammar and repetition."),
 )
+_CLEANUP_WRAP = 140
+_RADIO_INDENT = 22
 _STYLE_PLACEHOLDER = "e.g. British spelling, no exclamation marks, sign off with Cheers"
 _LEARNING_NOTE = (
     "Learning watches edits you make to text this app pasted, for up to 15 "
     "minutes after each dictation. Everything stays on this device."
 )
-_DEADLINE_NOTE = "Long dictations may skip cleanup when the limit is short."
+_DEADLINE_NOTE = "Then the raw dictation is pasted. Long dictations may skip cleanup when this is short."
 _NO_SELECTION = "Select a transformation first."
 _INCOMPLETE_TRANSFORM = "A transformation needs a name and an instruction."
+_MODEL_BLURB = "Cleans up and formats your dictation on this computer. Nothing leaves it."
+_INSTRUCTION_PREVIEW = 70
+_ADVANCED_CLOSED = "Advanced ▸"
+_ADVANCED_OPEN = "Advanced ▾"
 
 
 def status_text(status: WritingStatus) -> str:
@@ -53,6 +82,29 @@ def status_text(status: WritingStatus) -> str:
             return "Ready"
         return f"Ready. Last cleanup {status.last_cleanup_seconds:.2f} s"
     return "Starts once dictation is ready."
+
+
+def _status_pill(status: WritingStatus) -> tuple[str, str]:
+    """The short state beside the model's name, and the colour it is drawn in."""
+    if status.state == "downloading":
+        share = status.bytes_done / status.bytes_total if status.bytes_total else 0.0
+        return f"Installing {share:.0%}", "CardAccent.TLabel"
+    if status.state == "starting":
+        return "Starting", "CardAccent.TLabel"
+    if status.state == "ready":
+        return "Ready", "CardSuccess.TLabel"
+    if status.state in ("failed", "install_failed"):
+        return "Failed", "CardDanger.TLabel"
+    if status.state == "not_installed":
+        return "Not installed", "CardMuted.TLabel"
+    return "Waiting", "CardMuted.TLabel"
+
+
+def _status_detail(status: WritingStatus, line: str, pill: str) -> str:
+    """The line under the model's name, saying what the pill beside it does not."""
+    if status.state == "ready" and status.last_cleanup_seconds is not None:
+        return f"Last cleanup took {status.last_cleanup_seconds:.2f} s."
+    return _MODEL_BLURB if line in (pill, "Ready") else line
 
 
 class TkWritingPage(ttk.Frame):
@@ -89,8 +141,9 @@ class TkWritingPage(ttk.Frame):
         self._transforms_dirty = False
         self._selected_transform = ""
         self._placeholder_shown = False
-        self._advanced_open = False
         self._shown_state = ""
+        self._cleanup_cards: dict[str, ttk.Frame] = {}
+        self._transform_rows: dict[str, ttk.Frame] = {}
         self._build()
         self._refresh_transforms()
         self._refresh_learned()
@@ -101,44 +154,48 @@ class TkWritingPage(ttk.Frame):
     # -- construction ----------------------------------------------------
 
     def _build(self) -> None:
-        self.columnconfigure(0, weight=1, uniform="column")
-        self.columnconfigure(1, weight=1, uniform="column")
-        left = ttk.Frame(self)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
-        right = ttk.Frame(self)
-        right.grid(row=0, column=1, sticky="nsew")
-        self._build_model_group(left)
-        self._build_cleanup_group(left)
-        self._build_context_group(left)
-        self._build_learning_group(right)
-        self._build_transform_group(right)
+        self._build_model_group()
+        self._build_cleanup_group()
+        self._build_learning_group()
+        self._build_transform_group()
 
-    def _build_model_group(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Writing model", style=HEADING_STYLE).pack(anchor="w")
-        ttk.Label(parent, textvariable=self._status, wraplength=_WRAP).pack(
-            anchor="w", pady=(4, 0),
+    def _build_model_group(self) -> None:
+        section_heading(self, "Writing model", first=True)
+        self._model_card = card(self)
+        self._model_card.pack(fill="x")
+        self._model_card.columnconfigure(0, weight=1)
+        header = ttk.Frame(self._model_card, style=CARD_BODY_STYLE)
+        header.grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="Local writing model", style=CARD_TITLE_STYLE).pack(side="left")
+        self._pill = ttk.Label(header, text="", style=CARD_MUTED_STYLE)
+        self._pill.pack(side="left", padx=(10, 0))
+        self._detail = ttk.Label(
+            self._model_card, text="", style=CARD_MUTED_STYLE, wraplength=360, justify="left",
         )
-        self._progress = ttk.Progressbar(parent, maximum=1.0, length=300)
-        buttons = ttk.Frame(parent)
-        buttons.pack(anchor="w", pady=(6, 0))
-        self._buttons_row = buttons
-        self._action_button = ttk.Button(buttons, command=self._on_action)
+        self._detail.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self._buttons_row = ttk.Frame(self._model_card, style=CARD_BODY_STYLE)
+        self._buttons_row.grid(row=0, column=1, rowspan=2, sticky="e", padx=(16, 0))
+        self._action_button = ttk.Button(
+            self._buttons_row, style=PRIMARY_BUTTON_STYLE, command=self._on_action,
+        )
         self._log_button = ttk.Button(
-            buttons, text="Open log", command=self._writing.open_log,
+            self._buttons_row, text="Open log", command=self._writing.open_log,
         )
+        self._progress = ttk.Progressbar(self, maximum=1.0, style=THIN_PROGRESS_STYLE)
+
         self._advanced_button = ttk.Button(
-            parent, text="Advanced ▸", command=self._toggle_advanced,
+            self, text=_ADVANCED_CLOSED, style=PAGE_LINK_BUTTON_STYLE,
+            command=self._toggle_advanced,
         )
-        self._advanced_button.pack(anchor="w", pady=(6, 0))
-        self._advanced = ttk.Frame(parent)
+        self._advanced_button.pack(anchor="w", pady=(10, 0))
+        self._advanced = card(self)
         self._advanced.columnconfigure(1, weight=1)
         self._path_row(0, "llama-server.exe", self._runtime_path, "Programs", "*.exe")
         self._path_row(1, "Model (.gguf)", self._model_path, "GGUF models", "*.gguf")
         ttk.Label(
-            self._advanced,
-            text="Leave empty to use the installed ones.",
-            wraplength=_WRAP,
-        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
+            self._advanced, text="Leave empty to use the installed ones.",
+            style=CARD_MUTED_STYLE,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     def _path_row(
         self,
@@ -148,119 +205,173 @@ class TkWritingPage(ttk.Frame):
         kind: str,
         pattern: str,
     ) -> None:
-        ttk.Label(self._advanced, text=label).grid(row=row, column=0, sticky="w", pady=2)
-        ttk.Entry(self._advanced, textvariable=variable).grid(
-            row=row, column=1, sticky="ew", padx=(6, 6), pady=2,
+        ttk.Label(self._advanced, text=label, style=CARD_TEXT_STYLE).grid(
+            row=row, column=0, sticky="w", pady=4,
+        )
+        ttk.Entry(self._advanced, textvariable=variable, font=BODY_FONT).grid(
+            row=row, column=1, sticky="ew", padx=(12, CONTROL_GAP), pady=4,
         )
         ttk.Button(
             self._advanced,
             text="Browse...",
             command=lambda: self._browse(variable, kind, pattern),
-        ).grid(row=row, column=2, pady=2)
+        ).grid(row=row, column=2, pady=4)
 
-    def _build_cleanup_group(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Cleanup", style=HEADING_STYLE).pack(anchor="w", pady=(18, 4))
+    def _build_cleanup_group(self) -> None:
+        section_heading(self, "Cleanup")
+        choices = ttk.Frame(self)
+        choices.pack(fill="x")
+        choices.columnconfigure(tuple(range(len(_CLEANUP_CHOICES))), weight=1, uniform="cleanup")
         self._cleanup_radios: dict[str, ttk.Radiobutton] = {}
-        for value, label, description in _CLEANUP_CHOICES:
-            radio = ttk.Radiobutton(parent, text=label, value=value, variable=self._cleanup)
-            radio.pack(anchor="w", pady=(2, 0))
-            ttk.Label(parent, text=description, wraplength=_WRAP - 24).pack(
-                anchor="w", padx=(24, 0),
+        for column, (value, label, description) in enumerate(_CLEANUP_CHOICES):
+            choice = card(choices)
+            choice.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 10, 0))
+            radio = ttk.Radiobutton(
+                choice, text=label, value=value, variable=self._cleanup,
+                style=RADIO_TITLE_STYLE,
             )
+            radio.pack(anchor="w")
+            hint = ttk.Label(
+                choice, text=description, style=CARD_MUTED_STYLE,
+                wraplength=_CLEANUP_WRAP, justify="left",
+            )
+            hint.pack(anchor="w", padx=(_RADIO_INDENT, 0), pady=(2, 0))
+            for widget in (choice, hint):
+                widget.bind("<Button-1>", lambda _event, r=radio: r.invoke())
             self._cleanup_radios[value] = radio
-        ttk.Checkbutton(
-            parent, text="Turn spoken lists and steps into lists", variable=self._lists,
-        ).pack(anchor="w", pady=(6, 0))
-        row = ttk.Frame(parent)
-        row.pack(anchor="w", pady=(6, 0))
-        ttk.Label(row, text="Give up after").pack(side="left")
-        self._deadline_box = ttk.Spinbox(
-            row,
+            self._cleanup_cards[value] = choice
+        self._cleanup.trace_add("write", lambda *_args: self._refresh_cleanup_cards())
+        self._refresh_cleanup_cards()
+
+        rows = RowGroup(self)
+        rows.pack(fill="x", pady=(12, 0))
+        rows.add(
+            "Turn spoken lists into lists",
+            "Numbered steps and bullet points when you dictate them.",
+            lambda parent: switch(parent, self._lists),
+        )
+        deadline = rows.add("Give up after", _DEADLINE_NOTE, self._deadline_control)
+        self._deadline_box = deadline.control
+        rows.add(
+            "Use the text around the cursor",
+            "And the window title, to spell names and terms. Never read from "
+            "password fields or password managers.",
+            lambda parent: switch(parent, self._context),
+        )
+
+    def _deadline_control(self, parent: tkinter.Misc) -> ttk.Frame:
+        control = ttk.Frame(parent, style=CARD_BODY_STYLE)
+        ttk.Spinbox(
+            control,
             from_=MIN_DEADLINE_SECONDS,
             to=MAX_DEADLINE_SECONDS,
             increment=0.5,
             width=5,
             textvariable=self._deadline,
+            font=BODY_FONT,
+        ).pack(side="left")
+        ttk.Label(control, text="seconds", style=CARD_TEXT_STYLE).pack(side="left", padx=(6, 0))
+        return control
+
+    def _build_learning_group(self) -> None:
+        section_heading(self, "Learning")
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        rows.add(
+            "Learn words I correct",
+            "Names and terms you fix after pasting are spelled right next time.",
+            lambda parent: switch(parent, self._learn_words),
         )
-        self._deadline_box.pack(side="left", padx=4)
-        ttk.Label(row, text="s and paste the raw dictation").pack(side="left")
-        ttk.Label(parent, text=_DEADLINE_NOTE, wraplength=_WRAP).pack(anchor="w", pady=(2, 0))
+        rows.add(
+            "Learn my writing style",
+            "How you edit what was pasted shapes the next cleanup.",
+            lambda parent: switch(parent, self._learn_style),
+        )
+        rows.add_widget(self._style_notes_block)
+        rows.add_widget(self._learned_block)
+        page_note(self, _LEARNING_NOTE).pack(anchor="w", pady=(CONTROL_GAP, 0))
 
-    def _build_context_group(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Context", style=HEADING_STYLE).pack(anchor="w", pady=(18, 4))
-        ttk.Checkbutton(
-            parent,
-            text="Use the text around the cursor and the window title\nto spell names and terms",
-            variable=self._context,
-        ).pack(anchor="w")
+    def _style_notes_block(self, parent: tkinter.Misc) -> ttk.Frame:
+        block = ttk.Frame(parent, style=CARD_BODY_STYLE)
+        ttk.Label(block, text="Style notes", style=CARD_TITLE_STYLE).pack(anchor="w")
         ttk.Label(
-            parent,
-            text="Never read from password fields or password managers.",
-            wraplength=_WRAP,
-        ).pack(anchor="w", pady=(2, 0))
-
-    def _build_learning_group(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Learning", style=HEADING_STYLE).pack(anchor="w")
-        ttk.Checkbutton(
-            parent, text="Learn words I correct after pasting", variable=self._learn_words,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Checkbutton(
-            parent, text="Learn my writing style", variable=self._learn_style,
-        ).pack(anchor="w")
-        ttk.Label(parent, text="Style notes").pack(anchor="w", pady=(6, 2))
-        self._style_notes = tkinter.Text(parent, height=3, width=40, wrap="word")
+            block, text="Tell the writing model how you like to write.",
+            style=CARD_MUTED_STYLE,
+        ).pack(anchor="w", pady=(2, CONTROL_GAP))
+        self._style_notes = tkinter.Text(block, height=4, width=40, wrap="word")
         self._style_notes.pack(fill="x")
-        self._style_notes.tag_configure("placeholder", foreground="grey")
+        self._style_notes.tag_configure("placeholder", foreground="#8a8a93")
         self._style_notes.bind("<FocusIn>", self._hide_placeholder)
         self._style_notes.bind("<FocusOut>", self._show_placeholder_if_empty)
-        ttk.Label(parent, textvariable=self._learned, wraplength=_WRAP).pack(
-            anchor="w", pady=(6, 0),
-        )
-        buttons = ttk.Frame(parent)
-        buttons.pack(anchor="w", pady=(4, 0))
-        ttk.Button(buttons, text="Forget learned style", command=self._forget_style).pack(
-            side="left",
-        )
-        ttk.Button(buttons, text="Reset learning", command=self._reset_learning).pack(
-            side="left", padx=(8, 0),
-        )
-        ttk.Label(parent, text=_LEARNING_NOTE, wraplength=_WRAP).pack(anchor="w", pady=(4, 0))
+        return block
 
-    def _build_transform_group(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Transformations", style=HEADING_STYLE).pack(
-            anchor="w", pady=(18, 4),
+    def _learned_block(self, parent: tkinter.Misc) -> ttk.Frame:
+        block = ttk.Frame(parent, style=CARD_BODY_STYLE)
+        block.columnconfigure(0, weight=1)
+        ttk.Label(
+            block, textvariable=self._learned, style=CARD_MUTED_STYLE,
+            wraplength=300, justify="left",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(block, text="Forget learned style", command=self._forget_style).grid(
+            row=0, column=1, padx=(16, CONTROL_GAP),
         )
-        self._transform_list = tkinter.Listbox(parent, height=5, exportselection=False)
-        self._transform_list.bind("<<ListboxSelect>>", self._on_transform_selected)
+        ttk.Button(
+            block, text="Reset learning", style=DANGER_BUTTON_STYLE,
+            command=self._reset_learning,
+        ).grid(row=0, column=2)
+        return block
+
+    def _build_transform_group(self) -> None:
+        section_heading(self, "Transformations")
+        page_note(
+            self, "Instructions the writing model can apply to a whole dictation.",
+        ).pack(anchor="w", pady=(0, CONTROL_GAP))
+        self._transform_list = card(self, padding=(0, 4))
         self._transform_list.pack(fill="x")
-        editor = ttk.Frame(parent)
-        editor.pack(fill="x", pady=(4, 0))
+
+        editor = card(self)
+        editor.pack(fill="x", pady=(CONTROL_GAP, 0))
         editor.columnconfigure(1, weight=1)
-        ttk.Label(editor, text="Name").grid(row=0, column=0, sticky="w")
-        ttk.Entry(editor, textvariable=self._transform_name).grid(
-            row=0, column=1, sticky="ew", padx=(6, 0), pady=1,
-        )
-        ttk.Label(editor, text="Instruction").grid(row=1, column=0, sticky="w")
-        ttk.Entry(editor, textvariable=self._transform_text).grid(
-            row=1, column=1, sticky="ew", padx=(6, 0), pady=1,
-        )
-        buttons = ttk.Frame(parent)
-        buttons.pack(anchor="w", pady=(4, 0))
-        for text, command in (
-            ("Add", self.add_transform),
-            ("Edit", self.edit_transform),
-            ("Remove", self.remove_transform),
-            ("Restore built-ins", self.restore_builtins),
+        for row, (label, variable) in enumerate(
+            (("Name", self._transform_name), ("Instruction", self._transform_text)),
         ):
-            ttk.Button(buttons, text=text, command=command).pack(side="left", padx=(0, 6))
-        ttk.Label(parent, textvariable=self._message, wraplength=_WRAP).pack(anchor="w")
-        row = ttk.Frame(parent)
-        row.pack(anchor="w", pady=(6, 0))
-        ttk.Label(row, text="After each dictation, apply:").pack(side="left")
-        self._transform_combo = ttk.Combobox(
-            row, textvariable=self._transform_choice, state="readonly", width=22,
+            ttk.Label(editor, text=label, style=CARD_TEXT_STYLE).grid(
+                row=row, column=0, sticky="w", pady=4,
+            )
+            ttk.Entry(editor, textvariable=variable, font=BODY_FONT).grid(
+                row=row, column=1, sticky="ew", padx=(12, 0), pady=4,
+            )
+        buttons = ttk.Frame(editor, style=CARD_BODY_STYLE)
+        buttons.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(CONTROL_GAP, 0))
+        for text, command, style in (
+            ("Add", self.add_transform, "TButton"),
+            ("Save changes", self.edit_transform, "TButton"),
+            ("Remove", self.remove_transform, DANGER_BUTTON_STYLE),
+        ):
+            ttk.Button(buttons, text=text, command=command, style=style).pack(
+                side="left", padx=(0, CONTROL_GAP),
+            )
+        ttk.Button(
+            buttons, text="Restore built-ins", style=LINK_BUTTON_STYLE,
+            command=self.restore_builtins,
+        ).pack(side="right")
+        message = ttk.Label(
+            editor, textvariable=self._message, style="CardDanger.TLabel",
+            wraplength=CARD_TEXT_WRAP,
         )
-        self._transform_combo.pack(side="left", padx=(6, 0))
+        message.grid(row=3, column=0, columnspan=2, sticky="w", pady=(CONTROL_GAP, 0))
+        hide_while_empty(message, self._message)
+
+        rows = RowGroup(self)
+        rows.pack(fill="x", pady=(CONTROL_GAP, 0))
+        after = rows.add(
+            "After each dictation, apply",
+            "Runs after cleanup, every time.",
+            lambda parent: combobox(parent, textvariable=self._transform_choice),
+            fill=True,
+        )
+        assert isinstance(after.control, ttk.Combobox)
+        self._transform_combo = after.control
 
     # -- staged settings -------------------------------------------------
 
@@ -300,7 +411,7 @@ class TkWritingPage(ttk.Frame):
         self._transform_choice.set(chosen if chosen in self._transforms else _NO_TRANSFORM)
         self._runtime_path.set(settings.runtime_path)
         self._model_path.set(settings.model_path)
-        if (settings.runtime_path or settings.model_path) and not self._advanced_open:
+        if (settings.runtime_path or settings.model_path) and not self._advanced_open():
             self._toggle_advanced()
 
     def style_notes(self) -> str:
@@ -359,6 +470,8 @@ class TkWritingPage(ttk.Frame):
         self._transform_name.set(name)
         self._transform_text.set(self._transforms.get(name, ""))
         self._message.set("")
+        for row_name, row in self._transform_rows.items():
+            set_card_selected(row, row_name == name)
 
     def _commit_transforms(self) -> None:
         self._transforms = valid_transforms(self._transforms)
@@ -370,17 +483,35 @@ class TkWritingPage(ttk.Frame):
         self._refresh_transforms()
 
     def _refresh_transforms(self) -> None:
-        self._transform_list.delete(0, "end")
-        for name in self._transforms:
-            self._transform_list.insert("end", name)
+        for child in self._transform_list.winfo_children():
+            child.destroy()
+        self._transform_rows = {}
+        for index, (name, instruction) in enumerate(self._transforms.items()):
+            if index:
+                divider(self._transform_list).pack(fill="x")
+            self._transform_rows[name] = self._transform_row(name, instruction)
         self._transform_combo["values"] = [_NO_TRANSFORM, *self._transforms]
         if self._transform_choice.get() not in self._transforms:
             self._transform_choice.set(_NO_TRANSFORM)
 
-    def _on_transform_selected(self, _event: tkinter.Event) -> None:
-        selection = self._transform_list.curselection()
-        if selection:
-            self.select_transform(self._transform_list.get(selection[0]))
+    def _transform_row(self, name: str, instruction: str) -> ttk.Frame:
+        row = ttk.Frame(
+            self._transform_list, style=CARD_BODY_STYLE, padding=(CARD_PADDING, 8),
+            cursor="hand2",
+        )
+        row.pack(fill="x")
+        ttk.Label(row, text=name, style=CARD_TITLE_STYLE).pack(anchor="w")
+        preview = instruction if len(instruction) <= _INSTRUCTION_PREVIEW else (
+            instruction[: _INSTRUCTION_PREVIEW - 1] + "…"
+        )
+        ttk.Label(row, text=preview, style=CARD_MUTED_STYLE).pack(anchor="w")
+        for widget in (row, *row.winfo_children()):
+            widget.bind("<Button-1>", lambda _event, chosen=name: self.select_transform(chosen))
+        return row
+
+    def _refresh_cleanup_cards(self) -> None:
+        for value, choice in self._cleanup_cards.items():
+            set_card_selected(choice, value == self._cleanup.get())
 
     # -- model status ------------------------------------------------------
 
@@ -391,7 +522,11 @@ class TkWritingPage(ttk.Frame):
         if not self.winfo_exists():
             return
         status = self._writing.status()
-        self._status.set(status_text(status))
+        line = status_text(status)
+        pill, pill_style = _status_pill(status)
+        self._status.set(line)
+        self._pill.configure(text=f"● {pill}", style=pill_style)
+        self._detail.configure(text=_status_detail(status, line, pill))
         if status.bytes_total:
             self._progress["value"] = status.bytes_done / status.bytes_total
         # A download reports thousands of times; only a new state moves widgets.
@@ -399,17 +534,20 @@ class TkWritingPage(ttk.Frame):
             return
         self._shown_state = status.state
         if status.state == "downloading":
-            self._progress.pack(anchor="w", pady=(4, 0), before=self._buttons_row)
+            self._progress.pack(fill="x", pady=(CONTROL_GAP, 0), after=self._model_card)
         else:
             self._progress.pack_forget()
         self._action_button.pack_forget()
         self._log_button.pack_forget()
         action = _action_label(status.state)
         if action:
-            self._action_button.configure(text=action)
-            self._action_button.pack(side="left")
+            self._action_button.configure(
+                text=action,
+                style="TButton" if status.state == "downloading" else PRIMARY_BUTTON_STYLE,
+            )
+            self._action_button.pack(side="right")
         if status.state == "failed":
-            self._log_button.pack(side="left", padx=(8, 0))
+            self._log_button.pack(side="right", padx=(0, CONTROL_GAP))
 
     def _on_action(self) -> None:
         state = self._writing.status().state
@@ -421,14 +559,16 @@ class TkWritingPage(ttk.Frame):
             self._writing.retry()
         self._refresh_status()
 
+    def _advanced_open(self) -> bool:
+        return bool(self._advanced.winfo_manager())
+
     def _toggle_advanced(self) -> None:
-        self._advanced_open = not self._advanced_open
-        if self._advanced_open:
-            self._advanced.pack(fill="x", pady=(4, 0), after=self._advanced_button)
-            self._advanced_button.configure(text="Advanced ▾")
-        else:
+        if self._advanced_open():
             self._advanced.pack_forget()
-            self._advanced_button.configure(text="Advanced ▸")
+            self._advanced_button.configure(text=_ADVANCED_CLOSED)
+        else:
+            self._advanced.pack(fill="x", pady=(4, 0), after=self._advanced_button)
+            self._advanced_button.configure(text=_ADVANCED_OPEN)
 
     def _browse(self, variable: tkinter.StringVar, kind: str, pattern: str) -> None:
         chosen = filedialog.askopenfilename(

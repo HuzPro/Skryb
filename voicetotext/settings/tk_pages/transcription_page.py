@@ -9,8 +9,14 @@ from voicetotext.settings.license_consent import (
     collect_license_acceptance,
 )
 from voicetotext.settings.service import SettingsService
+from voicetotext.settings.settings_draft import SettingsDraft
 from voicetotext.settings.signal import Signal
-from voicetotext.settings.theme import HEADING_STYLE
+from voicetotext.settings.theme import (
+    PAGE_LINK_BUTTON_STYLE,
+    RowGroup,
+    combobox,
+    section_heading,
+)
 from voicetotext.settings.tk_model_list import TkModelList
 from voicetotext.settings.tk_pages.mode_selector import TkModeSelector
 from voicetotext.settings.transcription_mode import TranscriptionMode
@@ -18,8 +24,8 @@ from voicetotext.settings.transcription_mode import TranscriptionMode
 _logger = logging.getLogger(__name__)
 
 _STYLE_LABELS: dict[str, str] = {
-    "intended": "Intended (clean up what I meant)",
-    "verbatim": "Verbatim (exactly what I said)",
+    "intended": "Intended (what I meant)",
+    "verbatim": "Verbatim (what I said)",
 }
 _VERBATIM_NOTE = (
     "Verbatim keeps fillers and skips the dictionary, "
@@ -31,9 +37,20 @@ _UNSUPPORTED_NOTE = "Only CrisperWhisper models have speech styles."
 def _style_note(supported: bool) -> str:
     return _VERBATIM_NOTE if supported else _UNSUPPORTED_NOTE
 
-_SUPPORTED_LANGUAGES = [
-    "en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh",
-]
+
+_LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "nl": "Dutch",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+}
+_LANGUAGE_CODES = {name: code for code, name in _LANGUAGE_NAMES.items()}
 
 # Last-resort defaults if the service lists no models for a mode.
 _FALLBACK_MODELS: dict[TranscriptionMode, str] = {
@@ -42,9 +59,11 @@ _FALLBACK_MODELS: dict[TranscriptionMode, str] = {
 }
 
 _NO_GPU_STREAMING_REASON = (
-    "Streaming needs a CUDA or ROCm GPU, and none was detected."
+    "Needs a CUDA or ROCm GPU, and none was detected."
 )
 _CHECKING_FOR_GPU_REASON = "Checking for a GPU..."
+_ADVANCED_CLOSED = "Advanced ▸"
+_ADVANCED_OPEN = "Advanced ▾"
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 
@@ -56,11 +75,11 @@ def _run_now(action: Callable[[], None]) -> None:
 class TkTranscriptionPage(ttk.Frame):
     """Page for picking the mode, model, language, and engine.
 
-    The batch/streaming :class:`TkModeSelector` sits above the
-    :class:`TkModelList` it filters. The Engine combo is hardware-aware:
-    it asks the service for candidates compatible with the selected model
-    and re-populates on model change. Exposes imperative getters/setters
-    so the window can build a :class:`SettingsDraft` on Save.
+    The Batch/Live :class:`TkModeSelector` sits above the
+    :class:`TkModelList` it filters. The Engine combo, under Advanced, is
+    hardware-aware: it asks the service for candidates compatible with the
+    selected model and re-populates on model change. Exposes imperative
+    getters/setters so the window can build a :class:`SettingsDraft` on Save.
     """
 
     def __init__(
@@ -88,13 +107,13 @@ class TkTranscriptionPage(ttk.Frame):
         draft = self._service.current_draft()
         self._mode = draft.transcription_mode
 
-        ttk.Label(self, text="Mode", style=HEADING_STYLE).pack(anchor="w")
+        section_heading(self, "Mode", first=True)
         self._mode_selector = TkModeSelector(self)
         self._mode_selector.set_mode(self._mode)
         self._mode_selector.mode_changed.connect(self.apply_mode)
-        self._mode_selector.pack(fill="x", pady=(0, 8))
+        self._mode_selector.pack(fill="x")
 
-        ttk.Label(self, text="Models", style=HEADING_STYLE).pack(anchor="w")
+        section_heading(self, "Model")
         self._model_list = TkModelList(
             self,
             self._service,
@@ -104,17 +123,15 @@ class TkTranscriptionPage(ttk.Frame):
         )
         self._model_list.set_mode(self._mode)
         self._model_list.selection_changed.connect(self._on_model_selected)
-        self._model_list.pack(fill="both", expand=True, pady=(0, 8))
+        self._model_list.pack(fill="x")
         self._model_list.set_selected(draft.model_size)
 
-        ttk.Label(self, text="Settings", style=HEADING_STYLE).pack(
-            anchor="w", pady=(8, 0),
-        )
+        section_heading(self, "Speech")
         self._build_form(draft)
         self._gate_streaming_on_hardware()
 
     def _gate_streaming_on_hardware(self) -> None:
-        """Keep Streaming off until a GPU is known, without waiting for one.
+        """Keep Live off until a GPU is known, without waiting for one.
 
         The probe imports torch, which can take many seconds, so the page
         opens at once and updates itself when the probe reports back.
@@ -138,46 +155,60 @@ class TkTranscriptionPage(ttk.Frame):
             self.current_model(), current_engine=self.current_engine(),
         )
 
-    def _build_form(self, draft: object) -> None:
-        form = ttk.Frame(self)
-        form.pack(fill="x")
-        form.columnconfigure(1, weight=1)
-
-        self._language_var = tkinter.StringVar(master=self, value=draft.language)
-        self._language_combo = ttk.Combobox(
-            form,
-            textvariable=self._language_var,
-            values=_SUPPORTED_LANGUAGES,
-            state="readonly",
+    def _build_form(self, draft: SettingsDraft) -> None:
+        self._language_var = tkinter.StringVar(
+            master=self, value=_language_name(draft.language),
         )
-
-        self._engine_combo = ttk.Combobox(form, state="readonly", values=[])
-        self._engine_reason = ttk.Label(form, text="")
-
         self._speech_style_var = tkinter.StringVar(
             master=self, value=_STYLE_LABELS[draft.crisperwhisper_mode],
         )
-        self._speech_style_combo = ttk.Combobox(
-            form,
-            textvariable=self._speech_style_var,
-            values=list(_STYLE_LABELS.values()),
-            state="readonly",
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        self._language_combo = rows.add(
+            "Language",
+            "The language you speak in.",
+            lambda parent: combobox(
+                parent, textvariable=self._language_var,
+                values=list(_LANGUAGE_NAMES.values()),
+            ),
+            fill=True,
+        ).control
+        self._speech_style_row = rows.add(
+            "Speech style",
+            "",
+            lambda parent: combobox(
+                parent, textvariable=self._speech_style_var,
+                values=list(_STYLE_LABELS.values()),
+            ),
+            fill=True,
         )
-        self._speech_style_note = ttk.Label(form, text="")
+        self._speech_style_combo = self._speech_style_row.control
 
-        ttk.Label(form, text="Language:").grid(row=0, column=0, sticky="w", pady=2)
-        self._language_combo.grid(row=0, column=1, sticky="ew", pady=2)
-        ttk.Label(form, text="Engine:").grid(row=1, column=0, sticky="w", pady=2)
-        self._engine_combo.grid(row=1, column=1, sticky="ew", pady=2)
-        self._engine_reason.grid(row=2, column=1, sticky="w")
-        ttk.Label(form, text="Speech style:").grid(
-            row=3, column=0, sticky="w", pady=2,
+        self._advanced_button = ttk.Button(
+            self, text=_ADVANCED_CLOSED, style=PAGE_LINK_BUTTON_STYLE,
+            command=self._toggle_advanced,
         )
-        self._speech_style_combo.grid(row=3, column=1, sticky="ew", pady=2)
-        self._speech_style_note.grid(row=4, column=1, sticky="w")
+        self._advanced_button.pack(anchor="w", pady=(16, 0))
+        self._advanced = RowGroup(self)
+        self._engine_row = self._advanced.add(
+            "Engine",
+            "",
+            lambda parent: combobox(parent, values=[]),
+            fill=True,
+        )
+        self._engine_combo = self._engine_row.control
+        self._engine_reason = self._engine_row.description
 
         self._populate_engine_combo(draft.model_size, current_engine=draft.engine)
         self._refresh_speech_style(draft.model_size)
+
+    def _toggle_advanced(self) -> None:
+        if self._advanced.winfo_manager():
+            self._advanced.pack_forget()
+            self._advanced_button.configure(text=_ADVANCED_CLOSED)
+        else:
+            self._advanced.pack(fill="x", pady=(8, 0))
+            self._advanced_button.configure(text=_ADVANCED_OPEN)
 
     # ------------------------------------------------------------------
     # Accessors used by the window / tests
@@ -200,10 +231,11 @@ class TkTranscriptionPage(ttk.Frame):
         return self._mode_selector.current_mode()
 
     def current_language(self) -> str:
-        return self._language_var.get()
+        shown = self._language_var.get()
+        return _LANGUAGE_CODES.get(shown, shown)
 
     def set_language(self, language: str) -> None:
-        self._language_var.set(language)
+        self._language_var.set(_language_name(language))
 
     def current_engine(self) -> str:
         index = self._engine_combo.current()
@@ -225,7 +257,7 @@ class TkTranscriptionPage(ttk.Frame):
     # ------------------------------------------------------------------
 
     def apply_mode(self, mode: TranscriptionMode) -> None:
-        """React to a batch/streaming toggle.
+        """React to a Batch/Live toggle.
 
         Re-filters the model list, auto-selects a compatible model if the
         current one cannot run in the new mode (announced via
@@ -282,7 +314,7 @@ class TkTranscriptionPage(ttk.Frame):
         self._speech_style_combo.configure(
             state="readonly" if supported else "disabled",
         )
-        self._speech_style_note.configure(text=_style_note(supported))
+        self._speech_style_row.set_description(_style_note(supported))
 
     def _populate_engine_combo(
         self, model_name: str, current_engine: str = "auto",
@@ -300,7 +332,7 @@ class TkTranscriptionPage(ttk.Frame):
         self._engine_combo.configure(values=labels)
         self._select_engine_value(current_engine)
         reason = candidates[0].reason if candidates else ""
-        self._engine_reason.configure(text=str(reason))
+        self._engine_row.set_description(str(reason))
 
     def _select_engine_value(self, engine_id: str) -> None:
         if engine_id in self._engine_ids:
@@ -346,3 +378,7 @@ class TkTranscriptionPage(ttk.Frame):
             self._service.delete_model(name)
         except ValueError as exc:
             self.delete_error.emit(name, str(exc))
+
+
+def _language_name(code: str) -> str:
+    return _LANGUAGE_NAMES.get(code, code)

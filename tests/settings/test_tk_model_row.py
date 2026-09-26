@@ -125,18 +125,20 @@ class TestTkModelRowUpdateDownload:
 
 
 class TestTkModelRowSelection:
-    def test_should_apply_selected_styles_when_selected(self, row):
+    def test_selecting_a_card_tints_the_card_and_its_text(self, row):
         row.set_selected(True)
 
-        assert row.cget("style") == "Selected.TFrame"
-        assert row.name_label().cget("style") == "Selected.TLabel"
+        assert row.is_selected()
+        assert row.name_label().cget("style") == "SelectedTitle.TLabel"
+        assert row.description_label().cget("style") == "SelectedMuted.TLabel"
 
-    def test_should_revert_to_default_styles_when_deselected(self, row):
+    def test_deselecting_puts_the_card_and_its_text_back(self, row):
         row.set_selected(True)
         row.set_selected(False)
 
-        assert row.cget("style") == "TFrame"
-        assert row.name_label().cget("style") == "TLabel"
+        assert not row.is_selected()
+        assert row.name_label().cget("style") == "CardTitle.TLabel"
+        assert row.description_label().cget("style") == "CardMuted.TLabel"
 
 
 class TestTkModelRowCallbacks:
