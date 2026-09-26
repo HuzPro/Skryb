@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCombo, keyCaps, validateBindings } from "./keys";
+import { endsOnKey, formatCombo, keyCaps, validateBindings } from "./keys";
 import type { Binding, BindingAction, BindingMode } from "./types";
 
 const bind = (keys: string, action: BindingAction = "dictate", mode: BindingMode = "toggle"): Binding => ({ keys, mode, action });
@@ -19,6 +19,15 @@ describe("key caps", () => {
     expect(keyCaps("alt_r+f13")).toEqual(["Right Alt", "F13"]);
     expect(keyCaps("ctrl_l+7")).toEqual(["Left Ctrl", "7"]);
     expect(keyCaps("cmd+space")).toEqual(["Win", "Space"]);
+  });
+
+  it("keeps recording while only modifiers are held and finishes on the first other key or button", () => {
+    const pressed = ["ctrl", "ctrl+alt", "ctrl+alt+shift_r", "ctrl+alt+shift_r+m"];
+    expect(pressed.map(endsOnKey)).toEqual([false, false, false, true]);
+    expect(endsOnKey("cmd")).toBe(false);
+    expect(endsOnKey("mouse4")).toBe(true);
+    expect(endsOnKey("ctrl+f13")).toBe(true);
+    expect(endsOnKey(" ")).toBe(false);
   });
 
   it("ignores stray spaces and empty parts", () => {

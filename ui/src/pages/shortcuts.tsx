@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
-import { validateBindings } from "../lib/keys";
+import { endsOnKey, validateBindings } from "../lib/keys";
 import { onBeforeClose } from "../lib/platform";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
@@ -75,7 +75,10 @@ export function useCapture(): Capture {
     if (name !== "capture" || row === null) return;
     const event = data as { keys?: string; error?: string; cancelled?: boolean };
     if (event.error && !event.cancelled) setError({ row, message: event.error });
-    else if (event.keys && event.keys !== "esc") apply.current(event.keys);
+    else if (event.keys && event.keys !== "esc") {
+      apply.current(event.keys);
+      if (!endsOnKey(event.keys)) return;
+    }
     stop();
   });
 
