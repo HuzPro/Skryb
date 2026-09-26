@@ -135,8 +135,9 @@ class FakeTextPattern:
 
 
 class FakeElement:
-    def __init__(self, pattern: object) -> None:
+    def __init__(self, pattern: object, is_password: bool = False) -> None:
         self.pattern = pattern
+        self.CurrentIsPassword = int(is_password)  # noqa: N815 (COM name)
 
     def GetCurrentPattern(self, pattern_id: int) -> object:  # noqa: N802 (COM name)
         assert pattern_id == _TEXT_PATTERN_ID
@@ -253,6 +254,15 @@ class TestFieldsInsideALargerDocument:
         assert context.after == "b" * CONTEXT_CHARS
 
 class TestContextWhenNoneCanBeRead:
+    def test_a_password_field_is_never_read(self):
+        field = _whole_of(_DOCUMENT)
+        selection = FakeTextRange(field.document, 0, len(_DOCUMENT))
+        automation = FakeAutomation(
+            FakeElement(FakeTextPattern([selection], field), is_password=True),
+        )
+
+        assert _context_from(automation) == NO_CONTEXT
+
     def test_should_report_no_context_when_the_element_has_no_text_pattern(self):
         automation = FakeAutomation(FakeElement(NullPointer()))
 

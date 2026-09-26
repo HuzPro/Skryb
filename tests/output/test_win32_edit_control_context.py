@@ -51,6 +51,7 @@ class FakeUser32:
         self.messages: list[int] = []
         self.answers_messages = True
         self.reports_focus = True
+        self.style = 0
 
     def GetForegroundWindow(self) -> int:  # noqa: N802 (Win32 name)
         return _FOREGROUND_HWND
@@ -67,6 +68,9 @@ class FakeUser32:
     def GetClassNameW(self, hwnd: int, buffer: object, length: int) -> int:  # noqa: N802
         buffer.value = self.class_name
         return len(self.class_name)
+
+    def GetWindowLongW(self, hwnd: int, index: int) -> int:  # noqa: N802 (Win32 name)
+        return self.style
 
     def SendMessageTimeoutW(  # noqa: N802 (Win32 name)
         self,
@@ -177,6 +181,14 @@ class TestContextFromAnEditControl:
 
 
 class TestContextWhenNoneCanBeRead:
+    def test_a_password_edit_control_is_never_asked_for_its_text(
+        self, user32: FakeUser32,
+    ):
+        user32.style = 0x0020
+
+        assert edit_control_context_of(_HWND) == NO_CONTEXT
+        assert user32.messages == []
+
     def test_should_not_ask_a_window_that_is_not_an_edit_control_for_its_text(
         self, user32: FakeUser32,
     ):

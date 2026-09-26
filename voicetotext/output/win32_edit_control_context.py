@@ -23,6 +23,8 @@ from voicetotext.output.caret_context import (
 _logger = logging.getLogger(__name__)
 
 _EM_GETSEL = 0x00B0
+_GWL_STYLE = -16
+_ES_PASSWORD = 0x0020
 _WM_GETTEXT = 0x000D
 _WM_GETTEXTLENGTH = 0x000E
 
@@ -84,7 +86,7 @@ def edit_control_context_of(hwnd: int) -> CaretContext:
 
 def _context_of(hwnd: int) -> CaretContext:
     class_name = _class_name(hwnd) if hwnd else ""
-    if not _is_edit_control(class_name):
+    if not _is_edit_control(class_name) or _is_password_field(hwnd):
         return NO_CONTEXT
     start, end = _selection(hwnd)
     text = _text(hwnd)
@@ -109,6 +111,10 @@ def _is_edit_control(class_name: str) -> bool:
     ``WindowsForms10.RichEdit20W.app.0.x``.
     """
     return _EDIT_CLASS_MARKER in class_name.upper()
+
+
+def _is_password_field(hwnd: int) -> bool:
+    return bool(_user32().GetWindowLongW(hwnd, _GWL_STYLE) & _ES_PASSWORD)
 
 
 def _is_rich_edit(class_name: str) -> bool:
@@ -206,6 +212,8 @@ def _user32() -> ctypes.CDLL:
         ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int,
     ]
     user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.GetWindowLongW.restype = ctypes.c_long
     user32.SendMessageTimeoutW.argtypes = [
         ctypes.c_void_p,
         ctypes.c_uint,

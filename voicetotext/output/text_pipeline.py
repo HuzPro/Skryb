@@ -134,6 +134,11 @@ _FUNCTION_WORD_STOPLIST = frozenset({
 })
 
 
+# The writing model's stage: the dictation so far, and the caret reading it
+# may use for context, give the cleaned dictation.
+CleanupStep = Callable[[str, Callable[[], CaretContext]], str]
+
+
 def _no_caret_context() -> CaretContext:
     return NO_CONTEXT
 
@@ -143,6 +148,36 @@ def _caret_stage(caret_context: Callable[[], CaretContext]) -> Callable[[str], s
         return fit_to_context(text, caret_context())
 
     return fit
+
+
+class _CaretReading:
+    """One caret reading per dictation, shared by every stage that needs it.
+
+    Reading the caret goes through UI Automation and can retry, so the
+    cleanup stage and the caret fit must not each pay for their own read.
+    """
+
+    def __init__(self, read: Callable[[], CaretContext]) -> None:
+        self._read = read
+        self._context: CaretContext | None = None
+
+    def forget(self, text: str) -> str:
+        self._context = None
+        return text
+
+    def __call__(self) -> CaretContext:
+        if self._context is None:
+            self._context = self._read()
+        return self._context
+
+
+def _cleanup_stage(
+    cleanup: CleanupStep, caret_context: Callable[[], CaretContext],
+) -> Callable[[str], str]:
+    def clean(text: str) -> str:
+        return cleanup(text, caret_context)
+
+    return clean
 
 
 class TextPipeline:
@@ -156,8 +191,10 @@ class TextPipeline:
         punctuation_backend: PunctuationBackend | None = None,
         models_dir: Path | None = None,
         caret_context: Callable[[], CaretContext] = _no_caret_context,
+        cleanup: CleanupStep | None = None,
     ) -> "TextPipeline":
-        stages: list[Callable[[str], str]] = []
+        caret = _CaretReading(caret_context)
+        stages: list[Callable[[str], str]] = [caret.forget]
         if config.options.punctuation_model:
             backend = punctuation_backend
             if backend is None:
@@ -171,8 +208,10 @@ class TextPipeline:
             stages.append(remove_fillers)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
+        if cleanup is not None:
+            stages.append(_cleanup_stage(cleanup, caret))
         stages.append(add_trailing_sentence_space)
-        stages.append(_caret_stage(caret_context))
+        stages.append(_caret_stage(caret))
         stages.append(_RuleStage(config.rules).apply)
         if config.options.numbers:
             stages.append(format_numbers)
@@ -208,13 +247,14 @@ def build_pipeline(
     punctuation_backend: PunctuationBackend | None = None,
     models_dir: Path | None = None,
     caret_context: Callable[[], CaretContext] = _no_caret_context,
+    cleanup: CleanupStep | None = None,
 ) -> TextPipeline:
     if mode is PipelineMode.VERBATIM:
         return TextPipeline.passthrough()
     if mode is PipelineMode.STREAMING:
         return TextPipeline.for_streaming(config)
     return TextPipeline.for_batch(
-        config, punctuation_backend, models_dir, caret_context,
+        config, punctuation_backend, models_dir, caret_context, cleanup,
     )
 
 

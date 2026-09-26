@@ -64,6 +64,8 @@ class _PatternHandle(Protocol):
 
 
 class _Element(Protocol):
+    @property
+    def CurrentIsPassword(self) -> int: ...  # noqa: N802 (COM name)
     def GetCurrentPattern(  # noqa: N802 (COM name)
         self, pattern_id: int,
     ) -> _PatternHandle: ...
@@ -119,6 +121,9 @@ def _context_from(automation: _Automation) -> CaretContext:
 
 
 def _context_of(element: _Element) -> CaretContext:
+    if element.CurrentIsPassword:
+        _logger.debug("No caret context: the focused element is a password field.")
+        return NO_CONTEXT
     uia = _uia()
     handle = element.GetCurrentPattern(uia.UIA_TextPatternId)
     if not handle:
