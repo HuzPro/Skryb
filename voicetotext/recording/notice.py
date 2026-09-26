@@ -4,12 +4,12 @@ import ctypes
 import functools
 import tkinter
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 from voicetotext.core.color_scheme import ColorScheme, detect_app_color_scheme
 from voicetotext.core.work_area import foreground_work_area
 from voicetotext.recording.pill import CANVAS_HEIGHT
-from voicetotext.settings.theme import BODY_FONT, Theme, theme_for
 
 NoticeAction = tuple[str, Callable[[], None]]
 
@@ -37,6 +37,29 @@ _HWND_TOPMOST = -1
 _SWP_NOACTIVATE = 0x0010
 _SW_HIDE = 0
 _SW_SHOWNOACTIVATE = 4
+_BODY_FONT = ("Segoe UI", -13)
+
+
+@dataclass(frozen=True)
+class Palette:
+    surface: str
+    foreground: str
+    border: str
+    strong_border: str
+    accent: str
+    warning: str
+
+
+_PALETTES = {
+    ColorScheme.LIGHT: Palette(
+        surface="#ffffff", foreground="#18181b", border="#e4e4e7",
+        strong_border="#c4c4cc", accent="#2563eb", warning="#d97706",
+    ),
+    ColorScheme.DARK: Palette(
+        surface="#2a2a2e", foreground="#ededf0", border="#3a3a40",
+        strong_border="#5a5a63", accent="#7aa7ff", warning="#fbbf24",
+    ),
+}
 
 
 class NoticeWindowApi(Protocol):
@@ -153,7 +176,7 @@ class Notice:
         window = self._window or self._build()
         self._cancel_auto_hide()
         self._fill(
-            window, message, buttons[:_MAX_BUTTONS], theme_for(self._color_scheme()), warning,
+            window, message, buttons[:_MAX_BUTTONS], _PALETTES[self._color_scheme()], warning,
         )
         window.update_idletasks()
         api = self._api()
@@ -212,7 +235,7 @@ class Notice:
         window: tkinter.Toplevel,
         message: str,
         actions: Sequence[NoticeAction],
-        theme: Theme,
+        theme: Palette,
         warning: bool,
     ) -> None:
         for child in window.winfo_children():
@@ -226,7 +249,7 @@ class Notice:
             frame, bg=theme.warning if warning else theme.accent, width=_STRIP_WIDTH,
         ).pack(side="left", fill="y")
         tkinter.Label(
-            frame, text=message, bg=theme.surface, fg=theme.foreground, font=BODY_FONT,
+            frame, text=message, bg=theme.surface, fg=theme.foreground, font=_BODY_FONT,
         ).pack(side="left", padx=(_PADDING, _PADDING + 4), pady=_PADDING)
         self._buttons = [
             self._button(frame, label, action, theme) for label, action in actions
@@ -239,14 +262,14 @@ class Notice:
         parent: tkinter.Frame,
         label: str,
         action: Callable[[], None],
-        theme: Theme,
+        theme: Palette,
     ) -> tkinter.Button:
         button = tkinter.Button(
             parent, text=label, command=lambda: self._press(action),
             bg=theme.border, fg=theme.foreground,
             activebackground=theme.strong_border, activeforeground=theme.foreground,
             relief="flat", borderwidth=0, highlightthickness=0, takefocus=0,
-            font=BODY_FONT, padx=12, pady=3, cursor="hand2",
+            font=_BODY_FONT, padx=12, pady=3, cursor="hand2",
         )
         button.pack(side="left", padx=(0, _PADDING // 2), pady=_PADDING)
         return button
