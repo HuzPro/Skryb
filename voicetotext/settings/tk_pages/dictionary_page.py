@@ -41,6 +41,8 @@ class TkDictionaryPage(ttk.Frame):
         self._dictionary = DictionaryConfig()
         self._selected_index = _NOTHING_SELECTED
         self._dirty = False
+        # Learned words the user removed here; the learner must not relearn them.
+        self._forgotten: dict[tuple[str, str], None] = {}
         self._remove_fillers_var = tkinter.BooleanVar(master=self)
         self._spoken_commands_var = tkinter.BooleanVar(master=self)
         self._numbers_var = tkinter.BooleanVar(master=self)
@@ -168,6 +170,10 @@ class TkDictionaryPage(ttk.Frame):
             editor, text="Delete", command=self.delete_selected_rule,
         )
         self._delete_button.grid(row=4, column=3, sticky="w", pady=(5, 0))
+        self._forget_learned_button = ttk.Button(
+            editor, text="Forget all learned words", command=self.forget_learned_words,
+        )
+        self._forget_learned_button.grid(row=4, column=4, sticky="w", pady=(5, 0))
 
     def add_rule(self) -> None:
         rule = self._rule_from_editor()
@@ -195,9 +201,26 @@ class TkDictionaryPage(ttk.Frame):
             self._message_var.set(_NO_SELECTION_ERROR)
             return
         rules = list(self._dictionary.rules)
-        del rules[self._selected_index]
+        self._remember_if_learned(rules.pop(self._selected_index))
         self._dictionary = replace(self._dictionary, rules=tuple(rules))
         self._commit_edit()
+
+    def forget_learned_words(self) -> None:
+        kept: list[DictionaryRule] = []
+        for rule in self._dictionary.rules:
+            if isinstance(rule, LiteralRule) and rule.learned:
+                self._remember_if_learned(rule)
+            else:
+                kept.append(rule)
+        self._dictionary = replace(self._dictionary, rules=tuple(kept))
+        self._commit_edit()
+
+    def forgotten_learned_words(self) -> tuple[tuple[str, str], ...]:
+        return tuple(self._forgotten)
+
+    def _remember_if_learned(self, rule: DictionaryRule) -> None:
+        if isinstance(rule, LiteralRule) and rule.learned:
+            self._forgotten[(rule.spoken[0].strip(), rule.replacement)] = None
 
     def _rule_from_editor(
         self, original: DictionaryRule | None = None,
@@ -328,6 +351,7 @@ class TkDictionaryPage(ttk.Frame):
         self._numbers_var.set(dictionary.options.numbers)
         self._punctuation_model_var.set(dictionary.options.punctuation_model)
         self._dirty = False
+        self._forgotten = {}
         self._clear_editor()
         self._refresh_listbox()
         if dictionary.options.punctuation_model and not self._punctuation_available():
@@ -356,6 +380,9 @@ class TkDictionaryPage(ttk.Frame):
 
     def delete_button(self) -> ttk.Button:
         return self._delete_button
+
+    def forget_learned_button(self) -> ttk.Button:
+        return self._forget_learned_button
 
     def fillers_check(self) -> ttk.Checkbutton:
         return self._fillers_check
@@ -388,7 +415,8 @@ class TkDictionaryPage(ttk.Frame):
 def _rule_label(rule: DictionaryRule) -> str:
     if isinstance(rule, LiteralRule):
         source = ", ".join(_quote_if_glued(alias) for alias in rule.spoken)
-        return f"[literal] {source}  ->  {rule.replacement}"
+        learned = "  (learned)" if rule.learned else ""
+        return f"[literal] {source}  ->  {rule.replacement}{learned}"
     return f"[regex] {_quote_if_glued(rule.pattern)}  ->  {rule.replacement}"
 
 

@@ -12,14 +12,19 @@ from voicetotext.core.action_dispatcher import (
     ThreadedActionDispatcher,
 )
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
-from voicetotext.core.events import EngineLoadFailedEvent, MicrophoneMissingEvent
+from voicetotext.core.events import (
+    EngineLoadFailedEvent,
+    MicrophoneMissingEvent,
+    StateChangedEvent,
+    WritingNoticeEvent,
+)
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
 )
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
-from voicetotext.core.startup_log import milestone
+from voicetotext.core.startup_log import milestone, session_id
 from voicetotext.core.timestamps import utc_now
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics, content_recording_enabled
@@ -30,7 +35,7 @@ from voicetotext.edit_capture.delivery_recording_decorator import (
 )
 from voicetotext.edit_capture.observer import Win32EditObserver
 from voicetotext.edit_capture.recorder import EditRecorder
-from voicetotext.edit_capture.win32_foreground import foreground_hwnd
+from voicetotext.edit_capture.win32_foreground import foreground_hwnd, foreground_window
 from voicetotext.edit_capture.win32_input import caps_lock_enabled, click_count
 from voicetotext.hotkeys.key_parser import parse_hotkey_combo
 from voicetotext.hotkeys.listener import HotkeyListener
@@ -126,6 +131,13 @@ from voicetotext.transcription.streaming.streaming_engine import (
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
 from voicetotext.tray.win32_tray_adapter import build_win32_tray_adapter
+from voicetotext.writing.install import WritingPaths, managed_root, server_files
+from voicetotext.writing.learning import Learner
+from voicetotext.writing.llama_server import LlamaServer
+from voicetotext.writing.service import WritingService, warm_up_writing_model
+from voicetotext.writing.settings import read_writing_settings
+from voicetotext.writing.transforms import TransformStore
+from voicetotext.writing.voice_edit import VoiceEditor
 
 _logger = logging.getLogger(__name__)
 
@@ -156,6 +168,21 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     config.save()
 
 
+def migrate_stale_batch_block(config: JsonConfigAdapter) -> None:
+    """Drop the ``batch`` block an abandoned writing feature left behind.
+
+    Its values mean nothing to the ``writing`` settings that replaced it, so
+    they are removed rather than carried over.
+    """
+    document = config.get_all()
+    if "batch" not in document:
+        return
+    _logger.info("Removing the stale 'batch' settings block.")
+    del document["batch"]
+    config.replace_all(document)
+    config.save()
+
+
 def _ignore_delivery(text: str) -> None:
     return None
 
@@ -181,25 +208,46 @@ def _warn_if_synced_folder(directory: Path) -> None:
     )
 
 
-def _build_edit_capture(
-    config: JsonConfigAdapter, paths: AppPaths,
-) -> Win32EditObserver | None:
-    """The keystroke watcher, or nothing unless it was explicitly asked for.
+def _edit_capture_enabled(config: JsonConfigAdapter) -> bool:
+    return (
+        content_recording_enabled(config)
+        and config.get("diagnostics.capture_edits", False) is True
+    )
 
-    Off by default and deliberately config-only: it records what the user
-    types into the window a transcription was pasted into.
+
+def _learning_enabled(config: JsonConfigAdapter, learner: Learner | None) -> bool:
+    return learner is not None and read_writing_settings(config).learns
+
+
+def _build_edit_capture(
+    config: JsonConfigAdapter, paths: AppPaths, learner: Learner | None = None,
+) -> Win32EditObserver | None:
+    """The keystroke watcher, or nothing unless something needs it.
+
+    It feeds two sinks. ``edits.jsonl`` records what the user types into
+    the window a transcription was pasted into, so it stays off by default
+    and config-only. The learner keeps only word corrections and style
+    tallies, and follows the Writing page's learning checkboxes.
     """
-    if config.get("diagnostics.capture_edits", False) is not True:
+    capture = _edit_capture_enabled(config)
+    if not capture and not _learning_enabled(config, learner):
         return None
-    if not content_recording_enabled(config):
-        return None
-    _warn_if_synced_folder(paths.diagnostics_dir)
-    writer = JsonlWriter(paths.session_dir / "edits.jsonl")
-    _logger.info("Edit capture is on; writing to %s", paths.session_dir)
+    write_jsonl: Callable[[dict[str, object]], None] | None = None
+    if capture:
+        _warn_if_synced_folder(paths.diagnostics_dir)
+        write_jsonl = JsonlWriter(paths.session_dir / "edits.jsonl").append
+        _logger.info("Edit capture is on; writing to %s", paths.session_dir)
+
+    def write(event: dict[str, object]) -> None:
+        if write_jsonl is not None and _edit_capture_enabled(config):
+            write_jsonl(event)
+        if learner is not None and _learning_enabled(config, learner):
+            learner.observe(event)
+
     return Win32EditObserver(EditRecorder(
-        writer.append, utc_now,
-        lambda: content_recording_enabled(config)
-        and config.get("diagnostics.capture_edits", False) is True,
+        write, utc_now,
+        lambda: (write_jsonl is not None and _edit_capture_enabled(config))
+        or _learning_enabled(config, learner),
     ))
 
 
@@ -240,6 +288,7 @@ def _build_output(
     pipeline_mode: PipelineMode = PipelineMode.BATCH,
     models_dir: Path | None = None,
     on_delivered: Callable[[str], None] = _ignore_delivery,
+    writing: WritingService | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -300,8 +349,65 @@ def _build_output(
                 _paste_memory,
                 functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
             ),
+            cleanup=writing.cleanup_stage(dictionary) if writing is not None else None,
         ),
     )
+
+
+def _build_writing(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    event_bus: EventBus,
+    on_dictionary_changed: Callable[[], None],
+) -> WritingService:
+    """The local writing model: nothing runs until ``start``, and no file is read."""
+    settings = functools.partial(read_writing_settings, config)
+    writing_paths = WritingPaths(managed_root())
+    server = LlamaServer(
+        locate=lambda: server_files(writing_paths, settings()),
+        log_path=paths.session_dir / "writing-server.log",
+        warm_up=functools.partial(warm_up_writing_model, settings),
+    )
+    return WritingService(
+        settings,
+        writing_paths,
+        server,
+        Learner(
+            paths.base / "learning.json",
+            paths.dictionary_path,
+            settings,
+            on_dictionary_changed,
+            session_id(),
+        ),
+        TransformStore(paths.base / "transforms.json"),
+        notify=lambda message: event_bus.publish(WritingNoticeEvent(message=message)),
+        run_in_background=ThreadedActionDispatcher().dispatch,
+        read_window=foreground_window,
+    )
+
+
+def _start_once_idle(event_bus: EventBus, *starters: Callable[[], None]) -> None:
+    """Start background work the first time dictation is ready, never before.
+
+    Only once: after a writing server that gave up, later dictations must
+    not keep relaunching it; Retry on the Writing page does that.
+    """
+    def start(event: StateChangedEvent) -> None:
+        if event.new_state != AppState.IDLE.value:
+            return
+        event_bus.unsubscribe(StateChangedEvent, start)
+        for starter in starters:
+            starter()
+
+    event_bus.subscribe(StateChangedEvent, start)
+
+
+def _writing_seconds(
+    config: JsonConfigAdapter, writing: WritingService, audio_seconds: float,
+) -> float:
+    if _resolve_pipeline_mode(config) is not PipelineMode.BATCH:
+        return 0.0
+    return writing.estimated_seconds(audio_seconds)
 
 
 def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
@@ -822,6 +928,7 @@ def build_app(
     migrate_engine_field(config)
     migrate_output_mode(config)
     migrate_language(config)
+    migrate_stale_batch_block(config)
 
     if event_bus is None:
         event_bus = SimpleEventBus()
@@ -839,9 +946,13 @@ def build_app(
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
     diagnostics = SessionDiagnostics(paths, config, registry, hardware_detector)
     atexit.register(diagnostics.dispose)
-    edit_capture = _build_edit_capture(config, paths)
+    # The learner adds words to dictionary.json from the edit-capture thread;
+    # the rebuilt output chain is what puts them to use.
+    writing = _build_writing(
+        config, paths, event_bus, lambda: _use_learned_words(),
+    )
+    edit_capture = _build_edit_capture(config, paths, writing.learner)
     if edit_capture is not None:
-        edit_capture.start()
         atexit.register(edit_capture.stop)
 
     recorder = SoundDeviceAdapter(
@@ -869,6 +980,7 @@ def build_app(
         output_mode, gui_dispatcher, paths.dictionary_path,
         pipeline_mode, paths.models_dir,
         _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+        writing=writing,
     )
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -894,7 +1006,26 @@ def build_app(
             config.get("transcription.mode", "batch") == "streaming"
         ),
         prepare_audio=functools.partial(_prepare_audio, config),
+        voice_edit=VoiceEditor(
+            writing.client,
+            deadline=lambda: read_writing_settings(config).deadline_seconds,
+            read_context=read_caret_context,
+            read_window=foreground_window,
+        ),
+        writing_seconds=functools.partial(_writing_seconds, config, writing),
     )
+
+    def _use_learned_words() -> None:
+        output_mode = _resolve_output_mode(config)
+        pipeline_mode = _resolve_pipeline_mode(config)
+        record_and_transcribe_use_case.set_output(
+            _build_output(
+                output_mode, gui_dispatcher, paths.dictionary_path,
+                pipeline_mode, paths.models_dir,
+                _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+                writing=writing,
+            )
+        )
 
     listener = _build_hotkey_listener(
         config, record_and_transcribe_use_case, _key_observer(edit_capture),
@@ -956,11 +1087,13 @@ def build_app(
                 dictionary_path=paths.dictionary_path,
                 models_dir=paths.models_dir,
                 edit_capture=edit_capture,
+                writing=writing,
             ),
             on_capture_state_changed=lambda recording: (
                 app.pause_listener() if recording else app.resume_listener()
             ),
             schedule=gui_dispatcher.dispatch,
+            writing=writing,
         )
         settings_window_ref["current"] = window
         window.show()
@@ -985,7 +1118,9 @@ def build_app(
         ),
         on_open_settings=open_settings,
         download_manager=download_manager,
-        owned_disposables=(overlay,) if overlay is not None else (),
+        owned_disposables=(
+            (overlay, writing) if overlay is not None else (writing,)
+        ),
     )
 
     config.save()
@@ -998,6 +1133,12 @@ def build_app(
         model_name, combo, mode,
     )
 
+    # Keys observed before this only queue up; the observer catches up.
+    _start_once_idle(
+        event_bus,
+        writing.start,
+        *((edit_capture.start,) if edit_capture is not None else ()),
+    )
     _spawn_engine_load_thread(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,
@@ -1017,6 +1158,7 @@ def apply_settings(
     dictionary_path: Path | None = None,
     models_dir: Path | None = None,
     edit_capture: Win32EditObserver | None = None,
+    writing: WritingService | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -1032,8 +1174,12 @@ def apply_settings(
                 output_mode, gui_dispatcher, dictionary_path,
                 pipeline_mode, models_dir,
                 _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+                writing=writing,
             )
         )
+
+    if changes.writing_server_changed and writing is not None:
+        writing.restart_server()
 
     if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(

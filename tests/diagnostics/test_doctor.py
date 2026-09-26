@@ -9,9 +9,27 @@ is wrapped so a missing or broken module degrades to an
 """
 
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+import voicetotext.diagnostics.doctor as doctor
 from voicetotext.diagnostics.doctor import run_doctor
+from voicetotext.writing.install import WritingPaths
+from voicetotext.writing.settings import WritingSettings
+
+
+@pytest.fixture(autouse=True)
+def _no_real_writing_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Never launch the machine's own writing server from the test suite."""
+    monkeypatch.setattr(
+        doctor,
+        "_read_writing_model_info",
+        lambda: doctor.writing_model_report(
+            WritingSettings(), WritingPaths(tmp_path / "writing"), tmp_path / "server.log",
+        ),
+    )
 
 
 class TestDoctorReportShape:
@@ -99,3 +117,22 @@ class TestDoctorReportsInstalledVersions:
         assert "[torch]" in report.lower() or "[Torch]" in report
         # No stack trace leaked
         assert "Traceback" not in report
+
+
+class TestDoctorReportsTheWritingModel:
+    def test_a_missing_writing_model_is_reported_with_where_to_install_it(self) -> None:
+        report = run_doctor()
+
+        assert "[Writing model]" in report
+        assert "installed: no (Settings > Writing > Install)" in report
+        assert "cleanup: light" in report
+
+    def test_a_broken_writing_probe_degrades_to_an_error_line(self) -> None:
+        def explode() -> list[str]:
+            raise OSError("config.json is locked")
+
+        with patch.object(doctor, "_read_writing_model_info", explode):
+            report = run_doctor()
+
+        assert "[Writing model]" in report
+        assert "ERROR: config.json is locked" in report

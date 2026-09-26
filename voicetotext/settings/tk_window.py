@@ -34,18 +34,20 @@ from voicetotext.settings.tk_pages.dictionary_page import TkDictionaryPage
 from voicetotext.settings.tk_pages.hotkeys_page import TkHotkeysPage
 from voicetotext.settings.tk_pages.output_page import TkOutputPage
 from voicetotext.settings.tk_pages.transcription_page import TkTranscriptionPage
+from voicetotext.settings.tk_pages.writing_page import TkWritingPage
 from voicetotext.settings.tk_state_bridge import TkStateBridge
 from voicetotext.settings.theme import Theme, apply_theme, theme_for
 from voicetotext.settings.win32_ime_composition_hook import (
     Win32ImeCompositionHook,
 )
 from voicetotext.settings.win32_titlebar import set_titlebar_dark
+from voicetotext.writing.service import WritingService
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
 ChangeSetCallback = Callable[[ChangeSet], None]
 CaptureStateCallback = Callable[[bool], None]
 
-_SECTIONS = ["Transcription", "Audio", "Hotkeys", "Output", "Dictionary"]
+_SECTIONS = ["Transcription", "Audio", "Hotkeys", "Output", "Writing", "Dictionary"]
 
 
 def _run_now(action: Callable[[], None]) -> None:
@@ -86,8 +88,11 @@ class TkSettingsWindow(tkinter.Toplevel):
         color_scheme: ColorScheme | None = None,
         confirm_license: LicenseConsentPrompt = ask_license_consent,
         microphones: Microphones | None = None,
+        writing: WritingService | None = None,
     ) -> None:
         super().__init__(master)
+        # The first-run window has no writing model to manage yet.
+        self._writing = writing
         self._microphones = microphones or Microphones()
         self._shown_page: ttk.Frame | None = None
         # Hide immediately so the half-built, not-yet-themed window never
@@ -151,6 +156,8 @@ class TkSettingsWindow(tkinter.Toplevel):
             body, width=16, exportselection=False, activestyle="none",
         )
         for label in _SECTIONS:
+            if label == "Writing" and self._writing is None:
+                continue
             self._sidebar.insert("end", f"  {label}")
         self._sidebar.bind("<<ListboxSelect>>", self._on_sidebar_select)
         # Inset from the window edge so the tabs are not flush against it.
@@ -180,12 +187,18 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._output_page = TkOutputPage(content)
         self._dictionary_page = TkDictionaryPage(content)
         self._dictionary_page.set_dictionary(self._service.dictionary_rules())
+        self._writing_page = (
+            TkWritingPage(content, self._writing, self._schedule)
+            if self._writing is not None
+            else None
+        )
 
-        self._pages = [
+        self._pages: list[ttk.Frame] = [
             self._transcription_page,
             self._audio_page,
             self._hotkeys_page,
             self._output_page,
+            *([self._writing_page] if self._writing_page is not None else []),
             self._dictionary_page,
         ]
         for page in self._pages:
@@ -239,6 +252,8 @@ class TkSettingsWindow(tkinter.Toplevel):
         self._output_page.set_capture_content(draft.capture_content)
         self._audio_page.set_device(draft.input_device)
         self._audio_page.set_boost_quiet_speech(draft.boost_quiet_speech)
+        if self._writing_page is not None:
+            self._writing_page.set_settings(draft.writing)
 
     def _on_choose_logs_folder(self) -> None:
         selected = filedialog.askdirectory(
@@ -344,6 +359,11 @@ class TkSettingsWindow(tkinter.Toplevel):
             crisperwhisper_mode=(
                 self._transcription_page.current_crisperwhisper_mode()
             ),
+            writing=(
+                self._writing_page.settings()
+                if self._writing_page is not None
+                else self._service.current_draft().writing
+            ),
         )
 
     def _on_save_clicked(self) -> None:
@@ -369,7 +389,9 @@ class TkSettingsWindow(tkinter.Toplevel):
             )
             return
         changes = self._service.apply_draft(draft)
-        self._pending_changes = self._save_dictionary_edits(changes)
+        self._pending_changes = self._save_transform_edits(
+            self._save_dictionary_edits(changes),
+        )
 
         if changes.engine_reload_required and not self._first_run:
             self._disable_save_button()
@@ -399,6 +421,18 @@ class TkSettingsWindow(tkinter.Toplevel):
         if not self._dictionary_page.is_dirty():
             return changes
         self._service.save_dictionary_rules(self._dictionary_page.dictionary())
+        if self._writing is not None:
+            self._writing.forget_learned_words(
+                self._dictionary_page.forgotten_learned_words(),
+            )
+        return replace(changes, output_changed=True)
+
+    def _save_transform_edits(self, changes: ChangeSet) -> ChangeSet:
+        if self._writing is None or self._writing_page is None:
+            return changes
+        if not self._writing_page.transforms_dirty():
+            return changes
+        self._writing.save_transforms(self._writing_page.transforms())
         return replace(changes, output_changed=True)
 
     def _finalize_save(self) -> None:
@@ -566,6 +600,9 @@ class TkSettingsWindow(tkinter.Toplevel):
 
     def dictionary_page(self) -> TkDictionaryPage:
         return self._dictionary_page
+
+    def writing_page(self) -> TkWritingPage | None:
+        return self._writing_page
 
     def save_button(self) -> ttk.Button:
         return self._save_button

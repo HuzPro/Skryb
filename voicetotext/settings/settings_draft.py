@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.settings.transcription_mode import TranscriptionMode
+from voicetotext.writing.settings import WritingSettings
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
+    writing: WritingSettings = WritingSettings()
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,8 @@ class ChangeSet:
     output_changed: bool
     mode_changed: bool = False
     diagnostics_changed: bool = False
+    # The writing server has to be relaunched for a new runtime or model.
+    writing_server_changed: bool = False
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
@@ -77,6 +81,7 @@ class ChangeSet:
             or mode_changed
             or crisperwhisper_mode_changed
             or original.model_size != updated.model_size
+            or original.writing != updated.writing
         )
         return cls(
             engine_reload_required=engine_reload_required,
@@ -84,6 +89,10 @@ class ChangeSet:
             output_changed=output_changed,
             mode_changed=mode_changed,
             diagnostics_changed=original.capture_content != updated.capture_content,
+            writing_server_changed=(
+                original.writing.runtime_path != updated.writing.runtime_path
+                or original.writing.model_path != updated.writing.model_path
+            ),
         )
 
     @property
