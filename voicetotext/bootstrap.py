@@ -1272,6 +1272,11 @@ def build_app(
     )
     launcher = ShellLauncher(api_server, notify=lambda message: app.notify(message))
 
+    def show_page(page: str) -> None:
+        # Looking for the exe and starting it stay off the GUI thread, which
+        # the tray menu and the notice buttons call from.
+        action_dispatcher.dispatch(functools.partial(launcher.open, page))
+
     hot_plug = MicrophoneHotPlug(
         root,
         microphones,
@@ -1287,7 +1292,7 @@ def build_app(
         notice,
         gui_dispatcher.dispatch,
         retry=record_and_transcribe_use_case.retry_last_recording,
-        open_history=functools.partial(launcher.open, "history"),
+        open_history=functools.partial(show_page, "history"),
         paste_again=record_and_transcribe_use_case.paste_last,
         copy_again=record_and_transcribe_use_case.copy_last,
     )
@@ -1303,14 +1308,14 @@ def build_app(
         hotkey_listener=listener,
         tray_factory=functools.partial(
             build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
-            on_history_clicked=functools.partial(launcher.open, "history"),
+            on_history_clicked=functools.partial(show_page, "history"),
             on_paste_last_clicked=record_and_transcribe_use_case.paste_last,
             on_copy_last_clicked=record_and_transcribe_use_case.copy_last,
             list_microphones=functools.partial(_microphone_menu, config, microphones),
             on_microphone_chosen=functools.partial(_choose_microphone, config),
             on_devices_changed=hot_plug.devices_changed,
         ),
-        on_open_settings=functools.partial(launcher.open, "settings"),
+        on_open_settings=functools.partial(show_page, "settings"),
         download_manager=download_manager,
         owned_disposables=(
             (overlay, ducking, history_pruner, writing) if overlay is not None

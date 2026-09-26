@@ -27,6 +27,9 @@ _HOST = "127.0.0.1"
 _EVENTS_PATH = "/api/events"
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 _PARAMETER = re.compile(r"\{(\w+)\}")
+# The event stream's request line carries the token, and the session log
+# keeps debug lines.
+_TOKEN_IN_QUERY = re.compile(r"token=[^&\s]*")
 _CORS_HEADERS = (
     ("Access-Control-Allow-Origin", "*"),
     ("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS"),
@@ -170,7 +173,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         # The windowless app has no stderr for the default to write to.
-        _logger.debug("UI API: " + format, *args)
+        _logger.debug("UI API: %s", _TOKEN_IN_QUERY.sub("token=***", format % args))
 
     def _serve(self, method: str) -> None:
         url = urlsplit(self.path)
