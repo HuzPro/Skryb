@@ -223,6 +223,7 @@ def probed_hardware_kind(
     config: ConfigurationStore,
     registry: EngineRegistry,
     hardware_detector: HardwareDetector,
+    models_dir: Path,
 ) -> str:
     """The hardware kind for diagnostics, or ``unprobed`` if none was taken.
 
@@ -230,7 +231,7 @@ def probed_hardware_kind(
     has no reason to pay it, and a diagnostics field is not reason
     enough - so it records that no probe happened rather than forcing one.
     """
-    if not startup_requires_torch(config, registry):
+    if not startup_requires_torch(config, registry, models_dir):
         return UNPROBED_HARDWARE_KIND
     return hardware_detector.detect().kind
 
