@@ -30,28 +30,43 @@ export function useMicrophones(): { microphones: Microphone[]; rescan: () => Pro
 }
 
 type MeterState = "listening" | "failed" | "silent";
+const COULD_NOT_OPEN = "This microphone could not be opened.";
+
+let meterRequests: Promise<unknown> = Promise.resolve();
+
+/** One at a time, so switching microphones never lets the old "off" land after the new "on". */
+function sendMeter(device: string, on: boolean): Promise<unknown> {
+  meterRequests = meterRequests.catch(() => undefined).then(() => api.post("/api/microphones/meter", { device, on }));
+  return meterRequests;
+}
 
 /** Streams the level of `device` into the bars while mounted; the core only holds the microphone open meanwhile. */
 function LevelMeter({ device }: { device: string }) {
   const bars = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<MeterState>("listening");
+  const [failure, setFailure] = useState(COULD_NOT_OPEN);
 
   useEffect(() => {
     let alive = true;
     let heard = false;
     setState("listening");
     const stopListening = onServerEvent((name, data) => {
-      if (name !== "meter" || !bars.current) return;
+      if (name !== "meter") return;
       if (!heard) setState("listening");
       heard = true;
+      if (!bars.current) return;
       const lit = Math.round(Math.min(Math.max((data as { level: number }).level, 0), 1) * METER_BARS);
       Array.from(bars.current.children).forEach((bar, index) => {
         (bar as HTMLElement).style.opacity = index < lit ? "1" : "0.2";
       });
     });
-    const turnOff = () => api.post("/api/microphones/meter", { device, on: false });
+    const turnOff = () => sendMeter(device, false);
     const forget = onBeforeClose(turnOff);
-    api.post("/api/microphones/meter", { device, on: true }).catch(() => alive && setState("failed"));
+    sendMeter(device, true).catch((error: unknown) => {
+      if (!alive) return;
+      setFailure(errorText(error) || COULD_NOT_OPEN);
+      setState("failed");
+    });
     const watchdog = setTimeout(() => alive && !heard && setState("silent"), NO_SIGNAL_AFTER_MS);
     return () => {
       alive = false;
@@ -65,7 +80,7 @@ function LevelMeter({ device }: { device: string }) {
   return (
     <div className="flex items-center gap-4">
       <span className={cn("text-[12.5px]", state === "failed" ? "text-destructive" : "text-primary")}>
-        {state === "failed" ? "This microphone could not be opened." : "Speak to test the microphone."}
+        {state === "failed" ? failure : "Speak to test the microphone."}
       </span>
       {state === "listening" ? (
         <div ref={bars} aria-hidden className="ml-auto flex h-5 items-center gap-[3px]">

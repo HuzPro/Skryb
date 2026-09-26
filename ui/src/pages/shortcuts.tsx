@@ -73,8 +73,8 @@ export function useCapture(): Capture {
   useServerEvent((name, data) => {
     const row = rowRef.current;
     if (name !== "capture" || row === null) return;
-    const event = data as { keys?: string; error?: string };
-    if (event.error) setError({ row, message: event.error });
+    const event = data as { keys?: string; error?: string; cancelled?: boolean };
+    if (event.error && !event.cancelled) setError({ row, message: event.error });
     else if (event.keys && event.keys !== "esc") apply.current(event.keys);
     stop();
   });

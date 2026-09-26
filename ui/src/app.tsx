@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AudioLines, BookA, ClipboardPaste, History, Keyboard, Mic, PenLine } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
-import { ConnectionBanner, Prompts, SaveBar, Sidebar, TopBar, type NavItem } from "./components/shell";
+import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, type NavItem } from "./components/shell";
 import { connectTo } from "./lib/api";
 import { guardClose, onRelaunch, runBeforeClose, windowControls, type LaunchArgs, type Page } from "./lib/platform";
 import { useServerEvents } from "./lib/sse";
@@ -70,20 +70,22 @@ function Shell() {
   }, [mayClose]);
 
   return (
-    <div className="relative flex h-full">
-      {setup ? null : <Sidebar items={NAV} />}
-      <div className="relative flex min-w-0 flex-1 flex-col">
-        <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()}>
-          {setup ? <span className="pointer-events-none text-[13px] font-semibold">VoiceToText</span> : null}
-        </TopBar>
-        <main key={location.pathname} className="min-h-0 flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
-        {setup ? null : <SaveBar />}
-        {lost ? <ConnectionBanner onQuit={windowControls.close} /> : null}
+    <LostContext.Provider value={lost}>
+      <div className="relative flex h-full">
+        {setup ? null : <Sidebar items={NAV} />}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()}>
+            {setup ? <span className="pointer-events-none text-[13px] font-semibold">VoiceToText</span> : null}
+          </TopBar>
+          <main key={location.pathname} className="min-h-0 flex-1 overflow-y-auto">
+            <Outlet />
+          </main>
+          {setup ? null : <SaveBar />}
+          {lost ? <ConnectionBanner onQuit={windowControls.close} /> : null}
+        </div>
+        <Prompts />
       </div>
-      <Prompts />
-    </div>
+    </LostContext.Provider>
   );
 }
 

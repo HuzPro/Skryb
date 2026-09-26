@@ -181,6 +181,7 @@ export interface License {
   id: string;
   title: string;
   text: string;
+  url?: string;
 }
 
 export interface Engines {

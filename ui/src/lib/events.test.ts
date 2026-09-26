@@ -52,6 +52,16 @@ describe("server events", () => {
     expect(failed.snapshot.models?.[2]?.download).toMatchObject({ state: "failed", error: "Disk full" });
   });
 
+  it("marks a deleted model not installed and asks for a fresh list", () => {
+    const { snapshot, refetch } = reduceEvent({ models }, "download", { name: "parakeet-tdt-0.6b-v3", state: "deleted", bytes_done: 0, bytes_total: 0, error: "" });
+    expect(snapshot.models?.[0]).toMatchObject({ installed: false, download: null });
+    expect(refetch).toEqual(["models"]);
+  });
+
+  it("refetches the microphones when one is plugged in", () => {
+    expect(reduceEvent({ models }, "microphones", { name: "USB Microphone (Røde NT-USB Mini)", will_be_used: true })).toEqual({ snapshot: { models }, refetch: ["microphones"] });
+  });
+
   it("refetches the list when a download names a model it does not know", () => {
     const { snapshot, refetch } = reduceEvent({ models }, "download", { name: "new-model", state: "downloading", bytes_done: 1, bytes_total: 2, error: "" });
     expect(snapshot.models).toBe(models);
@@ -66,6 +76,13 @@ describe("server events", () => {
     }
     expect(snapshot.models?.[2]?.download?.bytes_done).toBe(1000);
     expect(snapshot.models?.[0]).toBe(models[0]);
+  });
+
+  it("reads the core's engine event, where state and flags come together", () => {
+    const failed = reduceEvent({ app }, "engine", { state: "failed", loading: false, ready: false, error: "Model file missing", model: "crisperwhisper-2.0-large" });
+    expect(failed.snapshot.app?.engine).toEqual({ ready: false, loading: false, error: "Model file missing", model: "crisperwhisper-2.0-large" });
+    const ready = reduceEvent({ app }, "engine", { state: "ready", loading: false, ready: true, error: null, model: "crisperwhisper-2.0-large" });
+    expect(ready.snapshot.app?.engine).toEqual({ ready: true, loading: false, error: null, model: "crisperwhisper-2.0-large" });
   });
 
   it("follows the engine through loading, ready and failed in either event shape", () => {
