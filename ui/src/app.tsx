@@ -29,7 +29,40 @@ const NAV: NavItem[] = [
   { path: "transcription", label: "Transcription", icon: AudioLines },
 ];
 
-const PAGE_PATHS: Record<Page, string> = { history: "/history", settings: "/dictionary", setup: "/setup" };
+const LAST_SETTINGS_PAGE = "last-settings-page";
+const SETTINGS_PAGES = NAV.map((item) => item.path).filter((path) => path !== "history");
+
+type PageMemory = Pick<Storage, "getItem" | "setItem">;
+
+function browserStorage(): PageMemory | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** `--page settings` reopens the settings page shown last, Transcription the first time. */
+export function launchPath(page: Page, memory: PageMemory | null = browserStorage()): string {
+  if (page === "history" || page === "setup") return `/${page}`;
+  let last: string | null = null;
+  try {
+    last = memory?.getItem(LAST_SETTINGS_PAGE) ?? null;
+  } catch {
+    last = null;
+  }
+  return `/${last && SETTINGS_PAGES.includes(last) ? last : "transcription"}`;
+}
+
+export function rememberPage(pathname: string, memory: PageMemory | null = browserStorage()): void {
+  const page = pathname.slice(1);
+  if (!SETTINGS_PAGES.includes(page)) return;
+  try {
+    memory?.setItem(LAST_SETTINGS_PAGE, page);
+  } catch {
+    // Storage blocked: the next launch starts on Transcription.
+  }
+}
 
 const LaunchContext = createContext<LaunchArgs | null>(null);
 
@@ -43,7 +76,8 @@ function Shell() {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const location = useLocation();
-  const setup = location.pathname === PAGE_PATHS.setup;
+  const setup = location.pathname === "/setup";
+  useEffect(() => rememberPage(location.pathname), [location.pathname]);
 
   const mayClose = useCallback(async (): Promise<boolean> => {
     if (!storeRef.current.anyDirty()) return true;
@@ -65,7 +99,7 @@ function Shell() {
         window.location.reload();
         return;
       }
-      void navigateRef.current(PAGE_PATHS[next.page] ?? PAGE_PATHS.settings);
+      void navigateRef.current(launchPath(next.page));
     });
   }, [mayClose, launch]);
 
@@ -102,7 +136,7 @@ const PAGES = [
 
 export function App({ launch }: { launch: LaunchArgs }) {
   const router = useMemo(
-    () => createMemoryRouter([{ path: "/", element: <Shell />, children: PAGES }], { initialEntries: [PAGE_PATHS[launch.page] ?? PAGE_PATHS.settings] }),
+    () => createMemoryRouter([{ path: "/", element: <Shell />, children: PAGES }], { initialEntries: [launchPath(launch.page)] }),
     [launch],
   );
   return (
