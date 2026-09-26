@@ -1,6 +1,8 @@
+import functools
 import logging
 import threading
 import tkinter
+import tkinter.font
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -67,10 +69,30 @@ _NEW_ENTRY_EVENTS: tuple[type[DomainEvent], ...] = (
     TranscriptionCompletedEvent, TranscriptionFailedEvent, RecordingCancelledEvent,
 )
 _PADDING = 16
+# Keeps cut-short text clear of the Length column beside it.
+_TEXT_COLUMN_GAP = 16
+_ELLIPSIS = "…"
 
 
 def _start_daemon_thread(work: Callable[[], None]) -> None:
     threading.Thread(target=work, name="history-load", daemon=True).start()
+
+
+def _fitted(text: str, width: int, char_width: Callable[[str], int]) -> str:
+    """*text* cut short with an ellipsis so it is at most *width* pixels wide.
+
+    A Treeview cell never elides on its own; it runs into the next column.
+    """
+    budget = width - char_width(_ELLIPSIS)
+    used = 0
+    cut: int | None = None
+    for index, character in enumerate(text):
+        used += char_width(character)
+        if cut is None and used > budget:
+            cut = index
+        if used > width:
+            return text[:cut].rstrip() + _ELLIPSIS
+    return text
 
 
 def _play_wav(path: Path) -> float:
@@ -223,6 +245,10 @@ class HistoryWindow:
         self._tree.configure(yscrollcommand=self._scroll_list)
         self._tree.grid(row=1, column=0, sticky="nsew")
         self._tree.bind("<<TreeviewSelect>>", lambda _event: self._render_selection())
+        # The column takes its new width when the tree lays out, after this event.
+        self._tree.bind("<Configure>", lambda _event: self._root.after_idle(self._refit_texts))
+        self._char_width = functools.cache(tkinter.font.Font(root=window, font=BODY_FONT).measure)
+        self._fitted_width = 0
         self._hint = ttk.Label(
             frame, text="", style=CARD_MUTED_STYLE, wraplength=PAGE_TEXT_WRAP,
             justify="center",
@@ -300,12 +326,13 @@ class HistoryWindow:
         selected = self._selected()
         self._shown = filter_entries(self._entries, self._query.get())
         self._tree.delete(*self._tree.get_children())
+        width = self._fitted_width = self._text_width()
         for position, entry in enumerate(self._shown):
             self._tree.insert(
                 "", "end", iid=str(position),
                 values=(
                     local_time(entry),
-                    preview(entry),
+                    _fitted(preview(entry), width, self._char_width),
                     format_duration(entry.audio_seconds),
                     entry.status,
                 ),
@@ -315,6 +342,16 @@ class HistoryWindow:
             self._reselect(selected.key)
         self._show_hint(self._hint_text)
         self._render_selection()
+
+    def _text_width(self) -> int:
+        return int(self._tree.column("text", "width")) - _TEXT_COLUMN_GAP
+
+    def _refit_texts(self) -> None:
+        if self._window is None or self._text_width() == self._fitted_width:
+            return
+        width = self._fitted_width = self._text_width()
+        for position, entry in enumerate(self._shown):
+            self._tree.set(str(position), "text", _fitted(preview(entry), width, self._char_width))
 
     def _reselect(self, key: tuple[str, int]) -> None:
         for position, entry in enumerate(self._shown):
