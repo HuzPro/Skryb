@@ -147,7 +147,7 @@ class TestRescanning:
         assert Microphones(query=broken).labels(["Mic A"]) == {"Mic A": "Mic A"}
 
 
-def _crowded_query():
+def crowded_device_query():
     """A thousand-odd inputs: MME cuts, WASAPI full names, duplicates, blanks."""
     devices = [_device("Microsoft Sound Mapper - Input")]
     for index in range(1000):
@@ -174,25 +174,25 @@ class TestPreferredMicrophones:
             "Microphone (Maono PD300X Microphone)",
         ]
 
-        chosen = connected_preferred_microphone(preferred, _crowded_query)
+        chosen = connected_preferred_microphone(preferred, crowded_device_query)
 
         assert chosen == "Headset (Jabra Evolve 20 MS Ste"
 
     def test_a_name_saved_the_way_windows_cut_it_still_matches(self):
         chosen = connected_preferred_microphone(
-            ["Microphone (Maono PD300X Microp"], _crowded_query,
+            ["Microphone (Maono PD300X Microp"], crowded_device_query,
         )
 
         assert chosen == "Microphone (Maono PD300X Microp"
 
     def test_unicode_names_match_exactly(self):
         assert connected_preferred_microphone(
-            ["Mikrofon (Gerät für Café ✓)"], _crowded_query,
+            ["Mikrofon (Gerät für Café ✓)"], crowded_device_query,
         ) == "Mikrofon (Gerät für Café ✓)"
 
     def test_nothing_connected_from_the_list_means_no_preference(self):
         assert connected_preferred_microphone(
-            ["Unplugged Blue Yeti", "", "   "], _crowded_query,
+            ["Unplugged Blue Yeti", "", "   "], crowded_device_query,
         ) is None
 
     def test_an_empty_list_never_touches_the_audio_stack(self):

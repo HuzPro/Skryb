@@ -12,7 +12,12 @@ import numpy as np
 import pytest
 
 from voicetotext.core.exceptions import AudioRecorderError
+from tests.recording.test_input_devices import crowded_device_query
 from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.recording.input_devices import (
+    connected_preferred_microphone,
+    input_device_index,
+)
 from voicetotext.recording.recorder import AudioRecorder
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 
@@ -503,3 +508,43 @@ class TestPreferredMicrophonesAtRecordingStart:
 
         assert adapter.device_name == ""
         assert mics.missing == ["Blue Yeti"]
+
+
+class TestChoosingAmongAThousandDevices:
+    @pytest.mark.parametrize(
+        ("preferred", "chosen", "opened"),
+        [
+            (
+                ["Unplugged Rode", "Headset (Jabra Evolve 20 MS Stereo)"],
+                "Microphone (Maono PD300X Microp",
+                "Headset (Jabra Evolve 20 MS Ste",
+            ),
+            (
+                ["Unplugged Rode", ""],
+                "Mikrofon (Gerät für Café ✓)",
+                "Mikrofon (Gerät für Café ✓)",
+            ),
+            (["Unplugged Rode"], "Unplugged Blue Yeti", ""),
+            ([], "", ""),
+        ],
+    )
+    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    def test_first_connected_preference_then_the_chosen_one_then_the_default(
+        self, mock_sd, preferred, chosen, opened,
+    ):
+        adapter = SoundDeviceAdapter(
+            device_name=lambda: chosen,
+            device_index=lambda name: input_device_index(name, crowded_device_query),
+            refresh_devices=lambda: None,
+            preferred_names=lambda: preferred,
+            find_preferred=lambda wishes: connected_preferred_microphone(
+                wishes, crowded_device_query,
+            ),
+        )
+
+        adapter.start_recording()
+
+        assert adapter.device_name == opened
+        devices, _host_api = crowded_device_query()
+        device = _opened_device(mock_sd)
+        assert (devices[device]["name"] if device is not None else "") == opened
