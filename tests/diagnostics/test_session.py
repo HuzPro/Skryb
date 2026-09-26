@@ -15,7 +15,7 @@ from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.model_info import ModelInfo
+from voicetotext.transcription.model_info import ModelInfo, get_model_info
 from voicetotext.transcription.result import TranscriptionResult
 
 pytestmark = pytest.mark.integration
@@ -55,6 +55,50 @@ def _audio() -> AudioSegment:
 
 
 class TestSessionEvents:
+    @pytest.mark.parametrize(
+        ("configured_engine", "ct2_installed", "expected_hardware"),
+        [
+            ("auto", True, "unprobed"),
+            ("auto", False, "amd_rocm"),
+            ("crisperwhisper_ct2", True, "unprobed"),
+            ("crisperwhisper", True, "amd_rocm"),
+        ],
+    )
+    def test_startup_diagnostics_only_probe_hardware_for_the_selected_engine(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        configured_engine: str,
+        ct2_installed: bool,
+        expected_hardware: str,
+    ) -> None:
+        paths = _session_paths(tmp_path / "VoiceToText – آواز")
+        model = get_model_info("crisperwhisper-2.0-turbo")
+        repo = paths.models_dir / f"models--{model.repo_id.replace('/', '--')}"
+        snapshot = repo / "snapshots" / model.revision
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.safetensors").write_bytes(b"weights")
+        (snapshot / "config.json").write_text("{}", encoding="utf-8")
+        (repo / "refs").mkdir()
+        (repo / "refs" / "main").write_text(model.revision, encoding="ascii")
+        monkeypatch.setattr(
+            "voicetotext.transcription.engine_factory._ctranslate2_installed",
+            lambda: ct2_installed,
+        )
+        config = FakeConfig({
+            "transcription.model_size": model.name,
+            "transcription.engine": configured_engine,
+            "transcription.device": "auto",
+        })
+        detector = FakeHardwareDetector()
+
+        diagnostics = SessionDiagnostics(paths, config, _REGISTRY, detector)
+        diagnostics.dispose()
+
+        started = _events(paths)[0]
+        assert started["hardware_kind"] == expected_hardware
+        assert (detector.detect_calls == 0) == (expected_hardware == "unprobed")
+
     def test_should_record_app_started_for_unknown_model(
         self,
         tmp_path: Path,

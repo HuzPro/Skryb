@@ -292,6 +292,7 @@ class SessionDiagnostics:
                 "device": self._active_device,
                 "hardware_kind": probed_hardware_kind(
                     self._config, self._registry, self._hardware_detector,
+                    self._paths.models_dir,
                 ),
                 "os": platform.platform(),
                 "python_version": platform.python_version(),
