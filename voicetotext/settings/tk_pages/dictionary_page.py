@@ -12,13 +12,32 @@ from voicetotext.output.dictionary_config import (
     RegexRule,
 )
 from voicetotext.output.punctuation_stage import sherpa_onnx_available
-from voicetotext.settings.theme import HEADING_STYLE
+from voicetotext.settings.theme import (
+    BODY_FONT,
+    CARD_BODY_STYLE,
+    CARD_MUTED_STYLE,
+    CARD_PADDING,
+    CARD_TEXT_STYLE,
+    CARD_TEXT_WRAP,
+    CHECK_STYLE,
+    CONTROL_GAP,
+    DANGER_BUTTON_STYLE,
+    LINK_BUTTON_STYLE,
+    RADIO_STYLE,
+    RowGroup,
+    card,
+    hide_while_empty,
+    page_note,
+    section_heading,
+    switch,
+)
 
 _HINT = (
     "Replace spoken words or phrases with typed text. Separate literal aliases "
     "with commas; regex rules use one pattern. A space at the start or end of "
     "the aliases box glues every alias to the neighbouring text."
 )
+_EMPTY_LIST = "No words yet. Add one below, or correct a pasted word and it is learned."
 _EMPTY_SPOKEN_ERROR = "At least one spoken alias or regex pattern is required."
 _INVALID_REGEX_ERROR = "The regex pattern or replacement is invalid: {}"
 _NO_SELECTION_ERROR = "Select a rule from the list first."
@@ -28,6 +47,7 @@ _PUNCTUATION_INSTALL_MESSAGE = (
     "Punctuation restoration requires the optional package: "
     "pip install voicetotext[punct]"
 )
+_TABLE_ROWS = 8
 
 
 class TkDictionaryPage(ttk.Frame):
@@ -57,67 +77,83 @@ class TkDictionaryPage(ttk.Frame):
         self._build()
 
     def _build(self) -> None:
-        ttk.Label(self, text="Dictionary", style=HEADING_STYLE).pack(anchor="w")
-        ttk.Label(self, text=_HINT, wraplength=520, justify="left").pack(
-            anchor="w", pady=(2, 6),
-        )
+        section_heading(self, "Cleanup", first=True)
         self._build_options()
-
-        self._listbox = tkinter.Listbox(self, height=9, exportselection=False)
-        self._listbox.bind("<<ListboxSelect>>", self._on_listbox_select)
-        self._listbox.pack(fill="both", expand=True, pady=(6, 0))
-
+        section_heading(self, "Words and replacements")
+        page_note(self, _HINT).pack(anchor="w", pady=(0, CONTROL_GAP))
+        self._build_table()
         self._build_editor()
-        ttk.Label(self, textvariable=self._message_var, wraplength=520).pack(
-            anchor="w", pady=(5, 0),
-        )
 
     def _build_options(self) -> None:
-        options = ttk.Frame(self)
-        options.pack(fill="x")
-        self._fillers_check = ttk.Checkbutton(
-            options,
-            text="Remove fillers (um, uh, uhh, umm, erm)",
-            variable=self._remove_fillers_var,
-            command=self._mark_dirty,
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        self._fillers_check = self._option(
+            rows, "Remove fillers", "Drops um, uh, uhh, umm and erm.",
+            self._remove_fillers_var, self._mark_dirty,
         )
-        self._fillers_check.pack(side="left")
-        self._commands_check = ttk.Checkbutton(
-            options,
-            text="Spoken commands",
-            variable=self._spoken_commands_var,
-            command=self._mark_dirty,
+        self._commands_check = self._option(
+            rows, "Spoken commands", "Say “new line” or “period” to type them.",
+            self._spoken_commands_var, self._mark_dirty,
         )
-        self._commands_check.pack(side="left", padx=(16, 0))
-        self._numbers_check = ttk.Checkbutton(
-            options,
-            text="Format numbers",
-            variable=self._numbers_var,
-            command=self._mark_dirty,
+        self._numbers_check = self._option(
+            rows, "Format numbers", "Writes “twenty five” as 25.",
+            self._numbers_var, self._mark_dirty,
         )
-        self._numbers_check.pack(side="left", padx=(16, 0))
-        self._punctuation_check = ttk.Checkbutton(
-            options,
-            text="Restore punctuation",
-            variable=self._punctuation_model_var,
-            command=self._on_punctuation_toggle,
+        self._punctuation_check = self._option(
+            rows, "Restore punctuation", "Adds punctuation with a small extra model.",
+            self._punctuation_model_var, self._on_punctuation_toggle,
         )
-        self._punctuation_check.pack(side="left", padx=(16, 0))
+
+    @staticmethod
+    def _option(
+        rows: RowGroup,
+        title: str,
+        description: str,
+        variable: tkinter.BooleanVar,
+        command: Callable[[], None],
+    ) -> ttk.Checkbutton:
+        row = rows.add(
+            title, description, lambda parent: switch(parent, variable, command=command),
+        )
+        assert isinstance(row.control, ttk.Checkbutton)
+        return row.control
+
+    def _build_table(self) -> None:
+        table = card(self, padding=1)
+        table.pack(fill="x")
+        self._tree = ttk.Treeview(
+            table, columns=("spoken", "replacement", "kind"), show="headings",
+            height=_TABLE_ROWS, selectmode="browse",
+        )
+        for column, heading, width, stretch in (
+            ("spoken", "When I say", 240, True),
+            ("replacement", "Replace with", 200, True),
+            ("kind", "", 80, False),
+        ):
+            self._tree.heading(column, text=heading, anchor="w")
+            self._tree.column(column, width=width, stretch=stretch, anchor="w")
+        self._tree.pack(fill="x")
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._empty = ttk.Label(
+            table, text=_EMPTY_LIST, style=CARD_MUTED_STYLE,
+            wraplength=CARD_TEXT_WRAP, justify="center",
+        )
 
     def _build_editor(self) -> None:
-        editor = ttk.Frame(self)
-        editor.pack(fill="x", pady=(7, 0))
+        editor = card(self)
+        editor.pack(fill="x", pady=(CONTROL_GAP, 0))
         editor.columnconfigure(1, weight=1)
 
-        ttk.Label(editor, text="Type").grid(row=0, column=0, sticky="w")
-        type_frame = ttk.Frame(editor)
-        type_frame.grid(row=0, column=1, sticky="w")
+        ttk.Label(editor, text="Type", style=CARD_TEXT_STYLE).grid(row=0, column=0, sticky="w")
+        type_frame = ttk.Frame(editor, style=CARD_BODY_STYLE)
+        type_frame.grid(row=0, column=1, sticky="w", padx=(12, 0))
         self._literal_radio = ttk.Radiobutton(
             type_frame,
             text="Literal",
             value="literal",
             variable=self._rule_type_var,
             command=self._sync_rule_type,
+            style=RADIO_STYLE,
         )
         self._literal_radio.pack(side="left")
         self._regex_radio = ttk.Radiobutton(
@@ -126,54 +162,64 @@ class TkDictionaryPage(ttk.Frame):
             value="regex",
             variable=self._rule_type_var,
             command=self._sync_rule_type,
+            style=RADIO_STYLE,
         )
-        self._regex_radio.pack(side="left", padx=(8, 0))
+        self._regex_radio.pack(side="left", padx=(16, 0))
 
-        ttk.Label(editor, text="Aliases / pattern").grid(
-            row=1, column=0, sticky="w", pady=(4, 0),
-        )
-        self._spoken_entry = ttk.Entry(editor, textvariable=self._spoken_var)
-        self._spoken_entry.grid(
-            row=1, column=1, columnspan=4, sticky="ew", pady=(4, 0),
-        )
+        self._spoken_entry = self._field(editor, 1, "Aliases / pattern", self._spoken_var)
+        self._replacement_entry = self._field(editor, 2, "Replacement", self._replacement_var)
 
-        ttk.Label(editor, text="Replacement").grid(
-            row=2, column=0, sticky="w", pady=(4, 0),
-        )
-        self._replacement_entry = ttk.Entry(
-            editor, textvariable=self._replacement_var,
-        )
-        self._replacement_entry.grid(
-            row=2, column=1, columnspan=4, sticky="ew", pady=(4, 0),
-        )
-
+        options = ttk.Frame(editor, style=CARD_BODY_STYLE)
+        options.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=(6, 0))
         self._case_check = ttk.Checkbutton(
-            editor, text="Case sensitive", variable=self._case_sensitive_var,
+            options, text="Case sensitive", variable=self._case_sensitive_var,
+            style=CHECK_STYLE,
         )
-        self._case_check.grid(row=3, column=1, sticky="w", pady=(4, 0))
+        self._case_check.pack(side="left")
         self._whole_check = ttk.Checkbutton(
-            editor, text="Whole words", variable=self._whole_words_var,
+            options, text="Whole words", variable=self._whole_words_var, style=CHECK_STYLE,
         )
-        self._whole_check.grid(row=3, column=2, sticky="w", pady=(4, 0))
+        self._whole_check.pack(side="left", padx=(16, 0))
         self._phonetic_check = ttk.Checkbutton(
-            editor, text="Phonetic", variable=self._phonetic_var,
+            options, text="Phonetic", variable=self._phonetic_var, style=CHECK_STYLE,
         )
-        self._phonetic_check.grid(row=3, column=3, sticky="w", pady=(4, 0))
+        self._phonetic_check.pack(side="left", padx=(16, 0))
 
-        self._add_button = ttk.Button(editor, text="Add", command=self.add_rule)
-        self._add_button.grid(row=4, column=1, sticky="w", pady=(5, 0))
+        buttons = ttk.Frame(editor, style=CARD_BODY_STYLE)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(CARD_PADDING, 0))
+        self._add_button = ttk.Button(buttons, text="Add", command=self.add_rule)
+        self._add_button.pack(side="left")
         self._update_button = ttk.Button(
-            editor, text="Update", command=self.update_selected_rule,
+            buttons, text="Update", command=self.update_selected_rule,
         )
-        self._update_button.grid(row=4, column=2, sticky="w", pady=(5, 0))
+        self._update_button.pack(side="left", padx=(CONTROL_GAP, 0))
         self._delete_button = ttk.Button(
-            editor, text="Delete", command=self.delete_selected_rule,
+            buttons, text="Delete", style=DANGER_BUTTON_STYLE,
+            command=self.delete_selected_rule,
         )
-        self._delete_button.grid(row=4, column=3, sticky="w", pady=(5, 0))
+        self._delete_button.pack(side="left", padx=(CONTROL_GAP, 0))
         self._forget_learned_button = ttk.Button(
-            editor, text="Forget all learned words", command=self.forget_learned_words,
+            buttons, text="Forget all learned words", style=LINK_BUTTON_STYLE,
+            command=self.forget_learned_words,
         )
-        self._forget_learned_button.grid(row=4, column=4, sticky="w", pady=(5, 0))
+        self._forget_learned_button.pack(side="right")
+        message = ttk.Label(
+            editor, textvariable=self._message_var, style="CardDanger.TLabel",
+            wraplength=CARD_TEXT_WRAP, justify="left",
+        )
+        message.grid(row=5, column=0, columnspan=2, sticky="w", pady=(CONTROL_GAP, 0))
+        hide_while_empty(message, self._message_var)
+
+    @staticmethod
+    def _field(
+        editor: ttk.Frame, row: int, label: str, variable: tkinter.StringVar,
+    ) -> ttk.Entry:
+        ttk.Label(editor, text=label, style=CARD_TEXT_STYLE).grid(
+            row=row, column=0, sticky="w", pady=(CONTROL_GAP, 0),
+        )
+        entry = ttk.Entry(editor, textvariable=variable, font=BODY_FONT)
+        entry.grid(row=row, column=1, sticky="ew", padx=(12, 0), pady=(CONTROL_GAP, 0))
+        return entry
 
     def add_rule(self) -> None:
         rule = self._rule_from_editor()
@@ -272,7 +318,7 @@ class TkDictionaryPage(ttk.Frame):
     def _commit_edit(self) -> None:
         self._dirty = True
         self._clear_editor()
-        self._refresh_listbox()
+        self._refresh_rules()
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -305,15 +351,19 @@ class TkDictionaryPage(ttk.Frame):
         self._message_var.set("")
         self._sync_rule_type()
 
-    def _refresh_listbox(self) -> None:
-        self._listbox.delete(0, "end")
-        for rule in self._dictionary.rules:
-            self._listbox.insert("end", _rule_label(rule))
+    def _refresh_rules(self) -> None:
+        self._tree.delete(*self._tree.get_children())
+        for index, rule in enumerate(self._dictionary.rules):
+            self._tree.insert("", "end", iid=str(index), values=_rule_columns(rule))
+        if self._dictionary.rules:
+            self._empty.place_forget()
+        else:
+            self._empty.place(in_=self._tree, relx=0.5, rely=0.55, anchor="center")
 
-    def _on_listbox_select(self, _event: tkinter.Event) -> None:
-        selection = self._listbox.curselection()
+    def _on_tree_select(self, _event: tkinter.Event) -> None:
+        selection = self._tree.selection()
         if selection:
-            self.select_rule(selection[0])
+            self.select_rule(int(selection[0]))
 
     def select_rule(self, index: int) -> None:
         self._selected_index = index
@@ -353,7 +403,7 @@ class TkDictionaryPage(ttk.Frame):
         self._dirty = False
         self._forgotten = {}
         self._clear_editor()
-        self._refresh_listbox()
+        self._refresh_rules()
         if dictionary.options.punctuation_model and not self._punctuation_available():
             self._message_var.set(_PUNCTUATION_INSTALL_MESSAGE)
 
@@ -361,7 +411,7 @@ class TkDictionaryPage(ttk.Frame):
         return self._dirty
 
     def rule_labels(self) -> list[str]:
-        return [self._listbox.get(i) for i in range(self._listbox.size())]
+        return [_rule_label(rule) for rule in self._dictionary.rules]
 
     def message(self) -> str:
         return self._message_var.get()
@@ -418,6 +468,13 @@ def _rule_label(rule: DictionaryRule) -> str:
         learned = "  (learned)" if rule.learned else ""
         return f"[literal] {source}  ->  {rule.replacement}{learned}"
     return f"[regex] {_quote_if_glued(rule.pattern)}  ->  {rule.replacement}"
+
+
+def _rule_columns(rule: DictionaryRule) -> tuple[str, str, str]:
+    if isinstance(rule, LiteralRule):
+        spoken = ", ".join(_quote_if_glued(alias) for alias in rule.spoken)
+        return spoken, rule.replacement, "learned" if rule.learned else ""
+    return _quote_if_glued(rule.pattern), rule.replacement, "regex"
 
 
 def _plain_aliases(rule: LiteralRule) -> set[str]:

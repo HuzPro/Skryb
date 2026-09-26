@@ -68,14 +68,14 @@ def test_loading_fewer_shortcuts_drops_the_extra_rows_and_blanks_the_optional_on
 
 
 def test_each_optional_shortcut_sits_under_its_own_heading(page):
-    slaves = page.pack_slaves()
-
     for row, heading in (
         (page.edit_row(), "Edit selected text by voice"),
         (page.paste_row(), "Paste last dictation"),
         (page.copy_row(), "Copy last dictation"),
     ):
-        assert slaves[slaves.index(row) - 1].cget("text") == heading
+        block = row.master.pack_slaves()
+        assert block[0].cget("text") == heading
+        assert block.index(row) > 0
 
 
 def test_a_new_page_starts_with_one_empty_dictation_row_that_cannot_be_removed(page):

@@ -2,9 +2,9 @@ import tkinter
 from collections.abc import Callable
 from tkinter import ttk
 
-from voicetotext.core.color_scheme import detect_color_scheme
+from voicetotext.core.color_scheme import detect_app_color_scheme
 from voicetotext.settings.service import SettingsService
-from voicetotext.settings.theme import apply_theme, theme_for
+from voicetotext.settings.theme import PRIMARY_BUTTON_STYLE, apply_theme, theme_for
 from voicetotext.settings.win32_titlebar import set_titlebar_dark
 from voicetotext.transcription.license_policy import LicenseTerms
 
@@ -59,13 +59,14 @@ class _LicenseConsentDialog(tkinter.Toplevel):
     def __init__(self, parent: tkinter.Misc, terms: LicenseTerms) -> None:
         super().__init__(parent)
         self.accepted = False
-        self._theme = theme_for(detect_color_scheme())
+        self._theme = theme_for(detect_app_color_scheme())
         self.title(f"Licence - {terms.license_id}")
         self.geometry(_DIALOG_GEOMETRY)
         self.protocol("WM_DELETE_WINDOW", self._decline)
         self._build(terms)
         apply_theme(self, self._theme)
-        set_titlebar_dark(self, dark=self._theme.is_dark)
+        # The caption can only be themed once the window has been mapped.
+        self.after_idle(lambda: set_titlebar_dark(self, dark=self._theme.is_dark))
         self.transient(parent.winfo_toplevel())
         self.grab_set()
 
@@ -103,7 +104,7 @@ class _LicenseConsentDialog(tkinter.Toplevel):
         footer = ttk.Frame(self)
         footer.pack(side="bottom", fill="x", padx=12, pady=8)
         self._accept_button = ttk.Button(
-            footer, text="Accept", command=self._accept,
+            footer, text="Accept", style=PRIMARY_BUTTON_STYLE, command=self._accept,
         )
         self._accept_button.pack(side="right")
         self._decline_button = ttk.Button(

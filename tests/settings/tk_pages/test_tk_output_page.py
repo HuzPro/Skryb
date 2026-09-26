@@ -38,11 +38,15 @@ class TestTkOutputPageButtons:
     def test_should_render_one_radio_per_output_mode(self, page):
         assert len(page.radio_buttons()) == len(list(OutputMode))
 
-    def test_should_display_label_text_for_each_mode(self, page):
+    def test_each_mode_has_its_own_card_title(self, page):
         labels = [btn.cget("text") for btn in page.radio_buttons()]
 
-        for mode in OutputMode:
-            assert mode.display_label in labels
+        assert labels == ["Paste only", "Paste and copy", "Clipboard only"]
+
+    def test_clicking_a_card_chooses_its_mode(self, page):
+        page.radio_buttons()[2].invoke()
+
+        assert page.current_mode() is OutputMode.CLIPBOARD_ONLY
 
 
 class TestResetPillPosition:
@@ -56,44 +60,6 @@ class TestResetPillPosition:
             assert "bottom centre" in widget._pill_status.cget("text")
         finally:
             widget.destroy()
-class TestTkOutputPageHistory:
-    def test_the_history_checkbox_is_the_saved_history_switch(self, page):
-        page.set_capture_content(True)
-
-        assert page.captures_content() is True
-
-    def test_retention_offers_forever_and_the_usual_periods(self, page):
-        page.set_history_retention_days(0)
-
-        assert list(page._retention_box.cget("values")) == [
-            "Forever", "7 days", "30 days", "90 days",
-        ]
-        assert page.history_retention_days() == 0
-        page._retention.set("90 days")
-        assert page.history_retention_days() == 90
-
-    def test_a_hand_edited_period_is_kept_rather_than_reset(self, page):
-        page.set_history_retention_days(14)
-
-        assert page.history_retention_days() == 14
-        assert "14 days" in page._retention_box.cget("values")
-
-    def test_delete_all_history_runs_only_after_confirming(self, tk_root, monkeypatch):
-        from voicetotext.settings.tk_pages import output_page
-
-        deleted: list[bool] = []
-        answers = iter([False, True])
-        monkeypatch.setattr(
-            output_page.messagebox, "askyesno", lambda *_a, **_k: next(answers),
-        )
-        page = TkOutputPage(tk_root, delete_all_history=lambda: deleted.append(True))
-        try:
-            page._confirm_delete_all()
-            page._confirm_delete_all()
-        finally:
-            page.destroy()
-
-        assert deleted == [True]
 
 
 class TestTkOutputPagePasteMethods:

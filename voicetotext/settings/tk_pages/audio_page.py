@@ -9,10 +9,30 @@ from voicetotext.recording.input_devices import (
     Microphones,
 )
 from voicetotext.recording.preferences import RecordingPreferences
-from voicetotext.settings.theme import HEADING_STYLE
+from voicetotext.settings.theme import (
+    BODY_FONT,
+    CARD_BODY_STYLE,
+    CARD_MUTED_STYLE,
+    CARD_PADDING,
+    CARD_TEXT_STYLE,
+    CARD_TITLE_STYLE,
+    CONTROL_GAP,
+    ICON_BUTTON_STYLE,
+    PAGE_LINK_BUTTON_STYLE,
+    THIN_PROGRESS_STYLE,
+    RowGroup,
+    card,
+    combobox,
+    divider,
+    page_note,
+    section_heading,
+    set_card_selected,
+    switch,
+)
 
 _METER_POLL_MS = 50
 _METER_FALL_PER_POLL = 0.06
+_METER_LENGTH = 110
 _LIMIT_MINUTES = (1.0, 60.0)
 _WARN_SECONDS = (0.0, 300.0)
 _DUCK_CHOICES = (
@@ -20,7 +40,13 @@ _DUCK_CHOICES = (
     ("lower", "Lower other apps"),
     ("mute", "Mute other apps"),
 )
+_DUCK_LABELS = dict(_DUCK_CHOICES)
+_DUCK_VALUES = {label: value for value, label in _DUCK_CHOICES}
 _NOT_CONNECTED = " (not connected)"
+_SPEAK_TO_TEST = "Speak to test the microphone."
+_WILL_NOT_OPEN = "This microphone could not be opened."
+_DEFAULT_DESCRIPTION = "Uses the microphone Windows is set to."
+_NO_PREFERRED = "None yet. The microphone chosen above is used."
 
 
 class TkAudioPage(ttk.Frame):
@@ -39,6 +65,7 @@ class TkAudioPage(ttk.Frame):
         self._cues = tkinter.BooleanVar(master=self, value=True)
         self._cue_volume = tkinter.DoubleVar(master=self, value=0.6)
         self._duck = tkinter.StringVar(master=self, value="off")
+        self._duck_label = tkinter.StringVar(master=self, value=_DUCK_LABELS["off"])
         self._limit_minutes = tkinter.StringVar(master=self, value="10")
         self._warn_seconds = tkinter.StringVar(master=self, value="30")
         self._preferences = RecordingPreferences()
@@ -49,118 +76,113 @@ class TkAudioPage(ttk.Frame):
         self._latest_level = 0.0
         self._shown_level = 0.0
         self._poll_id: str | None = None
+        self._meter: ttk.Progressbar
+        self._meter_status: ttk.Label
+        self._duck.trace_add(
+            "write",
+            lambda *_args: self._duck_label.set(_DUCK_LABELS.get(self._duck.get(), "")),
+        )
         self._build()
         self._fill(rescan=False)
 
     def _build(self) -> None:
-        ttk.Label(self, text="Microphone", style=HEADING_STYLE).pack(
-            anchor="w", pady=(0, 8),
-        )
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x")
-        self._picker = ttk.Combobox(
-            row, textvariable=self._choice, state="readonly", width=52,
-        )
-        self._picker.pack(side="left")
-        self._picker.bind("<<ComboboxSelected>>", self._on_picked)
-        ttk.Button(row, text="Refresh", command=lambda: self._fill(rescan=True)).pack(
-            side="left", padx=(8, 0),
-        )
-        ttk.Label(self, text="Level").pack(anchor="w", pady=(16, 4))
-        self._meter = ttk.Progressbar(self, maximum=1.0, length=400)
-        self._meter.pack(anchor="w")
-        self._meter_status = ttk.Label(self, text="Speak to test the microphone.")
-        self._meter_status.pack(anchor="w", pady=(4, 0))
-        ttk.Checkbutton(
-            self, text="Warn when the microphone goes silent",
-            variable=self._warn_silent,
-        ).pack(anchor="w", pady=(8, 0))
+        section_heading(self, "Microphone", first=True)
+        self._microphone_list = ttk.Frame(self)
+        self._microphone_list.pack(fill="x")
+        ttk.Button(
+            self, text="Look for new microphones", style=PAGE_LINK_BUTTON_STYLE,
+            command=lambda: self._fill(rescan=True),
+        ).pack(anchor="w", pady=(4, 0))
         self._build_preferred()
 
-        ttk.Label(self, text="Quiet speech", style=HEADING_STYLE).pack(
-            anchor="w", pady=(16, 8),
+        section_heading(self, "Recording")
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        rows.add(
+            "Boost quiet speech",
+            "Helps when you are far from the microphone. Raises the volume up to "
+            "10x without distorting it. Saved recordings stay as heard.",
+            lambda parent: switch(parent, self._boost),
         )
-        ttk.Checkbutton(
-            self, text="Boost quiet speech before transcribing",
-            variable=self._boost,
-        ).pack(anchor="w")
-        ttk.Label(
-            self,
-            text=(
-                "Helps when you are far from the microphone. Raises the volume\n"
-                "up to 10x without distorting it. Saved recordings stay as heard."
-            ),
-            wraplength=560,
-        ).pack(anchor="w", pady=(4, 0))
+        rows.add(
+            "Warn when the microphone goes silent",
+            "The pill says so when no sound arrives while you record.",
+            lambda parent: switch(parent, self._warn_silent),
+        )
         self._build_sounds()
         self._build_limit()
 
     def _build_preferred(self) -> None:
-        ttk.Label(self, text="Preferred microphones", style=HEADING_STYLE).pack(
-            anchor="w", pady=(16, 4),
-        )
-        ttk.Label(self, text="The first connected microphone in this list is used.").pack(
-            anchor="w", pady=(0, 4),
-        )
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x")
-        border = ttk.Frame(row, relief="solid", borderwidth=1)
-        border.pack(side="left")
-        self._preferred_list = tkinter.Listbox(
-            border, height=4, width=52, exportselection=False, activestyle="none",
-        )
-        self._preferred_list.pack()
-        buttons = ttk.Frame(row)
-        buttons.pack(side="left", padx=(8, 0), anchor="n")
-        for position, (text, command) in enumerate((
-            ("Up", lambda: self._move_preferred(-1)),
-            ("Down", lambda: self._move_preferred(1)),
-            ("Remove", self._remove_preferred),
-            ("Add selected", self._add_selected),
-        )):
-            ttk.Button(buttons, text=text, command=command).grid(
-                row=position // 2, column=position % 2, sticky="ew",
-                padx=(0, 4), pady=(0, 4),
-            )
+        section_heading(self, "Preferred microphones")
+        page_note(
+            self, "When one of these is plugged in, the first one in the list is used.",
+        ).pack(anchor="w", pady=(0, CONTROL_GAP))
+        self._preferred_card = card(self, padding=(CARD_PADDING, 4))
+        self._preferred_card.pack(fill="x")
+        ttk.Button(
+            self, text="Add the chosen microphone", style=PAGE_LINK_BUTTON_STYLE,
+            command=self._add_selected,
+        ).pack(anchor="w", pady=(4, 0))
 
     def _build_sounds(self) -> None:
-        ttk.Label(self, text="Sounds", style=HEADING_STYLE).pack(
-            anchor="w", pady=(16, 8),
+        section_heading(self, "Sounds")
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        rows.add(
+            "Play sounds",
+            "A short tone when recording starts and stops, and when the app is ready.",
+            self._sound_controls,
         )
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x")
-        ttk.Checkbutton(
-            row, text="Play start, stop and ready sounds", variable=self._cues,
-        ).pack(side="left")
-        ttk.Label(row, text="Volume").pack(side="left", padx=(16, 6))
+        rows.add(
+            "While recording",
+            "What happens to music and calls from other apps.",
+            lambda parent: self._duck_box(parent),
+            fill=True,
+        )
+
+    def _sound_controls(self, parent: tkinter.Misc) -> ttk.Frame:
+        controls = ttk.Frame(parent, style=CARD_BODY_STYLE)
         ttk.Scale(
-            row, from_=0.0, to=1.0, variable=self._cue_volume, length=160,
-        ).pack(side="left")
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x", pady=(8, 0))
-        ttk.Label(row, text="While recording:").pack(side="left", padx=(0, 8))
-        for value, text in _DUCK_CHOICES:
-            ttk.Radiobutton(row, text=text, value=value, variable=self._duck).pack(
-                side="left", padx=(0, 12),
-            )
+            controls, from_=0.0, to=1.0, variable=self._cue_volume, length=110,
+            style="Card.Horizontal.TScale",
+        ).pack(side="left", padx=(0, 12))
+        switch(controls, self._cues).pack(side="left")
+        return controls
+
+    def _duck_box(self, parent: tkinter.Misc) -> ttk.Combobox:
+        box = combobox(
+            parent, textvariable=self._duck_label, values=[label for _, label in _DUCK_CHOICES],
+        )
+        box.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._duck.set(_DUCK_VALUES.get(self._duck_label.get(), "off")),
+        )
+        return box
 
     def _build_limit(self) -> None:
-        ttk.Label(self, text="Recording limit", style=HEADING_STYLE).pack(
-            anchor="w", pady=(16, 8),
+        section_heading(self, "Recording limit")
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        rows.add(
+            "Stop recording after",
+            "The pill counts down the last seconds before it stops.",
+            self._limit_controls,
         )
-        row = ttk.Frame(self)
-        row.pack(anchor="w", fill="x")
-        ttk.Label(row, text="Stop recording after").pack(side="left")
-        ttk.Spinbox(
-            row, from_=_LIMIT_MINUTES[0], to=_LIMIT_MINUTES[1], increment=1,
-            width=4, textvariable=self._limit_minutes,
-        ).pack(side="left", padx=6)
-        ttk.Label(row, text="minutes. Warn").pack(side="left")
-        ttk.Spinbox(
-            row, from_=_WARN_SECONDS[0], to=_WARN_SECONDS[1], increment=5,
-            width=4, textvariable=self._warn_seconds,
-        ).pack(side="left", padx=6)
-        ttk.Label(row, text="seconds before.").pack(side="left")
+
+    def _limit_controls(self, parent: tkinter.Misc) -> ttk.Frame:
+        controls = ttk.Frame(parent, style=CARD_BODY_STYLE)
+        for variable, bounds, step, unit in (
+            (self._limit_minutes, _LIMIT_MINUTES, 1, "min"),
+            (self._warn_seconds, _WARN_SECONDS, 5, "s warning"),
+        ):
+            ttk.Spinbox(
+                controls, from_=bounds[0], to=bounds[1], increment=step, width=4,
+                textvariable=variable, font=BODY_FONT,
+            ).pack(side="left")
+            ttk.Label(controls, text=unit, style=CARD_TEXT_STYLE).pack(
+                side="left", padx=(6, 14 if unit == "min" else 0),
+            )
+        return controls
 
     def recording_preferences(self) -> RecordingPreferences:
         limit = _number_in(self._limit_minutes.get(), *_LIMIT_MINUTES)
@@ -191,42 +213,72 @@ class TkAudioPage(ttk.Frame):
         self._warn_seconds.set(f"{preferences.warn_before_cap_seconds:g}")
         self._show_preferred()
 
+    # -- preferred microphones -----------------------------------------------
+
     def _add_selected(self) -> None:
         if self._chosen == SYSTEM_DEFAULT:
             return
         full = self._labels.get(self._chosen, self._chosen)
         if full not in self._preferred and self._chosen not in self._preferred:
             self._preferred.append(full)
-        self._show_preferred(select=len(self._preferred) - 1)
+        self._show_preferred()
 
-    def _remove_preferred(self) -> None:
-        index = self._selected_preferred()
-        if index is None:
-            return
-        del self._preferred[index]
-        self._show_preferred(select=min(index, len(self._preferred) - 1))
+    def _remove_preferred(self, index: int) -> None:
+        if 0 <= index < len(self._preferred):
+            del self._preferred[index]
+        self._show_preferred()
 
-    def _move_preferred(self, step: int) -> None:
-        index = self._selected_preferred()
-        if index is None or not 0 <= index + step < len(self._preferred):
+    def _move_preferred(self, index: int, step: int) -> None:
+        if not (0 <= index < len(self._preferred) and 0 <= index + step < len(self._preferred)):
             return
         order = self._preferred
         order[index], order[index + step] = order[index + step], order[index]
-        self._show_preferred(select=index + step)
+        self._show_preferred()
 
-    def _selected_preferred(self) -> int | None:
-        selection = self._preferred_list.curselection()
-        return int(selection[0]) if selection else None
+    def preferred_labels(self) -> list[str]:
+        connected = self._connected_names()
+        return [
+            name if name in connected else name + _NOT_CONNECTED
+            for name in self._preferred
+        ]
 
-    def _show_preferred(self, select: int | None = None) -> None:
-        connected = {*self._labels, *self._labels.values()}
-        self._preferred_list.delete(0, "end")
-        for name in self._preferred:
-            self._preferred_list.insert(
-                "end", name if name in connected else name + _NOT_CONNECTED,
+    def _connected_names(self) -> set[str]:
+        return {*self._labels, *self._labels.values()}
+
+    def _show_preferred(self) -> None:
+        for child in self._preferred_card.winfo_children():
+            child.destroy()
+        if not self._preferred:
+            ttk.Label(
+                self._preferred_card, text=_NO_PREFERRED, style=CARD_MUTED_STYLE,
+            ).pack(anchor="w", pady=10)
+            return
+        connected = self._connected_names()
+        last = len(self._preferred) - 1
+        for index, name in enumerate(self._preferred):
+            if index:
+                divider(self._preferred_card).pack(fill="x")
+            self._preferred_row(index, name, name in connected, last).pack(fill="x", pady=6)
+
+    def _preferred_row(self, index: int, name: str, connected: bool, last: int) -> ttk.Frame:
+        row = ttk.Frame(self._preferred_card, style=CARD_BODY_STYLE)
+        ttk.Label(row, text=f"{index + 1}.", style=CARD_MUTED_STYLE, width=3).pack(side="left")
+        ttk.Label(row, text=name, style=CARD_TEXT_STYLE).pack(side="left")
+        if not connected:
+            ttk.Label(row, text="not connected", style=CARD_MUTED_STYLE).pack(
+                side="left", padx=(8, 0),
             )
-        if select is not None and select >= 0:
-            self._preferred_list.selection_set(select)
+        for text, command, enabled in (
+            ("×", lambda: self._remove_preferred(index), True),
+            ("↓", lambda: self._move_preferred(index, 1), index < last),
+            ("↑", lambda: self._move_preferred(index, -1), index > 0),
+        ):
+            button = ttk.Button(row, text=text, style=ICON_BUTTON_STYLE, width=2, command=command)
+            button.state(["!disabled"] if enabled else ["disabled"])
+            button.pack(side="right")
+        return row
+
+    # -- choosing the microphone ---------------------------------------------
 
     def current_device(self) -> str:
         return self._chosen
@@ -234,6 +286,9 @@ class TkAudioPage(ttk.Frame):
     def set_device(self, name: str) -> None:
         self._chosen = name
         self._fill(rescan=False)
+
+    def microphone_labels(self) -> list[str]:
+        return list(self._names_by_label)
 
     def boosts_quiet_speech(self) -> bool:
         return self._boost.get()
@@ -266,9 +321,9 @@ class TkAudioPage(ttk.Frame):
         # A chosen microphone that is unplugged stays listed, so saving
         # without touching the picker does not quietly forget it.
         if self._chosen and self._chosen not in names:
-            self._names_by_label[f"{self._chosen} (not connected)"] = self._chosen
-        self._picker["values"] = list(self._names_by_label)
+            self._names_by_label[f"{self._chosen}{_NOT_CONNECTED}"] = self._chosen
         self._choice.set(self._label_for(self._chosen))
+        self._show_microphones()
         self._show_preferred()
         if self._poll_id is not None:
             self._restart_meter()
@@ -279,15 +334,49 @@ class TkAudioPage(ttk.Frame):
                 return label
         return _DEFAULT_LABEL
 
-    def _on_picked(self, _event: tkinter.Event) -> None:
-        self._chosen = self._names_by_label.get(self._choice.get(), SYSTEM_DEFAULT)
+    def _show_microphones(self) -> None:
+        for child in self._microphone_list.winfo_children():
+            child.destroy()
+        for label in self._names_by_label:
+            self._microphone_card(label).pack(fill="x", pady=(0, CONTROL_GAP))
+
+    def _microphone_card(self, label: str) -> ttk.Frame:
+        chosen = label == self._choice.get()
+        mic_card = card(self._microphone_list)
+        mic_card.columnconfigure(0, weight=1)
+        mic_card.configure(cursor="hand2")
+        title = ttk.Label(mic_card, text=label, style=CARD_TITLE_STYLE)
+        title.grid(row=0, column=0, sticky="w")
+        description = _DEFAULT_DESCRIPTION if label == _DEFAULT_LABEL else ""
+        if label.endswith(_NOT_CONNECTED):
+            description = "Not connected right now."
+        if chosen:
+            self._meter_status = ttk.Label(mic_card, text=_SPEAK_TO_TEST, style="CardAccent.TLabel")
+            self._meter_status.grid(row=1, column=0, sticky="w", pady=(2, 0))
+            self._meter = ttk.Progressbar(
+                mic_card, maximum=1.0, length=_METER_LENGTH, style=THIN_PROGRESS_STYLE,
+            )
+            self._meter.grid(row=0, column=1, rowspan=2, sticky="e", padx=(16, 0))
+        elif description:
+            ttk.Label(mic_card, text=description, style=CARD_MUTED_STYLE).grid(
+                row=1, column=0, sticky="w", pady=(2, 0),
+            )
+        for widget in (mic_card, *mic_card.winfo_children()):
+            widget.bind("<Button-1>", lambda _event, choice=label: self._choose(choice))
+        set_card_selected(mic_card, chosen)
+        return mic_card
+
+    def _choose(self, label: str) -> None:
+        self._choice.set(label)
+        self._chosen = self._names_by_label.get(label, SYSTEM_DEFAULT)
+        self._show_microphones()
         self._restart_meter()
 
     def _restart_meter(self) -> None:
         opened = self._microphones.start_meter(self._chosen, self._on_level)
         self._meter_status.configure(
-            text="Speak to test the microphone."
-            if opened else "This microphone could not be opened.",
+            text=_SPEAK_TO_TEST if opened else _WILL_NOT_OPEN,
+            style="SelectedAccent.TLabel" if opened else "SelectedDanger.TLabel",
         )
         if self._poll_id is None:
             self._poll()

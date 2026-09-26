@@ -11,7 +11,20 @@ from voicetotext.hotkeys.bindings import (
     validate_bindings,
 )
 from voicetotext.settings.signal import Signal
-from voicetotext.settings.theme import HEADING_STYLE
+from voicetotext.settings.theme import (
+    CARD_BODY_STYLE,
+    CARD_MUTED_STYLE,
+    CARD_TEXT_WRAP,
+    CARD_TITLE_STYLE,
+    CONTROL_GAP,
+    ICON_BUTTON_STYLE,
+    LINK_BUTTON_STYLE,
+    RowGroup,
+    combobox,
+    page_note,
+    section_heading,
+    switch,
+)
 from voicetotext.settings.tk_hotkey_capture import (
     CaptureBridge,
     TkHotkeyCapture,
@@ -29,8 +42,14 @@ _MODES_HINT = (
 _DOUBLE_TAP_HINT = "Two quick presses keep it recording; the next press stops it."
 _CAPTURE_HINT = (
     "Type a shortcut such as ctrl+alt+m, f13 or mouse4, or click Record, "
-    "press it, then click Stop. Leave a box empty to turn that shortcut off."
+    "press the keys, then click Stop Recording. Leave a shortcut empty to "
+    "turn it off."
 )
+# Every shortcut row lays its parts out on the same columns, so the key
+# fields, the mode boxes and the remove buttons line up down the page.
+_CAPTURE_COLUMN = 300
+_MODE_COLUMN = 92
+_REMOVE_COLUMN = 30
 
 
 def _run_now(action: Callable[[], None]) -> None:
@@ -38,7 +57,7 @@ def _run_now(action: Callable[[], None]) -> None:
 
 
 class ShortcutRow(ttk.Frame):
-    """One shortcut box, with a Toggle/Hold choice and a Remove button when
+    """One shortcut field, with a Toggle/Hold choice and a remove button when
     the section needs them."""
 
     def __init__(
@@ -50,22 +69,23 @@ class ShortcutRow(ttk.Frame):
         with_mode: bool,
         on_remove: Callable[["ShortcutRow"], None] | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.columnconfigure(0, weight=1)
+        super().__init__(parent, style=CARD_BODY_STYLE)
+        self.columnconfigure(0, minsize=_CAPTURE_COLUMN)
+        self.columnconfigure(1, minsize=_MODE_COLUMN)
+        self.columnconfigure(2, minsize=_REMOVE_COLUMN)
         self.capture = TkHotkeyCapture(self, capture_bridge, schedule)
-        self.capture.grid(row=0, column=0, sticky="ew")
-        self._mode_box = ttk.Combobox(
-            self, values=list(_MODES_BY_LABEL), state="readonly", width=8,
-        )
+        self.capture.grid(row=0, column=0, sticky="new")
+        self._mode_box = combobox(self, values=list(_MODES_BY_LABEL), width=7)
         self.set_mode(BindingMode.TOGGLE)
         if with_mode:
-            self._mode_box.grid(row=0, column=1, sticky="n", padx=(8, 0))
+            self._mode_box.grid(row=0, column=1, sticky="new", padx=(CONTROL_GAP, 0))
         self.remove_button: ttk.Button | None = None
         if on_remove is not None:
             self.remove_button = ttk.Button(
-                self, text="Remove", command=lambda: on_remove(self),
+                self, text="×", width=2, style=ICON_BUTTON_STYLE,
+                command=lambda: on_remove(self),
             )
-            self.remove_button.grid(row=0, column=2, sticky="n", padx=(8, 0))
+            self.remove_button.grid(row=0, column=2, sticky="e", padx=(CONTROL_GAP, 0))
 
     def mode(self) -> BindingMode:
         return _MODES_BY_LABEL.get(self._mode_box.get(), BindingMode.TOGGLE)
@@ -96,39 +116,65 @@ class TkHotkeysPage(ttk.Frame):
         self._build()
 
     def _build(self) -> None:
-        self._heading("Dictation shortcuts", top=0)
-        ttk.Label(self, text=_MODES_HINT, wraplength=560, justify="left").pack(
-            anchor="w", pady=(0, 4),
-        )
-        self._rows_frame = ttk.Frame(self)
+        section_heading(self, "Dictation", first=True)
+        rows = RowGroup(self)
+        rows.pack(fill="x")
+        dictate = self._block(rows, "Dictate", f"Start and stop dictation. {_MODES_HINT}")
+        self._rows_frame = ttk.Frame(dictate, style=CARD_BODY_STYLE)
         self._rows_frame.pack(fill="x")
         ttk.Button(
-            self, text="Add shortcut", command=self.add_dictation_row,
-        ).pack(anchor="w", pady=(2, 0))
-        ttk.Checkbutton(
-            self, text="Double-tap a Hold shortcut to lock it on",
-            variable=self._double_tap,
-        ).pack(anchor="w", pady=(10, 0))
-        ttk.Label(self, text=_DOUBLE_TAP_HINT).pack(anchor="w")
-
-        self._edit_row = self._section("Edit selected text by voice", with_mode=True)
-        self._paste_row = self._section("Paste last dictation", with_mode=False)
-        self._copy_row = self._section("Copy last dictation", with_mode=False)
-
-        ttk.Label(self, text=_CAPTURE_HINT, wraplength=560, justify="left").pack(
-            anchor="w", pady=(8, 0),
+            dictate, text="Add another", style=LINK_BUTTON_STYLE,
+            command=self.add_dictation_row,
+        ).pack(anchor="w")
+        rows.add(
+            "Double-tap to lock",
+            f"For a Hold shortcut. {_DOUBLE_TAP_HINT}",
+            lambda parent: switch(parent, self._double_tap),
         )
+
+        section_heading(self, "More shortcuts")
+        more = RowGroup(self)
+        more.pack(fill="x")
+        self._edit_row = self._optional(
+            more, "Edit selected text by voice",
+            "Select text, press this and say how to change it.", with_mode=True,
+        )
+        self._paste_row = self._optional(
+            more, "Paste last dictation", "Paste it again where the cursor is.",
+            with_mode=False,
+        )
+        self._copy_row = self._optional(
+            more, "Copy last dictation", "Put it on the clipboard.", with_mode=False,
+        )
+        page_note(self, _CAPTURE_HINT).pack(anchor="w", pady=(CONTROL_GAP, 0))
         self.add_dictation_row()
 
-    def _heading(self, text: str, top: int = 14) -> None:
-        ttk.Label(self, text=text, style=HEADING_STYLE).pack(
-            anchor="w", pady=(top, 2),
-        )
+    @staticmethod
+    def _block(group: RowGroup, title: str, description: str) -> ttk.Frame:
+        """A titled block whose shortcut fields sit under the text, full width.
 
-    def _section(self, heading: str, *, with_mode: bool) -> ShortcutRow:
-        self._heading(heading)
-        row = self._row(self, with_mode=with_mode)
-        row.pack(fill="x", pady=(2, 0))
+        Beside the text the fields would leave too little room for a long
+        title at the narrowest window.
+        """
+
+        def build(parent: tkinter.Misc) -> ttk.Frame:
+            block = ttk.Frame(parent, style=CARD_BODY_STYLE)
+            ttk.Label(block, text=title, style=CARD_TITLE_STYLE).pack(anchor="w")
+            ttk.Label(
+                block, text=description, style=CARD_MUTED_STYLE,
+                wraplength=CARD_TEXT_WRAP, justify="left",
+            ).pack(anchor="w", pady=(2, CONTROL_GAP + 2))
+            return block
+
+        block = group.add_widget(build)
+        assert isinstance(block, ttk.Frame)
+        return block
+
+    def _optional(
+        self, group: RowGroup, title: str, description: str, *, with_mode: bool,
+    ) -> ShortcutRow:
+        row = self._row(self._block(group, title, description), with_mode=with_mode)
+        row.pack(anchor="w")
         return row
 
     def _row(
@@ -154,7 +200,7 @@ class TkHotkeysPage(ttk.Frame):
 
     def add_dictation_row(self) -> ShortcutRow:
         row = self._row(self._rows_frame, with_mode=True, on_remove=self.remove_dictation_row)
-        row.pack(fill="x", pady=(2, 0))
+        row.pack(anchor="w", pady=(0, CONTROL_GAP))
         self._dictation_rows.append(row)
         self._refresh_remove_buttons()
         return row

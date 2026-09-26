@@ -70,6 +70,7 @@ class _TrackingService:
         self.save_dictionary_rules = MagicMock()
         self.license_acceptance_required = MagicMock(return_value=False)
         self.reset_pill_position = MagicMock()
+        self.diagnostics_directory = MagicMock(return_value="D:/VoiceToText_logs")
 
     def subscribe_engine(self, listener: object) -> None:
         self._engine_listeners.append(listener)
