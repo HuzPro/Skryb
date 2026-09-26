@@ -824,6 +824,26 @@ class TestWin32Window:
 
         assert window.handle_message(0x0200, 0) is None
 
+    @pytest.mark.parametrize(("message", "l_param"), [
+        (0x0201, 0), (0x0202, 0), (0x0021, 0), (0x0020, 0), (0x0100, 0),
+    ])
+    def test_odd_and_failing_messages_through_the_real_proc_never_raise(
+        self, monkeypatch, message, l_param,
+    ):
+        reported: list[object] = []
+        monkeypatch.setattr(sys, "unraisablehook", reported.append)
+        window = self._window()
+        window.set_mouse_handler(MagicMock(side_effect=RuntimeError("boom")))
+        monkeypatch.setitem(overlay_module._WINDOWS, 99, window)
+        monkeypatch.setattr(
+            overlay_module, "_default_window_proc", lambda: MagicMock(return_value=0),
+        )
+
+        result = overlay_module._WINDOW_PROC(99, message, 0, l_param)
+
+        assert isinstance(result, int)
+        assert reported == []
+
     def test_a_failing_handler_never_escapes_into_windows(self, monkeypatch):
         window = self._window()
         window.set_mouse_handler(MagicMock(side_effect=RuntimeError("boom")))

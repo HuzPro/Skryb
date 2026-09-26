@@ -37,8 +37,12 @@ class Win32CaptureBridge:
         self._users -= 1
         if self._users:
             return
-        self._hook.stop()
-        self._mouse_hook.stop()
+        # A keyboard hook stuck on its thread must not leave the mouse hook
+        # swallowing the side buttons for good.
+        try:
+            self._hook.stop()
+        finally:
+            self._mouse_hook.stop()
 
     def _handle_key(self, is_key_down: bool, vk: int) -> bool:
         if is_key_down:

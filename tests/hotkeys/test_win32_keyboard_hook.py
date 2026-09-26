@@ -1,4 +1,5 @@
 import ctypes
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,11 +9,18 @@ from voicetotext.hotkeys import win32_keyboard_hook as wkh
 from voicetotext.hotkeys.win32_keyboard_hook import Win32KeyboardHook
 
 
-def _lparam(vk: int, flags: int = 0, extra: int = 0):
+def _lparam(vk: int, flags: int = 0, extra: int = 0, scan_code: int = 0):
     # Returned struct must stay referenced by the caller so its address
     # remains valid for the duration of the call under test.
-    info = wkh._KBDLLHOOKSTRUCT(vkCode=vk, flags=flags, dwExtraInfo=extra)
+    info = wkh._KBDLLHOOKSTRUCT(
+        vkCode=vk, scanCode=scan_code, flags=flags, dwExtraInfo=extra,
+    )
     return info, ctypes.addressof(info)
+
+
+_LLKHF_LOWER_IL_INJECTED = 0x02
+_LLKHF_INJECTED = 0x10
+_NEXT_HOOK_RESULT = 7
 
 
 class TestWin32KeyboardHookDispatch:
@@ -199,3 +207,95 @@ class TestWin32KeyboardHookLifecycle:
 
         assert hook._thread is None
         mock_user32.GetMessageW.assert_not_called()
+
+
+@pytest.fixture
+def reported(monkeypatch) -> list[object]:
+    """Whatever a ctypes callback let escape; Windows would get garbage back."""
+    escaped: list[object] = []
+    monkeypatch.setattr(sys, "unraisablehook", escaped.append)
+    return escaped
+
+
+@pytest.fixture
+def next_hook(monkeypatch) -> MagicMock:
+    user32 = MagicMock()
+    user32.CallNextHookEx.return_value = _NEXT_HOOK_RESULT
+    monkeypatch.setattr(wkh, "_user32", user32)
+    return user32.CallNextHookEx
+
+
+class TestEventsNoKeyProduces:
+    """Driven through the real ctypes thunk Windows calls."""
+
+    @pytest.mark.parametrize(("vk", "scan_code", "flags"), [
+        (0xE7, ord("é"), _LLKHF_INJECTED),
+        (0xE7, 0xD83D, _LLKHF_INJECTED | _LLKHF_LOWER_IL_INJECTED),
+        (0xE7, 0xDE00, _LLKHF_INJECTED | _LLKHF_LOWER_IL_INJECTED),
+        (0, 0x1E, _LLKHF_INJECTED),
+        (0xFF, 0x73, 0),
+    ])
+    def test_injected_text_and_scan_code_only_events_pass_by_the_handler_but_are_observed(
+        self, reported, next_hook, vk, scan_code, flags,
+    ):
+        handler = MagicMock(return_value=True)
+        observer = MagicMock()
+        hook = Win32KeyboardHook(handler, observer)
+        info, lparam = _lparam(vk, flags=flags, scan_code=scan_code)
+
+        down = hook._proc(wkh._HC_ACTION, wkh._WM_KEYDOWN, lparam)
+        up = hook._proc(wkh._HC_ACTION, wkh._WM_KEYUP, lparam)
+
+        assert (down, up) == (_NEXT_HOOK_RESULT, _NEXT_HOOK_RESULT)
+        handler.assert_not_called()
+        assert observer.call_args_list == [
+            ((True, vk, flags, 0),), ((False, vk, flags, 0),),
+        ]
+        assert reported == []
+
+    @pytest.mark.parametrize("flags", [
+        0, _LLKHF_INJECTED, _LLKHF_INJECTED | _LLKHF_LOWER_IL_INJECTED,
+    ])
+    def test_a_real_key_reaches_the_handler_whatever_its_injection_flags(
+        self, reported, next_hook, flags,
+    ):
+        handler = MagicMock(return_value=True)
+        hook = Win32KeyboardHook(handler)
+        info, lparam = _lparam(0x4D, flags=flags)
+
+        assert hook._proc(wkh._HC_ACTION, wkh._WM_SYSKEYDOWN, lparam) == wkh._SUPPRESS
+        handler.assert_called_once_with(True, 0x4D)
+        assert reported == []
+
+    @pytest.mark.parametrize("message", [
+        wkh._WM_KEYDOWN, wkh._WM_KEYUP, wkh._WM_SYSKEYDOWN, wkh._WM_SYSKEYUP, 0x0000,
+    ])
+    def test_an_event_without_its_key_data_is_passed_on_unread(
+        self, reported, next_hook, message,
+    ):
+        handler = MagicMock(return_value=True)
+        observer = MagicMock()
+        hook = Win32KeyboardHook(handler, observer)
+
+        assert hook._proc(wkh._HC_ACTION, message, 0) == _NEXT_HOOK_RESULT
+        handler.assert_not_called()
+        observer.assert_not_called()
+        assert reported == []
+
+    def test_a_handler_that_keeps_failing_passes_every_key_on_and_is_logged_once(
+        self, reported, next_hook, app_caplog,
+    ):
+        hook = Win32KeyboardHook(MagicMock(side_effect=KeyError("strategy state")))
+        info, lparam = _lparam(0x4D)
+
+        results = {
+            hook._proc(wkh._HC_ACTION, message, lparam)
+            for _ in range(1500)
+            for message in (wkh._WM_KEYDOWN, wkh._WM_KEYUP)
+        }
+
+        assert results == {_NEXT_HOOK_RESULT}
+        assert next_hook.call_count == 3000
+        failures = [r for r in app_caplog.records if "keyboard hook failed" in r.getMessage()]
+        assert len(failures) == 1
+        assert reported == []
