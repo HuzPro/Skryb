@@ -9,12 +9,18 @@ open at the 16 kHz the recorder asks for.
 
 import logging
 import math
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 _logger = logging.getLogger(__name__)
 
 SYSTEM_DEFAULT = ""
+DEFAULT_LABEL = "Windows default"
+# Restarting PortAudio while another thread lists devices or restarts it
+# too can crash inside the driver; the tray menu and a plugged-in device
+# can both ask at once.
+_PORTAUDIO_LOCK = threading.Lock()
 
 # Host APIs' own names for "whatever Windows' default is", which the
 # picker already offers as the default.
@@ -30,7 +36,8 @@ DeviceQuery = Callable[[], tuple[Sequence[dict[str, Any]], int]]
 def query_portaudio() -> tuple[Sequence[dict[str, Any]], int]:
     import sounddevice as sd
 
-    return sd.query_devices(), sd.default.hostapi
+    with _PORTAUDIO_LOCK:
+        return sd.query_devices(), sd.default.hostapi
 
 
 def refresh_portaudio() -> None:
@@ -41,11 +48,12 @@ def refresh_portaudio() -> None:
     """
     import sounddevice as sd
 
-    try:
-        sd._terminate()  # the only way to see hot-plugged devices
-        sd._initialize()
-    except Exception:  # a failed re-scan keeps the old list
-        _logger.warning("Could not re-scan audio devices.", exc_info=True)
+    with _PORTAUDIO_LOCK:
+        try:
+            sd._terminate()  # the only way to see hot-plugged devices
+            sd._initialize()
+        except Exception:  # a failed re-scan keeps the old list
+            _logger.warning("Could not re-scan audio devices.", exc_info=True)
 
 
 def input_device_names(query: DeviceQuery = query_portaudio) -> list[str]:
@@ -101,6 +109,41 @@ def input_device_index(
     return None
 
 
+def preferred_microphone(
+    preferred: Sequence[str], connected: Sequence[str], labels: Mapping[str, str],
+) -> str | None:
+    """The connected microphone that comes first in ``preferred``, or None.
+
+    ``preferred`` holds full names and ``connected`` the names PortAudio
+    opens them by, which the default host API may have cut short, so a
+    wish matches either the name or its full label.
+    """
+    by_either: dict[str, str] = {}
+    for name in connected:
+        by_either.setdefault(name, name)
+        by_either.setdefault(labels.get(name, name), name)
+    return next((by_either[wish] for wish in preferred if wish in by_either), None)
+
+
+def connected_preferred_microphone(
+    preferred: Sequence[str], query: DeviceQuery = query_portaudio,
+) -> str | None:
+    if not preferred:
+        return None
+    names = input_device_names(query)
+    return preferred_microphone(preferred, names, full_names(names, query))
+
+
+def short_microphone_name(name: str) -> str:
+    """The hardware part of a name, "Maono PD300X" for "Microphone (Maono PD300X)".
+
+    Windows names most microphones for the kind of endpoint first and the
+    hardware second, in brackets that a cut-short name may never close.
+    """
+    _kind, bracket, hardware = name.partition(" (")
+    return (hardware.removesuffix(")").strip() if bracket else "") or name.strip()
+
+
 def _never_busy() -> bool:
     return False
 
@@ -129,6 +172,11 @@ class Microphones:
         except Exception:  # fall back to the names as the device reports them
             _logger.debug("Looking up full microphone names failed.", exc_info=True)
             return {name: name for name in names}
+
+    def label(self, name: str) -> str:
+        if name == SYSTEM_DEFAULT:
+            return DEFAULT_LABEL
+        return self.labels([name]).get(name, name)
 
     def names(self, rescan: bool = False) -> list[str]:
         if rescan and not self._is_busy() and self._meter is None:

@@ -9,7 +9,8 @@ class DomainEvent:
 
 @dataclass(frozen=True)
 class RecordingStartedEvent(DomainEvent):
-    pass
+    # A few words the pill shows above itself, such as "Editing selection".
+    caption: str = ""
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,9 @@ class RecordingResumedEvent(DomainEvent):
 
 @dataclass(frozen=True)
 class RecordingCancelledEvent(DomainEvent):
-    pass
+    """``recoverable`` when the discarded audio can still be transcribed."""
+
+    recoverable: bool = False
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,32 @@ class MicrophoneMissingEvent(DomainEvent):
     """The chosen microphone is gone; recording uses the Windows default."""
 
     name: str = ""
+
+
+@dataclass(frozen=True)
+class MicrophoneSilentEvent(DomainEvent):
+    """The recording microphone has sent nothing but digital silence."""
+
+    device_name: str = ""
+    seconds_silent: float = 0.0
+
+
+@dataclass(frozen=True)
+class MicrophoneAudioResumedEvent(DomainEvent):
+    pass
+
+
+@dataclass(frozen=True)
+class MicrophoneConnectedEvent(DomainEvent):
+    """A microphone was plugged in; ``will_be_used`` if the next recording picks it."""
+
+    name: str = ""
+    will_be_used: bool = False
+
+
+@dataclass(frozen=True)
+class RecordingCapWarningEvent(DomainEvent):
+    remaining_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -66,7 +95,10 @@ class TranscriptionCompletedEvent(DomainEvent):
 
 @dataclass(frozen=True)
 class TranscriptionFailedEvent(DomainEvent):
+    """``recoverable`` when the recording can be transcribed again."""
+
     error: str = ""
+    recoverable: bool = False
 
 
 @dataclass(frozen=True)
@@ -136,3 +168,40 @@ class ModelDeletedEvent(DomainEvent):
     flips from "Delete" back to "Download" without a manual refresh.
     """
     name: str = ""
+
+
+@dataclass(frozen=True)
+class WritingNoticeEvent(DomainEvent):
+    """Why a voice edit or cleanup did not happen, shown beside the dictation."""
+
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class WritingServerFailedEvent(DomainEvent):
+    """The writing model gave up after its restarts; said once per session."""
+
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class DeliveryFailedEvent(DomainEvent):
+    """Dictated text did not reach a text field; ``reason`` says why.
+
+    ``reason`` is a :class:`voicetotext.output.app_aware_delivery.DeliveryFailure`
+    value: ``no_text_field`` (the text went to the clipboard instead) or
+    ``not_landed`` (the paste was sent but never showed up).
+    """
+
+    reason: str = ""
+    text: str = ""
+
+
+@dataclass(frozen=True)
+class NoLastDictationEvent(DomainEvent):
+    """Paste-last or copy-last was asked for before anything was dictated."""
+
+
+@dataclass(frozen=True)
+class RetryStartedEvent(DomainEvent):
+    """A cancelled or failed recording is being transcribed again."""

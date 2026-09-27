@@ -2,6 +2,7 @@ import ctypes
 import ctypes.wintypes as _wt
 import logging
 import threading
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 
 from voicetotext.core.exceptions import HotkeyError
@@ -23,6 +24,14 @@ _SUPPRESS = 1
 
 _KEY_DOWN_MESSAGES = frozenset({_WM_KEYDOWN, _WM_SYSKEYDOWN})
 _KEY_UP_MESSAGES = frozenset({_WM_KEYUP, _WM_SYSKEYUP})
+_KEY_MESSAGES = _KEY_DOWN_MESSAGES | _KEY_UP_MESSAGES
+
+# Codes no key on a keyboard produces: 0 and 0xFF come from scan codes with
+# no virtual key, and VK_PACKET carries a character injected as text. None
+# can be part of a shortcut, so they only ever go past the handler.
+_VK_PACKET = 0xE7
+_VK_NONE = 0xFF
+_NOT_KEYS = frozenset({0, _VK_PACKET, _VK_NONE})
 
 _READY_TIMEOUT_SECONDS = 2.0
 _JOIN_TIMEOUT_SECONDS = 2.0
@@ -70,8 +79,9 @@ _kernel32.GetModuleHandleW.restype = _wt.HMODULE
 _kernel32.GetCurrentThreadId.restype = _wt.DWORD
 
 
-# Decides what to do with each key event. Receives ``(is_key_down, vk)`` and
-# returns True to SUPPRESS the key (stop it reaching other applications).
+# Decides what to do with each key or mouse-button event. Receives
+# ``(is_key_down, vk)`` and returns True to SUPPRESS it (stop it reaching
+# other applications).
 KeyEventHandler = Callable[[bool, int], bool]
 
 # Watches key events without a say in suppression. Receives
@@ -86,33 +96,36 @@ def ignore_key_event(is_key_down: bool, vk: int, flags: int, extra: int) -> None
     return None
 
 
-class Win32KeyboardHook:
-    """A low-level keyboard hook running on its own message-pump thread.
+class Win32LowLevelHook(ABC):
+    """A low-level input hook running on its own message-pump thread.
 
-    A ``WH_KEYBOARD_LL`` hook only fires on a thread that pumps messages, so
-    ``start`` spawns a daemon thread that installs the hook and runs a
-    ``GetMessage`` loop; ``stop`` posts ``WM_QUIT`` to break it and unhooks.
+    A ``WH_KEYBOARD_LL``/``WH_MOUSE_LL`` hook only fires on a thread that
+    pumps messages, so ``start`` spawns a daemon thread that installs the
+    hook and runs a ``GetMessage`` loop; ``stop`` posts ``WM_QUIT`` to break
+    it and unhooks.
 
     ``start`` blocks on a readiness event until the worker has published its
     thread id AND created its message queue (via ``SetWindowsHookExW``), so
     ``stop`` can never race ahead and drop the ``WM_QUIT`` that frees the
     thread. The hook proc is pinned on the instance - a ``WINFUNCTYPE`` the
     GC collects mid-flight would crash the interpreter.
+
+    Nothing raised while handling an event leaves the hook proc: the first
+    failure is logged and every failing event is passed on unchanged.
     """
 
-    def __init__(
-        self,
-        handler: KeyEventHandler,
-        observer: KeyObserver = ignore_key_event,
-    ) -> None:
+    _hook_type: int
+    _device: str
+
+    def __init__(self, handler: KeyEventHandler) -> None:
         self._handler = handler
-        self._observer = observer
         self._proc = _HOOKPROC(self._hook_proc)
         self._thread: threading.Thread | None = None
         self._thread_id: int = 0
         self._hook: int | None = None
         self._ready = threading.Event()
         self._start_error: Exception | None = None
+        self._failure_logged = False
 
     def start(self) -> None:
         if self._thread is not None:
@@ -140,7 +153,8 @@ class Win32KeyboardHook:
         self._thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
         if self._thread.is_alive():
             raise HotkeyError(
-                "Keyboard hook thread did not exit; the hook may still be installed."
+                f"The {self._device} hook thread did not exit; "
+                "the hook may still be installed."
             )
         self._thread = None
         self._thread_id = 0
@@ -168,11 +182,11 @@ class Win32KeyboardHook:
 
     def _install_hook(self) -> None:
         self._hook = _user32.SetWindowsHookExW(
-            _WH_KEYBOARD_LL, self._proc, _kernel32.GetModuleHandleW(None), 0,
+            self._hook_type, self._proc, _kernel32.GetModuleHandleW(None), 0,
         )
         if not self._hook:
             raise HotkeyError(
-                "Could not install the global keyboard hook "
+                f"Could not install the global {self._device} hook "
                 "(SetWindowsHookExW returned NULL)."
             )
 
@@ -188,24 +202,59 @@ class Win32KeyboardHook:
             _user32.DispatchMessageW(ctypes.byref(message))
 
     def _hook_proc(self, n_code: int, w_param: int, l_param: int) -> int:
-        if n_code == _HC_ACTION and self._dispatch(w_param, l_param):
+        if n_code == _HC_ACTION and l_param and self._swallows(w_param, l_param):
             return _SUPPRESS
         return _user32.CallNextHookEx(None, n_code, w_param, l_param)
 
+    def _swallows(self, message: int, l_param: int) -> bool:
+        try:
+            return self._dispatch(message, l_param)
+        except Exception:
+            self._log_first_failure()
+            return False
+
+    def _log_first_failure(self) -> None:
+        if self._failure_logged:
+            return
+        self._failure_logged = True
+        _logger.exception(
+            "The %s hook failed on an event; passing events on.", self._device,
+        )
+
+    @abstractmethod
     def _dispatch(self, message: int, l_param: int) -> bool:
+        """Hand one hook message to the handler; True to swallow it."""
+
+
+class Win32KeyboardHook(Win32LowLevelHook):
+    """Every key down and up, for a handler that may swallow it and an
+    observer that watches whatever the handler let through."""
+
+    _hook_type = _WH_KEYBOARD_LL
+    _device = "keyboard"
+
+    def __init__(
+        self,
+        handler: KeyEventHandler,
+        observer: KeyObserver = ignore_key_event,
+    ) -> None:
+        super().__init__(handler)
+        self._observer = observer
+
+    def _dispatch(self, message: int, l_param: int) -> bool:
+        if message not in _KEY_MESSAGES:
+            return False
         info = ctypes.cast(
             l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT),
         ).contents
-        if message in _KEY_DOWN_MESSAGES:
-            return self._handle_then_observe(True, info)
-        if message in _KEY_UP_MESSAGES:
-            return self._handle_then_observe(False, info)
-        return False
+        return self._handle_then_observe(message in _KEY_DOWN_MESSAGES, info)
 
     def _handle_then_observe(
         self, is_key_down: bool, info: _KBDLLHOOKSTRUCT,
     ) -> bool:
-        suppress = self._handler(is_key_down, info.vkCode)
+        suppress = info.vkCode not in _NOT_KEYS and self._handler(
+            is_key_down, info.vkCode,
+        )
         # A swallowed key never reached the focused app, so watchers of
         # what the user typed there must not see it either.
         if not suppress:

@@ -1,7 +1,9 @@
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from voicetotext.core.event_bus import EventBus
 from voicetotext.core.events import (
@@ -10,11 +12,27 @@ from voicetotext.core.events import (
     DownloadProgressEvent,
     DownloadStateChangedEvent,
 )
-from voicetotext.downloads.model_download_job import ModelDownloadJob
 from voicetotext.downloads.state import DownloadState, DownloadStats
 
 
 _SPEED_WINDOW_SECONDS = 3.0
+
+
+class DownloadJob(Protocol):
+    """What the manager runs: :class:`ModelDownloadJob` or any job shaped like it."""
+
+    @property
+    def job_id(self) -> str: ...
+
+    @property
+    def total_bytes(self) -> int: ...
+
+    def run(
+        self,
+        on_progress: Callable[[int, int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None: ...
 
 
 class DownloadHandle:
@@ -46,7 +64,7 @@ class DownloadHandle:
 
 @dataclass
 class _ActiveJob:
-    job: ModelDownloadJob
+    job: DownloadJob
     state: DownloadState = DownloadState.QUEUED
     cancel_event: threading.Event = field(default_factory=threading.Event)
     pause_event: threading.Event = field(default_factory=threading.Event)
@@ -89,7 +107,7 @@ def _is_in_flight(state: DownloadState) -> bool:
 
 
 class DownloadManager:
-    """Bounded thread pool that runs :class:`ModelDownloadJob` instances and
+    """Bounded thread pool that runs :class:`DownloadJob` instances and
     publishes their lifecycle on the shared :class:`EventBus`.
 
     Exposes pause/resume/cancel via :class:`DownloadHandle`.
@@ -109,7 +127,7 @@ class DownloadManager:
     # Public API
     # ------------------------------------------------------------------
 
-    def enqueue(self, job: ModelDownloadJob) -> DownloadHandle:
+    def enqueue(self, job: DownloadJob) -> DownloadHandle:
         with self._lock:
             existing = self._jobs.get(job.job_id)
             if existing is not None and _is_in_flight(existing.state):

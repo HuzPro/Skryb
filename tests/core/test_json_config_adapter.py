@@ -35,8 +35,8 @@ class TestJsonConfigAdapterDefaults:
         config = JsonConfigAdapter(tmp_path / "config.json")
         config.load()
 
-        assert config.get("hotkey.mode") == "toggle"
-        assert config.get("hotkey.combination") == "ctrl+alt+m"
+        assert config.get("hotkey.bindings") == [{"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"}]
+        assert config.get("hotkey.double_tap_locks_hold") is True
         assert config.get("output.mode") == "direct_paste"
         assert config.get("transcription.model_size") is None
         assert config.get("overlay.enabled") is True
@@ -68,7 +68,7 @@ class TestJsonConfigAdapterDotNotation:
         hotkey = config.get("hotkey")
 
         assert isinstance(hotkey, dict)
-        assert hotkey["mode"] == "toggle"
+        assert hotkey["double_tap_locks_hold"] is True
 
 
 class TestJsonConfigAdapterPersistence:

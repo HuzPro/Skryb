@@ -6,8 +6,9 @@ _DEFAULTS: dict[str, ConfigValue] = {
     "transcription.model_size": "parakeet-tdt-0.6b-v3",
     "transcription.language": "en",
     "transcription.device": "auto",
-    "hotkey.combination": "ctrl+alt+m",
-    "hotkey.mode": "toggle",
+    "hotkey.bindings": [
+        {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
+    ],
     "output.mode": "direct_paste",
     "audio.sample_rate": 16000,
 }

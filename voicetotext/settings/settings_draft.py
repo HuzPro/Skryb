@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 
+from voicetotext.hotkeys.bindings import DEFAULT_BINDINGS, Binding
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.transcription_mode import TranscriptionMode
+from voicetotext.writing.settings import WritingSettings
 
 
 @dataclass(frozen=True)
@@ -18,8 +21,6 @@ class SettingsDraft:
     language: str
     device: str
     engine: str
-    hotkey_combination: str
-    hotkey_mode: str
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
     crisperwhisper_mode: str = "intended"
@@ -28,6 +29,16 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
+    writing: WritingSettings = WritingSettings()
+    hotkey_bindings: tuple[Binding, ...] = DEFAULT_BINDINGS
+    double_tap_locks_hold: bool = True
+    # Read where it is used, at each recording or sound, so none of it
+    # needs a rebuild either.
+    recording: RecordingPreferences = RecordingPreferences()
+    # 0 keeps history forever. Overrides are (process, method value) pairs,
+    # read at every paste, so neither needs a rebuild.
+    history_retention_days: int = 0
+    paste_method_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,6 +55,11 @@ class ChangeSet:
     output_changed: bool
     mode_changed: bool = False
     diagnostics_changed: bool = False
+    # The writing server has to be relaunched for a new runtime or model.
+    writing_server_changed: bool = False
+    # Learning needs the edit watcher, which only runs while something uses it.
+    learning_turned_on: bool = False
+    history_retention_changed: bool = False
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
@@ -62,8 +78,8 @@ class ChangeSet:
             or crisperwhisper_mode_changed
         )
         hotkey_changed = (
-            original.hotkey_combination != updated.hotkey_combination
-            or original.hotkey_mode != updated.hotkey_mode
+            original.hotkey_bindings != updated.hotkey_bindings
+            or original.double_tap_locks_hold != updated.double_tap_locks_hold
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
         # The pipeline runs in passthrough only while a CrisperWhisper model
@@ -77,6 +93,7 @@ class ChangeSet:
             or mode_changed
             or crisperwhisper_mode_changed
             or original.model_size != updated.model_size
+            or original.writing != updated.writing
         )
         return cls(
             engine_reload_required=engine_reload_required,
@@ -84,6 +101,14 @@ class ChangeSet:
             output_changed=output_changed,
             mode_changed=mode_changed,
             diagnostics_changed=original.capture_content != updated.capture_content,
+            writing_server_changed=(
+                original.writing.runtime_path != updated.writing.runtime_path
+                or original.writing.model_path != updated.writing.model_path
+            ),
+            history_retention_changed=(
+                original.history_retention_days != updated.history_retention_days
+            ),
+            learning_turned_on=not original.writing.learns and updated.writing.learns,
         )
 
     @property
@@ -94,4 +119,5 @@ class ChangeSet:
             or self.output_changed
             or self.mode_changed
             or self.diagnostics_changed
+            or self.history_retention_changed
         )

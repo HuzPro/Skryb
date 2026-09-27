@@ -1,13 +1,18 @@
+from string import ascii_lowercase, digits
+
 from voicetotext.hotkeys.keys import (
     VK_F1,
     VK_LCONTROL,
     VK_LMENU,
     VK_LSHIFT,
     VK_LWIN,
+    VK_MBUTTON,
     VK_RCONTROL,
     VK_RMENU,
     VK_RSHIFT,
     VK_SPACE,
+    VK_XBUTTON1,
+    VK_XBUTTON2,
     HotkeyKey,
     from_char,
 )
@@ -28,8 +33,13 @@ _MODIFIER_MAP: dict[str, HotkeyKey] = {
     "shift_r": HotkeyKey(VK_RSHIFT, "shift"),
     "cmd": HotkeyKey(VK_LWIN, "cmd"),
     "space": HotkeyKey(VK_SPACE, "space"),
-    **{f"f{n}": HotkeyKey(VK_F1 + n - 1, f"f{n}") for n in range(1, 13)},
+    "mouse_middle": HotkeyKey(VK_MBUTTON, "mouse_middle"),
+    "mouse4": HotkeyKey(VK_XBUTTON1, "mouse4"),
+    "mouse5": HotkeyKey(VK_XBUTTON2, "mouse5"),
+    **{f"f{n}": HotkeyKey(VK_F1 + n - 1, f"f{n}") for n in range(1, 25)},
 }
+
+_SINGLE_CHARACTER_KEYS = frozenset(ascii_lowercase + digits)
 
 
 def parse_hotkey_combo(combo_string: str) -> tuple[HotkeyKey, ...]:
@@ -38,7 +48,7 @@ def parse_hotkey_combo(combo_string: str) -> tuple[HotkeyKey, ...]:
         part = raw_part.strip()
         if part in _MODIFIER_MAP:
             parsed.append(_MODIFIER_MAP[part])
-        elif len(part) == 1 and part.isalpha():
+        elif part in _SINGLE_CHARACTER_KEYS:
             parsed.append(from_char(part))
         else:
             raise ValueError(f"Unknown key: {part}")

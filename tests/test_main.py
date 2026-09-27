@@ -16,8 +16,8 @@ from voicetotext.transcription.engine_factory import build_engine_registry
 from voicetotext.transcription.engine_registry import EngineRegistry
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import DEFAULT_MODEL
-from voicetotext.transcription.torch_hardware_detector import (
-    TorchHardwareDetector,
+from voicetotext.transcription.cached_hardware_detector import (
+    CachedHardwareDetector,
 )
 from voicetotext.__main__ import (
     _Startup,
@@ -265,6 +265,7 @@ class TestBindingStartupOrder:
         manager = MagicMock()
         manager.is_installed.return_value = True
         app = MagicMock()
+        api_server = MagicMock()
         paths = SimpleNamespace(
             config_path=Path("config.json"),
             models_dir=Path("models"),
@@ -276,6 +277,10 @@ class TestBindingStartupOrder:
 
         with (
             patch("tkinter.Tk", side_effect=lambda: timeline.append("tk") or root),
+            patch(
+                "voicetotext.__main__._start_api_server",
+                side_effect=lambda _bus: timeline.append("api-server") or api_server,
+            ),
             patch(
                 "voicetotext.downloads.download_manager.DownloadManager",
                 side_effect=lambda **_kwargs: timeline.append("downloads")
@@ -299,6 +304,7 @@ class TestBindingStartupOrder:
 
         assert timeline == [
             "tk",
+            "api-server",
             "downloads",
             "manager",
             "await-prewarm",
@@ -306,9 +312,10 @@ class TestBindingStartupOrder:
         ]
         detect.assert_not_called()
         assert build_app.call_args.kwargs["registry"] is startup.registry
+        assert build_app.call_args.kwargs["api_server"] is api_server
         assert isinstance(
             build_app.call_args.kwargs["hardware_detector"],
-            TorchHardwareDetector,
+            CachedHardwareDetector,
         )
         app.run.assert_called_once_with()
 
@@ -405,11 +412,13 @@ class TestOneLicensePolicyForTheProcess:
             config_path=Path("config.json"),
             models_dir=tmp_path,
             dictionary_path=tmp_path / "dictionary.json",
+            diagnostics_dir=tmp_path / "diagnostics",
             is_first_run=lambda: True,
         )
 
         with (
             patch("tkinter.Tk", return_value=MagicMock()),
+            patch("voicetotext.__main__._start_api_server"),
             patch("voicetotext.downloads.download_manager.DownloadManager"),
             patch(
                 "voicetotext.transcription.engine_factory.create_model_manager",

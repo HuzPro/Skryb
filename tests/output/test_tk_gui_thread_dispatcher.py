@@ -90,6 +90,29 @@ class TestTkGuiThreadDispatcherDrain:
         assert results == [0, 1, 2, 3, 4]
 
 
+class TestTkGuiThreadDispatcherSleep:
+    def test_sleep_returns_on_time_while_a_frame_loop_keeps_a_timer_always_due(
+        self, root, dispatcher,
+    ) -> None:
+        # Like the pill: each frame reschedules itself and is due again at
+        # once. The loop gives up after 1.5 s so a regression fails, not hangs.
+        give_up_at = time.monotonic() + 1.5
+
+        def frame() -> None:
+            time.sleep(0.002)
+            if time.monotonic() < give_up_at:
+                root.after(0, frame)
+
+        root.after(0, frame)
+        started = time.monotonic()
+        dispatcher.sleep(0.05)
+        took = time.monotonic() - started
+        while time.monotonic() < give_up_at + 0.1:
+            root.update()
+
+        assert took < 0.5
+
+
 class TestTkGuiThreadDispatcherExceptionSafety:
     @pytest.fixture()
     def log_capture(self, caplog: pytest.LogCaptureFixture):

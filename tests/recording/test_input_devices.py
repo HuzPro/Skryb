@@ -3,12 +3,16 @@ import math
 import pytest
 
 from voicetotext.recording.input_devices import (
+    DEFAULT_LABEL,
     SYSTEM_DEFAULT,
     Microphones,
+    connected_preferred_microphone,
     full_names,
     input_device_index,
     input_device_names,
     loudness,
+    preferred_microphone,
+    short_microphone_name,
 )
 
 _MME = 0
@@ -141,3 +145,94 @@ class TestRescanning:
             raise OSError("PortAudio not initialized")
 
         assert Microphones(query=broken).labels(["Mic A"]) == {"Mic A": "Mic A"}
+
+
+def crowded_device_query():
+    """A thousand-odd inputs: MME cuts, WASAPI full names, duplicates, blanks."""
+    devices = [_device("Microsoft Sound Mapper - Input")]
+    for index in range(1000):
+        name = f"Microphone {index % 400} (Generic USB Audio Device)"
+        devices.append(_device(name[:31]))
+        devices.append(_device(name, hostapi=_WASAPI))
+    devices += [
+        _device(""),
+        _device("   "),
+        _device("Mikrofon (Gerät für Café ✓)"),
+        _device("Microphone (Maono PD300X Microp"),
+        _device("Microphone (Maono PD300X Microphone)", hostapi=_WASAPI),
+        _device("Headset (Jabra Evolve 20 MS Ste"),
+        _device("Headset (Jabra Evolve 20 MS Stereo)", hostapi=_WASAPI),
+    ]
+    return devices, _MME
+
+
+class TestPreferredMicrophones:
+    def test_the_first_connected_one_in_the_list_wins_by_its_full_name(self):
+        preferred = [
+            "Unplugged Blue Yeti",
+            "Headset (Jabra Evolve 20 MS Stereo)",
+            "Microphone (Maono PD300X Microphone)",
+        ]
+
+        chosen = connected_preferred_microphone(preferred, crowded_device_query)
+
+        assert chosen == "Headset (Jabra Evolve 20 MS Ste"
+
+    def test_a_name_saved_the_way_windows_cut_it_still_matches(self):
+        chosen = connected_preferred_microphone(
+            ["Microphone (Maono PD300X Microp"], crowded_device_query,
+        )
+
+        assert chosen == "Microphone (Maono PD300X Microp"
+
+    def test_unicode_names_match_exactly(self):
+        assert connected_preferred_microphone(
+            ["Mikrofon (Gerät für Café ✓)"], crowded_device_query,
+        ) == "Mikrofon (Gerät für Café ✓)"
+
+    def test_nothing_connected_from_the_list_means_no_preference(self):
+        assert connected_preferred_microphone(
+            ["Unplugged Blue Yeti", "", "   "], crowded_device_query,
+        ) is None
+
+    def test_an_empty_list_never_touches_the_audio_stack(self):
+        def untouchable():
+            raise AssertionError("queried PortAudio for nothing")
+
+        assert connected_preferred_microphone([], untouchable) is None
+
+    def test_duplicate_devices_resolve_to_the_first_of_them(self):
+        connected = ["Mic", "Mic", "Mic 2"]
+
+        assert preferred_microphone(["Mic 2", "Mic"], connected, {}) == "Mic 2"
+        assert preferred_microphone(["Mic"], connected, {}) == "Mic"
+
+    def test_a_short_name_is_never_mistaken_for_a_longer_one(self):
+        assert preferred_microphone(["Mic 2 (USB)"], ["Mic"], {"Mic": "Mic"}) is None
+
+
+class TestShortNames:
+    @pytest.mark.parametrize(
+        ("name", "short"),
+        [
+            ("Microphone (Maono PD300X Microphone)", "Maono PD300X Microphone"),
+            ("Microphone (Maono PD300X Microp", "Maono PD300X Microp"),
+            ("Microphone (Realtek(R) Audio)", "Realtek(R) Audio"),
+            ("Mikrofon (Gerät für Café ✓)", "Gerät für Café ✓"),
+            ("Blue Yeti", "Blue Yeti"),
+            ("Microphone ()", "Microphone ()"),
+            (DEFAULT_LABEL, DEFAULT_LABEL),
+        ],
+    )
+    def test_keeps_the_part_that_names_the_hardware(self, name, short):
+        assert short_microphone_name(name) == short
+
+
+class TestLabels:
+    def test_the_windows_default_reads_as_such(self):
+        assert Microphones(query=_query).label(SYSTEM_DEFAULT) == "Windows default"
+
+    def test_a_cut_name_reads_in_full(self):
+        assert Microphones(query=_query).label("Microphone (Maono PD300X Microp") == (
+            "Microphone (Maono PD300X Microphone)"
+        )

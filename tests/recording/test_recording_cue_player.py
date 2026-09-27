@@ -1,8 +1,10 @@
 import numpy as np
+import pytest
 
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     EngineLoadCompletedEvent,
+    RecordingCapWarningEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     StateChangedEvent,
@@ -16,19 +18,25 @@ from voicetotext.recording.recording_cue_player import (
     START_FREQUENCY_HZ,
     ready_chime_to_samples,
     tone_to_samples,
+    warning_to_samples,
 )
+from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 
 
 class _FakeCuePlayer(RecordingCuePlayer):
     def __init__(self) -> None:
         self.starts = 0
         self.stops = 0
+        self.warnings = 0
 
     def play_start(self) -> None:
         self.starts += 1
 
     def play_stop(self) -> None:
         self.stops += 1
+
+    def play_warning(self) -> None:
+        self.warnings += 1
 
 
 class TestToneToSamples:
@@ -138,3 +146,69 @@ class TestEngineReadyBeeper:
         ))
 
         assert player.readies == 0
+
+
+class TestRecordingLimitWarningCue:
+    def test_a_limit_warning_plays_the_warning_cue_and_nothing_else(self):
+        bus = SimpleEventBus()
+        player = _FakeCuePlayer()
+        CueBeeper(bus, player)
+
+        bus.publish(RecordingCapWarningEvent(remaining_seconds=30.0))
+
+        assert (player.warnings, player.starts, player.stops) == (1, 0, 0)
+
+    def test_the_warning_is_softer_than_the_start_and_stop_cues(self):
+        warning = float(np.max(np.abs(warning_to_samples())))
+        start = float(np.max(np.abs(tone_to_samples(START_FREQUENCY_HZ))))
+
+        assert 0.0 < warning < start
+
+
+class _PlayedCues(SoundDeviceCuePlayer):
+    def __init__(self, enabled: bool = True, volume: float = 0.6) -> None:
+        self.enabled = enabled
+        self.volume = volume
+        super().__init__(enabled=lambda: self.enabled, volume=lambda: self.volume)
+        self.played: list[np.ndarray] = []
+
+    def _emit(self, samples: np.ndarray) -> None:
+        self.played.append(samples)
+
+
+class TestCueSettings:
+    def test_the_default_volume_plays_the_cues_exactly_as_loud_as_before(self):
+        player = _PlayedCues()
+
+        player.play_start()
+
+        np.testing.assert_array_equal(player.played[0], tone_to_samples(START_FREQUENCY_HZ))
+
+    def test_turning_sounds_off_silences_every_cue_from_the_next_one_on(self):
+        player = _PlayedCues()
+        player.play_start()
+
+        player.enabled = False
+        player.play_stop()
+        player.play_ready()
+        player.play_warning()
+
+        assert len(player.played) == 1
+
+    def test_volume_scales_each_cue_as_it_is_played(self):
+        player = _PlayedCues(volume=0.3)
+        player.play_stop()
+        player.volume = 1.0
+        player.play_stop()
+
+        quiet, loud = (float(np.max(np.abs(samples))) for samples in player.played)
+        assert loud == pytest.approx(quiet * (1.0 / 0.3), rel=1e-5)
+        assert loud <= 1.0
+
+    @pytest.mark.parametrize("volume", [0.0, -3.0, float("nan")])
+    def test_a_volume_of_nothing_or_nonsense_plays_nothing(self, volume):
+        player = _PlayedCues(volume=volume)
+
+        player.play_start()
+
+        assert player.played == []

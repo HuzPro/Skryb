@@ -12,14 +12,21 @@ from voicetotext.core.action_dispatcher import (
     ThreadedActionDispatcher,
 )
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
-from voicetotext.core.events import EngineLoadFailedEvent, MicrophoneMissingEvent
+from voicetotext.core.events import (
+    DeliveryFailedEvent,
+    EngineLoadFailedEvent,
+    MicrophoneMissingEvent,
+    StateChangedEvent,
+    WritingNoticeEvent,
+    WritingServerFailedEvent,
+)
 from voicetotext.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
 )
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
-from voicetotext.core.startup_log import milestone
+from voicetotext.core.startup_log import milestone, session_id
 from voicetotext.core.timestamps import utc_now
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics, content_recording_enabled
@@ -30,17 +37,29 @@ from voicetotext.edit_capture.delivery_recording_decorator import (
 )
 from voicetotext.edit_capture.observer import Win32EditObserver
 from voicetotext.edit_capture.recorder import EditRecorder
-from voicetotext.edit_capture.win32_foreground import foreground_hwnd
+from voicetotext.edit_capture.win32_foreground import (
+    foreground_hwnd,
+    foreground_window,
+)
 from voicetotext.edit_capture.win32_input import caps_lock_enabled, click_count
-from voicetotext.hotkeys.key_parser import parse_hotkey_combo
+from voicetotext.hotkeys.actions import HotkeyActions, strategies_for
+from voicetotext.hotkeys.bindings import (
+    BindingAction,
+    migrate_legacy_hotkey,
+    parse_bindings,
+)
 from voicetotext.hotkeys.listener import HotkeyListener
-from voicetotext.hotkeys.push_to_talk_strategy import PushToTalkStrategy
-from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.win32_keyboard_hook import KeyObserver, ignore_key_event
+from voicetotext.output.app_aware_delivery import (
+    AppAwareDelivery,
+    DeliveryFailure,
+    DeliveryHooks,
+)
 from voicetotext.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
+from voicetotext.output.caret_context import log_caret_text_when
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -51,19 +70,24 @@ from voicetotext.output.gui_thread_output_decorator import (
     GuiThreadOutputDecorator,
 )
 from voicetotext.output.handler import TextOutputHandler
+from voicetotext.output.last_dictation import LastDictation, LastDictationDecorator
 from voicetotext.output.modifier_release_waiting_key_sender import (
     ModifierReleaseWaitingKeySender,
 )
 from voicetotext.output.output_mode import OutputMode
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
 from voicetotext.output.paste_memory import PasteMemory, read_or_remember
+from voicetotext.output.paste_method import PasteMethod, paste_method_for
 from voicetotext.output.sleeper import TimeSleeper
 from voicetotext.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
 from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
-from voicetotext.output.win32_caret_context import read_caret_context
+from voicetotext.output.win32_caret_context import (
+    read_caret_context,
+    text_field_focused,
+)
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
 from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
@@ -74,11 +98,22 @@ from voicetotext.output.win32_key_sender import (
 from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
-from voicetotext.history.tk_window import HistoryWindow
+from voicetotext.history.retention import HistoryPruner, history_retention_days
+from voicetotext.history.service import HistoryService
+from voicetotext.recording.audio_ducking import AudioDucking, core_audio_sessions
 from voicetotext.recording.audio_segment import AudioSegment
+from voicetotext.recording.hot_plug import MicrophoneHotPlug
 from voicetotext.recording.input_devices import Microphones
+from voicetotext.recording.notice import Notice
 from voicetotext.recording.overlay import RecordingOverlay
+from voicetotext.recording.preferences import (
+    RecordingPreferences,
+    load_pill_position,
+    save_pill_position,
+)
+from voicetotext.recording.silence_watchdog import SilenceWatchdog
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
+from voicetotext.recording.recovery_notices import RecoveryNotices
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.recording.speech_level import boost_quiet_speech
@@ -90,7 +125,6 @@ from voicetotext.settings.engine_hot_swap import (
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
 from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
-from voicetotext.settings.tk_window import TkSettingsWindow
 from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.engine_factory import (
@@ -126,6 +160,16 @@ from voicetotext.transcription.streaming.streaming_engine import (
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
 from voicetotext.tray.app import SystemTrayApp
 from voicetotext.tray.win32_tray_adapter import build_win32_tray_adapter
+from voicetotext.ui.api_handlers import CoreApi, ShortcutCapture
+from voicetotext.ui.api_server import ApiServer
+from voicetotext.ui.launcher import ShellLauncher
+from voicetotext.writing.install import WritingPaths, managed_root, server_files
+from voicetotext.writing.learning import Learner
+from voicetotext.writing.llama_server import LlamaServer
+from voicetotext.writing.service import WritingService, warm_up_writing_model
+from voicetotext.writing.settings import read_writing_settings
+from voicetotext.writing.transforms import TransformStore
+from voicetotext.writing.voice_edit import VoiceEditor
 
 _logger = logging.getLogger(__name__)
 
@@ -156,6 +200,29 @@ def migrate_language(config: JsonConfigAdapter) -> None:
     config.save()
 
 
+def migrate_stale_batch_block(config: JsonConfigAdapter) -> None:
+    """Drop the ``batch`` block an abandoned writing feature left behind.
+
+    Its values mean nothing to the ``writing`` settings that replaced it, so
+    they are removed rather than carried over.
+    """
+    document = config.get_all()
+    if "batch" not in document:
+        return
+    _logger.info("Removing the stale 'batch' settings block.")
+    del document["batch"]
+    config.replace_all(document)
+    config.save()
+
+
+def migrate_hotkey_bindings(config: JsonConfigAdapter) -> None:
+    """Turn a single ``hotkey.combination``/``hotkey.mode`` into ``hotkey.bindings``."""
+    if not migrate_legacy_hotkey(config):
+        return
+    _logger.info("Migrated the hotkey to shortcut bindings.")
+    config.save()
+
+
 def _ignore_delivery(text: str) -> None:
     return None
 
@@ -181,25 +248,46 @@ def _warn_if_synced_folder(directory: Path) -> None:
     )
 
 
-def _build_edit_capture(
-    config: JsonConfigAdapter, paths: AppPaths,
-) -> Win32EditObserver | None:
-    """The keystroke watcher, or nothing unless it was explicitly asked for.
+def _edit_capture_enabled(config: JsonConfigAdapter) -> bool:
+    return (
+        content_recording_enabled(config)
+        and config.get("diagnostics.capture_edits", False) is True
+    )
 
-    Off by default and deliberately config-only: it records what the user
-    types into the window a transcription was pasted into.
+
+def _learning_enabled(config: JsonConfigAdapter, learner: Learner | None) -> bool:
+    return learner is not None and read_writing_settings(config).learns
+
+
+def _build_edit_capture(
+    config: JsonConfigAdapter, paths: AppPaths, learner: Learner | None = None,
+) -> Win32EditObserver | None:
+    """The keystroke watcher, or nothing unless something needs it.
+
+    It feeds two sinks. ``edits.jsonl`` records what the user types into
+    the window a transcription was pasted into, so it stays off by default
+    and config-only. The learner keeps only word corrections and style
+    tallies, and follows the Writing page's learning checkboxes.
     """
-    if config.get("diagnostics.capture_edits", False) is not True:
+    capture = _edit_capture_enabled(config)
+    if not capture and not _learning_enabled(config, learner):
         return None
-    if not content_recording_enabled(config):
-        return None
-    _warn_if_synced_folder(paths.diagnostics_dir)
-    writer = JsonlWriter(paths.session_dir / "edits.jsonl")
-    _logger.info("Edit capture is on; writing to %s", paths.session_dir)
+    write_jsonl: Callable[[dict[str, object]], None] | None = None
+    if capture:
+        _warn_if_synced_folder(paths.diagnostics_dir)
+        write_jsonl = JsonlWriter(paths.session_dir / "edits.jsonl").append
+        _logger.info("Edit capture is on; writing to %s", paths.session_dir)
+
+    def write(event: dict[str, object]) -> None:
+        if write_jsonl is not None and _edit_capture_enabled(config):
+            write_jsonl(event)
+        if learner is not None and _learning_enabled(config, learner):
+            learner.observe(event)
+
     return Win32EditObserver(EditRecorder(
-        writer.append, utc_now,
-        lambda: content_recording_enabled(config)
-        and config.get("diagnostics.capture_edits", False) is True,
+        write, utc_now,
+        lambda: (write_jsonl is not None and _edit_capture_enabled(config))
+        or _learning_enabled(config, learner),
     ))
 
 
@@ -240,6 +328,8 @@ def _build_output(
     pipeline_mode: PipelineMode = PipelineMode.BATCH,
     models_dir: Path | None = None,
     on_delivered: Callable[[str], None] = _ignore_delivery,
+    writing: WritingService | None = None,
+    hooks: DeliveryHooks | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -260,6 +350,7 @@ def _build_output(
         return DeliveryRecordingDecorator(
             inner=PasteAndClipboardAdapter(
                 sleeper=sleeper, writer=writer, key_sender=key_sender,
+                paste_method=hooks.paste_method if hooks is not None else None,
             ),
             record=functools.partial(_remember_then_report, on_delivered),
         )
@@ -283,7 +374,16 @@ def _build_output(
     # ``SendInput`` calls require a UI thread, and the use case runs
     # on a daemon worker. Wrapping every concrete handler with this
     # decorator means the worker never touches Win32 directly.
-    gui_output = GuiThreadOutputDecorator(inner=inner, dispatcher=gui_dispatcher)
+    gui_output: TextOutputHandler = GuiThreadOutputDecorator(
+        inner=inner, dispatcher=gui_dispatcher,
+    )
+    # Streaming pastes fragments: none is a dictation to repeat, and each
+    # would read as a paste that the next one pushed out of place.
+    if hooks is not None and pipeline_mode is not PipelineMode.STREAMING:
+        gui_output = _deliver_with_hooks(
+            hooks, gui_output, inner, writer, gui_dispatcher,
+            app_aware=mode is not OutputMode.CLIPBOARD_ONLY,
+        )
     dictionary = (
         load_dictionary(dictionary_path)
         if dictionary_path is not None
@@ -300,8 +400,116 @@ def _build_output(
                 _paste_memory,
                 functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
             ),
+            cleanup=writing.cleanup_stage(dictionary) if writing is not None else None,
         ),
     )
+
+
+def _build_writing(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    event_bus: EventBus,
+    on_dictionary_changed: Callable[[], None],
+    show_notice: Callable[[str], None],
+) -> WritingService:
+    """The local writing model: nothing runs until ``start``, and no file is read.
+
+    This is the one place writing notices are routed. Anything about a
+    dictation or a voice edit shows in the notice beside it; the server
+    giving up for good is a tray balloon, once, since no dictation is on
+    screen when it happens.
+    """
+    event_bus.subscribe(WritingNoticeEvent, lambda event: show_notice(event.message))
+    settings = functools.partial(read_writing_settings, config)
+    writing_paths = WritingPaths(managed_root())
+    server = LlamaServer(
+        locate=lambda: server_files(writing_paths, settings()),
+        log_path=paths.session_dir / "writing-server.log",
+        warm_up=functools.partial(warm_up_writing_model, settings),
+    )
+    return WritingService(
+        settings,
+        writing_paths,
+        server,
+        Learner(
+            paths.base / "learning.json",
+            paths.dictionary_path,
+            settings,
+            on_dictionary_changed,
+            session_id(),
+        ),
+        TransformStore(paths.base / "transforms.json"),
+        notify=lambda message: event_bus.publish(WritingServerFailedEvent(message=message)),
+        run_in_background=ThreadedActionDispatcher().dispatch,
+        read_window=foreground_window,
+    )
+
+
+def _start_once_idle(event_bus: EventBus, *starters: Callable[[], None]) -> None:
+    """Start background work the first time dictation is ready, never before.
+
+    Only once: after a writing server that gave up, later dictations must
+    not keep relaunching it; Retry on the Writing page does that.
+    """
+    def start(event: StateChangedEvent) -> None:
+        if event.new_state != AppState.IDLE.value:
+            return
+        event_bus.unsubscribe(StateChangedEvent, start)
+        for starter in starters:
+            starter()
+
+    event_bus.subscribe(StateChangedEvent, start)
+
+
+def _writing_seconds(
+    config: JsonConfigAdapter, writing: WritingService, audio_seconds: float,
+) -> float:
+    if _resolve_pipeline_mode(config) is not PipelineMode.BATCH:
+        return 0.0
+    return writing.estimated_seconds(audio_seconds)
+
+
+def _deliver_with_hooks(
+    hooks: DeliveryHooks,
+    gui_output: TextOutputHandler,
+    inner: TextOutputHandler,
+    writer: Win32ClipboardWriter,
+    gui_dispatcher: GuiThreadDispatcher,
+    *,
+    app_aware: bool,
+) -> TextOutputHandler:
+    """Remember each dictation for paste-last, and paste only into text fields."""
+    delivery = gui_output
+    if app_aware:
+        delivery = AppAwareDelivery(
+            paste=inner,
+            copy=ClipboardAdapter(writer=writer),
+            gui=gui_dispatcher,
+            on_failed=hooks.on_failed,
+            text_field_focused=text_field_focused,
+            read_context=read_caret_context,
+            foreground=foreground_hwnd,
+        )
+    hooks.last_dictation.route(
+        paste=delivery,
+        copy=GuiThreadOutputDecorator(
+            inner=ClipboardAdapter(writer=writer), dispatcher=gui_dispatcher,
+        ),
+    )
+    return LastDictationDecorator(delivery, hooks.last_dictation)
+
+
+def _foreground_paste_method(config: JsonConfigAdapter) -> PasteMethod:
+    return paste_method_for(
+        foreground_window().process,
+        config.get("output.paste_method_overrides", {}),
+    )
+
+
+def _publish_delivery_failure(
+    event_bus: EventBus, failure: DeliveryFailure, text: str,
+) -> None:
+    event_bus.publish(DeliveryFailedEvent(reason=failure.value, text=text))
 
 
 def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
@@ -330,26 +538,46 @@ def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
     return config.get("transcription.crisperwhisper_mode", "intended") == "verbatim"
 
 
+def _hotkey_actions(use_case: RecordAndTranscribeUseCase) -> HotkeyActions:
+    return HotkeyActions(
+        dictate_activate=use_case.on_hotkey_activated,
+        dictate_deactivate=use_case.on_hotkey_deactivated,
+        edit_activate=use_case.on_edit_hotkey_activated,
+        edit_deactivate=use_case.on_edit_hotkey_deactivated,
+        paste_last=use_case.paste_last,
+        copy_last=use_case.copy_last,
+    )
+
+
 def _build_hotkey_listener(
     config: JsonConfigAdapter,
     use_case: RecordAndTranscribeUseCase,
+    actions: HotkeyActions,
     observer: KeyObserver = ignore_key_event,
 ) -> HotkeyListener:
-    combo_string = config.get("hotkey.combination", "ctrl+alt+m")
-    keys = parse_hotkey_combo(combo_string)
-    _paste_memory.set_hotkey(key.vk for key in keys)
-
-    if config.get("hotkey.mode") == "push_to_talk":
-        strategy = PushToTalkStrategy(keys=keys)
-    else:
-        strategy = ToggleStrategy(keys=keys)
-
-    listener = Win32HookAdapter(
-        strategy, observer, cancel=functools.partial(_cancel_with_escape, use_case),
+    bindings = parse_bindings(config)
+    _paste_memory.set_hotkeys(
+        [key.vk for key in binding.keys] for binding in bindings
     )
-    listener.set_on_activate(use_case.on_hotkey_activated)
-    listener.set_on_deactivate(use_case.on_hotkey_deactivated)
-    return listener
+    return Win32HookAdapter(
+        strategies_for(
+            bindings, actions,
+            double_tap_locks_hold=(
+                config.get("hotkey.double_tap_locks_hold", True) is not False
+            ),
+        ),
+        observer,
+        cancel=functools.partial(_cancel_with_escape, use_case),
+        listen_to_mouse=any(binding.uses_mouse() for binding in bindings),
+    )
+
+
+def _describe_dictation_shortcuts(config: JsonConfigAdapter) -> str:
+    return ", ".join(
+        f"{binding.combo} ({binding.mode.value})"
+        for binding in parse_bindings(config)
+        if binding.action is BindingAction.DICTATE
+    ) or "none"
 
 
 
@@ -813,6 +1041,7 @@ def build_app(
     registry: EngineRegistry,
     hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
+    api_server: ApiServer,
 ) -> SystemTrayApp:
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
@@ -822,6 +1051,8 @@ def build_app(
     migrate_engine_field(config)
     migrate_output_mode(config)
     migrate_language(config)
+    migrate_stale_batch_block(config)
+    migrate_hotkey_bindings(config)
 
     if event_bus is None:
         event_bus = SimpleEventBus()
@@ -832,16 +1063,27 @@ def build_app(
     # distinct chime when the engine becomes ready to transcribe. The event
     # bus retains the subscriptions, so the beepers outlive this function
     # without an explicit reference.
-    cue_player = SoundDeviceCuePlayer()
+    preferences = functools.partial(RecordingPreferences.from_config, config)
+    cue_player = SoundDeviceCuePlayer(
+        enabled=lambda: preferences().cues_enabled,
+        volume=lambda: preferences().cue_volume,
+    )
     CueBeeper(event_bus, cue_player)
     EngineReadyBeeper(event_bus, cue_player)
 
     state_machine = AppStateMachine(event_bus, initial_state=AppState.LOADING)
     diagnostics = SessionDiagnostics(paths, config, registry, hardware_detector)
     atexit.register(diagnostics.dispose)
-    edit_capture = _build_edit_capture(config, paths)
+    log_caret_text_when(functools.partial(content_recording_enabled, config))
+    # The learner adds words to dictionary.json from the edit-capture thread;
+    # the rebuilt output chain is what puts them to use. Both callbacks are
+    # bound late: they only run once the app is up.
+    writing = _build_writing(
+        config, paths, event_bus, lambda: _use_learned_words(),
+        lambda message: gui_dispatcher.dispatch(lambda: notice.show(message)),
+    )
+    edit_capture = _build_edit_capture(config, paths, writing.learner)
     if edit_capture is not None:
-        edit_capture.start()
         atexit.register(edit_capture.stop)
 
     recorder = SoundDeviceAdapter(
@@ -850,11 +1092,24 @@ def build_app(
         on_device_missing=lambda name: event_bus.publish(
             MicrophoneMissingEvent(name=name),
         ),
+        preferred_names=lambda: preferences().preferred_devices,
     )
     # Re-scanning the hardware restarts PortAudio, which would cut off a
     # recording, so it waits until the app is idle.
     microphones = Microphones(
         is_busy=lambda: state_machine.state != AppState.IDLE,
+    )
+    SilenceWatchdog(
+        event_bus,
+        level=lambda: recorder.current_rms,
+        device_name=lambda: microphones.label(recorder.device_name),
+        enabled=lambda: preferences().warn_when_silent,
+    )
+    ducking = AudioDucking(
+        event_bus,
+        mode=lambda: preferences().duck_other_audio,
+        level=lambda: preferences().duck_level,
+        list_sessions=core_audio_sessions,
     )
 
     # The GUI thread is the only thread that owns a window and a
@@ -865,10 +1120,18 @@ def build_app(
     gui_dispatcher = TkGuiThreadDispatcher(root)
     output_mode = _resolve_output_mode(config)
     pipeline_mode = _resolve_pipeline_mode(config)
+    last_dictation = LastDictation()
+    delivery_hooks = DeliveryHooks(
+        last_dictation=last_dictation,
+        paste_method=functools.partial(_foreground_paste_method, config),
+        on_failed=functools.partial(_publish_delivery_failure, event_bus),
+    )
     output = _build_output(
         output_mode, gui_dispatcher, paths.dictionary_path,
         pipeline_mode, paths.models_dir,
         _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+        writing=writing,
+        hooks=delivery_hooks,
     )
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -886,18 +1149,50 @@ def build_app(
         event_bus=event_bus,
         action_dispatcher=action_dispatcher,
         diagnostics=diagnostics,
-        max_recording_seconds=config.get(
-            "recording.max_duration_seconds", 600.0,
-        ),
+        max_recording_seconds=lambda: preferences().max_duration_seconds,
+        warn_before_cap_seconds=lambda: preferences().warn_before_cap_seconds,
         streaming_controller=streaming_controller,
         is_streaming_mode=lambda: (
             config.get("transcription.mode", "batch") == "streaming"
         ),
         prepare_audio=functools.partial(_prepare_audio, config),
+        voice_edit=VoiceEditor(
+            writing.client,
+            deadline=lambda: read_writing_settings(config).deadline_seconds,
+            read_context=read_caret_context,
+            read_window=foreground_window,
+        ),
+        writing_seconds=functools.partial(_writing_seconds, config, writing),
+        last_dictation=last_dictation,
     )
 
+    def _use_learned_words() -> None:
+        output_mode = _resolve_output_mode(config)
+        pipeline_mode = _resolve_pipeline_mode(config)
+        record_and_transcribe_use_case.set_output(
+            _build_output(
+                output_mode, gui_dispatcher, paths.dictionary_path,
+                pipeline_mode, paths.models_dir,
+                _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+                writing=writing,
+                hooks=delivery_hooks,
+            )
+        )
+
+    def _edit_watcher(changes: ChangeSet) -> Win32EditObserver | None:
+        """The edit watcher, started now if learning was just switched on."""
+        nonlocal edit_capture
+        if edit_capture is None and changes.learning_turned_on:
+            edit_capture = _build_edit_capture(config, paths, writing.learner)
+            if edit_capture is not None:
+                edit_capture.start()
+                atexit.register(edit_capture.stop)
+        return edit_capture
+
+    hotkey_actions = _hotkey_actions(record_and_transcribe_use_case)
     listener = _build_hotkey_listener(
-        config, record_and_transcribe_use_case, _key_observer(edit_capture),
+        config, record_and_transcribe_use_case, hotkey_actions,
+        _key_observer(edit_capture),
     )
     overlay = (
         RecordingOverlay(
@@ -910,6 +1205,8 @@ def build_app(
             on_finish=record_and_transcribe_use_case.on_hotkey_deactivated,
             on_press=_paste_memory.excuse_click,
             on_tick=_paste_memory.sync_clicks,
+            load_position=functools.partial(load_pill_position, config),
+            save_position=functools.partial(save_pill_position, config),
         )
         if config.get("overlay.enabled", True)
         else None
@@ -937,40 +1234,72 @@ def build_app(
         diagnostics=diagnostics,
     )
 
-    settings_window_ref: dict[str, TkSettingsWindow | None] = {"current": None}
-
-    def open_settings() -> None:
-        existing = settings_window_ref["current"]
-        if existing is not None and existing.is_open():
-            existing.show()
-            return
-        window = TkSettingsWindow(
-            root,
-            settings_service,
-            capture_bridge=Win32CaptureBridge(),
-            first_run=False,
-            microphones=microphones,
-            on_save=lambda changes: apply_settings(
-                changes, config, record_and_transcribe_use_case, app,
-                gui_dispatcher=gui_dispatcher,
-                dictionary_path=paths.dictionary_path,
-                models_dir=paths.models_dir,
-                edit_capture=edit_capture,
-            ),
-            on_capture_state_changed=lambda recording: (
-                app.pause_listener() if recording else app.resume_listener()
-            ),
-            schedule=gui_dispatcher.dispatch,
+    def apply_saved_settings(changes: ChangeSet) -> None:
+        apply_settings(
+            changes, config, record_and_transcribe_use_case, app,
+            gui_dispatcher=gui_dispatcher,
+            dictionary_path=paths.dictionary_path,
+            models_dir=paths.models_dir,
+            edit_capture=_edit_watcher(changes),
+            writing=writing,
+            hotkey_actions=hotkey_actions,
+            delivery_hooks=delivery_hooks,
+            history_pruner=history_pruner,
         )
-        settings_window_ref["current"] = window
-        window.show()
 
-    history_window = HistoryWindow(
-        root,
-        paths.diagnostics_dir,
-        retranscribe=record_and_transcribe_use_case.retranscribe,
-        schedule=gui_dispatcher.dispatch,
+    # The shell's requests arrive on the API server's threads; applying
+    # settings rebuilds the output chain and the hotkey hook, which the
+    # settings window always did on the GUI thread.
+    api = CoreApi(
+        settings_service,
+        api_server.hub,
+        microphones=microphones,
+        capture=ShortcutCapture(
+            Win32CaptureBridge(),
+            functools.partial(api_server.hub.publish, "capture"),
+            pause=lambda: app.pause_listener(),
+            resume=lambda: app.resume_listener(),
+        ),
+        diagnostics_dir=paths.diagnostics_dir,
+        state=lambda: state_machine.state,
+        on_save=lambda changes: gui_dispatcher.dispatch(
+            lambda: apply_saved_settings(changes),
+        ),
+        writing=writing,
+        history=HistoryService(
+            paths.diagnostics_dir, record_and_transcribe_use_case.retranscribe,
+        ),
     )
+    launcher = ShellLauncher(api_server, notify=lambda message: app.notify(message))
+
+    def show_page(page: str) -> None:
+        # Looking for the exe and starting it stay off the GUI thread, which
+        # the tray menu and the notice buttons call from.
+        action_dispatcher.dispatch(functools.partial(launcher.open, page))
+
+    hot_plug = MicrophoneHotPlug(
+        root,
+        microphones,
+        preferred=lambda: preferences().preferred_devices,
+        chosen=functools.partial(_chosen_microphone, config),
+        event_bus=event_bus,
+        run_in_background=action_dispatcher.dispatch,
+    )
+
+    notice = Notice(root)
+    RecoveryNotices(
+        event_bus,
+        notice,
+        gui_dispatcher.dispatch,
+        retry=record_and_transcribe_use_case.retry_last_recording,
+        open_history=functools.partial(show_page, "history"),
+        paste_again=record_and_transcribe_use_case.paste_last,
+        copy_again=record_and_transcribe_use_case.copy_last,
+    )
+    history_pruner = HistoryPruner(
+        paths.diagnostics_dir, functools.partial(history_retention_days, config),
+    )
+    history_pruner.start_when_ready(event_bus)
 
     app = SystemTrayApp(
         use_case=record_and_transcribe_use_case,
@@ -979,25 +1308,38 @@ def build_app(
         hotkey_listener=listener,
         tray_factory=functools.partial(
             build_win32_tray_adapter, root=root, dispatcher=gui_dispatcher,
-            on_history_clicked=history_window.show,
+            on_history_clicked=functools.partial(show_page, "history"),
+            on_paste_last_clicked=record_and_transcribe_use_case.paste_last,
+            on_copy_last_clicked=record_and_transcribe_use_case.copy_last,
             list_microphones=functools.partial(_microphone_menu, config, microphones),
             on_microphone_chosen=functools.partial(_choose_microphone, config),
+            on_devices_changed=hot_plug.devices_changed,
         ),
-        on_open_settings=open_settings,
+        on_open_settings=functools.partial(show_page, "settings"),
         download_manager=download_manager,
-        owned_disposables=(overlay,) if overlay is not None else (),
+        owned_disposables=(
+            (overlay, ducking, history_pruner, writing) if overlay is not None
+            else (ducking, history_pruner, writing)
+        ),
     )
 
+    # Only once the tray app exists: saving settings and recording a
+    # shortcut both reach it.
+    api.serve_on(api_server)
     config.save()
-    combo = config.get("hotkey.combination", "ctrl+alt+m")
-    mode = config.get("hotkey.mode", "toggle")
     model_name = config.get("transcription.model_size")
     _logger.info(
         "Tray online. Loading '%s' in the background. "
-        "Hotkey %s (%s mode) will queue until ready.",
-        model_name, combo, mode,
+        "Dictation shortcuts %s will queue until ready.",
+        model_name, _describe_dictation_shortcuts(config),
     )
 
+    # Keys observed before this only queue up; the observer catches up.
+    _start_once_idle(
+        event_bus,
+        writing.start,
+        *((edit_capture.start,) if edit_capture is not None else ()),
+    )
     _spawn_engine_load_thread(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,
@@ -1017,6 +1359,10 @@ def apply_settings(
     dictionary_path: Path | None = None,
     models_dir: Path | None = None,
     edit_capture: Win32EditObserver | None = None,
+    writing: WritingService | None = None,
+    hotkey_actions: HotkeyActions | None = None,
+    delivery_hooks: DeliveryHooks | None = None,
+    history_pruner: HistoryPruner | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -1032,11 +1378,21 @@ def apply_settings(
                 output_mode, gui_dispatcher, dictionary_path,
                 pipeline_mode, models_dir,
                 _delivery_reporter(edit_capture, pipeline_mode, output_mode),
+                writing=writing,
+                hooks=delivery_hooks,
             )
         )
 
-    if changes.hotkey_changed:
+    if changes.writing_server_changed and writing is not None:
+        writing.restart_server()
+
+    if changes.history_retention_changed and history_pruner is not None:
+        history_pruner.prune_now()
+
+    # A just-started edit watcher only sees keys once the listener has it.
+    if changes.hotkey_changed or changes.learning_turned_on:
         new_listener = _build_hotkey_listener(
-            config, use_case, _key_observer(edit_capture),
+            config, use_case, hotkey_actions or _hotkey_actions(use_case),
+            _key_observer(edit_capture),
         )
         app.set_hotkey_listener(new_listener)

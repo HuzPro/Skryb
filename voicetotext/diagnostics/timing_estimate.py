@@ -67,7 +67,8 @@ class TranscriptionTimeEstimate:
                 self.record(
                     engine_key(event.get("model"), event.get("engine"), event.get("device")),
                     _number(event.get("audio_seconds")),
-                    _number(event.get("wall_seconds")),
+                    _number(event.get("wall_seconds"))
+                    - _number(event.get("output_seconds")),
                 )
 
 

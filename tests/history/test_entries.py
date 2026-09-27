@@ -300,18 +300,18 @@ def test_preview_of_a_cancelled_recording_says_it_was_never_transcribed() -> Non
 
 
 def test_explains_an_empty_history_and_how_to_fill_it(tmp_path: Path) -> None:
-    missing = empty_state_message([], tmp_path / "gone")
-    empty = empty_state_message([], tmp_path)
+    missing = empty_state_message([], tmp_path / "gone", saving=False)
+    empty = empty_state_message([], tmp_path, saving=False)
 
     assert "does not exist" in missing
     assert empty.startswith("No dictations yet.")
     for message in (missing, empty):
-        assert "Settings > Output" in message
+        assert "Settings > History" in message
 
 
 def test_hints_at_content_capture_when_the_newest_dictation_was_not_saved() -> None:
     unsaved = [_entry("", status=NOT_SAVED), _entry("older, saved")]
     saved = [_entry("newest, saved"), _entry("", status=NOT_SAVED)]
 
-    assert "not saved" in empty_state_message(unsaved, Path("."))
-    assert empty_state_message(saved, Path(".")) == ""
+    assert "not saved" in empty_state_message(unsaved, Path("."), saving=False)
+    assert empty_state_message(saved, Path("."), saving=False) == ""
