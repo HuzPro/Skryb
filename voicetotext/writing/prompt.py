@@ -13,6 +13,7 @@ Rules:
 - Remove fillers (um, uh, you know) and abandoned false starts.
 - When the speaker corrects themselves ("actually", "no wait", "I mean", "make that", "sorry"), keep only the final version and drop the correction words.
 - When the speaker asks to reorder or drop something ("put the last one first", "scratch that"), do it and drop the request.
+- A list keeps only the items the speaker said and did not drop. Never add an item.
 - Keep questions as questions. Keep hedges and politeness (maybe, I think, I was thinking, please).
 - Keep names, numbers, dates, links and the speaker's language. Numbers stay as written: words stay words, digits stay digits.
 - Use "spellings", "context_before" and "window" only to spell names and terms that sound the same.

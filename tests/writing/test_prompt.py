@@ -33,6 +33,7 @@ def test_the_examples_use_no_everyday_shopping_or_agenda_words(lists):
     assert len(words) > 30
     assert not words & _EVERYDAY_WORDS
     assert "Never take words from the examples." in prompt
+    assert "Never add an item." in prompt
 
 
 def test_a_part_note_goes_after_the_shared_prompt_so_every_part_reuses_its_cache():
