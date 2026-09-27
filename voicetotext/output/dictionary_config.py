@@ -1,11 +1,16 @@
 import json
 import logging
 import re
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 _logger = logging.getLogger(__name__)
+# The settings window and the word learner both rewrite dictionary.json, from
+# different threads; each rewrite holds this for its whole read and write.
+_WRITE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,7 @@ class LiteralRule:
     whole_words: bool = True
     phonetic: bool = False
     enabled: bool = True
+    learned: bool = False
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,52 @@ def load_dictionary(path: Path) -> DictionaryConfig:
     if "version" not in raw:
         return _migrate_v1(raw)
     return _load_v2(raw)
+
+
+def save_dictionary(path: Path, config: DictionaryConfig) -> None:
+    with _WRITE_LOCK:
+        _write_dictionary(path, config)
+
+
+def update_dictionary(
+    path: Path, change: Callable[[DictionaryConfig], DictionaryConfig],
+) -> bool:
+    """Apply ``change`` to the saved dictionary; ``True`` if it was rewritten.
+
+    A file that cannot be read as a dictionary is left alone rather than
+    replaced by one holding only the change.
+    """
+    with _WRITE_LOCK:
+        if path.exists() and not _is_readable_dictionary(path):
+            _logger.warning("Dictionary not updated: '%s' is not a readable dictionary", path)
+            return False
+        current = load_dictionary(path)
+        updated = change(current)
+        if updated == current:
+            return False
+        _write_dictionary(path, updated)
+        return True
+
+
+def _is_readable_dictionary(path: Path) -> bool:
+    try:
+        document: object = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(document, dict):
+        return False
+    raw = cast(dict[object, object], document)
+    return "version" not in raw or _is_version_two(raw.get("version"))
+
+
+def _write_dictionary(path: Path, config: DictionaryConfig) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_suffix(".tmp")
+    staged.write_text(
+        json.dumps(dictionary_to_json(config), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    staged.replace(path)
 
 
 def dictionary_to_json(config: DictionaryConfig) -> dict[str, object]:
@@ -113,6 +165,28 @@ def _load_v2(document: dict[object, object]) -> DictionaryConfig:
         rule = _load_rule(raw_rule, index)
         if rule is not None:
             rules.append(rule)
+    return DictionaryConfig(options=options, rules=tuple(rules))
+
+
+def dictionary_from_json(document: dict[object, object]) -> DictionaryConfig:
+    """``dictionary_to_json``'s options and rules, for input that has to be whole.
+
+    Raises ``ValueError`` naming the first part that is not valid, where
+    reading the saved file skips it.
+    """
+    raw_options, raw_rules = document.get("options"), document.get("rules")
+    options = (
+        _load_options(cast(dict[object, object], raw_options))
+        if isinstance(raw_options, dict) else None
+    )
+    if options is None or not isinstance(raw_rules, list):
+        raise ValueError("The dictionary needs true or false options and a list of rules.")
+    rules: list[DictionaryRule] = []
+    for index, raw_rule in enumerate(cast(list[object], raw_rules)):
+        rule = _load_rule(raw_rule, index)
+        if rule is None:
+            raise ValueError(f"Dictionary rule {index + 1} is not valid.")
+        rules.append(rule)
     return DictionaryConfig(options=options, rules=tuple(rules))
 
 
@@ -176,7 +250,7 @@ def _load_literal_rule(
     booleans = _literal_booleans(document, index)
     if booleans is None:
         return None
-    case_sensitive, whole_words, phonetic, enabled = booleans
+    case_sensitive, whole_words, phonetic, enabled, learned = booleans
     return LiteralRule(
         spoken=tuple(cast(list[str], raw_spoken)),
         replacement=replacement,
@@ -184,17 +258,19 @@ def _load_literal_rule(
         whole_words=whole_words,
         phonetic=phonetic,
         enabled=enabled,
+        learned=learned,
     )
 
 
 def _literal_booleans(
     document: dict[object, object], index: int,
-) -> tuple[bool, bool, bool, bool] | None:
+) -> tuple[bool, bool, bool, bool, bool] | None:
     defaults = {
         "case_sensitive": False,
         "whole_words": True,
         "phonetic": False,
         "enabled": True,
+        "learned": False,
     }
     values: list[bool] = []
     for name, default in defaults.items():
@@ -203,7 +279,7 @@ def _literal_booleans(
             _warn_bad_rule(index, f"{name} must be boolean")
             return None
         values.append(value)
-    return values[0], values[1], values[2], values[3]
+    return values[0], values[1], values[2], values[3], values[4]
 
 
 def _load_regex_rule(
@@ -236,7 +312,7 @@ def _warn_bad_rule(index: int, reason: str) -> None:
 
 def _rule_to_json(rule: DictionaryRule) -> dict[str, object]:
     if isinstance(rule, LiteralRule):
-        return {
+        document: dict[str, object] = {
             "type": "literal",
             "spoken": list(rule.spoken),
             "replacement": rule.replacement,
@@ -245,6 +321,9 @@ def _rule_to_json(rule: DictionaryRule) -> dict[str, object]:
             "phonetic": rule.phonetic,
             "enabled": rule.enabled,
         }
+        if rule.learned:
+            document["learned"] = True
+        return document
     return {
         "type": "regex",
         "pattern": rule.pattern,

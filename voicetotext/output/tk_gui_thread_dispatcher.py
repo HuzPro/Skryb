@@ -2,6 +2,7 @@ import logging
 import queue
 import time
 import tkinter
+import _tkinter
 from collections.abc import Callable
 
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
@@ -37,15 +38,20 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
         blocking it would leave the paste queued until after the clipboard is
         restored. No drain is scheduled while an action runs, so pumping here
         cannot start another queued action.
+
+        One event at a time, never ``update()``: the pill's frame loop keeps
+        a timer due at all times, so ``update()`` can run it forever, and the
+        pill only stops once the drain delivers the state it is waiting for.
         """
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             try:
-                self._root.update()
+                handled = self._root.tk.dooneevent(_tkinter.DONT_WAIT)
             except tkinter.TclError:
                 time.sleep(max(0.0, deadline - time.monotonic()))
                 return
-            time.sleep(_PUMP_INTERVAL_SECONDS)
+            if not handled:
+                time.sleep(_PUMP_INTERVAL_SECONDS)
 
     def cancel(self) -> None:
         """Stop the drain poller (idempotent). Used on shutdown/teardown."""

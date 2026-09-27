@@ -7,8 +7,9 @@ leaving the box.
 
 ## Features
 
-- **System-wide dictation.** Toggle or push-to-talk hotkey (default
-  `Ctrl+Alt+M`), text lands in the focused app; your clipboard is preserved.
+- **System-wide dictation.** Any number of toggle or hold shortcuts, on keys
+  or mouse buttons 3-5 (default `Ctrl+Alt+M`); double-tap a hold shortcut to
+  go hands-free. Text lands in the focused app; your clipboard is preserved.
 - **Local models.** Parakeet provides accurate batch transcription and
   Nemotron provides low-latency streaming.
 - **Live streaming mode (experimental).** Text appears while you speak,
@@ -48,8 +49,8 @@ typed into the active window. If anything misbehaves, run
 
 ## Privacy
 
-Audio and transcripts are not saved by default. Settings > Output > Privacy
-lets you opt into saving them in the logs folder. Changes apply when you save.
+Audio and transcripts are not saved by default. Settings > History > Save
+history lets you opt into saving them in the logs folder. Changes apply when you save.
 Ordinary logs contain timing and status information, without transcript text.
 
 The default folder is `%APPDATA%\VoiceToText\diagnostics`. Use a local folder

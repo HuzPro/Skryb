@@ -16,6 +16,10 @@ class Signal:
     def connect(self, subscriber: Callable[..., None]) -> None:
         self._subscribers.append(subscriber)
 
+    def disconnect(self, subscriber: Callable[..., None]) -> None:
+        if subscriber in self._subscribers:
+            self._subscribers.remove(subscriber)
+
     def emit(self, *args: object) -> None:
         for subscriber in list(self._subscribers):
             subscriber(*args)

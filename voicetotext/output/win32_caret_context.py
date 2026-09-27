@@ -13,8 +13,10 @@ from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     CaretContext,
+    caret_log_line,
 )
 from voicetotext.output.win32_edit_control_context import (
+    foreground_has_caret,
     read_edit_control_context,
 )
 
@@ -27,8 +29,6 @@ _ALL_TEXT = -1
 
 # CUIAutomation8, the class that also serves pre-Windows-8 clients.
 _AUTOMATION_CLSID = "{E22AD333-B25F-460C-83D0-0581107395C9}"
-
-_LOGGED_TEXT_CHARS = 20
 
 
 class _TextRange(Protocol):
@@ -64,6 +64,10 @@ class _PatternHandle(Protocol):
 
 
 class _Element(Protocol):
+    @property
+    def CurrentIsPassword(self) -> int: ...  # noqa: N802 (COM name)
+    @property
+    def CurrentControlType(self) -> int: ...  # noqa: N802 (COM name)
     def GetCurrentPattern(  # noqa: N802 (COM name)
         self, pattern_id: int,
     ) -> _PatternHandle: ...
@@ -101,6 +105,42 @@ def read_ui_automation_context() -> CaretContext:
         return NO_CONTEXT
 
 
+def text_field_focused() -> bool:
+    """Whether the keyboard focus is somewhere text can be pasted. Never raises.
+
+    A system caret answers first and cheaply. Otherwise UI Automation is
+    asked what the focused element is. When neither can answer, the paste
+    goes ahead as it always did: an unreadable app must not lose dictation.
+    """
+    try:
+        if foreground_has_caret():
+            return True
+    except OSError:
+        _logger.debug("The foreground thread has no GUI state to read.")
+    try:
+        return focused_element_takes_text()
+    except Exception:
+        _logger.debug("UI Automation could not describe the focus.", exc_info=True)
+        return True
+
+
+def focused_element_takes_text() -> bool:
+    """Whether the focused element is an edit field or document, or holds a value.
+
+    Raises when UI Automation cannot answer.
+    """
+    uia = _uia()
+    element = _automation().GetFocusedElement()
+    if element.CurrentControlType in (
+        uia.UIA_EditControlTypeId, uia.UIA_DocumentControlTypeId,
+    ):
+        return True
+    return any(
+        element.GetCurrentPattern(pattern)
+        for pattern in (uia.UIA_TextPatternId, uia.UIA_ValuePatternId)
+    )
+
+
 def caret_context_of_hwnd(hwnd: int) -> CaretContext:
     """Same reading, aimed at one window handle instead of the focused one.
 
@@ -119,6 +159,9 @@ def _context_from(automation: _Automation) -> CaretContext:
 
 
 def _context_of(element: _Element) -> CaretContext:
+    if element.CurrentIsPassword:
+        _logger.debug("No caret context: the focused element is a password field.")
+        return NO_CONTEXT
     uia = _uia()
     handle = element.GetCurrentPattern(uia.UIA_TextPatternId)
     if not handle:
@@ -143,7 +186,7 @@ def _context_of(element: _Element) -> CaretContext:
             selection, document, uia.TextPatternRangeEndpoint_End,
         ),
     )
-    _log_context(context)
+    _logger.debug("Caret context: %s", caret_log_line(context))
     return context
 
 
@@ -201,15 +244,6 @@ def _clamp_to_document(adjacent: _TextRange, edge: int, document: _TextRange) ->
         adjacent.MoveEndpointByRange(edge, document, start)
     elif adjacent.CompareEndpoints(edge, document, end) > 0:
         adjacent.MoveEndpointByRange(edge, document, end)
-
-
-def _log_context(context: CaretContext) -> None:
-    _logger.debug(
-        "Caret context: before=%r selected=%r after=%r",
-        context.before[-_LOGGED_TEXT_CHARS:],
-        context.selected[:_LOGGED_TEXT_CHARS],
-        context.after[:_LOGGED_TEXT_CHARS],
-    )
 
 
 def _automation() -> _Automation:

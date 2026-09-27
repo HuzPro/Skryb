@@ -26,6 +26,7 @@ from voicetotext.core.events import (
 from voicetotext.core.exceptions import LicenseNotAcceptedError
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.state_machine import AppState, AppStateMachine
+from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
     DictionaryOptions,
@@ -33,6 +34,7 @@ from voicetotext.output.dictionary_config import (
     RegexRule,
 )
 from voicetotext.output.output_mode import OutputMode
+from voicetotext.recording.preferences import RecordingPreferences
 from voicetotext.settings.download_coordinator import DownloadCoordinator
 from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
 from voicetotext.settings.model_installation_cache import ModelInstallationCache
@@ -45,6 +47,7 @@ from voicetotext.settings.service import (
 from voicetotext.settings.settings_draft import SettingsDraft
 from voicetotext.transcription.license_policy import LicensePolicy
 from voicetotext.transcription.model_info import ALL_MODELS
+from voicetotext.writing.settings import WritingSettings
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 
@@ -83,8 +86,6 @@ def _build_service(
         "transcription.model_size": _PARAKEET,
         "transcription.language": "en",
         "transcription.device": "auto",
-        "hotkey.combination": "ctrl+alt+m",
-        "hotkey.mode": "toggle",
         "output.mode": "direct_paste",
     }
     config_data.update(config_overrides or {})
@@ -154,7 +155,7 @@ class TestEngineCandidatesFor:
 
 
 class _RecordingListener(DownloadEventListener, EngineEventListener):
-    def __init__(self):
+    def __init__(self) -> None:
         self.progress: list = []
         self.state: list = []
         self.completed: list = []
@@ -305,8 +306,11 @@ class TestCurrentDraft:
                 "transcription.model_size": "nemotron-speech-streaming-en-0.6b",
                 "transcription.language": "en",
                 "transcription.device": "cuda",
-                "hotkey.combination": "f12",
-                "hotkey.mode": "push_to_talk",
+                "hotkey.bindings": [
+                    {"keys": "f12", "mode": "hold", "action": "dictate"},
+                    {"keys": "ctrl+shift+v", "mode": "press", "action": "paste_last"},
+                ],
+                "hotkey.double_tap_locks_hold": False,
                 "output.mode": "clipboard_only",
             }
         )
@@ -316,8 +320,11 @@ class TestCurrentDraft:
         assert draft.model_size == "nemotron-speech-streaming-en-0.6b"
         assert draft.language == "en"
         assert draft.device == "cuda"
-        assert draft.hotkey_combination == "f12"
-        assert draft.hotkey_mode == "push_to_talk"
+        assert draft.hotkey_bindings == (
+            Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+            Binding("ctrl+shift+v", BindingMode.PRESS, BindingAction.PASTE_LAST),
+        )
+        assert draft.double_tap_locks_hold is False
         assert draft.output_mode is OutputMode.CLIPBOARD_ONLY
 
     def test_should_pass_language_through_without_translation(self):
@@ -338,9 +345,12 @@ class TestApplyDraft:
             language="en",
             device="cuda",
             engine="auto",
-            hotkey_combination="f12",
-            hotkey_mode="push_to_talk",
             output_mode=OutputMode.CLIPBOARD_ONLY,
+            hotkey_bindings=(
+                Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+                Binding("mouse4", BindingMode.TOGGLE, BindingAction.DICTATE),
+            ),
+            double_tap_locks_hold=False,
         )
 
         service.apply_draft(draft)
@@ -348,8 +358,11 @@ class TestApplyDraft:
         assert config.get("transcription.model_size") == "nemotron-speech-streaming-en-0.6b"
         assert config.get("transcription.language") == "en"
         assert config.get("transcription.device") == "cuda"
-        assert config.get("hotkey.combination") == "f12"
-        assert config.get("hotkey.mode") == "push_to_talk"
+        assert config.get("hotkey.bindings") == [
+            {"keys": "f12", "mode": "hold", "action": "dictate"},
+            {"keys": "mouse4", "mode": "toggle", "action": "dictate"},
+        ]
+        assert config.get("hotkey.double_tap_locks_hold") is False
         assert config.get("output.mode") == "clipboard_only"
         assert config.save_count == 1
 
@@ -360,8 +373,6 @@ class TestApplyDraft:
             language="de",
             device="auto",
             engine="auto",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
 
@@ -377,8 +388,6 @@ class TestApplyDraft:
             language="en",
             device="auto",
             engine="auto",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
 
@@ -402,8 +411,6 @@ class TestApplyDraft:
             language="en",
             device="auto",
             engine="nano_parakeet",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
         service.apply_draft(draft)
@@ -423,8 +430,6 @@ class TestApplyDraft:
             language="en",
             device="auto",
             engine="nano_parakeet",
-            hotkey_combination="ctrl+alt+m",
-            hotkey_mode="toggle",
             output_mode=OutputMode.DIRECT_PASTE,
         )
         service.apply_draft(draft)
@@ -442,7 +447,7 @@ class TestSettingsTransfer:
 
         exported = json.loads(path.read_text(encoding="utf-8"))
         assert exported["transcription"]["model_size"] == _PARAKEET
-        assert exported["hotkey"]["mode"] == "toggle"
+        assert exported["output"]["mode"] == "direct_paste"
 
     def test_should_import_unknown_keys_and_fill_missing_defaults(
         self,
@@ -462,7 +467,7 @@ class TestSettingsTransfer:
 
         assert config.get("transcription.language") == "fr"
         assert config.get("transcription.device") == "auto"
-        assert config.get("hotkey.mode") == "toggle"
+        assert config.get("hotkey.bindings") == [{"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"}]
         assert config.get("future.nested.option") == "enabled"
         assert config.save_count == 1
 
@@ -474,7 +479,7 @@ class TestSettingsTransfer:
         service, *_ = _build_service(config_store=config)
         import_path = tmp_path / "settings.json"
         import_path.write_text(
-            json.dumps({"hotkey": {"mode": "push_to_talk"}}),
+            json.dumps({"output": {"mode": "clipboard_only"}}),
             encoding="utf-8",
         )
 
@@ -485,8 +490,27 @@ class TestSettingsTransfer:
         ).splitlines()
         entry = cast(dict[str, object], json.loads(history_lines[-1]))
         assert entry["changes"] == [
-            {"key": "hotkey.mode", "from": "toggle", "to": "push_to_talk"}
+            {"key": "output.mode", "from": "direct_paste", "to": "clipboard_only"}
         ]
+
+    def test_importing_an_export_from_before_bindings_keeps_its_hotkey(
+        self, tmp_path: Path,
+    ) -> None:
+        config = JsonConfigAdapter(tmp_path / "config.json")
+        config.load()
+        service, *_ = _build_service(config_store=config)
+        import_path = tmp_path / "old-export.json"
+        import_path.write_text(
+            json.dumps({"hotkey": {"mode": "push_to_talk", "combination": "f12"}}),
+            encoding="utf-8",
+        )
+
+        service.import_settings(import_path)
+
+        assert service.current_draft().hotkey_bindings == (
+            Binding("f12", BindingMode.HOLD, BindingAction.DICTATE),
+        )
+        assert config.get("hotkey.mode") is None
 
     @pytest.mark.parametrize("value", [[], "settings", 1, None])
     def test_should_reject_import_when_json_is_not_an_object(
@@ -682,8 +706,6 @@ class TestIsEngineSwapping:
         config = FakeConfig({
             "transcription.model_size": "parakeet-tdt-0.6b-v3",
             "transcription.device": "auto",
-            "hotkey.combination": "ctrl+alt+m",
-            "hotkey.mode": "toggle",
             "output.mode": "direct_paste",
         })
         manager = FakeModelManager(installed={"parakeet-tdt-0.6b-v3": True})
@@ -841,3 +863,120 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert config.get("audio.boost_quiet_speech") is False
     assert service.current_draft().input_device == "Microphone (Maono PD300X Microp"
     assert service.current_draft().boost_quiet_speech is False
+
+
+class TestWritingSettings:
+    def test_every_writing_field_round_trips_through_the_config(self):
+        service, config, *_ = _build_service()
+        writing = WritingSettings(
+            cleanup="polished",
+            lists=False,
+            deadline_seconds=12.5,
+            context=False,
+            learn_words=False,
+            learn_style=False,
+            style_notes="British spelling ✓\nno exclamation marks",
+            after_dictation_transform="Casual",
+            runtime_path="C:/tools/llama café/llama-server.exe",
+            model_path="D:/models/Qwen3.5-4B-Q4_K_M.gguf",
+        )
+
+        service.apply_draft(replace(service.current_draft(), writing=writing))
+
+        assert service.current_draft().writing == writing
+        assert config.get("writing.cleanup") == "polished"
+        assert config.get("writing.deadline_seconds") == 12.5
+
+    def test_missing_or_nonsense_writing_values_read_as_the_defaults(self):
+        service, *_ = _build_service(config_overrides={
+            "writing.cleanup": "aggressive",
+            "writing.deadline_seconds": "soon",
+            "writing.lists": "yes",
+            "writing.style_notes": 42,
+        })
+
+        assert service.current_draft().writing == WritingSettings()
+
+    def test_the_deadline_is_kept_between_half_a_second_and_thirty(self):
+        service, *_ = _build_service(config_overrides={"writing.deadline_seconds": 90})
+
+        assert service.current_draft().writing.deadline_seconds == 30.0
+
+
+def test_recording_preferences_round_trip_through_saved_settings_without_a_rebuild() -> None:
+    service, config, _, _, _ = _build_service()
+    draft = service.current_draft()
+    assert draft.recording == RecordingPreferences()
+    chosen = RecordingPreferences(
+        warn_when_silent=False,
+        preferred_devices=("Microphone (Maono PD300X Microphone)", "Gerät für Café ✓"),
+        cues_enabled=False,
+        cue_volume=0.9,
+        duck_other_audio="lower",
+        duck_level=0.3,
+        max_duration_seconds=300.0,
+        warn_before_cap_seconds=15.0,
+    )
+
+    changes = service.apply_draft(replace(draft, recording=chosen))
+
+    assert service.current_draft().recording == chosen
+    assert config.get("recording.max_duration_seconds") == 300.0
+    assert config.get("audio.preferred_devices") == [
+        "Microphone (Maono PD300X Microphone)", "Gerät für Café ✓",
+    ]
+    assert changes.any_changed is False
+
+
+def test_resetting_the_pill_position_puts_it_back_at_the_bottom_centre() -> None:
+    service, config, _, _, _ = _build_service()
+    config.set("overlay.position.x", 0.1)
+    config.set("overlay.position.y", 0.2)
+
+    service.reset_pill_position()
+
+    assert (config.get("overlay.position.x"), config.get("overlay.position.y")) == (0.5, 1.0)
+    assert config.save_count >= 1
+
+
+def test_history_retention_and_paste_methods_survive_a_restart(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    store = JsonConfigAdapter(path)
+    store.load()
+    service, *_ = _build_service(config_store=store)
+    assert service.current_draft().history_retention_days == 0
+    assert service.current_draft().paste_method_overrides == ()
+
+    changes = service.apply_draft(replace(
+        service.current_draft(),
+        history_retention_days=30,
+        paste_method_overrides=(("mintty.exe", "ctrl_shift_v"), ("vmconnect.exe", "type")),
+    ))
+    reloaded = JsonConfigAdapter(path)
+    reloaded.load()
+    restarted, *_ = _build_service(config_store=reloaded)
+
+    assert changes.history_retention_changed
+    assert restarted.current_draft().history_retention_days == 30
+    assert restarted.current_draft().paste_method_overrides == (
+        ("mintty.exe", "ctrl_shift_v"), ("vmconnect.exe", "type"),
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["output"][
+        "paste_method_overrides"
+    ] == {"mintty.exe": "ctrl_shift_v", "vmconnect.exe": "type"}
+
+
+def test_removing_every_paste_override_clears_them_all(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"output": {"paste_method_overrides": {
+        "Mintty.exe": "ctrl_v", "broken.exe": "middle_click",
+    }}}), encoding="utf-8")
+    store = JsonConfigAdapter(path)
+    store.load()
+    service, *_ = _build_service(config_store=store)
+    assert service.current_draft().paste_method_overrides == (("mintty.exe", "ctrl_v"),)
+
+    service.apply_draft(replace(service.current_draft(), paste_method_overrides=()))
+
+    assert store.get("output.paste_method_overrides") == {}
+    assert service.current_draft().history_retention_days == 0

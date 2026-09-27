@@ -51,6 +51,9 @@ class FakeUser32:
         self.messages: list[int] = []
         self.answers_messages = True
         self.reports_focus = True
+        self.style = 0
+        self.caret_hwnd: int | None = None
+        self.answers_thread_info = True
 
     def GetForegroundWindow(self) -> int:  # noqa: N802 (Win32 name)
         return _FOREGROUND_HWND
@@ -62,11 +65,15 @@ class FakeUser32:
     def GetGUIThreadInfo(self, thread: int, info: object) -> int:  # noqa: N802
         assert thread == _THREAD
         info._obj.hwndFocus = _HWND if self.reports_focus else None
-        return 1
+        info._obj.hwndCaret = self.caret_hwnd
+        return 1 if self.answers_thread_info else 0
 
     def GetClassNameW(self, hwnd: int, buffer: object, length: int) -> int:  # noqa: N802
         buffer.value = self.class_name
         return len(self.class_name)
+
+    def GetWindowLongW(self, hwnd: int, index: int) -> int:  # noqa: N802 (Win32 name)
+        return self.style
 
     def SendMessageTimeoutW(  # noqa: N802 (Win32 name)
         self,
@@ -177,6 +184,14 @@ class TestContextFromAnEditControl:
 
 
 class TestContextWhenNoneCanBeRead:
+    def test_a_password_edit_control_is_never_asked_for_its_text(
+        self, user32: FakeUser32,
+    ):
+        user32.style = 0x0020
+
+        assert edit_control_context_of(_HWND) == NO_CONTEXT
+        assert user32.messages == []
+
     def test_should_not_ask_a_window_that_is_not_an_edit_control_for_its_text(
         self, user32: FakeUser32,
     ):
@@ -223,3 +238,23 @@ class TestReadEditControlContext:
         assert read_edit_control_context() == NO_CONTEXT
         assert user32.messages == []
 
+
+class TestForegroundCaret:
+    def test_a_foreground_app_showing_a_caret_has_a_text_field(
+        self, user32: FakeUser32,
+    ):
+        user32.caret_hwnd = _HWND
+
+        assert module.foreground_has_caret() is True
+
+    def test_a_foreground_app_without_a_caret_has_none(self, user32: FakeUser32):
+        assert module.foreground_has_caret() is False
+
+    def test_an_unreadable_foreground_thread_is_an_error_not_a_guess(
+        self, user32: FakeUser32,
+    ):
+        user32.answers_thread_info = False
+
+        with pytest.raises(OSError):
+            module.foreground_has_caret()
+        assert read_edit_control_context() == NO_CONTEXT

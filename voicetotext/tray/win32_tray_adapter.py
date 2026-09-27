@@ -1,6 +1,8 @@
 import ctypes
 import ctypes.wintypes as _wt
 import logging
+import threading
+import time
 import tkinter
 from collections.abc import Callable, Sequence
 from typing import Protocol
@@ -13,6 +15,7 @@ from voicetotext.tray.win32_icons import create_icon_image
 _logger = logging.getLogger(__name__)
 
 _user32 = ctypes.windll.user32
+_dwmapi = ctypes.windll.dwmapi
 _gdi32 = ctypes.windll.gdi32
 _shell32 = ctypes.windll.shell32
 _kernel32 = ctypes.windll.kernel32
@@ -36,6 +39,8 @@ _WM_APP_TRAY = 0x0400 + 1  # WM_APP + 1: our tray callback message
 _WM_RBUTTONUP = 0x0205
 _WM_CONTEXTMENU = 0x007B
 _WM_LBUTTONDBLCLK = 0x0203
+_WM_DEVICECHANGE = 0x0219
+_DBT_DEVNODES_CHANGED = 0x0007
 _WS_EX_TOOLWINDOW = 0x80
 _MF_STRING = 0x0
 _MF_SEPARATOR = 0x800
@@ -49,6 +54,26 @@ _ID_STATE = 1
 _ID_SETTINGS = 2
 _ID_QUIT = 3
 _ID_HISTORY = 4
+_ID_PASTE_LAST = 5
+_ID_COPY_LAST = 6
+
+# The tray menu takes the focus; paste-last hands it back first.
+_FOCUS_RESTORE_SECONDS = 0.3
+_FOCUS_POLL_SECONDS = 0.01
+_GW_HWNDNEXT = 2
+_GW_OWNER = 4
+_GWL_EXSTYLE = -20
+_DWMWA_CLOAKED = 14
+_CLASS_NAME_CHARS = 256
+_MAX_WINDOWS_TO_SCAN = 1000
+# A click in the notification area activates the taskbar itself, so the
+# app the user was in is the first real window below it.
+_TASKBAR_CLASSES = frozenset({
+    "Shell_TrayWnd",
+    "Shell_SecondaryTrayWnd",
+    "NotifyIconOverflowWindow",
+    "TopLevelWindowForOverflowXamlIsland",
+})
 # Microphone choices take one id each from here up.
 _ID_FIRST_MICROPHONE = 100
 _SYSTEM_DEFAULT_LABEL = "Windows default"
@@ -178,10 +203,87 @@ _user32.GetCursorPos.argtypes = [ctypes.POINTER(_wt.POINT)]
 _user32.GetCursorPos.restype = _wt.BOOL
 _user32.SetForegroundWindow.argtypes = [_wt.HWND]
 _user32.SetForegroundWindow.restype = _wt.BOOL
+_user32.GetForegroundWindow.argtypes = []
+_user32.GetForegroundWindow.restype = _wt.HWND
+_user32.GetClassNameW.argtypes = [_wt.HWND, _wt.LPWSTR, ctypes.c_int]
+_user32.GetClassNameW.restype = ctypes.c_int
+_user32.GetTopWindow.argtypes = [_wt.HWND]
+_user32.GetTopWindow.restype = _wt.HWND
+_user32.GetWindow.argtypes = [_wt.HWND, _wt.UINT]
+_user32.GetWindow.restype = _wt.HWND
+_user32.IsWindowVisible.argtypes = [_wt.HWND]
+_user32.IsWindowVisible.restype = _wt.BOOL
+_user32.IsIconic.argtypes = [_wt.HWND]
+_user32.IsIconic.restype = _wt.BOOL
+_user32.GetWindowLongW.argtypes = [_wt.HWND, ctypes.c_int]
+_user32.GetWindowLongW.restype = _wt.LONG
+_dwmapi.DwmGetWindowAttribute.argtypes = [
+    _wt.HWND, _wt.DWORD, ctypes.c_void_p, _wt.DWORD,
+]
+_dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
 _shell32.Shell_NotifyIconW.argtypes = [
     _wt.DWORD, ctypes.POINTER(_NOTIFYICONDATAW),
 ]
 _shell32.Shell_NotifyIconW.restype = _wt.BOOL
+
+
+def _run_in_background(work: Callable[[], None]) -> None:
+    threading.Thread(target=work, name="paste-last-focus", daemon=True).start()
+
+
+def _class_name(hwnd: int) -> str:
+    buffer = ctypes.create_unicode_buffer(_CLASS_NAME_CHARS)
+    _user32.GetClassNameW(hwnd, buffer, _CLASS_NAME_CHARS)
+    return buffer.value
+
+
+def _is_cloaked(hwnd: int) -> bool:
+    """Hidden by the compositor: a suspended store app, another desktop."""
+    cloaked = _wt.DWORD(0)
+    result = _dwmapi.DwmGetWindowAttribute(
+        hwnd, _DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked),
+    )
+    return result == 0 and bool(cloaked.value)
+
+
+def _is_app_window(hwnd: int) -> bool:
+    """A window Alt+Tab would offer: shown, not minimised, unowned, no tool window."""
+    if not _user32.IsWindowVisible(hwnd) or _user32.IsIconic(hwnd):
+        return False
+    if _user32.GetWindow(hwnd, _GW_OWNER):
+        return False
+    if _user32.GetWindowLongW(hwnd, _GWL_EXSTYLE) & _WS_EX_TOOLWINDOW:
+        return False
+    return _class_name(hwnd) not in _TASKBAR_CLASSES and not _is_cloaked(hwnd)
+
+
+def _window_to_return_to(previous: int) -> int:
+    """The window the user was in before the tray menu opened, or 0."""
+    if previous and _class_name(previous) not in _TASKBAR_CLASSES:
+        return previous
+    hwnd = _user32.GetTopWindow(None)
+    for _ in range(_MAX_WINDOWS_TO_SCAN):
+        if not hwnd:
+            return 0
+        if _is_app_window(hwnd):
+            return int(hwnd)
+        hwnd = _user32.GetWindow(hwnd, _GW_HWNDNEXT)
+    return 0
+
+
+def _wait_for_foreground(hwnd: int, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while int(_user32.GetForegroundWindow() or 0) != hwnd:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_FOCUS_POLL_SECONDS)
+    return True
+
+
+def _paste_when_in_front(target: int, paste: Callable[[], None]) -> None:
+    if not target or not _wait_for_foreground(target, _FOCUS_RESTORE_SECONDS):
+        _logger.info("Could not hand the focus back before paste-last.")
+    paste()
 
 
 def create_hicon(state: AppState, size: int = _ICON_SIZE) -> int:
@@ -251,7 +353,16 @@ class Win32TrayBackend:
     restarted and dropped our icon. NOT unit-tested end-to-end (it needs a
     live shell); the :class:`Win32TrayAdapter` orchestration is tested with
     a fake backend.
+
+    The window procedure runs inside Tk's event loop, where any Tk call
+    leaves ``_tkinter`` without the thread state its next Python callback
+    needs, and that callback aborts the process. So every app callback is
+    handed to the GUI dispatcher and runs on its next drain. The menu
+    itself stays here: its modal loop runs Tcl timers, which need the state
+    the event loop left in place.
     """
+
+    _failure_logged = False
 
     def __init__(
         self,
@@ -261,13 +372,22 @@ class Win32TrayBackend:
         on_history_clicked: Callable[[], None] | None = None,
         list_microphones: MicrophoneLister | None = None,
         on_microphone_chosen: Callable[[str], None] | None = None,
+        on_devices_changed: Callable[[], None] | None = None,
+        on_paste_last_clicked: Callable[[], None] | None = None,
+        on_copy_last_clicked: Callable[[], None] | None = None,
+        *,
+        dispatcher: GuiThreadDispatcher,
     ) -> None:
+        self._dispatcher = dispatcher
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
         self._on_history_clicked = on_history_clicked
+        self._on_paste_last_clicked = on_paste_last_clicked
+        self._on_copy_last_clicked = on_copy_last_clicked
         self._list_microphones = list_microphones
         self._on_microphone_chosen = on_microphone_chosen
+        self._on_devices_changed = on_devices_changed
         self._offered_microphones: list[str] = []
         self._added = False
         self._wndproc = _WNDPROC(self._window_proc)  # pinned: GC would crash us
@@ -338,13 +458,35 @@ class Win32TrayBackend:
         _shell32.Shell_NotifyIconW(_NIM_MODIFY, ctypes.byref(self._nid))
 
     def _window_proc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+        try:
+            if self._handled(msg, wparam, lparam):
+                return 0
+        except Exception:
+            self._log_first_failure()
+        return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    def _handled(self, msg: int, wparam: int, lparam: int) -> bool:
         if msg == _WM_APP_TRAY:
             self._handle_tray_event(lparam & 0xFFFF)
-            return 0
+            return True
         if msg == _WM_TASKBAR_CREATED:
             self._readd_after_explorer_restart()
-            return 0
-        return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+            return True
+        # Windows sends this to every top-level window when any device is
+        # plugged in or out; this window is top-level for broadcasts anyway.
+        if (
+            msg == _WM_DEVICECHANGE
+            and wparam == _DBT_DEVNODES_CHANGED
+            and self._on_devices_changed is not None
+        ):
+            self._dispatcher.dispatch(self._on_devices_changed)
+        return False
+
+    def _log_first_failure(self) -> None:
+        if self._failure_logged:
+            return
+        self._failure_logged = True
+        _logger.exception("The tray window failed on a message; passing messages on.")
 
     def _readd_after_explorer_restart(self) -> None:
         if not self._added:
@@ -356,7 +498,7 @@ class Win32TrayBackend:
         if mouse_message in (_WM_RBUTTONUP, _WM_CONTEXTMENU):
             self._show_context_menu()
         elif mouse_message == _WM_LBUTTONDBLCLK and self._on_settings_clicked:
-            self._on_settings_clicked()
+            self._dispatcher.dispatch(self._on_settings_clicked)
 
     def _show_context_menu(self) -> None:
         menu = _user32.CreatePopupMenu()
@@ -364,6 +506,14 @@ class Win32TrayBackend:
             menu, _MF_STRING | _MF_GRAYED, _ID_STATE, self._get_state_label(),
         )
         _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
+        if self._on_paste_last_clicked is not None:
+            _user32.AppendMenuW(
+                menu, _MF_STRING, _ID_PASTE_LAST, "Paste last dictation",
+            )
+        if self._on_copy_last_clicked is not None:
+            _user32.AppendMenuW(
+                menu, _MF_STRING, _ID_COPY_LAST, "Copy last dictation",
+            )
         if self._on_history_clicked is not None:
             _user32.AppendMenuW(menu, _MF_STRING, _ID_HISTORY, "History...")
         self._append_microphone_menu(menu)
@@ -374,13 +524,14 @@ class Win32TrayBackend:
 
         point = _wt.POINT()
         _user32.GetCursorPos(ctypes.byref(point))
+        previous = int(_user32.GetForegroundWindow() or 0)
         _user32.SetForegroundWindow(self._hwnd)
         command = _user32.TrackPopupMenu(
             menu, _TPM_RIGHTBUTTON | _TPM_RETURNCMD,
             point.x, point.y, 0, self._hwnd, None,
         )
         _user32.DestroyMenu(menu)
-        self._dispatch_menu_command(command)
+        self._dispatch_menu_command(command, previous)
 
     def _append_microphone_menu(self, menu: int) -> None:
         if self._list_microphones is None or self._on_microphone_chosen is None:
@@ -402,18 +553,43 @@ class Win32TrayBackend:
             _user32.AppendMenuW(submenu, flags, _ID_FIRST_MICROPHONE + offset, label)
         _user32.AppendMenuW(menu, _MF_POPUP, submenu, "Microphone")
 
-    def _dispatch_menu_command(self, command: int) -> None:
+    def _dispatch_menu_command(self, command: int, previous: int = 0) -> None:
+        if command == _ID_PASTE_LAST and self._on_paste_last_clicked is not None:
+            self._paste_last_into(previous, self._on_paste_last_clicked)
+            return
+        action = self._menu_action(command)
+        if action is not None:
+            self._dispatcher.dispatch(action)
+
+    def _menu_action(self, command: int) -> Callable[[], None] | None:
         offset = command - _ID_FIRST_MICROPHONE
         if 0 <= offset < len(self._offered_microphones):
-            if self._on_microphone_chosen is not None:
-                self._on_microphone_chosen(self._offered_microphones[offset])
-            return
-        if command == _ID_SETTINGS and self._on_settings_clicked is not None:
-            self._on_settings_clicked()
-        elif command == _ID_HISTORY and self._on_history_clicked is not None:
-            self._on_history_clicked()
-        elif command == _ID_QUIT:
-            self._on_quit_clicked()
+            return self._microphone_choice(self._offered_microphones[offset])
+        return {
+            _ID_SETTINGS: self._on_settings_clicked,
+            _ID_HISTORY: self._on_history_clicked,
+            _ID_COPY_LAST: self._on_copy_last_clicked,
+            _ID_QUIT: self._on_quit_clicked,
+        }.get(command)
+
+    def _microphone_choice(self, name: str) -> Callable[[], None] | None:
+        choose = self._on_microphone_chosen
+        if choose is None:
+            return None
+        return lambda: choose(name)
+
+    @staticmethod
+    def _paste_last_into(previous: int, paste: Callable[[], None]) -> None:
+        """Give the focus back to the app the user was in, then paste there.
+
+        The wait for the switch runs off the GUI thread. When the focus does
+        not come back in time, paste-last runs anyway; with no text field in
+        front it leaves the text on the clipboard and shows the notice.
+        """
+        target = _window_to_return_to(previous)
+        if target:
+            _user32.SetForegroundWindow(target)
+        _run_in_background(lambda: _paste_when_in_front(target, paste))
 
 
 class Win32TrayAdapter:
@@ -440,6 +616,9 @@ class Win32TrayAdapter:
         on_history_clicked: Callable[[], None] | None = None,
         list_microphones: MicrophoneLister | None = None,
         on_microphone_chosen: Callable[[str], None] | None = None,
+        on_devices_changed: Callable[[], None] | None = None,
+        on_paste_last_clicked: Callable[[], None] | None = None,
+        on_copy_last_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
@@ -452,6 +631,9 @@ class Win32TrayAdapter:
         self._backend: TrayBackend = backend or Win32TrayBackend(
             get_state_label, on_settings_clicked, on_quit_clicked,
             on_history_clicked, list_microphones, on_microphone_chosen,
+            on_devices_changed,
+            on_paste_last_clicked, on_copy_last_clicked,
+            dispatcher=dispatcher,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -560,6 +742,9 @@ def build_win32_tray_adapter(
     on_history_clicked: Callable[[], None] | None = None,
     list_microphones: MicrophoneLister | None = None,
     on_microphone_chosen: Callable[[str], None] | None = None,
+    on_devices_changed: Callable[[], None] | None = None,
+    on_paste_last_clicked: Callable[[], None] | None = None,
+    on_copy_last_clicked: Callable[[], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`voicetotext.tray.app.TrayIconFactory`.
 
@@ -578,4 +763,7 @@ def build_win32_tray_adapter(
         on_history_clicked=on_history_clicked,
         list_microphones=list_microphones,
         on_microphone_chosen=on_microphone_chosen,
+        on_devices_changed=on_devices_changed,
+        on_paste_last_clicked=on_paste_last_clicked,
+        on_copy_last_clicked=on_copy_last_clicked,
     )

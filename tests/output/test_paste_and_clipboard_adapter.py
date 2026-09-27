@@ -7,15 +7,19 @@ from voicetotext.output.clipboard_writer import ClipboardWriter
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.output.key_sender import KeySender
 from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from voicetotext.output.paste_method import PasteMethod
 from voicetotext.output.sleeper import Sleeper
 
 
-def _adapter() -> tuple[PasteAndClipboardAdapter, MagicMock, MagicMock, MagicMock]:
+def _adapter(
+    paste_method=None,
+) -> tuple[PasteAndClipboardAdapter, MagicMock, MagicMock, MagicMock]:
     sleeper = MagicMock(spec=Sleeper)
     writer = MagicMock(spec=ClipboardWriter)
     key_sender = MagicMock(spec=KeySender)
     adapter = PasteAndClipboardAdapter(
         sleeper=sleeper, writer=writer, key_sender=key_sender,
+        paste_method=paste_method,
     )
     return adapter, sleeper, writer, key_sender
 
@@ -27,7 +31,25 @@ class TestPasteAndClipboardAdapterOutput:
         adapter.output("hello world")
 
         writer.set_text.assert_called_once_with("hello world")
-        key_sender.send_ctrl_v.assert_called_once_with()
+        key_sender.send_paste.assert_called_once_with(PasteMethod.CTRL_V, "hello world")
+
+    def test_pastes_with_the_method_chosen_for_the_app_in_front(self):
+        adapter, _, _, key_sender = _adapter(lambda: PasteMethod.SHIFT_INSERT)
+
+        adapter.output("ls -la")
+
+        key_sender.send_paste.assert_called_once_with(PasteMethod.SHIFT_INSERT, "ls -la")
+
+    def test_keeps_the_text_on_the_clipboard_when_the_app_cannot_be_identified(self):
+        def unknown_app() -> PasteMethod:
+            raise OSError("access denied")
+
+        adapter, _, writer, key_sender = _adapter(unknown_app)
+
+        adapter.output("hello world")
+
+        writer.set_text.assert_called_once_with("hello world")
+        key_sender.send_paste.assert_not_called()
 
     def test_should_wait_before_pasting(self):
         adapter, sleeper, _, _ = _adapter()
@@ -38,7 +60,7 @@ class TestPasteAndClipboardAdapterOutput:
 
     def test_should_log_warning_and_keep_text_when_paste_fails(self):
         adapter, _, writer, key_sender = _adapter()
-        key_sender.send_ctrl_v.side_effect = RuntimeError("paste failed")
+        key_sender.send_paste.side_effect = RuntimeError("paste failed")
 
         adapter.output("hello world")
 
@@ -51,7 +73,7 @@ class TestPasteAndClipboardAdapterOutput:
         with pytest.raises(ClipboardWriteError):
             adapter.output("text")
 
-        key_sender.send_ctrl_v.assert_not_called()
+        key_sender.send_paste.assert_not_called()
 
 
 class TestPasteAndClipboardAdapterIsATextOutputHandler:

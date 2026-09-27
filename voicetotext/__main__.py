@@ -23,6 +23,16 @@ if TYPE_CHECKING:
     from voicetotext.transcription.hardware_detector import HardwareDetector
     from voicetotext.transcription.license_policy import LicensePolicy
     from voicetotext.transcription.model_manager import ModelManager
+    from voicetotext.ui.api_server import ApiServer
+    from voicetotext.ui.launcher import ShellLauncher
+
+_MB_ICONERROR = 0x10
+_MB_SETFOREGROUND = 0x10000
+_MB_TOPMOST = 0x40000
+SETUP_NOT_FINISHED = (
+    "Setup was closed before a speech model was installed, so VoiceToText will close. "
+    "Start VoiceToText again to finish setting it up."
+)
 
 
 def _apply_torch_env_overrides() -> None:
@@ -43,10 +53,17 @@ def _apply_torch_env_overrides() -> None:
     flash / mem-efficient attention kernels on AMD ROCm. The flag is a
     no-op on NVIDIA / CPU, so it is set unconditionally; ``setdefault``
     lets a user explicitly opt out by exporting ``=0`` first.
+
+    ``ROCM_SDK_TARGET_FAMILY`` is answered here so no torch import ever
+    runs ROCm's own ``offload-arch`` probe, which flashes a console window
+    under the windowless launcher.
     """
     if os.environ.get("VOICETOTEXT_DISABLE_CUDA_CACHE") == "1":
         os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
     os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    from voicetotext.core.rocm_env import prepare_rocm_environment
+
+    prepare_rocm_environment()
 
 
 def _apply_hf_cache_env_overrides(paths: AppPaths) -> None:
@@ -259,19 +276,30 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     license_policy = LicensePolicy(config)
 
     event_bus = SimpleEventBus()
+    # Before setup, which is served through it: one socket bind and an idle
+    # thread until the shell connects.
+    api_server = _start_api_server(event_bus)
     download_manager = DownloadManager(event_bus=event_bus)
     model_manager = create_model_manager(
         paths.models_dir, download_manager, license_policy,
     )
 
     startup.await_torch_prewarm()
+    from voicetotext.transcription.cached_hardware_detector import (
+        CachedHardwareDetector,
+    )
     from voicetotext.transcription.torch_hardware_detector import (
         TorchHardwareDetector,
+    )
+    from voicetotext.transcription.win32_display_adapters import (
+        display_adapter_fingerprint,
     )
 
     # Held, not called: the GPU probe imports torch, so only the code
     # that actually needs an answer gets to pay for one.
-    hardware_detector = TorchHardwareDetector()
+    hardware_detector = CachedHardwareDetector(
+        TorchHardwareDetector(), config, display_adapter_fingerprint,
+    )
     from voicetotext.transcription.model_info import DEFAULT_MODEL
 
     if not startup.model_was_configured:
@@ -280,9 +308,14 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     if paths.is_first_run() or not _configured_model_installed(
         config, model_manager,
     ):
+        from voicetotext.ui.launcher import ShellLauncher
+
         _run_first_time_setup(
             config, model_manager, event_bus, root, registry,
             hardware_detector, paths.dictionary_path, license_policy,
+            api_server=api_server,
+            launcher=ShellLauncher(api_server, notify=_show_setup_problem),
+            diagnostics_dir=paths.diagnostics_dir,
         )
 
     if not _configured_model_installed(config, model_manager):
@@ -300,8 +333,18 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
         registry=registry,
         hardware_detector=hardware_detector,
         license_policy=license_policy,
+        api_server=api_server,
     )
     app.run()
+
+
+def _start_api_server(event_bus: SimpleEventBus) -> ApiServer:
+    from voicetotext.ui.api_server import ApiServer
+    from voicetotext.ui.event_hub import EventHub
+
+    server = ApiServer(EventHub(event_bus))
+    server.start()
+    return server
 
 
 def _configured_model_installed(
@@ -326,11 +369,24 @@ def _run_first_time_setup(
     hardware_detector: HardwareDetector,
     dictionary_path: Path,
     license_policy: LicensePolicy,
+    *,
+    api_server: ApiServer,
+    launcher: ShellLauncher,
+    diagnostics_dir: Path,
 ) -> None:
+    """Serve setup to the shell and wait, pumping Tk, until it is done or closed.
+
+    A shell that cannot be opened has already told the user why, so this
+    returns at once and the caller finds no model installed.
+    """
+    import functools
+    import threading
+
     from voicetotext.bootstrap import build_first_run_settings_service
-    from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
-    from voicetotext.settings.tk_window import TkSettingsWindow
+    from voicetotext.recording.input_devices import Microphones
     from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
+    from voicetotext.ui.api_handlers import CoreApi, ShortcutCapture
+    from voicetotext.ui.launcher import wait_for_setup
 
     service = build_first_run_settings_service(
         config=config,
@@ -341,18 +397,28 @@ def _run_first_time_setup(
         dictionary_path=dictionary_path,
         license_policy=license_policy,
     )
-    dispatcher = TkGuiThreadDispatcher(root)
-    window = TkSettingsWindow(
-        root,
+    setup_done = threading.Event()
+    CoreApi(
         service,
-        capture_bridge=Win32CaptureBridge(),
+        api_server.hub,
+        microphones=Microphones(),
+        capture=ShortcutCapture(
+            Win32CaptureBridge(), functools.partial(api_server.hub.publish, "capture"),
+        ),
+        diagnostics_dir=diagnostics_dir,
         first_run=True,
-        schedule=dispatcher.dispatch,
-    )
-    window.show()
-    root.wait_window(window)
-    dispatcher.cancel()
+        on_setup_done=setup_done.set,
+    ).serve_on(api_server)
+    if launcher.open("setup"):
+        wait_for_setup(root, lambda: setup_done.is_set() or not launcher.is_running())
+        if not _configured_model_installed(config, model_manager):
+            _show_setup_problem(SETUP_NOT_FINISHED)
     config.save()
+
+
+def _show_setup_problem(message: str) -> None:
+    # No tray icon exists yet to show a balloon on.
+    _try_show_message("VoiceToText", message)
 
 
 def _show_instance_conflict() -> None:
@@ -377,7 +443,10 @@ def _try_show_message(title: str, message: str) -> None:
     try:
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
+        # No window of ours is in front to own it, so it asks to be on top.
+        ctypes.windll.user32.MessageBoxW(
+            None, message, title, _MB_ICONERROR | _MB_SETFOREGROUND | _MB_TOPMOST,
+        )
     except Exception:
         pass
 

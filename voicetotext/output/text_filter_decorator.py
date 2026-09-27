@@ -11,5 +11,8 @@ class TextFilterDecorator(TextOutputHandler):
     def output(self, text: str) -> None:
         self._inner.output(self._pipeline.process(text))
 
+    def output_verbatim(self, text: str) -> None:
+        self._inner.output(text)
+
 
 __all__ = ["TextFilterDecorator", "load_dictionary"]

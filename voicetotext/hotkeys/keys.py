@@ -15,7 +15,13 @@ VK_LWIN = 0x5B
 VK_RWIN = 0x5C
 VK_SPACE = 0x20
 VK_ESCAPE = 0x1B
-VK_F1 = 0x70  # F1..F12 are contiguous: 0x70..0x7B
+VK_F1 = 0x70  # F1..F24 are contiguous: 0x70..0x87
+# Mouse buttons 3-5 have virtual-key codes too; the mouse hook reports them
+# under these so one shortcut can mix keys and a button.
+VK_MBUTTON = 0x04
+VK_XBUTTON1 = 0x05
+VK_XBUTTON2 = 0x06
+MOUSE_BUTTON_VKS = frozenset({VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2})
 
 _VK_A = 0x41
 _VK_Z = 0x5A
@@ -54,12 +60,16 @@ _GENERIC_MODIFIER_NAMES: dict[int, str] = {
     VK_LSHIFT: "shift", VK_RSHIFT: "shift",
     VK_LWIN: "cmd", VK_RWIN: "cmd",
 }
+MODIFIER_VKS = frozenset(_GENERIC_MODIFIER_NAMES)
 
 _NAMED_KEYS: dict[int, str] = {
     **_GENERIC_MODIFIER_NAMES,
     VK_SPACE: "space",
     VK_ESCAPE: "esc",
-    **{VK_F1 + offset: f"f{offset + 1}" for offset in range(12)},
+    VK_MBUTTON: "mouse_middle",
+    VK_XBUTTON1: "mouse4",
+    VK_XBUTTON2: "mouse5",
+    **{VK_F1 + offset: f"f{offset + 1}" for offset in range(24)},
 }
 
 

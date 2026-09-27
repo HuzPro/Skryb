@@ -1,5 +1,6 @@
 import importlib.util
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from pathlib import Path
 
 from voicetotext.core.config import ConfigurationStore
@@ -15,6 +16,7 @@ from voicetotext.transcription.engine_selector import rank_engines
 from voicetotext.transcription.engine_types import (
     ALL_HARDWARE_KINDS,
     CrisperWhisperMode,
+    EngineCandidate,
     EngineDescriptor,
     EngineId,
     HardwareProfile,
@@ -223,6 +225,7 @@ def probed_hardware_kind(
     config: ConfigurationStore,
     registry: EngineRegistry,
     hardware_detector: HardwareDetector,
+    models_dir: Path,
 ) -> str:
     """The hardware kind for diagnostics, or ``unprobed`` if none was taken.
 
@@ -230,7 +233,7 @@ def probed_hardware_kind(
     has no reason to pay it, and a diagnostics field is not reason
     enough - so it records that no probe happened rather than forcing one.
     """
-    if not startup_requires_torch(config, registry):
+    if not startup_requires_torch(config, registry, models_dir):
         return UNPROBED_HARDWARE_KIND
     return hardware_detector.detect().kind
 
@@ -289,14 +292,27 @@ def _ranking_that_ignores_hardware(
     model_info: ModelInfo,
     registry: EngineRegistry,
 ) -> tuple[EngineId, ...]:
-    """Ranked engine ids when hardware cannot change the order.
+    return tuple(
+        candidate.engine_id
+        for candidate in engine_candidates_ignoring_hardware(
+            model_info, registry,
+        )
+    )
+
+
+def engine_candidates_ignoring_hardware(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+) -> tuple[EngineCandidate, ...]:
+    """Ranked engine candidates when hardware cannot change the order.
 
     ``rank_engines`` consults hardware only to drop engines that do not
     support it. When every engine compatible with *model_info* runs on
     every hardware kind, nothing is ever dropped and the order is the
     priority order alone - so the GPU never has to be probed. Returns
     empty when hardware could matter, which sends the caller to the
-    probe.
+    probe. The recommendation carries no reason: no hardware was probed
+    to give one.
     """
     compatible = [
         descriptor for descriptor in registry.all_descriptors()
@@ -309,7 +325,7 @@ def _ranking_that_ignores_hardware(
     if not compatible or not runs_anywhere:
         return ()
     return tuple(
-        candidate.engine_id
+        replace(candidate, reason="")
         for candidate in rank_engines(
             model_info, _UNPROBED_HARDWARE, registry.all_descriptors(),
         )

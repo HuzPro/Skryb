@@ -1,6 +1,6 @@
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import sounddevice as sd
@@ -9,6 +9,7 @@ from voicetotext.core.exceptions import AudioRecorderError
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.recording.input_devices import (
     SYSTEM_DEFAULT,
+    connected_preferred_microphone,
     input_device_index,
     refresh_portaudio,
 )
@@ -25,13 +26,18 @@ def _ignore_missing(_name: str) -> None:
     return None
 
 
+def _no_preferences() -> Sequence[str]:
+    return ()
+
+
 class SoundDeviceAdapter(AudioRecorder):
     """Records from the chosen microphone, or the Windows default without it.
 
     The choice is read at every start, so picking another microphone takes
     effect on the next recording, and one that was unplugged is used again
-    as soon as it is back. ``on_device_missing`` hears about a missing
-    microphone once per absence, not once per recording.
+    as soon as it is back. The first connected microphone in
+    ``preferred_names`` beats the chosen one. ``on_device_missing`` hears
+    about a missing microphone once per absence, not once per recording.
     """
 
     def __init__(
@@ -41,9 +47,15 @@ class SoundDeviceAdapter(AudioRecorder):
         on_device_missing: Callable[[str], None] = _ignore_missing,
         device_index: Callable[[str], int | None] = input_device_index,
         refresh_devices: Callable[[], None] = refresh_portaudio,
+        preferred_names: Callable[[], Sequence[str]] = _no_preferences,
+        find_preferred: Callable[
+            [Sequence[str]], str | None,
+        ] = connected_preferred_microphone,
     ) -> None:
         self._sample_rate = sample_rate
         self._device_name = device_name
+        self._preferred_names = preferred_names
+        self._find_preferred = find_preferred
         self._on_device_missing = on_device_missing
         self._device_index = device_index
         self._refresh_devices = refresh_devices
@@ -55,6 +67,8 @@ class SoundDeviceAdapter(AudioRecorder):
         self._on_frame: Callable[[np.ndarray], None] | None = None
         self._lock = threading.Lock()
         self.current_rms = 0.0
+        # What the last recording opened; SYSTEM_DEFAULT for Windows' default.
+        self.device_name = SYSTEM_DEFAULT
 
     def start_recording(
         self, on_frame: Callable[[np.ndarray], None] | None = None,
@@ -66,17 +80,29 @@ class SoundDeviceAdapter(AudioRecorder):
             self.current_rms = 0.0
             self._paused = False
             self._on_frame = on_frame
-            name = self._device_name()
+            name = self._microphone_to_use()
+            device: int | None = None
             try:
-                self._stream = self._open(self._resolve(name))
+                device = self._resolve(name)
+                self._stream = self._open(device)
             except sd.PortAudioError:
                 if name == SYSTEM_DEFAULT:
                     raise
                 _logger.warning("Opening microphone %r failed.", name, exc_info=True)
                 self._report_missing(name)
+                device = None
                 self._stream = self._open(None)
             self._stream.start()
             self._is_recording = True
+            self.device_name = name if device is not None else SYSTEM_DEFAULT
+
+    def _microphone_to_use(self) -> str:
+        try:
+            preferred = self._find_preferred(self._preferred_names())
+        except Exception:  # a broken device list falls back to the chosen one
+            _logger.warning("Looking for a preferred microphone failed.", exc_info=True)
+            preferred = None
+        return preferred or self._device_name()
 
     def _open(self, device: int | None) -> sd.InputStream:
         return sd.InputStream(

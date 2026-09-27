@@ -17,12 +17,15 @@ from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     CaretContext,
+    caret_log_line,
 )
 
 
 _logger = logging.getLogger(__name__)
 
 _EM_GETSEL = 0x00B0
+_GWL_STYLE = -16
+_ES_PASSWORD = 0x0020
 _WM_GETTEXT = 0x000D
 _WM_GETTEXTLENGTH = 0x000E
 
@@ -34,8 +37,6 @@ _MESSAGE_TIMEOUT_MS = 200
 _CLASS_NAME_BUFFER_CHARS = 256
 _EDIT_CLASS_MARKER = "EDIT"
 _RICH_EDIT_CLASS_MARKER = "RICHEDIT"
-
-_LOGGED_TEXT_CHARS = 20
 
 _NO_WPARAM = 0
 _NO_LPARAM = 0
@@ -84,7 +85,7 @@ def edit_control_context_of(hwnd: int) -> CaretContext:
 
 def _context_of(hwnd: int) -> CaretContext:
     class_name = _class_name(hwnd) if hwnd else ""
-    if not _is_edit_control(class_name):
+    if not _is_edit_control(class_name) or _is_password_field(hwnd):
         return NO_CONTEXT
     start, end = _selection(hwnd)
     text = _text(hwnd)
@@ -95,7 +96,7 @@ def _context_of(hwnd: int) -> CaretContext:
         selected=text[start:end],
         after=text[end:end + CONTEXT_CHARS],
     )
-    _log_context(context)
+    _logger.debug("Edit control context: %s", caret_log_line(context))
     return context
 
 
@@ -109,6 +110,10 @@ def _is_edit_control(class_name: str) -> bool:
     ``WindowsForms10.RichEdit20W.app.0.x``.
     """
     return _EDIT_CLASS_MARKER in class_name.upper()
+
+
+def _is_password_field(hwnd: int) -> bool:
+    return bool(_user32().GetWindowLongW(hwnd, _GWL_STYLE) & _ES_PASSWORD)
 
 
 def _is_rich_edit(class_name: str) -> bool:
@@ -125,19 +130,35 @@ def _with_rich_edit_paragraph_breaks(text: str) -> str:
     return text.replace("\r\n", "\r")
 
 
+def foreground_has_caret() -> bool:
+    """Whether the foreground app shows a system caret, the classic text-field sign.
+
+    Raises ``OSError`` when the foreground thread cannot be asked.
+    """
+    return bool(_foreground_gui_thread_info().hwndCaret)
+
+
 def _focused_hwnd() -> int:
     """The control with the keyboard focus, not just the foreground window.
 
     ``GetFocus`` only answers for the calling thread, so the focused child has
     to come from the foreground thread's own GUI state.
     """
+    try:
+        info = _foreground_gui_thread_info()
+    except OSError:
+        return 0
+    return int(info.hwndFocus or 0)
+
+
+def _foreground_gui_thread_info() -> _GuiThreadInfo:
     user32 = _user32()
     thread = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
     info = _GuiThreadInfo()
     info.cbSize = ctypes.sizeof(_GuiThreadInfo)
     if not user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
-        return 0
-    return int(info.hwndFocus or 0)
+        raise OSError("GetGUIThreadInfo failed for the foreground thread")
+    return info
 
 
 def _class_name(hwnd: int) -> str:
@@ -176,15 +197,6 @@ def _send(hwnd: int, message: int, wparam: object, lparam: object) -> int:
     return int(result.value)
 
 
-def _log_context(context: CaretContext) -> None:
-    _logger.debug(
-        "Edit control context: before=%r selected=%r after=%r",
-        context.before[-_LOGGED_TEXT_CHARS:],
-        context.selected[:_LOGGED_TEXT_CHARS],
-        context.after[:_LOGGED_TEXT_CHARS],
-    )
-
-
 @cache
 def _user32() -> ctypes.CDLL:
     """``user32`` with the signatures this module needs.
@@ -206,6 +218,8 @@ def _user32() -> ctypes.CDLL:
         ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int,
     ]
     user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.GetWindowLongW.restype = ctypes.c_long
     user32.SendMessageTimeoutW.argtypes = [
         ctypes.c_void_p,
         ctypes.c_uint,
