@@ -127,6 +127,26 @@ class TestDoctorReportsTheWritingModel:
         assert "installed: no (Settings > Writing > Install)" in report
         assert "cleanup: light" in report
 
+    def test_the_pinned_model_id_and_file_are_named_next_to_the_file_that_will_launch(
+        self, tmp_path: Path,
+    ) -> None:
+        qwen = tmp_path / "Qwen3.5-4B-Q4_K_M.gguf"
+
+        pinned = doctor.writing_model_report(
+            WritingSettings(), WritingPaths(tmp_path / "writing"), tmp_path / "server.log",
+        )
+        overridden = doctor.writing_model_report(
+            WritingSettings(model_path=str(qwen)), WritingPaths(tmp_path / "writing"),
+            tmp_path / "server.log",
+        )
+
+        assert "  pinned model: spark-x2.5-4b (Spark-X2.5-4B-Q4_K_M.gguf)" in pinned
+        assert any(
+            line.startswith("  model: ") and line.endswith("Spark-X2.5-4B-Q4_K_M.gguf")
+            for line in pinned
+        )
+        assert f"  model: {qwen}" in overridden
+
     def test_a_broken_writing_probe_degrades_to_an_error_line(self) -> None:
         def explode() -> list[str]:
             raise OSError("config.json is locked")

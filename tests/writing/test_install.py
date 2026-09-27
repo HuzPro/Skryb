@@ -4,18 +4,23 @@ import threading
 import time
 import zipfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from tests.fakes.writing import UnreachableDownloader
 from voicetotext.downloads.chunked_file_downloader import FileDownloadPlan
+from voicetotext.writing import install
 from voicetotext.writing.install import (
     DOWNLOAD_CORRUPTED,
     DOWNLOAD_FAILED,
+    INSTALL_BYTES,
     INSTALL_FAILED,
     MODEL_GGUF,
     RUNTIME_ZIP,
+    WRITING_MODEL,
+    WRITING_MODELS,
     Artifact,
     InstallError,
     InstallJob,
@@ -184,8 +189,19 @@ class TestInstallJob:
     def test_the_pinned_artifacts_are_the_measured_ones(self):
         assert RUNTIME_ZIP.size == 33_062_078
         assert RUNTIME_ZIP.sha256 == "670a1f9bf5272c43dbbd7b0004a12dd3d3f6f575246fd23b733f06c064f1b96b"
-        assert "e87f176479d0855a907a41277aca2f8ee7a09523" in MODEL_GGUF.url
-        assert MODEL_GGUF.size == 2_740_937_888
+        assert WRITING_MODELS == (WRITING_MODEL,)
+        assert (WRITING_MODEL.id, WRITING_MODEL.label, WRITING_MODEL.license) == (
+            "spark-x2.5-4b", "Spark X2.5 4B", "Apache-2.0",
+        )
+        assert MODEL_GGUF is WRITING_MODEL.gguf
+        assert MODEL_GGUF.url == (
+            "https://huggingface.co/XHToken/Spark-X2.5-4B-GGUF/resolve/"
+            "9826e0be84e6e6e8b9668abc91421109a1df1e2d/Spark-X2.5-4B-Q4_K_M.gguf"
+        )
+        assert MODEL_GGUF.file_name == "Spark-X2.5-4B-Q4_K_M.gguf"
+        assert MODEL_GGUF.size == 2_600_224_352
+        assert MODEL_GGUF.sha256 == "adfcfa19a4ed6a5985da8bf565fe15f8e1a7e131d79bae2d19d48d1c40109428"
+        assert INSTALL_BYTES == 2_633_286_430
 
 
 class TestInstaller:
@@ -253,6 +269,37 @@ class TestServerFiles:
         files = server_files(WritingPaths(tmp_path / "managed"), settings)
 
         assert files is not None and files.runtime == runtime and files.model == model
+
+    def test_installed_means_the_spark_file_and_a_leftover_qwen_file_does_not_count(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setattr(install, "MODEL_GGUF", replace(MODEL_GGUF, size=len(MODEL_BYTES)))
+        paths = WritingPaths(tmp_path / "managed")
+        paths.runtime_exe.parent.mkdir(parents=True)
+        paths.runtime_exe.write_bytes(b"MZ")
+        models = paths.root / "models"
+        models.mkdir()
+        (models / "Qwen3.5-4B-Q4_K_M.gguf").write_bytes(MODEL_BYTES)
+
+        assert paths.model_file == models / "Spark-X2.5-4B-Q4_K_M.gguf"
+        assert server_files(paths, WritingSettings()) is None
+
+        paths.model_file.write_bytes(MODEL_BYTES)
+        files = server_files(paths, WritingSettings())
+
+        assert files is not None and files.model == paths.model_file
+
+    def test_a_saved_override_that_points_at_the_old_qwen_file_still_wins(self, tmp_path):
+        paths = WritingPaths(tmp_path / "managed")
+        paths.runtime_exe.parent.mkdir(parents=True)
+        paths.runtime_exe.write_bytes(b"MZ")
+        qwen = tmp_path / "old models" / "Qwen3.5-4B-Q4_K_M.gguf"
+        qwen.parent.mkdir()
+        qwen.write_bytes(b"GGUF")
+
+        files = server_files(paths, WritingSettings(model_path=str(qwen)))
+
+        assert files is not None and files.model == qwen
 
     def test_a_partly_moved_managed_model_is_not_launched(self, tmp_path):
         paths = WritingPaths(tmp_path / "managed")
