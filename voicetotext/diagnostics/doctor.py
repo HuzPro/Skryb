@@ -18,7 +18,7 @@ from pathlib import Path
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
 from voicetotext.writing.client import post_completion
-from voicetotext.writing.install import WritingPaths, managed_root, server_files
+from voicetotext.writing.install import WRITING_MODEL, WritingPaths, managed_root, server_files
 from voicetotext.writing.llama_server import (
     LlamaServer,
     ServerFiles,
@@ -219,6 +219,7 @@ def writing_model_report(
     lines = [
         f"  cleanup: {settings.cleanup}",
         f"  runtime: {settings.runtime_path or paths.runtime_exe}",
+        f"  pinned model: {WRITING_MODEL.id} ({WRITING_MODEL.gguf.file_name})",
         f"  model: {settings.model_path or paths.model_file}",
     ]
     files = server_files(paths, settings)

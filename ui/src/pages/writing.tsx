@@ -23,6 +23,11 @@ function lastLine(text: string): string {
   return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) ?? "";
 }
 
+/** The file name at the end of a Windows or POSIX path. */
+export function fileName(path: string): string {
+  return path.split(/[\\/]/).at(-1) ?? "";
+}
+
 /** The short state beside the model's name and the line under it. */
 export function describeWriting(status: WritingStatus): { pill: string; tone: Tone; detail: string } {
   const share = status.bytes_total ? status.bytes_done / status.bytes_total : 0;
@@ -75,6 +80,11 @@ function WritingModelCard() {
             </span>
           </div>
           <div className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</div>
+          {status.model_path ? (
+            <div className="mt-0.5 truncate text-[12px] text-muted-foreground" title={status.model_path}>
+              Model file: {fileName(status.model_path)}
+            </div>
+          ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
           {status.state === "not_installed" ? <Button onClick={() => void run("install")}>Install ({formatGigabytes(status.install_bytes)})</Button> : null}

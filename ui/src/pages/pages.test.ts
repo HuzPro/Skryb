@@ -6,6 +6,7 @@ import { formatDuration, groupByDay, preview } from "./history";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
 import { withMode } from "./transcription";
+import { fileName } from "./writing";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
   id: at, at, text, audio_seconds: 3, status: "", error: null, has_audio: true, kind: "dictation", ...extra,
@@ -138,5 +139,13 @@ describe("the page a launch opens", () => {
     };
     expect(() => rememberPage("/output", blocked)).not.toThrow();
     expect(launchPath("settings", blocked)).toBe("/transcription");
+  });
+});
+
+describe("writing model file", () => {
+  it("names the file in use, whether it is the installed one or an override", () => {
+    expect(fileName("C:\\Users\\Zoë\\AppData\\Local\\VoiceToText\\writing\\models\\Spark-X2.5-4B-Q4_K_M.gguf")).toBe("Spark-X2.5-4B-Q4_K_M.gguf");
+    expect(fileName("D:/models/Qwen3.5-4B-Q4_K_M.gguf")).toBe("Qwen3.5-4B-Q4_K_M.gguf");
+    expect(fileName("")).toBe("");
   });
 });

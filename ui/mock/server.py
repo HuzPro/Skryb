@@ -179,7 +179,9 @@ class Core:
             ],
         }
         self.writing = {"state": "not_installed", "detail": "", "bytes_done": 0, "bytes_total": 0,
-                        "install_bytes": 2_800_000_000, "runtime_path": "", "model_path": "",
+                        "install_bytes": 2_633_286_430,
+                        "runtime_path": r"C:\Users\you\AppData\Local\VoiceToText\writing\llama-b11200\llama-server.exe",
+                        "model_path": r"C:\Users\you\AppData\Local\VoiceToText\writing\models\Spark-X2.5-4B-Q4_K_M.gguf",
                         "last_cleanup_seconds": None,
                         "learned_style_summary": "short sentences, British spelling, no sign-off"}
         self.transforms = [{"name": n, "instruction": i, "builtin": True} for n, i in BUILTIN_TRANSFORMS]

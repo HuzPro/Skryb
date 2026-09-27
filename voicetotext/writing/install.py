@@ -53,15 +53,35 @@ RUNTIME_ZIP = Artifact(
     size=33_062_078,
     sha256="670a1f9bf5272c43dbbd7b0004a12dd3d3f6f575246fd23b733f06c064f1b96b",
 )
-MODEL_GGUF = Artifact(
-    url=(
-        "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/"
-        "e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf"
+
+
+@dataclass(frozen=True)
+class WritingModel:
+    id: str
+    label: str
+    license: str
+    gguf: Artifact
+
+
+# The publisher requires llama.cpp b10828 or newer; the runtime above is b11200.
+WRITING_MODELS = (
+    WritingModel(
+        id="spark-x2.5-4b",
+        label="Spark X2.5 4B",
+        license="Apache-2.0",
+        gguf=Artifact(
+            url=(
+                "https://huggingface.co/XHToken/Spark-X2.5-4B-GGUF/resolve/"
+                "9826e0be84e6e6e8b9668abc91421109a1df1e2d/Spark-X2.5-4B-Q4_K_M.gguf"
+            ),
+            file_name="Spark-X2.5-4B-Q4_K_M.gguf",
+            size=2_600_224_352,
+            sha256="adfcfa19a4ed6a5985da8bf565fe15f8e1a7e131d79bae2d19d48d1c40109428",
+        ),
     ),
-    file_name="Qwen3.5-4B-Q4_K_M.gguf",
-    size=2_740_937_888,
-    sha256="00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
 )
+WRITING_MODEL = WRITING_MODELS[0]
+MODEL_GGUF = WRITING_MODEL.gguf
 INSTALL_BYTES = RUNTIME_ZIP.size + MODEL_GGUF.size
 
 DOWNLOAD_FAILED = (
