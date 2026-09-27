@@ -16,29 +16,35 @@ Rules:
 - Keep questions as questions. Keep hedges and politeness (maybe, I think, I was thinking, please).
 - Keep names, numbers, dates, links and the speaker's language. Numbers stay as written: words stay words, digits stay digits.
 - Use "spellings", "context_before" and "window" only to spell names and terms that sound the same.
-- Do not summarize, translate or add facts."""
+- Do not summarize, translate or add facts.
+- Never take words from the examples."""
 
+# Examples use words no dictation is likely to contain: the model copies an
+# example's list item into a real list that looks like it.
 _EXAMPLES = (
-    ('{"dictation": "Uh let\'s meet on Friday, actually no, Monday at 4."}',
-     "Let's meet on Monday at 4."),
-    ('{"dictation": "Can you explain the bug? Please include the logs."}',
-     "Can you explain the bug? Please include the logs."),
-    ('{"dictation": "I think maybe this is too expensive."}',
-     "I think maybe this is too expensive."),
-    ('{"dictation": "Send this to Jon, actually John with an h.", "spellings": ["John"]}',
-     "Send this to John."),
+    ('{"dictation": "Uh the quartz crate goes to dock 7, actually no, dock 9."}',
+     "The quartz crate goes to dock 9."),
+    ('{"dictation": "Can you polish the brass lantern? Please keep the old hinge."}',
+     "Can you polish the brass lantern? Please keep the old hinge."),
+    ('{"dictation": "I think maybe the saffron glaze is too bitter."}',
+     "I think maybe the saffron glaze is too bitter."),
+    ('{"dictation": "Send the zeppelin sketch to Jorik, actually Joric with a c.", '
+     '"spellings": ["Joric"]}',
+     "Send the zeppelin sketch to Joric."),
 )
 _LIST_EXAMPLES = (
-    ('{"dictation": "Buy three things first milk second eggs and third bread."}',
-     "Buy three things:\n1. Milk\n2. Eggs\n3. Bread"),
-    ('{"dictation": "The tasks are review code, write tests, publish docs. Put the last one first."}',
-     "The tasks are:\n1. Publish docs\n2. Review code\n3. Write tests"),
+    ('{"dictation": "Label three crates first quartz second saffron and third lanterns."}',
+     "Label three crates:\n1. Quartz\n2. Saffron\n3. Lanterns"),
+    ('{"dictation": "The steps are tune the harpsichord, oil the gondola, feed the walrus. '
+     'Put the last one first."}',
+     "The steps are:\n1. Feed the walrus\n2. Tune the harpsichord\n3. Oil the gondola"),
 )
 _PROSE_EXAMPLES = (
-    ('{"dictation": "Buy three things first milk second eggs and third bread."}',
-     "Buy three things: milk, eggs and bread."),
-    ('{"dictation": "The tasks are review code, write tests, publish docs. Put the last one first."}',
-     "The tasks are publish docs, review code and write tests."),
+    ('{"dictation": "Label three crates first quartz second saffron and third lanterns."}',
+     "Label three crates: quartz, saffron and lanterns."),
+    ('{"dictation": "The steps are tune the harpsichord, oil the gondola, feed the walrus. '
+     'Put the last one first."}',
+     "The steps are feed the walrus, tune the harpsichord and oil the gondola."),
 )
 
 _LEVELS = {
@@ -67,7 +73,10 @@ class Hints:
 
 
 def cleanup_system_prompt(
-    settings: WritingSettings, style: tuple[str, ...] = (), transform: str = "",
+    settings: WritingSettings,
+    style: tuple[str, ...] = (),
+    transform: str = "",
+    part: tuple[int, int] = (1, 1),
 ) -> str:
     examples = _EXAMPLES + (_LIST_EXAMPLES if settings.lists else _PROSE_EXAMPLES)
     lines = [
@@ -84,6 +93,9 @@ def cleanup_system_prompt(
             "Finally, rewrite the cleaned text as follows, keeping every fact, "
             "name and number: " + transform.strip()
         )
+    number, parts = part
+    if parts > 1:
+        lines.append(f"This is part {number} of {parts} of one dictation; clean only this part.")
     return "\n".join(lines)
 
 
