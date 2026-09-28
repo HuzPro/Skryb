@@ -16,6 +16,7 @@ from voicetotext.output.caret_context import (
     caret_log_line,
 )
 from voicetotext.output.win32_edit_control_context import (
+    has_child_window_of_class,
     foreground_has_caret,
     read_edit_control_context,
 )
@@ -29,6 +30,18 @@ _ALL_TEXT = -1
 
 # CUIAutomation8, the class that also serves pre-Windows-8 clients.
 _AUTOMATION_CLSID = "{E22AD333-B25F-460C-83D0-0581107395C9}"
+
+# Chromium, Electron and WebView2 build a page's accessibility tree lazily,
+# so until it exists the focus reads as a blank pane of the browser around
+# the page, or of the window hosting it (WhatsApp's composer reads as its
+# WinUI content bridge). That means "cannot tell", not "no text field".
+_CHROMIUM_FRAMEWORK = "Chrome"
+_WEB_VIEW_HOST_CLASSES = frozenset({
+    "Chrome_WidgetWin_0",
+    "Chrome_WidgetWin_1",
+    "Chrome_RenderWidgetHostHWND",
+    "Microsoft.UI.Xaml.Controls.WebView2",
+})
 
 
 class _TextRange(Protocol):
@@ -68,14 +81,22 @@ class _Element(Protocol):
     def CurrentIsPassword(self) -> int: ...  # noqa: N802 (COM name)
     @property
     def CurrentControlType(self) -> int: ...  # noqa: N802 (COM name)
+    @property
+    def CurrentClassName(self) -> str: ...  # noqa: N802 (COM name)
+    @property
+    def CurrentFrameworkId(self) -> str: ...  # noqa: N802 (COM name)
+    @property
+    def CurrentNativeWindowHandle(self) -> int | None: ...  # noqa: N802 (COM name)
     def GetCurrentPattern(  # noqa: N802 (COM name)
         self, pattern_id: int,
     ) -> _PatternHandle: ...
+    def FindFirst(self, scope: int, condition: object) -> "_Element | None": ...  # noqa: N802 (COM name)
 
 
 class _Automation(Protocol):
     def GetFocusedElement(self) -> _Element: ...  # noqa: N802 (COM name)
     def ElementFromHandle(self, hwnd: int) -> _Element: ...  # noqa: N802 (COM name)
+    def CreatePropertyCondition(self, property_id: int, value: object) -> object: ...  # noqa: N802 (COM name)
 
 
 def read_caret_context() -> CaretContext:
@@ -127,18 +148,70 @@ def text_field_focused() -> bool:
 def focused_element_takes_text() -> bool:
     """Whether the focused element is an edit field or document, or holds a value.
 
-    Raises when UI Automation cannot answer.
+    A blank web view pane with no focused element found inside counts as
+    one too: the page inside is not described yet. Raises when UI
+    Automation cannot answer.
     """
     uia = _uia()
-    element = _automation().GetFocusedElement()
+    element = _focused_element(_automation())
     if element.CurrentControlType in (
         uia.UIA_EditControlTypeId, uia.UIA_DocumentControlTypeId,
     ):
         return True
-    return any(
+    if any(
         element.GetCurrentPattern(pattern)
         for pattern in (uia.UIA_TextPatternId, uia.UIA_ValuePatternId)
+    ):
+        return True
+    if _is_blank_web_view(element):
+        _logger.debug("The focus is a web view not described yet (%s).", _described(element))
+        return True
+    _logger.debug("The focus takes no text (%s).", _described(element))
+    return False
+
+
+def _focused_element(automation: "_Automation") -> "_Element":
+    """The focused element, looking inside a web view that reports only itself.
+
+    WhatsApp's composer often reads as the WinUI bridge around its WebView2,
+    while the page inside still marks the composer as the one with the focus.
+    """
+    element = automation.GetFocusedElement()
+    if not _is_blank_web_view(element):
+        return element
+    uia = _uia()
+    inner = element.FindFirst(
+        uia.TreeScope_Descendants,
+        automation.CreatePropertyCondition(uia.UIA_HasKeyboardFocusPropertyId, True),
     )
+    if not inner:
+        return element
+    _logger.debug(
+        "The focus reads as %s; using the focused element inside it (%s).",
+        _described(element), _described(inner),
+    )
+    return inner
+
+
+def _described(element: "_Element") -> str:
+    return (
+        f"control type {element.CurrentControlType}, class {element.CurrentClassName!r},"
+        f" framework {element.CurrentFrameworkId!r}"
+    )
+
+
+def _is_blank_web_view(element: "_Element") -> bool:
+    return element.CurrentControlType == _uia().UIA_PaneControlTypeId and _is_web_view(element)
+
+
+def _is_web_view(element: "_Element") -> bool:
+    if (
+        element.CurrentFrameworkId == _CHROMIUM_FRAMEWORK
+        or element.CurrentClassName in _WEB_VIEW_HOST_CLASSES
+    ):
+        return True
+    hwnd = element.CurrentNativeWindowHandle
+    return bool(hwnd) and has_child_window_of_class(int(hwnd), _WEB_VIEW_HOST_CLASSES)
 
 
 def caret_context_of_hwnd(hwnd: int) -> CaretContext:
@@ -155,7 +228,7 @@ def caret_context_of_hwnd(hwnd: int) -> CaretContext:
 
 
 def _context_from(automation: _Automation) -> CaretContext:
-    return _context_of(automation.GetFocusedElement())
+    return _context_of(_focused_element(automation))
 
 
 def _context_of(element: _Element) -> CaretContext:

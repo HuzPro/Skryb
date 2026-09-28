@@ -279,6 +279,15 @@ class TestRuleStage:
             == "hello_ world"
         )
 
+    def test_should_let_an_alias_starting_with_a_comma_swallow_that_comma(self) -> None:
+        rules = (
+            LiteralRule((" underscore ",), "_"),
+            LiteralRule((", underscore ",), "_"),
+        )
+
+        assert _batch("snake, underscore case", rules) == "snake_case"
+        assert _batch("snake underscore case", rules) == "snake_case"
+
     def test_should_glue_across_tabs(self) -> None:
         rules = (LiteralRule((" underscore ",), "_"),)
 

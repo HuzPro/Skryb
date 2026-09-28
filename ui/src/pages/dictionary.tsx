@@ -28,10 +28,16 @@ function edgeWhitespace(text: string): [string, string] {
   return [text.slice(0, text.length - text.trimStart().length), text.slice(text.trimEnd().length)];
 }
 
-/** Mirrors the old page: "a, b" -> ["a", "b"]; a space at either end of the box glues every alias to the neighbouring text. */
+/** Mirrors the old page: "a, b" -> ["a", "b"]; a space at either end of the box glues every alias to the neighbouring text.
+ * A comma at the very start or end of the box belongs to the alias, so ", underscore" also swallows the comma before it. */
 export function splitAliases(spoken: string): string[] {
   const [left, right] = edgeWhitespace(spoken);
-  return spoken.split(",").map((alias) => alias.trim()).filter(Boolean).map((alias) => left + alias + right);
+  const text = spoken.trim();
+  const head = /^(?:,\s*)*/.exec(text)?.[0] ?? "";
+  const tail = /(?:\s*,)*$/.exec(text.slice(head.length))?.[0] ?? "";
+  const aliases = text.slice(head.length, text.length - tail.length).split(",").map((alias) => alias.trim()).filter(Boolean);
+  const last = aliases.length - 1;
+  return aliases.map((alias, at) => left + (at === 0 ? head : "") + alias + (at === last ? tail : "") + right);
 }
 
 export function joinAliases(aliases: string[]): string {

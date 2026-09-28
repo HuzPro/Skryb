@@ -1,6 +1,9 @@
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
+
+from text_to_num import alpha2digit
 
 _NEWLINES = "\n\r"
 _SENTENCE_ENDINGS = ".!?" + _NEWLINES
@@ -12,8 +15,20 @@ _SPACED_PUNCTUATION = ".!?,;:\u2026"
 _INVISIBLE_CHARACTERS = "\ufeff\u200b\u200c\u200d\u2060\ufffc"
 _WITHOUT_INVISIBLE_CHARACTERS = str.maketrans("", "", _INVISIBLE_CHARACTERS)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
+# A list item's marker at the start of a line: "3. ", "3) ", "- ", "* " or "• ".
+_LIST_MARKER = re.compile(r"^[ \t]*(?:(?P<number>\d+)(?P<dot>[.)])|(?P<bullet>[-*•]))(?:[ \t]+|$)")
+# Two or more whole numbers joined by commas at the end of a line: "1, 2, 3".
+_NUMBER_LIST_END = re.compile(r"(?<![\d.])\d+(?:[ \t]*,[ \t]*\d+)+[ \t]*$")
+_SPOKEN_NUMBER_RUN = re.compile(r"(?P<numbers>\d+(?:(?:[ \t]*,[ \t]*|[ \t]+)\d+)*)(?P<end>[.!?]?)")
 
 CONTEXT_CHARS = 40
+
+
+class ListLayout(Enum):
+    """How a spoken list is laid out at the caret, going by the text already there."""
+
+    INLINE = "inline"
+    VERTICAL = "vertical"
 
 
 @dataclass(frozen=True)
@@ -64,8 +79,106 @@ def fit_to_context(text: str, context: CaretContext) -> str:
     return _fit_to_visible_context(text, _without_invisible_characters(context))
 
 
+def list_layout(context: CaretContext) -> ListLayout | None:
+    """The layout the text at the caret already uses, or ``None`` when it does not say.
+
+    At the end of a numbered or bulleted item, or on the empty line after
+    one, a spoken list goes on as more items. Anywhere else inside a line
+    it stays on that line. An empty line, an empty box or a line ending in
+    a colon leave the choice to the speaker's setting.
+    """
+    if context == NO_CONTEXT or context.selected.strip():
+        return None
+    visible = _without_invisible_characters(context)
+    if _last_item(visible) is not None:
+        return ListLayout.VERTICAL
+    line = _current_line(visible.before)
+    rest_of_line = _lines(visible.after)[0]
+    if (line.strip() and not line.rstrip().endswith(":")) or rest_of_line.strip():
+        return ListLayout.INLINE
+    return None
+
+
+@dataclass(frozen=True)
+class _ListItem:
+    marker: str
+    number: int | None
+    empty: bool
+    on_current_line: bool
+    lowercase: bool
+
+
+def _last_item(context: CaretContext) -> _ListItem | None:
+    """The list item the caret sits at the end of, or on the empty line after."""
+    if _lines(context.after)[0].strip():
+        return None
+    lines = _lines(context.before)
+    index = len(lines) - 1
+    on_current_line = bool(lines[index].strip()) or index == 0
+    if not on_current_line:
+        index -= 1
+    # The first line read may have been cut off mid-line; only when the
+    # reading stopped at the start of the field is its start in view.
+    if index == 0 and len(context.before) >= CONTEXT_CHARS:
+        return None
+    match = _LIST_MARKER.match(lines[index])
+    if match is None:
+        return None
+    numbered = match["number"] is not None
+    text = lines[index][match.end():].strip()
+    return _ListItem(
+        marker="{}" + match["dot"] + " " if numbered else match["bullet"] + " ",
+        number=int(match["number"]) if numbered else None,
+        empty=not text,
+        on_current_line=on_current_line,
+        lowercase=text[:1].islower(),
+    )
+
+
+def _lines(text: str) -> list[str]:
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _current_line(before: str) -> str:
+    return _lines(before)[-1]
+
+
+def _continue_vertical_list(text: str, item: _ListItem) -> str:
+    """The dictation as the next items of the list the caret is in."""
+    entries = [
+        line[match.end():].strip() if (match := _LIST_MARKER.match(line)) else line.strip()
+        for line in _lines(text)
+    ]
+    match_case = _lowercase_first_word if item.lowercase else _capitalize_first_word
+    entries = [match_case(entry) for entry in entries if entry]
+    if not entries:
+        return text
+    fills_empty_slot = item.on_current_line and item.empty
+    first = item.number if fills_empty_slot or item.number is None else item.number + 1
+    lines = []
+    for offset, entry in enumerate(entries):
+        number = None if first is None else first + offset
+        marker = item.marker.format(number)
+        lines.append(entry if offset == 0 and fills_empty_slot else marker + entry)
+    return ("\n" if item.on_current_line and not item.empty else "") + "\n".join(lines)
+
+
+def _continue_number_list(core: str, before: str) -> str | None:
+    """Spoken numbers after "1, 2, 3" as ", 4, 5", or ``None`` when that does not apply."""
+    if not _NUMBER_LIST_END.search(_current_line(before)):
+        return None
+    run = _SPOKEN_NUMBER_RUN.fullmatch(alpha2digit(core, "en", threshold=0).strip())
+    if run is None:
+        return None
+    return ", " + ", ".join(re.findall(r"\d+", run["numbers"])) + run["end"]
+
+
 def _fit_to_visible_context(text: str, context: CaretContext) -> str:
-    core = _match_preceding_case(text.strip(), context.before)
+    item = _last_item(context) if not context.selected.strip() else None
+    if item is not None:
+        return _continue_vertical_list(text, item)
+    core = _continue_number_list(text.strip(), context.before) or text.strip()
+    core = _match_preceding_case(core, context.before)
     lead = _lead(core, context)
     trail = _trailing_whitespace(context.selected)
     following = context.after.lstrip(" \t")
