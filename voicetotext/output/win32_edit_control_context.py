@@ -167,6 +167,18 @@ def _class_name(hwnd: int) -> str:
     return buffer.value
 
 
+def has_child_window_of_class(hwnd: int, class_names: frozenset[str]) -> bool:
+    """Whether a window directly inside ``hwnd`` has one of ``class_names``.
+
+    Direct children only: every top-level window is a child of the desktop,
+    so a deeper search would find any browser that happens to be open.
+    """
+    user32 = _user32()
+    if hwnd == user32.GetDesktopWindow():
+        return False
+    return any(user32.FindWindowExW(hwnd, None, name, None) for name in class_names)
+
+
 def _selection(hwnd: int) -> tuple[int, int]:
     start = ctypes.c_ulong(0)
     end = ctypes.c_ulong(0)
@@ -218,6 +230,12 @@ def _user32() -> ctypes.CDLL:
         ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int,
     ]
     user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetDesktopWindow.argtypes = []
+    user32.GetDesktopWindow.restype = ctypes.c_void_p
+    user32.FindWindowExW.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+    ]
+    user32.FindWindowExW.restype = ctypes.c_void_p
     user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
     user32.GetWindowLongW.restype = ctypes.c_long
     user32.SendMessageTimeoutW.argtypes = [

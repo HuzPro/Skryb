@@ -22,12 +22,28 @@ class NullPointer:
 
 
 class FakeElement:
-    def __init__(self, control_type: int, patterns: frozenset[int] = frozenset()) -> None:
+    def __init__(
+        self,
+        control_type: int,
+        patterns: frozenset[int] = frozenset(),
+        *,
+        class_name: str = "",
+        framework: str = "Win32",
+        hwnd: int | None = None,
+        focused_inside: "FakeElement | None" = None,
+    ) -> None:
         self.CurrentControlType = control_type
+        self.CurrentClassName = class_name
+        self.CurrentFrameworkId = framework
+        self.CurrentNativeWindowHandle = hwnd
         self._patterns = patterns
+        self._focused_inside = focused_inside
 
     def GetCurrentPattern(self, pattern_id: int) -> object:  # noqa: N802 (COM name)
         return object() if pattern_id in self._patterns else NullPointer()
+
+    def FindFirst(self, scope: int, condition: object) -> "FakeElement | None":  # noqa: N802 (COM name)
+        return self._focused_inside
 
 
 @pytest.fixture(autouse=True)
@@ -35,19 +51,39 @@ def stub_uia(monkeypatch) -> None:
     monkeypatch.setattr(module, "_uia", lambda: SimpleNamespace(
         UIA_EditControlTypeId=_EDIT,
         UIA_DocumentControlTypeId=_DOCUMENT,
+        UIA_PaneControlTypeId=_PANE,
+        UIA_HasKeyboardFocusPropertyId=30008,
+        TreeScope_Descendants=4,
         UIA_TextPatternId=_TEXT_PATTERN,
         UIA_ValuePatternId=_VALUE_PATTERN,
     ))
 
 
+_WHATSAPP_BRIDGE_HWND = 197492
+_PLAIN_WINUI_BRIDGE_HWND = 5001
+# The window classes directly inside each window, as FindWindowEx finds them.
+_CHILD_WINDOWS = {
+    _WHATSAPP_BRIDGE_HWND: {"Chrome_WidgetWin_0", "InputSiteWindowClass"},
+    _PLAIN_WINUI_BRIDGE_HWND: {"InputSiteWindowClass"},
+}
+
+
 def _focus(monkeypatch, element: FakeElement | None, *, caret: bool = False) -> list[str]:
     asked: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "has_child_window_of_class",
+        lambda hwnd, classes: bool(_CHILD_WINDOWS.get(hwnd, set()) & classes),
+    )
 
     def automation() -> SimpleNamespace:
         asked.append("uia")
         if element is None:
             raise OSError("UIAutomationCore.dll is missing")
-        return SimpleNamespace(GetFocusedElement=lambda: element)
+        return SimpleNamespace(
+            GetFocusedElement=lambda: element,
+            CreatePropertyCondition=lambda property_id, value: (property_id, value),
+        )
 
     monkeypatch.setattr(module, "foreground_has_caret", lambda: caret)
     monkeypatch.setattr(module, "_automation", automation)
@@ -85,6 +121,67 @@ def test_fields_that_take_text_are_pasted_into(monkeypatch, element) -> None:
 def test_targets_without_a_text_field_are_not_pasted_into(monkeypatch, element) -> None:
     _focus(monkeypatch, element)
 
+    assert module.text_field_focused() is False
+
+
+@pytest.mark.parametrize(
+    "element",
+    [
+        FakeElement(_PANE, class_name="EmbeddedBrowserTabRootView", framework="Chrome"),
+        FakeElement(_PANE, class_name="BrowserRootView", framework="Chrome"),
+        FakeElement(_PANE, class_name="Chrome_WidgetWin_1"),
+        FakeElement(_PANE, class_name="Microsoft.UI.Xaml.Controls.WebView2"),
+        FakeElement(_PANE, class_name="Chrome_RenderWidgetHostHWND"),
+        FakeElement(
+            _PANE, class_name="Microsoft.UI.Content.DesktopChildSiteBridge",
+            hwnd=_WHATSAPP_BRIDGE_HWND,
+        ),
+    ],
+    ids=[
+        "whatsapp-tab-root", "whatsapp-browser-root", "electron-window", "winui-webview2",
+        "chrome-render-widget", "whatsapp-winui-bridge-holding-the-web-view",
+    ],
+)
+def test_a_web_view_whose_page_is_not_described_yet_is_still_pasted_into(
+    monkeypatch, element,
+) -> None:
+    _focus(monkeypatch, element)
+
+    assert module.text_field_focused() is True
+
+
+@pytest.mark.parametrize(
+    "element",
+    [
+        FakeElement(_BUTTON, framework="Chrome"),
+        FakeElement(_LIST_ITEM, framework="Chrome"),
+        FakeElement(_PANE, class_name="UnityWndClass", hwnd=9001),
+        FakeElement(
+            _PANE, class_name="Microsoft.UI.Content.DesktopChildSiteBridge",
+            hwnd=_PLAIN_WINUI_BRIDGE_HWND,
+        ),
+    ],
+    ids=["web-button", "web-chat-list-item", "game-window", "winui-host-without-web-view"],
+)
+def test_real_non_text_controls_in_or_near_web_views_are_still_not_pasted_into(
+    monkeypatch, element,
+) -> None:
+    _focus(monkeypatch, element)
+
+    assert module.text_field_focused() is False
+
+
+def test_the_focused_element_inside_a_blank_web_view_decides(monkeypatch) -> None:
+    def bridge(inside: FakeElement) -> FakeElement:
+        return FakeElement(
+            _PANE, class_name="Microsoft.UI.Content.DesktopChildSiteBridge",
+            hwnd=_WHATSAPP_BRIDGE_HWND, focused_inside=inside,
+        )
+
+    _focus(monkeypatch, bridge(FakeElement(_EDIT, framework="Chrome")))
+    assert module.text_field_focused() is True
+
+    _focus(monkeypatch, bridge(FakeElement(_BUTTON, framework="Chrome")))
     assert module.text_field_focused() is False
 
 
