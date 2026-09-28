@@ -1,9 +1,21 @@
 import json
 import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from voicetotext.output.dictation_trace import (
+    ANSWER_FIELD,
+    CONTEXT_FIELD,
+    OUTCOME_FIELD,
+    REASON_FIELD,
+    REJECTED,
+    SECONDS_FIELD,
+    TYPED_FIELD,
+    WINDOW_FIELD,
+)
 
 # Matches the folder names ``startup_log`` gives sessions. The ownership
 # marker is not required: sessions from before it existed still hold
@@ -22,6 +34,24 @@ _CAPTURE_HINT = (
     "Settings > History."
 )
 _DELETED_EVENT = "history_deleted"
+
+
+@dataclass(frozen=True)
+class WritingRecord:
+    """What the writing model made of a dictation, and what was typed in the end.
+
+    ``outcome`` is empty when the model was not asked (cleanup off). The
+    text fields are empty in a log kept with content capture off, and in
+    dictations from before they were recorded.
+    """
+
+    outcome: str
+    reason: str
+    seconds: float | None
+    answer: str
+    typed: str
+    context_before: str
+    window: str
 
 
 @dataclass(frozen=True)
@@ -45,10 +75,16 @@ class HistoryEntry:
     transcript_path: Path | None = None
     # "edit" for a voice edit, whose text is the spoken instruction.
     kind: str = "dictation"
+    writing: WritingRecord | None = None
 
     @property
     def is_cancelled(self) -> bool:
         return self.status == CANCELLED
+
+    @property
+    def shown_text(self) -> str:
+        """What was typed when that was saved, else what the engine heard."""
+        return self.writing.typed if self.writing is not None and self.writing.typed else self.text
 
 
 def load_history(diagnostics_dir: Path) -> list[HistoryEntry]:
@@ -90,11 +126,43 @@ def filter_entries(entries: list[HistoryEntry], query: str) -> list[HistoryEntry
     needle = query.strip().casefold()
     if not needle:
         return entries
-    return [entry for entry in entries if needle in entry.text.casefold()]
+    return [entry for entry in entries if any(needle in text.casefold() for text in _searched(entry))]
+
+
+TRACK_RECORD_SPAN = 50
+
+
+@dataclass(frozen=True)
+class TrackRecord:
+    """How the writing model fared on the latest dictations it was asked about."""
+
+    dictations: int
+    outcomes: dict[str, int]
+    # Why answers were rejected, most common first.
+    rejections: list[tuple[str, int]]
+
+
+def writing_track_record(
+    entries: list[HistoryEntry], span: int = TRACK_RECORD_SPAN,
+) -> TrackRecord:
+    """Outcomes of the newest *span* dictations the model was asked about; *entries* newest first."""
+    asked = [
+        entry.writing for entry in entries
+        if entry.writing is not None and entry.writing.outcome
+    ][:span]
+    outcomes = Counter(record.outcome for record in asked)
+    rejections = Counter(record.reason for record in asked if record.outcome == REJECTED)
+    return TrackRecord(len(asked), dict(outcomes), rejections.most_common())
+
+
+def _searched(entry: HistoryEntry) -> tuple[str, ...]:
+    if entry.writing is None:
+        return (entry.text,)
+    return (entry.text, entry.writing.typed, entry.writing.answer)
 
 
 def preview(entry: HistoryEntry) -> str:
-    text = " ".join(entry.text.split())
+    text = " ".join(entry.shown_text.split())
     if not text:
         if entry.error:
             return f"({entry.error})"
@@ -197,7 +265,28 @@ def _entry(
         seq=_seq(event.get("index")),
         transcript_path=transcript,
         kind="edit" if event.get("kind") == "edit" else "dictation",
+        writing=_writing(event) if kind == "transcription" else None,
     )
+
+
+def _writing(event: dict) -> WritingRecord | None:
+    """The trace a dictation logged; a line from before traces has none."""
+    if OUTCOME_FIELD not in event and TYPED_FIELD not in event:
+        return None
+    seconds = event.get(SECONDS_FIELD)
+    return WritingRecord(
+        outcome=_string(event.get(OUTCOME_FIELD)),
+        reason=_string(event.get(REASON_FIELD)),
+        seconds=_seconds(seconds) if seconds is not None else None,
+        answer=_string(event.get(ANSWER_FIELD)),
+        typed=_string(event.get(TYPED_FIELD)),
+        context_before=_string(event.get(CONTEXT_FIELD)),
+        window=_string(event.get(WINDOW_FIELD)),
+    )
+
+
+def _string(value: object) -> str:
+    return value if isinstance(value, str) else ""
 
 
 def _text_is_gone(event: dict, text: str, transcript: Path | None) -> bool:

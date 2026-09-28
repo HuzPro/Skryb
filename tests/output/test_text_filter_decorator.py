@@ -204,3 +204,26 @@ class TestLoadDictionary:
         )
 
         assert load_dictionary(path) == DictionaryConfig()
+
+
+def test_the_text_typed_after_every_stage_is_recorded_for_history() -> None:
+    from voicetotext.output.dictation_trace import begin_trace, end_trace
+
+    inner = CapturingOutput()
+    decorator = TextFilterDecorator(inner, TextPipeline((lambda text: text.replace("um ", "").capitalize() + ".",)))
+    trace = begin_trace()
+    try:
+        decorator.output("um testing café")
+    finally:
+        end_trace()
+
+    assert inner.values == ["Testing café."]
+    assert trace.typed == "Testing café."
+
+
+def test_output_without_a_running_trace_records_nothing_and_still_types() -> None:
+    inner = CapturingOutput()
+
+    TextFilterDecorator(inner, TextPipeline((str.upper,))).output("hello")
+
+    assert inner.values == ["HELLO"]

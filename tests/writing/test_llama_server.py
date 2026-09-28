@@ -170,6 +170,45 @@ class TestSupervision:
         server.stop()
 
 
+    def test_a_retry_the_moment_the_server_gives_up_is_not_lost(self, tmp_path):
+        crashes = [FakeChild(pid=pid, exits_while_loading=1) for pid in range(4)]
+        launch = FakeLaunch([*crashes, FakeChild(pid=50)])
+        server, _statuses, _bound = _server(tmp_path, launch, backoff=(0.0, 0.0, 0.0))
+        retried: list[bool] = []
+
+        def retry_once_on_failure(status: ServerStatus) -> None:
+            if status.state is ServerState.FAILED and not retried:
+                retried.append(True)
+                server.start()
+
+        server.subscribe(retry_once_on_failure)
+        server.start()
+        _wait_for(server.ready_event.is_set)
+
+        assert launch.launched[-1].pid == 50
+        server.stop()
+
+    def test_a_retry_the_moment_the_model_is_found_missing_is_not_lost(self, tmp_path):
+        (tmp_path / "installed").mkdir()
+        files = _files(tmp_path / "installed")
+        located = iter([None, files])
+        launch = FakeLaunch([FakeChild(pid=7)])
+        server, _statuses, _bound = _server(tmp_path, launch, locate=lambda: next(located))
+        retried: list[bool] = []
+
+        def retry_once_when_missing(status: ServerStatus) -> None:
+            if status.state is ServerState.NOT_INSTALLED and not retried:
+                retried.append(True)
+                server.start()
+
+        server.subscribe(retry_once_when_missing)
+        server.start()
+        _wait_for(server.ready_event.is_set)
+
+        assert [child.pid for child in launch.launched] == [7]
+        server.stop()
+
+
 class TestLaunchCommand:
     def test_the_api_key_is_passed_to_the_child_but_never_written_to_the_log(self, tmp_path):
         launch = FakeLaunch([FakeChild(pid=3)])

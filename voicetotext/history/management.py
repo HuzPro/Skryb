@@ -1,13 +1,15 @@
 """Deleting and exporting history entries.
 
-A deletion removes the entry's recording and transcript, blanks the text
-its log line kept (marking the line ``"history_deleted": true``) and adds a
+A deletion removes the entry's recording and transcript, blanks every text
+its log line kept, the writing model's answer and the typed text included
+(marking the line ``"history_deleted": true``), and adds a
 ``history_deleted`` line naming its ``seq``, so
 :func:`~voicetotext.history.entries.load_history` stops listing it. The log
 is rewritten in one atomic swap; every other line stays byte for byte, and
 the session's text log and other diagnostics files are never touched.
 """
 
+import csv
 import json
 import logging
 import os
@@ -21,6 +23,7 @@ from pathlib import Path
 from voicetotext.core.timestamps import utc_iso, utc_now
 from voicetotext.diagnostics.jsonl import JsonlWriter, encode_line
 from voicetotext.history.entries import HistoryEntry, load_history
+from voicetotext.output.dictation_trace import TRACE_TEXT_FIELDS
 
 _logger = logging.getLogger(__name__)
 
@@ -28,6 +31,8 @@ _logger = logging.getLogger(__name__)
 # anything else (``session.jsonl`` included) is never acted on.
 _ENTRY_FOLDERS = frozenset({"audio", "transcripts"})
 _NEWLINE = os.linesep.encode()
+# Every field of a dictation's log line that holds text someone said or saw.
+_TEXT_FIELDS = ("text", *TRACE_TEXT_FIELDS)
 
 
 def delete_entries(
@@ -91,6 +96,51 @@ def default_export_name(entry: HistoryEntry) -> str:
     return f"dictation-{entry.at.astimezone():%Y%m%d-%H%M%S}.wav"
 
 
+_CSV_HEADER = (
+    "Time", "Kind", "Status", "Audio seconds", "Transcription", "Writing model",
+    "Why not used", "Writing model answer", "Model seconds", "Typed",
+    "Text before the cursor", "Window",
+)
+# A cell starting with one of these runs as a formula when a spreadsheet opens it.
+_FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def export_csv(entries: Iterable[HistoryEntry], destination: Path) -> int:
+    """Write *entries* to a CSV file a spreadsheet opens as text; return the row count.
+
+    UTF-8 with a byte order mark, so Excel reads accents and emoji right.
+    """
+    rows = [_csv_row(entry) for entry in entries]
+    with destination.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(_CSV_HEADER)
+        writer.writerows(rows)
+    return len(rows)
+
+
+def _csv_row(entry: HistoryEntry) -> list[str]:
+    writing = entry.writing
+    cells = [
+        entry.at.astimezone().isoformat(timespec="seconds"),
+        entry.kind,
+        entry.status or "Done",
+        f"{entry.audio_seconds:.1f}",
+        entry.text,
+        writing.outcome if writing else "",
+        writing.reason if writing else "",
+        writing.answer if writing else "",
+        f"{writing.seconds:.2f}" if writing and writing.seconds is not None else "",
+        writing.typed if writing else "",
+        writing.context_before if writing else "",
+        writing.window if writing else "",
+    ]
+    return [_inert(cell) for cell in cells]
+
+
+def _inert(cell: str) -> str:
+    return "'" + cell if cell.startswith(_FORMULA_STARTS) else cell
+
+
 def _delete_in_session(
     session_dir: Path, entries: list[HistoryEntry], now: datetime,
 ) -> int:
@@ -140,9 +190,11 @@ def _redacted_line(line: bytes, seqs: set[int]) -> bytes:
     index = event.get("index")
     if not isinstance(index, int) or isinstance(index, bool) or index not in seqs:
         return line
-    if event.get("text") == "" and event.get("history_deleted") is True:
+    present = [field for field in _TEXT_FIELDS if field in event]
+    if event.get("history_deleted") is True and not any(event[field] for field in present):
         return line
-    event["text"] = ""
+    for field in present:
+        event[field] = ""
     event["history_deleted"] = True
     body = line.rstrip(b"\r\n")
     return encode_line(event, line[len(body):] or _NEWLINE)

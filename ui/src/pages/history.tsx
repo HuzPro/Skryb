@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, Download, Play, RotateCcw, Search, Square, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Copy, Download, FileDown, Play, RotateCcw, Search, Square, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Card } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Badge } from "../components/ui/badge";
@@ -10,10 +10,11 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
+import { wordDiff, type DiffPart } from "../lib/diff";
 import { chooseFolder, chooseSavePath, copyText } from "../lib/platform";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
-import type { HistoryEntry } from "../lib/types";
+import type { HistoryEntry, WritingRecord } from "../lib/types";
 import { cn } from "../lib/utils";
 
 const RETENTION_DAYS = [0, 7, 30, 90];
@@ -49,9 +50,14 @@ export function formatDuration(seconds: number): string {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `${minutes}:${secs}`;
 }
 
+/** Mirrors `HistoryEntry.shown_text`: what was typed when that was saved, else what the engine heard. */
+export function finalText(entry: HistoryEntry): string {
+  return entry.writing?.typed || entry.text;
+}
+
 /** Mirrors `history.entries.preview`: one line, and a hint when there is no text. */
 export function preview(entry: HistoryEntry): string {
-  const text = entry.text.split(/\s+/).filter(Boolean).join(" ");
+  const text = finalText(entry).split(/\s+/).filter(Boolean).join(" ");
   if (text) return text;
   if (entry.error) return `(${entry.error})`;
   return entry.status === "Cancelled" ? "(cancelled - not transcribed)" : "(no text)";
@@ -80,6 +86,89 @@ function useDebounced(value: string, ms: number): string {
 
 function statusVariant(status: HistoryEntry["status"]): "destructive" | "default" {
   return status === "Failed" ? "destructive" : "default";
+}
+
+/** One line on what the writing model did with a dictation. */
+export function describeOutcome(writing: WritingRecord): { text: string; bad: boolean } {
+  const reason = writing.reason ? `: ${writing.reason}` : "";
+  switch (writing.outcome) {
+    case "applied":
+      return { text: `Writing model applied${writing.seconds === null ? "" : ` in ${writing.seconds.toFixed(2)} s`}.`, bad: false };
+    case "rejected":
+      return { text: `Writing model answer not used${reason}.`, bad: true };
+    case "too_slow":
+      return { text: `Writing model too slow${reason}.`, bad: true };
+    case "skipped":
+      return { text: `Writing model skipped${reason}.`, bad: true };
+    default:
+      return { text: "Writing model not asked (cleanup was off).", bad: false };
+  }
+}
+
+/** Whether an entry has more than one version of its text to compare. */
+export function hasVersions(entry: HistoryEntry): boolean {
+  return Boolean(entry.writing?.answer || (entry.writing?.typed && entry.writing.typed.trim() !== entry.text.trim()));
+}
+
+function Marked({ parts }: { parts: DiffPart[] }) {
+  return (
+    <>
+      {parts.map((part, index) => (
+        <span
+          key={index}
+          className={cn(
+            part.change === "removed" && "rounded-sm bg-destructive/15 text-destructive line-through decoration-destructive/60",
+            part.change === "added" && "rounded-sm bg-success/20",
+          )}
+        >
+          {part.text}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function Version({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-[11.5px] font-semibold text-muted-foreground">{label}</div>
+      <div className="selectable text-[13px] whitespace-pre-wrap break-words">{children}</div>
+    </div>
+  );
+}
+
+function WritingCompare({ entry, writing }: { entry: HistoryEntry; writing: WritingRecord }) {
+  const outcome = describeOutcome(writing);
+  const diff = useMemo(() => wordDiff(entry.text, writing.answer), [entry.text, writing.answer]);
+  const typedDiffers = writing.typed.trim() && writing.typed.trim() !== (writing.answer || entry.text).trim();
+  return (
+    <div className="flex flex-col gap-3">
+      <p className={cn("text-[12.5px]", outcome.bad ? "text-destructive" : "text-muted-foreground")}>{outcome.text}</p>
+      {writing.answer ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Version label="Heard">
+            <Marked parts={diff.before} />
+          </Version>
+          <Version label={writing.outcome === "applied" ? "Writing model" : "Writing model (not used)"}>
+            <Marked parts={diff.after} />
+          </Version>
+        </div>
+      ) : (
+        <Version label="Heard">{entry.text || <span className="text-muted-foreground italic">No text.</span>}</Version>
+      )}
+      {typedDiffers ? <Version label="Typed">{writing.typed}</Version> : null}
+      {writing.context_before || writing.window ? (
+        <div className="border-t pt-2 text-[12px] text-muted-foreground">
+          {writing.window ? <div className="truncate">Window: {writing.window}</div> : null}
+          {writing.context_before ? (
+            <div className="selectable whitespace-pre-wrap">
+              Text before the cursor: <span className="text-foreground">{writing.context_before}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function HistorySettings() {
@@ -168,6 +257,7 @@ export function HistoryPage() {
   const [retries, setRetries] = useState<Record<string, Retry>>({});
   const [playing, setPlaying] = useState<string | null>(null);
   const [note, setNote] = useState<{ text: string; error: boolean }>({ text: "", error: false });
+  const [exportNote, setExportNote] = useState<{ text: string; error: boolean }>({ text: "", error: false });
   const listRef = useRef<HTMLDivElement>(null);
   const playTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const virtualizer = useVirtualizer({
@@ -200,7 +290,8 @@ export function HistoryPage() {
     }
   };
 
-  const shownText = retry?.state === "done" ? retry.text : retry?.state === "running" ? "Transcribing…" : (selected?.text ?? "");
+  const shownText = retry?.state === "done" ? retry.text : retry?.state === "running" ? "Transcribing…" : selected ? finalText(selected) : "";
+  const comparing = Boolean(selected?.writing && hasVersions(selected) && !retry);
   const statusNote =
     note.text ||
     (retry?.state === "done"
@@ -268,6 +359,17 @@ export function HistoryPage() {
     virtualizer.scrollToIndex(itemIndex, { align: "auto" });
   };
 
+  const exportAll = async () => {
+    try {
+      const path = await chooseSavePath("Export history", `voicetotext-history-${new Date().toISOString().slice(0, 10)}.csv`, "Spreadsheet (CSV)", "csv");
+      if (!path) return;
+      const { rows } = await api.post<{ rows: number }>(`/api/history/export?query=${encodeURIComponent(search)}`, { path });
+      setExportNote({ text: `Exported ${rows} ${rows === 1 ? "dictation" : "dictations"}.`, error: false });
+    } catch (error) {
+      setExportNote({ text: errorText(error), error: true });
+    }
+  };
+
   const emptyText = history.isPending
     ? "Loading…"
     : history.isError
@@ -282,9 +384,16 @@ export function HistoryPage() {
     <div className="flex h-full flex-col gap-3 px-6 pt-3 pb-5">
       <div className="flex min-h-8 items-center justify-between gap-4">
         <h1 className="text-[20px] font-semibold tracking-tight">History</h1>
-        <div className="relative w-72">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input aria-label="Search history" placeholder="Search dictations" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <div className="flex items-center gap-2">
+          {exportNote.text ? <span className={cn("text-[12.5px]", exportNote.error ? "text-destructive" : "text-muted-foreground")}>{exportNote.text}</span> : null}
+          <Button variant="outline" size="sm" disabled={!entries.length} onClick={() => void exportAll()}>
+            <FileDown />
+            {search ? "Export results" : "Export"}
+          </Button>
+          <div className="relative w-72">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input aria-label="Search history" placeholder="Search dictations" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </div>
         </div>
       </div>
       <HistorySettings />
@@ -305,7 +414,8 @@ export function HistoryPage() {
                 }
                 const { entry } = item;
                 const active = entry.id === selectedId;
-                const blank = !entry.text.trim();
+                const blank = !finalText(entry).trim();
+                const modelFailed = entry.writing?.outcome === "rejected" || entry.writing?.outcome === "too_slow";
                 return (
                   <div
                     key={row.key}
@@ -321,6 +431,7 @@ export function HistoryPage() {
                     <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{parts(entry.at).time}</span>
                     <span className={cn("min-w-0 flex-1 truncate text-[13px]", blank && "text-muted-foreground italic")}>{preview(entry)}</span>
                     {entry.kind === "edit" ? <Badge variant="primary">Edit</Badge> : null}
+                    {modelFailed ? <Badge>{entry.writing?.outcome === "too_slow" ? "Model too slow" : "Model rejected"}</Badge> : null}
                     {entry.status ? <Badge variant={statusVariant(entry.status)}>{entry.status}</Badge> : null}
                     <span className="w-10 shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">{formatDuration(entry.audio_seconds)}</span>
                   </div>
@@ -330,7 +441,7 @@ export function HistoryPage() {
           </div>
           {!entries.length ? <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12.5px] text-muted-foreground">{emptyText}</p> : null}
         </Card>
-        <Card className="flex w-[300px] shrink-0 flex-col">
+        <Card className={cn("flex shrink-0 flex-col transition-[width] duration-150", comparing ? "w-[560px]" : "w-[300px]")}>
           {selected && actions ? (
             <>
               <div className="border-b px-4 py-3">
@@ -342,8 +453,19 @@ export function HistoryPage() {
                   {selected.status ? <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge> : null}
                 </div>
               </div>
-              <div className="selectable min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[13px] whitespace-pre-wrap">
-                {shownText || <span className="text-muted-foreground italic">No text.</span>}
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[13px]">
+                {comparing && selected.writing ? (
+                  <WritingCompare entry={selected} writing={selected.writing} />
+                ) : (
+                  <>
+                    {selected.writing && !retry ? (
+                      <p className={cn("mb-2 text-[12.5px]", describeOutcome(selected.writing).bad ? "text-destructive" : "text-muted-foreground")}>
+                        {describeOutcome(selected.writing).text}
+                      </p>
+                    ) : null}
+                    <div className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
+                  </>
+                )}
               </div>
               {statusNote ? <p className={cn("px-4 pb-2 text-[12.5px]", noteIsError ? "text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
               <div className="flex flex-wrap gap-1.5 border-t px-3 py-2.5">

@@ -133,13 +133,35 @@ def _history():
             status, error = "Failed", "The model ran out of memory (CUDA error 2)."
         elif roll < 0.07:
             status, has_audio = "Not saved", False
+        text = f"#{HISTORY_SIZE - index} {text}" if text.strip() else text
+        kind = "edit" if index % 23 == 5 else "dictation"
+        heard, writing = text, None
+        if text.strip() and not status and kind == "dictation":
+            heard, writing = _writing_record(text, rng)
         entries.append({
             "id": f"{at:%Y%m%dT%H%M%SZ}-{index * 2654435761 % 16**8:08x}.{index % 40 + 3}", "at": at.isoformat(timespec="seconds"),
-            "text": f"#{HISTORY_SIZE - index} {text}" if text.strip() else text,
+            "text": heard,
             "audio_seconds": round(1.5 + rng.random() * 40, 1), "status": status, "error": error,
-            "has_audio": has_audio, "kind": "edit" if index % 23 == 5 else "dictation",
+            "has_audio": has_audio, "kind": kind, "writing": writing,
         })
     return entries
+
+
+def _writing_record(clean: str, rng: random.Random):
+    """What the engine heard for *clean*, and what the writing model made of it."""
+    heard = "um so " + clean[:1].lower() + clean[1:].rstrip(".")
+    roll = rng.random()
+    record = {"outcome": "applied", "reason": "", "seconds": round(0.2 + rng.random() * 0.8, 2), "answer": clean,
+              "typed": clean, "context_before": "Hi Sarah, " if roll < 0.3 else "", "window": "Outlook (outlook.exe)"}
+    if roll < 0.12:
+        record.update(outcome="rejected", reason="a number changed", answer=clean.replace("#", "No. ") + " Thanks!", typed=heard)
+    elif roll < 0.17:
+        record.update(outcome="too_slow", reason="it took 4.62s, over the 4.0s limit", seconds=4.62, typed=heard)
+    elif roll < 0.22:
+        record.update(outcome="skipped", reason="the writing model is busy", seconds=None, answer="", typed=heard)
+    elif roll < 0.27:
+        return clean, None  # from before versions were saved
+    return heard, record
 
 
 class Core:
@@ -533,6 +555,17 @@ class Handler(BaseHTTPRequestHandler):
             core.dictionary["rules"] = [r for r in core.dictionary["rules"] if not (r["kind"] == "literal" and r["learned"])]
         elif action == "open-log":
             pass
+        elif action == "track-record":
+            asked = [entry["writing"] for entry in core.history if entry.get("writing") and entry["writing"]["outcome"]][:50]
+            outcomes: dict[str, int] = {}
+            reasons: dict[str, int] = {}
+            for record in asked:
+                outcomes[record["outcome"]] = outcomes.get(record["outcome"], 0) + 1
+                if record["outcome"] == "rejected":
+                    reasons[record["reason"]] = reasons.get(record["reason"], 0) + 1
+            rejections = [{"reason": reason, "count": count} for reason, count in sorted(reasons.items(), key=lambda item: -item[1])]
+            self._send(200, {"dictations": len(asked), "outcomes": outcomes, "rejections": rejections})
+            return
         else:
             self._send(200, status)
             return
@@ -553,9 +586,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _history(self, method, rest, query) -> None:
         core = self.core
+        needle = query.get("query", [""])[0].strip().casefold()
+        found = [
+            entry for entry in core.history
+            if any(needle in text.casefold() for text in (entry["text"], *((entry["writing"] or {}).get(key, "") for key in ("typed", "answer"))))
+        ]
         if method == "GET":
-            needle = query.get("query", [""])[0].strip().casefold()
-            self._send(200, [entry for entry in core.history if needle in entry["text"].casefold()])
+            self._send(200, found)
+            return
+        if method == "POST" and rest == ["export"]:
+            self._send(200, {"rows": len(found)})
             return
         if method == "DELETE" and not rest:
             def wipe() -> None:
