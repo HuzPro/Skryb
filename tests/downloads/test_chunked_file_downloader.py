@@ -267,7 +267,7 @@ class TestChunkedFileDownloaderSizeMismatch:
             head=_HeadResult(content_length=size, etag=None, accept_ranges="bytes"),
             bodies=bodies,
         )
-        downloader = ChunkedFileDownloader(http=http, n_chunks=4)
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=())
 
         with pytest.raises(FileDownloadError):
             downloader.download(
@@ -333,7 +333,7 @@ class TestChunkedFileDownloaderMidStreamError:
             bodies=bodies,
             failing_range=failing_range,
         )
-        downloader = ChunkedFileDownloader(http=http, n_chunks=4)
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=())
         plan = _make_plan(tmp_path, size)
 
         with pytest.raises(FileDownloadError):
@@ -362,6 +362,134 @@ class TestChunkedFileDownloaderMidStreamError:
         assert target.read_bytes() == body
         # Verify the failed chunk only re-requested its missing tail on resume
         assert (resumed_start, resumed_end) in http.range_calls
+
+    def test_a_dropped_connection_resumes_that_chunk_in_the_same_download(self, tmp_path):
+        size = 4000
+        body = bytes(range(256)) * (size // 256) + b"Z" * (size % 256)
+        chunk_size = size // 4
+        bodies = {
+            (i * chunk_size, (i + 1) * chunk_size - 1): body[i * chunk_size : (i + 1) * chunk_size]
+            for i in range(4)
+        }
+        failing_range = (chunk_size, 2 * chunk_size - 1)
+        resumed_start = chunk_size + chunk_size // 2
+        bodies[(resumed_start, 2 * chunk_size - 1)] = body[resumed_start : 2 * chunk_size]
+        http = _MidStreamFailingHttpClient(
+            head=_HeadResult(content_length=size, etag='"abc"', accept_ranges="bytes"),
+            bodies=bodies,
+            failing_range=failing_range,
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=(0.0,))
+        received: list[int] = []
+
+        downloader.download(
+            plan=_make_plan(tmp_path, size),
+            on_progress=received.append,
+            cancel_event=threading.Event(),
+            pause_event=threading.Event(),
+        )
+
+        assert (tmp_path / "file.bin").read_bytes() == body
+        assert (resumed_start, 2 * chunk_size - 1) in http.range_calls
+        assert sum(received) == size
+
+    def test_a_connection_that_keeps_dropping_without_progress_fails_after_the_retries(self, tmp_path):
+        class _AlwaysReset(_FakeHttpClient):
+            def stream_range(self, url, start, end):
+                self.range_calls.append((start, end))
+                raise ConnectionResetError(10054, "An existing connection was forcibly closed")
+
+        http = _AlwaysReset(
+            head=_HeadResult(content_length=1000, etag=None, accept_ranges="bytes"), bodies={},
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=(0.0, 0.0))
+
+        with pytest.raises(FileDownloadError, match="forcibly closed"):
+            downloader.download(
+                plan=_make_plan(tmp_path, 1000),
+                on_progress=lambda n: None,
+                cancel_event=threading.Event(),
+                pause_event=threading.Event(),
+            )
+
+        assert len(http.range_calls) == 4 * 3
+
+    def test_a_chunk_that_keeps_making_progress_is_never_given_up_on(self, tmp_path):
+        size = 1000
+        body = bytes(i % 251 for i in range(size))
+
+        class _TenBytesAtATime(_FakeHttpClient):
+            def stream_range(self, url, start, end):
+                self.range_calls.append((start, end))
+                yield body[start : min(start + 10, end + 1)]
+                if start + 10 <= end:
+                    raise ConnectionResetError("dropped")
+
+        http = _TenBytesAtATime(
+            head=_HeadResult(content_length=size, etag=None, accept_ranges="bytes"), bodies={},
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=(0.0,))
+
+        downloader.download(
+            plan=_make_plan(tmp_path, size),
+            on_progress=lambda n: None,
+            cancel_event=threading.Event(),
+            pause_event=threading.Event(),
+        )
+
+        assert (tmp_path / "file.bin").read_bytes() == body
+        assert len(http.range_calls) == 100
+
+    def test_a_failed_first_request_for_the_file_size_is_retried(self, tmp_path):
+        size = 1000
+        body = b"H" * size
+
+        class _HeadFailsOnce(_FakeHttpClient):
+            heads = 0
+
+            def head(self, url):
+                self.heads += 1
+                if self.heads == 1:
+                    raise ConnectionResetError("dropped")
+                return self.head_response
+
+        http = _HeadFailsOnce(
+            head=_HeadResult(content_length=size, etag=None, accept_ranges=None),
+            bodies={(0, size - 1): body},
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=(0.0,))
+
+        downloader.download(
+            plan=_make_plan(tmp_path, size),
+            on_progress=lambda n: None,
+            cancel_event=threading.Event(),
+            pause_event=threading.Event(),
+        )
+
+        assert (tmp_path / "file.bin").read_bytes() == body
+        assert http.heads == 2
+
+    def test_cancelling_during_a_retry_wait_stops_at_once(self, tmp_path):
+        cancel = threading.Event()
+
+        class _ResetThenCancel(_FakeHttpClient):
+            def stream_range(self, url, start, end):
+                self.range_calls.append((start, end))
+                cancel.set()
+                raise ConnectionResetError("dropped")
+
+        http = _ResetThenCancel(
+            head=_HeadResult(content_length=1000, etag=None, accept_ranges="bytes"), bodies={},
+        )
+        downloader = ChunkedFileDownloader(http=http, n_chunks=4, retry_delays=(60.0,))
+
+        with pytest.raises(FileDownloadError, match="Cancelled"):
+            downloader.download(
+                plan=_make_plan(tmp_path, 1000),
+                on_progress=lambda n: None,
+                cancel_event=cancel,
+                pause_event=threading.Event(),
+            )
 
     def test_should_preserve_bytes_when_sidecar_file_is_corrupted_between_runs(self, tmp_path):
         size = 1000
