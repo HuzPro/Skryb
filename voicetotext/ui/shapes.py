@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TypeVar, cast
 
-from voicetotext.history.entries import HistoryEntry
+from voicetotext.history.entries import HistoryEntry, TrackRecord
 from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode, binding_for
 from voicetotext.output.dictionary_config import (
     DictionaryConfig,
@@ -64,6 +64,15 @@ def history_entry_json(entry: HistoryEntry) -> Json:
         "error": entry.error,
         "has_audio": has_audio(entry),
         "kind": entry.kind,
+        "writing": asdict(entry.writing) if entry.writing is not None else None,
+    }
+
+
+def track_record_json(record: TrackRecord) -> Json:
+    return {
+        "dictations": record.dictations,
+        "outcomes": record.outcomes,
+        "rejections": [{"reason": reason, "count": count} for reason, count in record.rejections],
     }
 
 

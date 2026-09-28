@@ -16,6 +16,14 @@ from typing import Protocol
 from voicetotext.edit_capture.recorder import DENIED_PROCESSES
 from voicetotext.edit_capture.window import ForegroundWindow
 from voicetotext.output.caret_context import NO_CONTEXT, CaretContext, ListLayout, list_layout
+from voicetotext.output.dictation_trace import (
+    APPLIED,
+    REJECTED,
+    SKIPPED,
+    TOO_SLOW,
+    DictationTrace,
+    current_trace,
+)
 from voicetotext.writing.client import WritingUnavailable
 from voicetotext.writing.prompt import (
     Hints,
@@ -125,29 +133,32 @@ class CleanupStage:
             else NO_CONTEXT
         )
         system = cleanup_system_prompt(self._settings_at(context), self._style(), transform)
-        user = cleanup_user_message(dictation, self._hints(window, context))
+        hints = self._hints(window, context)
+        trace = current_trace() or DictationTrace()
+        trace.context_before, trace.window = hints.context_before, hints.window
+        user = cleanup_user_message(dictation, hints)
         max_tokens = estimated_tokens(dictation) * 2 + 64
         if estimated_tokens(system + user) + max_tokens > CONTEXT_TOKENS:
-            _logger.info("Cleanup skipped: the dictation is too long for the writing model.")
-            return text
+            return _outcome(text, trace, SKIPPED, "the dictation is too long for the writing model")
         deadline = self._settings.deadline_seconds
         try:
             answer = self._client.complete(
                 system, user, max_tokens, deadline - (self._clock() - started),
             )
         except WritingUnavailable as exc:
-            _logger.info("Cleanup skipped: %s.", exc)
-            return text
+            return _outcome(text, trace, SKIPPED, str(exc))
         elapsed = self._clock() - started
+        trace.cleanup_answer, trace.cleanup_seconds = answer, elapsed
         if elapsed > deadline:
-            _logger.info("Cleanup discarded: it took %.2fs, over the %.1fs limit.", elapsed, deadline)
-            return text
+            return _outcome(
+                text, trace, TOO_SLOW, f"it took {elapsed:.2f}s, over the {deadline:.1f}s limit",
+            )
         reason = rejection_reason(dictation, answer, self._settings.cleanup, bool(transform.strip()))
         if reason:
-            _logger.info("Cleanup rejected: %s.", reason)
-            return text
+            return _outcome(text, trace, REJECTED, reason)
         self._timings.record(elapsed, len(dictation.split()))
         _logger.info("Cleanup applied in %.2fs.", elapsed)
+        trace.cleanup = APPLIED
         return _with_edges_of(text, answer.strip())
 
     def _settings_at(self, context: CaretContext) -> WritingSettings:
@@ -168,6 +179,16 @@ class CleanupStage:
             return Hints(spellings=self._spellings)
         title = f"{window.title} ({window.process})" if window.process else window.title
         return Hints(self._spellings, context.before, title)
+
+
+_LOGGED_OUTCOMES = {SKIPPED: "skipped", TOO_SLOW: "discarded", REJECTED: "rejected"}
+
+
+def _outcome(text: str, trace: DictationTrace, outcome: str, reason: str) -> str:
+    """The dictation unchanged, with why the model's answer was not used on record."""
+    _logger.info("Cleanup %s: %s.", _LOGGED_OUTCOMES[outcome], reason)
+    trace.cleanup, trace.cleanup_reason = outcome, reason
+    return text
 
 
 def rejection_reason(
