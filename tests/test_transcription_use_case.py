@@ -25,6 +25,7 @@ from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
+from voicetotext.output.dictation_trace import current_trace
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.result import TranscriptionResult
 from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
@@ -203,6 +204,36 @@ class TestTranscriptionDiagnostics:
         assert recorded_audio is audio
         assert recorded_result is result
         assert requested_at.tzinfo is UTC
+
+    def test_a_dictation_hands_history_what_the_output_chain_typed(self) -> None:
+        use_case, recorder, engine, output, _, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result(text="testing one two three")
+
+        def pipeline(text: str) -> None:
+            trace = current_trace()
+            assert trace is not None
+            trace.typed = "Testing 1, 2, 3."
+
+        output.output.side_effect = pipeline
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        trace = use_case._diagnostics.transcription_finished.call_args.kwargs["trace"]
+        assert trace.typed == "Testing 1, 2, 3."
+        assert current_trace() is None
+
+    def test_a_dictation_whose_output_failed_leaves_no_trace_behind_for_the_next(self) -> None:
+        use_case, recorder, engine, output, _, _ = _build_use_case()
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result(text="hello")
+        output.output.side_effect = RuntimeError("the paste target vanished")
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        assert current_trace() is None
 
     def test_should_record_empty_result(self) -> None:
         use_case, recorder, engine, _, _, _ = _build_use_case()
