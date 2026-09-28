@@ -136,7 +136,7 @@ class Win32NoticeWindow:
 
 
 class Notice:
-    """A one-line message with up to three buttons, just above the pill.
+    """A one-line message with up to three buttons and a close cross, just above the pill.
 
     GUI thread only; other threads hop over with the GUI dispatcher. The
     window is an ``overrideredirect`` toplevel, because Tk asks for the
@@ -171,6 +171,7 @@ class Notice:
         self._shown = 0
         self._revealed = 0
         self._buttons: list[tkinter.Button] = []
+        self._close: tkinter.Button | None = None
         self._message = ""
 
     @property
@@ -183,6 +184,10 @@ class Notice:
 
     def buttons(self) -> list[tkinter.Button]:
         return list(self._buttons)
+
+    @property
+    def close_button(self) -> tkinter.Button | None:
+        return self._close
 
     def show(
         self, message: str, buttons: Sequence[NoticeAction] = (), *, warning: bool = False,
@@ -285,8 +290,14 @@ class Notice:
         self._buttons = [
             self._button(frame, label, action, theme) for label, action in actions
         ]
-        if self._buttons:
-            self._buttons[-1].pack_configure(padx=(0, _PADDING))
+        self._close = tkinter.Button(
+            frame, text="✕", command=self.hide,
+            bg=theme.surface, fg=theme.foreground,
+            activebackground=theme.border, activeforeground=theme.foreground,
+            relief="flat", borderwidth=0, highlightthickness=0, takefocus=0,
+            font=_BODY_FONT, padx=6, pady=3, cursor="hand2",
+        )
+        self._close.pack(side="left", padx=(0, _PADDING // 2), pady=_PADDING)
         return [frame, strip]
 
     def _button(
