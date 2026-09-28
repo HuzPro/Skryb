@@ -663,7 +663,12 @@ def _literal_pattern(alias: str, whole_words: bool) -> str:
     ]
     pattern = "".join(parts)
     if whole_words:
-        pattern = r"(?<!\w)(?:" + pattern + r")(?!\w)"
+        # Only a word character can split a word, so an alias edge like the
+        # comma in ", underscore" may sit right against the word before it.
+        core = alias.strip()
+        before = r"(?<!\w)" if _WORD_PATTERN.match(core) else ""
+        after = r"(?!\w)" if _WORD_PATTERN.match(core[-1:]) else ""
+        pattern = before + "(?:" + pattern + ")" + after
     return pattern
 
 
