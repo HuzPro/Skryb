@@ -15,8 +15,26 @@ const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): His
 describe("dictionary aliases", () => {
   it("splits on commas and drops blanks", () => {
     expect(splitAliases("jason, jayson")).toEqual(["jason", "jayson"]);
-    expect(splitAliases("jason,, ,jayson,")).toEqual(["jason", "jayson"]);
+    expect(splitAliases("jason,, ,jayson")).toEqual(["jason", "jayson"]);
     expect(splitAliases("jason, JSON ")).toEqual(["jason ", "JSON "]);
+    expect(splitAliases(" , ,")).toEqual([]);
+  });
+
+  it("keeps a comma at the start or end of the box as part of the alias", () => {
+    expect(splitAliases(", underscore")).toEqual([", underscore"]);
+    expect(splitAliases(",underscore")).toEqual([",underscore"]);
+    expect(splitAliases("underscore,")).toEqual(["underscore,"]);
+    expect(splitAliases(", underscore, under score")).toEqual([", underscore", "under score"]);
+    expect(splitAliases(" , dash ")).toEqual([" , dash "]);
+    expect(joinAliases(splitAliases(", underscore, under score,"))).toBe(", underscore, under score,");
+  });
+
+  it("does not call a leading-comma alias a duplicate of the same word without it", () => {
+    const rules = [
+      { kind: "literal" as const, spoken: [" underscore "], replacement: "_", case_sensitive: false, whole_words: true, phonetic: false, enabled: true, learned: false },
+    ];
+    const candidate = { ...rules[0]!, spoken: splitAliases(", underscore") };
+    expect(duplicateAlias(rules, candidate, -1)).toBe(false);
   });
 
   it("glues every alias to the neighbouring text when the box starts or ends with a space", () => {
