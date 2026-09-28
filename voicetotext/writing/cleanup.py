@@ -4,6 +4,7 @@ Every way this stage can fail ends the same way: the dictation goes on
 exactly as it came in, so cleanup can only ever add polish, never lose text.
 """
 
+import dataclasses
 import logging
 import re
 import threading
@@ -14,7 +15,7 @@ from typing import Protocol
 
 from voicetotext.edit_capture.recorder import DENIED_PROCESSES
 from voicetotext.edit_capture.window import ForegroundWindow
-from voicetotext.output.caret_context import CaretContext
+from voicetotext.output.caret_context import NO_CONTEXT, CaretContext, ListLayout, list_layout
 from voicetotext.writing.client import WritingUnavailable
 from voicetotext.writing.prompt import (
     Hints,
@@ -117,8 +118,14 @@ class CleanupStage:
         started = self._clock()
         transform = self._transform()
         dictation = text.strip()
-        system = cleanup_system_prompt(self._settings, self._style(), transform)
-        user = cleanup_user_message(dictation, self._hints(caret_context))
+        window = self._window() if self._settings.context else None
+        context = (
+            caret_context()
+            if window is not None and window.process not in DENIED_PROCESSES
+            else NO_CONTEXT
+        )
+        system = cleanup_system_prompt(self._settings_at(context), self._style(), transform)
+        user = cleanup_user_message(dictation, self._hints(window, context))
         max_tokens = estimated_tokens(dictation) * 2 + 64
         if estimated_tokens(system + user) + max_tokens > CONTEXT_TOKENS:
             _logger.info("Cleanup skipped: the dictation is too long for the writing model.")
@@ -143,19 +150,24 @@ class CleanupStage:
         _logger.info("Cleanup applied in %.2fs.", elapsed)
         return _with_edges_of(text, answer.strip())
 
+    def _settings_at(self, context: CaretContext) -> WritingSettings:
+        """The settings, with lists laid out the way the text at the caret already is."""
+        layout = list_layout(context)
+        if layout is None:
+            return self._settings
+        return dataclasses.replace(self._settings, lists=layout is ListLayout.VERTICAL)
+
     def _style(self) -> tuple[str, ...]:
         notes = self._settings.style_notes.strip()
         learned = self._learned_style() if self._settings.learn_style else ()
         return ((notes,) if notes else ()) + learned
 
-    def _hints(self, caret_context: Callable[[], CaretContext]) -> Hints:
-        if not self._settings.context:
-            return Hints(spellings=self._spellings)
-        window = self._window()
-        if window.process in DENIED_PROCESSES:
+    def _hints(self, window: ForegroundWindow | None, context: CaretContext) -> Hints:
+        """Spellings always; the caret and window only when allowed and not a denied app."""
+        if window is None or window.process in DENIED_PROCESSES:
             return Hints(spellings=self._spellings)
         title = f"{window.title} ({window.process})" if window.process else window.title
-        return Hints(self._spellings, caret_context().before, title)
+        return Hints(self._spellings, context.before, title)
 
 
 def rejection_reason(
