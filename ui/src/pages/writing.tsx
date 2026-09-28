@@ -12,7 +12,8 @@ import { api, errorText } from "../lib/api";
 import { isDirty } from "../lib/draft";
 import { chooseOpenPath } from "../lib/platform";
 import { useStore, useSyncedDraft } from "../lib/store";
-import type { Cleanup, Transform, WritingSettings, WritingStatus } from "../lib/types";
+import { useServerEvent } from "../lib/sse";
+import type { Cleanup, TrackRecord, Transform, WritingSettings, WritingStatus } from "../lib/types";
 
 const BLURB = "Cleans up and formats your dictation on this computer. Nothing leaves it.";
 const PREVIEW_CHARS = 90;
@@ -111,6 +112,42 @@ function WritingModelCard() {
       {status.state === "installing" ? <ProgressBar className="mt-3" value={status.bytes_total ? status.bytes_done / status.bytes_total : 0} /> : null}
       {error ? <InlineError>{error}</InlineError> : null}
     </Card>
+  );
+}
+
+const OUTCOME_WORDS: [keyof TrackRecord["outcomes"], string][] = [
+  ["applied", "applied"],
+  ["rejected", "not used"],
+  ["too_slow", "too slow"],
+  ["skipped", "skipped"],
+];
+
+/** The track record in one sentence, and why answers were not used in another. */
+export function describeTrackRecord(record: TrackRecord): string[] {
+  if (!record.dictations) return ["No dictations have gone through the writing model yet."];
+  const counts = OUTCOME_WORDS.filter(([key]) => record.outcomes[key]).map(([key, words]) => `${record.outcomes[key]} ${words}`);
+  const plural = record.dictations === 1 ? "dictation" : "dictations";
+  const lines = [`Last ${record.dictations} ${plural}: ${counts.join(", ")}.`];
+  if (record.rejections.length) {
+    lines.push(`Not used because ${record.rejections.map(({ reason, count }) => `${reason} (${count})`).join(", ")}.`);
+  }
+  return lines;
+}
+
+function TrackRecordLine() {
+  const client = useQueryClient();
+  const record = useQuery({ queryKey: ["writing-track-record"], queryFn: () => api.get<TrackRecord>("/api/writing/track-record"), retry: false }).data;
+  useServerEvent((name) => {
+    if (name === "history") void client.invalidateQueries({ queryKey: ["writing-track-record"] });
+  });
+  if (!record) return null;
+  return (
+    <div className="mt-2 px-1 text-[12.5px] text-muted-foreground">
+      {describeTrackRecord(record).map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+      <p>Open History to compare what you said with what the model wrote.</p>
+    </div>
   );
 }
 
@@ -296,6 +333,7 @@ export function WritingPage() {
       <PageTitle title="Writing" />
       <Section title="Writing model">
         <WritingModelCard />
+        <TrackRecordLine />
         <Disclosure label="Advanced" defaultOpen={Boolean(writing.runtime_path || writing.model_path)}>
           <Rows>
             <Row title="llama-server.exe" description="Leave empty to use the installed one.">

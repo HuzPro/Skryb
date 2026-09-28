@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { launchPath, rememberPage } from "../app";
-import type { HistoryEntry, Model, Settings } from "../lib/types";
+import type { HistoryEntry, Model, Settings, WritingRecord } from "../lib/types";
 import { duplicateAlias, joinAliases, splitAliases } from "./dictionary";
-import { formatDuration, groupByDay, preview } from "./history";
+import { describeOutcome, finalText, formatDuration, groupByDay, hasVersions, preview } from "./history";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
 import { withMode } from "./transcription";
-import { fileName } from "./writing";
+import { describeTrackRecord, fileName } from "./writing";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
-  id: at, at, text, audio_seconds: 3, status: "", error: null, has_audio: true, kind: "dictation", ...extra,
+  id: at, at, text, audio_seconds: 3, status: "", error: null, has_audio: true, kind: "dictation", writing: null, ...extra,
 });
 
 describe("dictionary aliases", () => {
@@ -56,6 +56,37 @@ describe("dictionary aliases", () => {
     expect(duplicateAlias(rules, candidate, -1)).toBe(true);
     expect(duplicateAlias(rules, candidate, 0)).toBe(false);
     expect(duplicateAlias(rules, rules[1]!, -1)).toBe(false);
+  });
+});
+
+const writing = (extra: Partial<WritingRecord> = {}): WritingRecord => ({
+  outcome: "applied", reason: "", seconds: 0.42, answer: "", typed: "", context_before: "", window: "", ...extra,
+});
+
+describe("history versions", () => {
+  it("lists what was typed, and falls back to what was heard for older entries", () => {
+    const typed = entry("2026-09-28T18:48:37", "four five", { writing: writing({ typed: "Testing 1, 2, 3, 4, 5." }) });
+    const older = entry("2026-09-20T09:00:00", "An old dictation café");
+
+    expect(finalText(typed)).toBe("Testing 1, 2, 3, 4, 5.");
+    expect(preview(typed)).toBe("Testing 1, 2, 3, 4, 5.");
+    expect(preview(older)).toBe("An old dictation café");
+  });
+
+  it("only offers a comparison when there is more than one version to compare", () => {
+    expect(hasVersions(entry("2026-09-28T10:00:00", "hello", { writing: writing({ answer: "Hello." }) }))).toBe(true);
+    expect(hasVersions(entry("2026-09-28T10:00:00", "hello", { writing: writing({ typed: "Hello there." }) }))).toBe(true);
+    expect(hasVersions(entry("2026-09-28T10:00:00", "hello ", { writing: writing({ typed: "hello" }) }))).toBe(false);
+    expect(hasVersions(entry("2026-09-28T10:00:00", "hello", { writing: writing({ outcome: "skipped" }) }))).toBe(false);
+    expect(hasVersions(entry("2026-09-28T10:00:00", "hello"))).toBe(false);
+  });
+
+  it("says what the writing model did in plain words", () => {
+    expect(describeOutcome(writing())).toEqual({ text: "Writing model applied in 0.42 s.", bad: false });
+    expect(describeOutcome(writing({ outcome: "rejected", reason: "a number changed" }))).toEqual({ text: "Writing model answer not used: a number changed.", bad: true });
+    expect(describeOutcome(writing({ outcome: "too_slow", reason: "it took 4.50s, over the 4.0s limit" })).text).toBe("Writing model too slow: it took 4.50s, over the 4.0s limit.");
+    expect(describeOutcome(writing({ outcome: "skipped", reason: "the writing model is busy" })).bad).toBe(true);
+    expect(describeOutcome(writing({ outcome: "", seconds: null })).text).toBe("Writing model not asked (cleanup was off).");
   });
 });
 
@@ -165,5 +196,25 @@ describe("writing model file", () => {
     expect(fileName("C:\\Users\\Zoë\\AppData\\Local\\VoiceToText\\writing\\models\\Spark-X2.5-4B-Q4_K_M.gguf")).toBe("Spark-X2.5-4B-Q4_K_M.gguf");
     expect(fileName("D:/models/Qwen3.5-4B-Q4_K_M.gguf")).toBe("Qwen3.5-4B-Q4_K_M.gguf");
     expect(fileName("")).toBe("");
+  });
+});
+
+describe("writing model track record", () => {
+  it("counts the outcomes in plain words and lists why answers were not used", () => {
+    const lines = describeTrackRecord({
+      dictations: 50,
+      outcomes: { applied: 38, rejected: 7, too_slow: 5 },
+      rejections: [{ reason: "a number changed", count: 4 }, { reason: "a hedge was dropped", count: 3 }],
+    });
+
+    expect(lines).toEqual([
+      "Last 50 dictations: 38 applied, 7 not used, 5 too slow.",
+      "Not used because a number changed (4), a hedge was dropped (3).",
+    ]);
+  });
+
+  it("reads right for one dictation and for none", () => {
+    expect(describeTrackRecord({ dictations: 1, outcomes: { skipped: 1 }, rejections: [] })).toEqual(["Last 1 dictation: 1 skipped."]);
+    expect(describeTrackRecord({ dictations: 0, outcomes: {}, rejections: [] })).toEqual(["No dictations have gone through the writing model yet."]);
   });
 });
