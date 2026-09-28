@@ -198,6 +198,45 @@ class TestContextHints:
         assert client.requests[0][1] == {"dictation": "hello", "spellings": ["Aïsha", "Kubernetes"]}
         assert reads == []
 
+    @pytest.mark.parametrize(
+        ("before", "after", "lists_setting", "expects_lists"),
+        [
+            ("Testing 1, 2, 3", ".", True, False),
+            ("Groceries: eggs, milk", "", True, False),
+            ("1. Open the app\n2. Log in", "", False, True),
+            ("", "", True, True),
+            ("", "", False, False),
+        ],
+        ids=[
+            "mid-line-overrides-lists-on", "comma-list-stays-inline",
+            "numbered-list-overrides-lists-off", "empty-box-follows-on", "empty-box-follows-off",
+        ],
+    )
+    def test_the_list_layout_follows_the_text_at_the_caret(
+        self, before, after, lists_setting, expects_lists,
+    ):
+        client = ScriptedClient()
+        context = CaretContext(before=before, selected="", after=after)
+
+        _stage(client, lists=lists_setting)("four five six", lambda: context)
+
+        system = client.requests[0][0]
+        assert ("numbered list, one item per line" in system) is expects_lists
+        assert ("Never add lists" in system) is not expects_lists
+
+    def test_with_context_off_the_list_setting_is_used_as_is(self):
+        client = ScriptedClient()
+        reads: list[int] = []
+
+        def read() -> CaretContext:
+            reads.append(1)
+            return CaretContext("Testing 1, 2, 3", "", ".")
+
+        _stage(client, context=False, lists=True)("four five six", read)
+
+        assert "numbered list, one item per line" in client.requests[0][0]
+        assert reads == []
+
     def test_style_notes_and_the_transform_reach_the_system_prompt(self):
         client = ScriptedClient()
         stage = CleanupStage(

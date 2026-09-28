@@ -1,10 +1,11 @@
+import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Callable, Iterable
-from typing import Protocol
+from collections.abc import Callable, Iterable, Sequence
+from typing import Protocol, TypeVar
 
 from voicetotext.downloads.chunk_plan import plan_chunks
 from voicetotext.downloads.sidecar import (
@@ -15,8 +16,16 @@ from voicetotext.downloads.sidecar import (
 from voicetotext.downloads.state import ChunkState
 
 
+_logger = logging.getLogger(__name__)
+
 _DEFAULT_N_CHUNKS = 8
 _SIDECAR_BACKUP_SUFFIX = ".bak"
+# Servers and CDNs drop long connections now and then; each chunk resumes
+# where it stopped. The waits restart whenever an attempt made progress, so
+# only a connection that stays dead fails the download.
+_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0, 8.0, 16.0)
+
+_T = TypeVar("_T")
 
 
 class FileDownloadError(Exception):
@@ -57,6 +66,10 @@ class _SharedDownloadState:
             )
             self.sidecar.save(meta_path)
 
+    def chunk(self, index: int) -> ChunkState:
+        with self.lock:
+            return next(c for c in self.sidecar.chunks if c.index == index)
+
 
 class ChunkedFileDownloader:
     """Orchestrates the download of a single file.
@@ -66,9 +79,15 @@ class ChunkedFileDownloader:
     before renaming to *target* on success.
     """
 
-    def __init__(self, http: HttpClient, n_chunks: int = _DEFAULT_N_CHUNKS) -> None:
+    def __init__(
+        self,
+        http: HttpClient,
+        n_chunks: int = _DEFAULT_N_CHUNKS,
+        retry_delays: Sequence[float] = _RETRY_DELAYS_SECONDS,
+    ) -> None:
         self._http = http
         self._n_chunks = n_chunks
+        self._retry_delays = tuple(retry_delays)
 
     def download(
         self,
@@ -81,7 +100,7 @@ class ChunkedFileDownloader:
         meta_path = plan.target.with_suffix(plan.target.suffix + ".part.meta")
         plan.target.parent.mkdir(parents=True, exist_ok=True)
 
-        head = self._http.head(plan.url)
+        head = self._retrying(lambda: self._http.head(plan.url), plan.url, cancel_event)
         sidecar = self._load_or_create_sidecar(
             meta_path=meta_path,
             part_path=part_path,
@@ -111,9 +130,22 @@ class ChunkedFileDownloader:
                 part_path=part_path,
                 meta_path=meta_path,
                 on_progress=on_progress,
+                cancel_event=cancel_event,
             )
 
         self._finalize(plan=plan, part_path=part_path, meta_path=meta_path)
+
+    def _retrying(
+        self, call: Callable[[], _T], url: str, cancel_event: threading.Event,
+    ) -> _T:
+        for delay in self._retry_delays:
+            try:
+                return call()
+            except Exception as exc:
+                _logger.warning("Request to %s failed, retrying in %ss: %s", url, delay, exc)
+            if cancel_event.wait(delay):
+                raise FileDownloadError("Cancelled")
+        return call()
 
     # ------------------------------------------------------------------
     # Sidecar handling
@@ -229,9 +261,48 @@ class ChunkedFileDownloader:
         cancel_event: threading.Event,
         pause_event: threading.Event,
     ) -> None:
-        if chunk.is_complete or cancel_event.is_set() or pause_event.is_set():
-            return
+        delays = iter(self._retry_delays)
+        while True:
+            current = shared.chunk(chunk.index)
+            if current.is_complete or cancel_event.is_set() or pause_event.is_set():
+                return
+            failure: Exception | None = None
+            try:
+                self._stream_chunk(
+                    current, plan, part_path, meta_path,
+                    shared, on_progress, cancel_event, pause_event,
+                )
+            except Exception as exc:
+                failure = exc
+            after = shared.chunk(chunk.index)
+            if after.is_complete or cancel_event.is_set() or pause_event.is_set():
+                return
+            if after.bytes_done > current.bytes_done:
+                delays = iter(self._retry_delays)
+            delay = next(delays, None)
+            if delay is None:
+                raise failure or FileDownloadError(
+                    f"Chunk {chunk.index} ended at {after.bytes_done}/{after.length} bytes"
+                )
+            _logger.warning(
+                "Chunk %d of %s stopped at %d/%d bytes, retrying in %ss: %s",
+                chunk.index, plan.url, after.bytes_done, after.length, delay,
+                failure or "stream ended early",
+            )
+            if cancel_event.wait(delay):
+                return
 
+    def _stream_chunk(
+        self,
+        chunk: ChunkState,
+        plan: FileDownloadPlan,
+        part_path: Path,
+        meta_path: Path,
+        shared: _SharedDownloadState,
+        on_progress: Callable[[int], None],
+        cancel_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
         stream = self._http.stream_range(
             plan.url, chunk.start + chunk.bytes_done, chunk.end
         )
@@ -299,8 +370,9 @@ class ChunkedFileDownloader:
         part_path: Path,
         meta_path: Path,
         on_progress: Callable[[int], None],
+        cancel_event: threading.Event,
     ) -> None:
-        data = self._http.get_full(plan.url)
+        data = self._retrying(lambda: self._http.get_full(plan.url), plan.url, cancel_event)
         part_path.write_bytes(data)
         on_progress(len(data))
         if meta_path.exists():

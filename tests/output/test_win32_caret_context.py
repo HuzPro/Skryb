@@ -30,6 +30,10 @@ from voicetotext.output.win32_caret_context import (
 
 
 _TEXT_PATTERN_ID = 10014
+_EDIT = 50004
+_PANE = 50033
+_HAS_KEYBOARD_FOCUS = 30008
+_DESCENDANTS = 4
 _ENDPOINT_START = 0
 _ENDPOINT_END = 1
 _UNIT_CHARACTER = 0
@@ -50,6 +54,9 @@ def stub_uia(monkeypatch) -> None:
         "_uia",
         lambda: SimpleNamespace(
             UIA_TextPatternId=_TEXT_PATTERN_ID,
+            UIA_PaneControlTypeId=_PANE,
+            UIA_HasKeyboardFocusPropertyId=_HAS_KEYBOARD_FOCUS,
+            TreeScope_Descendants=_DESCENDANTS,
             IUIAutomationTextPattern=object(),
             TextPatternRangeEndpoint_Start=_ENDPOINT_START,
             TextPatternRangeEndpoint_End=_ENDPOINT_END,
@@ -140,13 +147,32 @@ class FakeTextPattern:
 
 
 class FakeElement:
-    def __init__(self, pattern: object, is_password: bool = False) -> None:
+    def __init__(
+        self,
+        pattern: object,
+        is_password: bool = False,
+        *,
+        control_type: int = _EDIT,
+        class_name: str = "",
+        framework: str = "Chrome",
+        focused_inside: "FakeElement | None" = None,
+    ) -> None:
         self.pattern = pattern
         self.CurrentIsPassword = int(is_password)  # noqa: N815 (COM name)
+        self.CurrentControlType = control_type  # noqa: N815 (COM name)
+        self.CurrentClassName = class_name  # noqa: N815 (COM name)
+        self.CurrentFrameworkId = framework  # noqa: N815 (COM name)
+        self.CurrentNativeWindowHandle = None  # noqa: N815 (COM name)
+        self.focused_inside = focused_inside
 
     def GetCurrentPattern(self, pattern_id: int) -> object:  # noqa: N802 (COM name)
         assert pattern_id == _TEXT_PATTERN_ID
         return self.pattern
+
+    def FindFirst(self, scope: int, condition: object) -> "FakeElement | None":  # noqa: N802 (COM name)
+        assert scope == _DESCENDANTS
+        assert condition == (_HAS_KEYBOARD_FOCUS, True)
+        return self.focused_inside
 
 
 class FakeAutomation:
@@ -155,6 +181,9 @@ class FakeAutomation:
 
     def GetFocusedElement(self) -> FakeElement:  # noqa: N802 (COM name)
         return self.element
+
+    def CreatePropertyCondition(self, property_id: int, value: object) -> tuple:  # noqa: N802 (COM name)
+        return (property_id, value)
 
 
 class BrokenAutomation:
@@ -257,6 +286,37 @@ class TestFieldsInsideALargerDocument:
 
         assert context.before == "a" * CONTEXT_CHARS
         assert context.after == "b" * CONTEXT_CHARS
+
+class TestWebViewsThatReportOnlyTheirHost:
+    """WhatsApp's composer often reads as the blank pane around its WebView2."""
+
+    def test_should_read_the_focused_field_inside_a_blank_web_view(self):
+        field = _whole_of("Testing 1, 2, 3.")
+        composer = FakeElement(FakeTextPattern([FakeTextRange(field.document, 16, 16)], field))
+        bridge = FakeElement(
+            NullPointer(), control_type=_PANE,
+            class_name="Microsoft.UI.Xaml.Controls.WebView2", framework="Win32",
+            focused_inside=composer,
+        )
+
+        context = _context_from(FakeAutomation(bridge))
+
+        assert context.before == "Testing 1, 2, 3."
+        assert context.after == ""
+
+    def test_should_report_no_context_when_nothing_inside_the_web_view_has_the_focus(self):
+        bridge = FakeElement(NullPointer(), control_type=_PANE, framework="Chrome")
+
+        assert _context_from(FakeAutomation(bridge)) == NO_CONTEXT
+
+    def test_should_not_search_inside_a_pane_that_is_not_a_web_view(self):
+        game = FakeElement(
+            NullPointer(), control_type=_PANE, class_name="UnityWndClass", framework="Win32",
+            focused_inside=FakeElement(FakeTextPattern([], _whole_of("chat"))),
+        )
+
+        assert _context_from(FakeAutomation(game)) == NO_CONTEXT
+
 
 class TestContextWhenNoneCanBeRead:
     def test_a_password_field_is_never_read(self):
