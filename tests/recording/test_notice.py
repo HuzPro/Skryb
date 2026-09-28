@@ -167,6 +167,25 @@ def test_a_second_notice_replaces_the_first(notice, native) -> None:
     assert pressed == ["history"]
 
 
+def test_the_close_cross_puts_the_notice_away_without_running_any_action(notice, native) -> None:
+    pressed: list[str] = []
+    notice.show("The paste did not land.", [("Paste again", lambda: pressed.append("paste"))])
+
+    assert notice.close_button.cget("text") == "✕"
+    assert str(notice.close_button.cget("takefocus")) == "0"
+    _click(notice.close_button)
+
+    assert pressed == []
+    assert not notice.visible
+    assert len(native.hidden) == 1
+
+
+def test_a_notice_with_no_actions_still_has_a_close_cross(notice) -> None:
+    notice.show("Nothing to paste into. The text is on your clipboard.", [])
+
+    assert notice.close_button.winfo_exists()
+
+
 def test_at_most_three_buttons_are_offered(notice) -> None:
     notice.show("Choose", [(f"Option {n}", lambda: None) for n in range(5)])
 
