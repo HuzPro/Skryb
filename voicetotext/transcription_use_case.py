@@ -30,6 +30,7 @@ from voicetotext.core.exceptions import EngineSwapError
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics
 from voicetotext.output.clipboard_write_error import ClipboardWriteError
+from voicetotext.output.dictation_trace import begin_trace, end_trace
 from voicetotext.output.handler import TextOutputHandler
 from voicetotext.output.last_dictation import LastDictation
 from voicetotext.recording.audio_segment import AudioSegment, load_wav
@@ -657,14 +658,20 @@ class RecordAndTranscribeUseCase:
         # on this thread; timing it apart keeps the transcription estimate
         # about transcribing alone.
         output_started = time.monotonic()
+        trace = None
         if editing is None:
-            self._deliver_transcribed_text(result)
+            begin_trace()
+            try:
+                self._deliver_transcribed_text(result)
+            finally:
+                trace = end_trace()
         else:
             self._deliver_voice_edit(result, editing)
         self._diagnostics.transcription_finished(
             audio, result, requested_at,
             kind="dictation" if editing is None else "edit",
             output_seconds=time.monotonic() - output_started,
+            trace=trace,
         )
         self._state_machine.transition_to(AppState.IDLE)
         _logger.debug("post-transcribe: state -> IDLE")

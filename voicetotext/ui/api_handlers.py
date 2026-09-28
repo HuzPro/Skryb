@@ -47,6 +47,7 @@ from voicetotext.ui.shapes import (
     learned_pairs,
     settings_json,
     shown_combination,
+    track_record_json,
     writing_status_json,
 )
 from voicetotext.writing.service import WritingService
@@ -271,6 +272,7 @@ class CoreApi:
             ("POST", "/api/dictionary/forget-learned", self._forget_learned_words),
             ("DELETE", "/api/dictionary/learned/{spoken}", self._forget_learned_word),
             ("GET", "/api/writing", self._writing_status),
+            ("GET", "/api/writing/track-record", self._writing_track_record),
             *(
                 ("POST", f"/api/writing/{action}", functools.partial(self._writing_action, action))
                 for action in _WRITING_ACTIONS
@@ -280,6 +282,7 @@ class CoreApi:
             ("POST", "/api/transforms/restore-builtins", self._restore_builtin_transforms),
             ("GET", "/api/history", self._list_history),
             ("DELETE", "/api/history", self._delete_all_history),
+            ("POST", "/api/history/export", self._export_history_csv),
             ("DELETE", "/api/history/{id}", self._delete_history_entry),
             ("POST", "/api/history/{id}/play", self._play_recording),
             ("POST", "/api/history/{id}/stop", self._stop_playback),
@@ -754,6 +757,17 @@ class CoreApi:
         except (OSError, ValueError) as exc:
             raise ApiError(400, f"Could not save the audio: {exc}") from exc
         return _NO_CONTENT
+
+    def _export_history_csv(self, request: ApiRequest) -> ApiResponse:
+        destination = _path_from(request)
+        try:
+            rows = self._require_history().export_csv(request.query.get("query", ""), destination)
+        except OSError as exc:
+            raise ApiError(400, f"Could not save the history: {exc}") from exc
+        return ApiResponse(200, {"rows": rows})
+
+    def _writing_track_record(self, _request: ApiRequest) -> ApiResponse:
+        return ApiResponse(200, track_record_json(self._require_history().track_record()))
 
     def _report_retry(self, entry: str, outcome: RetryOutcome) -> None:
         if isinstance(outcome, Exception):

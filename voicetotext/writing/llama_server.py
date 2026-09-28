@@ -284,15 +284,20 @@ class LlamaServer:
             self._keep_alive(run)
         except Exception as exc:  # noqa: BLE001 - a dead supervisor must say why
             _logger.exception("The writing server supervisor failed.")
-            self._publish(run, ServerStatus(ServerState.FAILED, str(exc)))
+            self._finish(run, ServerStatus(ServerState.FAILED, str(exc)))
         finally:
             run.stop.set()
+
+    def _finish(self, run: _Run, status: ServerStatus) -> None:
+        """End *run*, then say so: a ``start`` reacting to *status* must find it over."""
+        run.stop.set()
+        self._publish(run, status)
 
     def _keep_alive(self, run: _Run) -> None:
         for delay in (*self._backoff, None):
             files = self._locate()
             if files is None:
-                self._publish(run, ServerStatus(ServerState.NOT_INSTALLED))
+                self._finish(run, ServerStatus(ServerState.NOT_INSTALLED))
                 return
             ended = self._serve_until_exit(run, files)
             if run.stop.is_set():
@@ -302,7 +307,7 @@ class LlamaServer:
                 "The writing server stopped: %s. Last lines of its log:\n%s", ended, tail,
             )
             if delay is None or ended.startswith("it did not become ready"):
-                self._publish(run, ServerStatus(ServerState.FAILED, tail or ended))
+                self._finish(run, ServerStatus(ServerState.FAILED, tail or ended))
                 return
             self._publish(
                 run,

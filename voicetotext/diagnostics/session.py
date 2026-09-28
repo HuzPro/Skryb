@@ -21,6 +21,16 @@ from voicetotext.core.startup_log import (
     process_uptime_seconds,
 )
 from voicetotext.diagnostics.jsonl import JsonlWriter
+from voicetotext.output.dictation_trace import (
+    ANSWER_FIELD,
+    CONTEXT_FIELD,
+    OUTCOME_FIELD,
+    REASON_FIELD,
+    SECONDS_FIELD,
+    TYPED_FIELD,
+    WINDOW_FIELD,
+    DictationTrace,
+)
 from voicetotext.diagnostics.timing_estimate import (
     TranscriptionTimeEstimate,
     engine_key,
@@ -58,6 +68,24 @@ class _AudioLevels:
     rms: float
     peak: float
     noise_floor: float
+
+
+def _trace_fields(trace: DictationTrace | None, capture_content: bool) -> dict[str, object]:
+    if trace is None:
+        return {}
+    fields: dict[str, object] = {
+        OUTCOME_FIELD: trace.cleanup,
+        REASON_FIELD: trace.cleanup_reason,
+        SECONDS_FIELD: trace.cleanup_seconds,
+    }
+    if capture_content:
+        fields.update({
+            TYPED_FIELD: trace.typed or "",
+            ANSWER_FIELD: trace.cleanup_answer or "",
+            CONTEXT_FIELD: trace.context_before,
+            WINDOW_FIELD: trace.window,
+        })
+    return fields
 
 
 def _audio_levels(audio: AudioSegment) -> _AudioLevels:
@@ -188,12 +216,15 @@ class SessionDiagnostics:
         requested_at: datetime,
         kind: str = "dictation",
         output_seconds: float = 0.0,
+        trace: DictationTrace | None = None,
     ) -> None:
         """Log one transcription; a voice edit's ``text`` is its instruction.
 
         ``output_seconds`` is the part of the wall time spent after the
         engine, in the text pipeline and the writing model; the timing
-        estimate leaves it out.
+        estimate leaves it out. ``trace`` adds what the writing model made
+        of it and what was typed: its outcome always, its text only while
+        content capture is on, like the transcript itself.
         """
         index = self._next_transcription_index()
         finished_at = utc_now()
@@ -264,6 +295,7 @@ class SessionDiagnostics:
                     "word_count": len(text.split()),
                     "is_empty": not text.strip(),
                     "error": error,
+                    **_trace_fields(trace, capture_content),
                 }
             )
         _logger.info(

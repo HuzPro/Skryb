@@ -158,6 +158,26 @@ export interface HistoryEntry {
   error: string | null;
   has_audio: boolean;
   kind: "dictation" | "edit";
+  writing: WritingRecord | null;
+}
+
+export type CleanupOutcome = "" | "applied" | "rejected" | "too_slow" | "skipped";
+
+/** What the writing model made of a dictation. Text fields are empty when history was off. */
+export interface WritingRecord {
+  outcome: CleanupOutcome;
+  reason: string;
+  seconds: number | null;
+  answer: string;
+  typed: string;
+  context_before: string;
+  window: string;
+}
+
+export interface TrackRecord {
+  dictations: number;
+  outcomes: Partial<Record<Exclude<CleanupOutcome, "">, number>>;
+  rejections: { reason: string; count: number }[];
 }
 
 export interface EngineInfo {

@@ -11,6 +11,14 @@ from tests.fakes.writing import (
 )
 from voicetotext.edit_capture.window import ForegroundWindow
 from voicetotext.output.caret_context import NO_CONTEXT, CaretContext
+from voicetotext.output.dictation_trace import (
+    APPLIED,
+    REJECTED,
+    SKIPPED,
+    TOO_SLOW,
+    begin_trace,
+    end_trace,
+)
 from voicetotext.output.dictionary_config import DictionaryConfig, DictionaryOptions, LiteralRule
 from voicetotext.output.text_pipeline import TextPipeline
 from voicetotext.writing.cleanup import (
@@ -334,3 +342,72 @@ class TestPipelineModes:
 
         assert "REWRITTEN" not in pipeline.process("keep my exact words")
         assert model.requests == []
+
+
+class TestWhatHistoryGetsToSee:
+    """The trace history keeps, so a bad cleanup can be seen for what it was."""
+
+    @pytest.fixture(autouse=True)
+    def trace(self):
+        trace = begin_trace()
+        yield trace
+        end_trace()
+
+    def test_an_applied_cleanup_keeps_the_answer_its_time_and_what_the_model_was_shown(self, trace):
+        clock = FakeClock()
+        client = ScriptedClient(answer="Testing 1, 2, 3, 4.", clock=clock, takes=0.4)
+        context = CaretContext(before="Hi Aïsha, ", selected="", after="")
+
+        _stage(client, clock)("testing 1, 2, 3, 4", lambda: context)
+
+        assert (trace.cleanup, trace.cleanup_reason) == (APPLIED, "")
+        assert trace.cleanup_answer == "Testing 1, 2, 3, 4."
+        assert trace.cleanup_seconds == pytest.approx(0.4)
+        assert trace.context_before == "Hi Aïsha, "
+        assert trace.window == "Re: Invoice for Aïsha (outlook.exe)"
+
+    def test_a_rejected_answer_is_kept_with_the_reason_it_was_not_used(self, trace):
+        client = ScriptedClient(answer="Meet me at 4 PM on the 14th.")
+
+        typed = _stage(client)("Meet me at 3 PM on the 14th.", _no_context)
+
+        assert typed == "Meet me at 3 PM on the 14th."
+        assert (trace.cleanup, trace.cleanup_reason) == (REJECTED, "a number changed")
+        assert trace.cleanup_answer == "Meet me at 4 PM on the 14th."
+
+    def test_an_answer_that_came_too_late_is_kept_and_marked_too_slow(self, trace):
+        clock = FakeClock()
+        client = ScriptedClient(answer="A tidy answer.", clock=clock, takes=4.5)
+
+        _stage(client, clock, deadline_seconds=4.0)("a tidy answer", _no_context)
+
+        assert trace.cleanup == TOO_SLOW
+        assert trace.cleanup_reason == "it took 4.50s, over the 4.0s limit"
+        assert trace.cleanup_answer == "A tidy answer."
+
+    def test_a_busy_model_is_recorded_as_skipped_with_no_answer(self, trace):
+        client = ScriptedClient(error=WritingUnavailable("the writing model is busy"))
+
+        _stage(client)("hello there", _no_context)
+
+        assert (trace.cleanup, trace.cleanup_reason) == (SKIPPED, "the writing model is busy")
+        assert trace.cleanup_answer is None
+
+    def test_nothing_around_the_cursor_is_recorded_when_context_is_off_or_the_app_is_denied(self):
+        context = CaretContext(before="master password is hunter2 ", selected="", after="")
+        for stage in (_stage(ScriptedClient(), context=False), _stage(ScriptedClient(), window=_KEEPASS)):
+            trace = begin_trace()
+            stage("and the other one", lambda: context)
+            end_trace()
+
+            assert (trace.context_before, trace.window) == ("", "")
+
+    def test_with_cleanup_off_the_trace_says_the_model_was_not_asked(self, trace):
+        _stage(ScriptedClient(), cleanup="off")("hello there", _no_context)
+
+        assert (trace.cleanup, trace.cleanup_answer) == ("", None)
+
+    def test_cleanup_still_works_with_no_trace_running(self):
+        end_trace()
+
+        assert _stage(ScriptedClient(answer="Hello there."))("hello there", _no_context) == "Hello there."
