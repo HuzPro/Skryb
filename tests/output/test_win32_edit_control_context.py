@@ -3,8 +3,10 @@
 The Win32 surface is hand-faked rather than mocked: a fake ``user32`` holds
 one window's class name, text and selection and answers the three messages
 from them, so the slicing these tests exercise is the real one. Nothing here
-touches ``ctypes.windll``, so the file runs on any platform.
+touches ``ctypes.windll`` except the one real-window test, which is Windows only.
 """
+
+import sys
 
 import pytest
 
@@ -258,3 +260,30 @@ class TestForegroundCaret:
         with pytest.raises(OSError):
             module.foreground_has_caret()
         assert read_edit_control_context() == NO_CONTEXT
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="real Win32 windows")
+def test_only_windows_directly_inside_count_and_never_the_whole_desktop(tk_root) -> None:
+    import ctypes
+    import tkinter
+
+    from voicetotext.output.win32_edit_control_context import has_child_window_of_class
+
+    window = tkinter.Toplevel(tk_root)
+    try:
+        tkinter.Frame(window).pack()
+        button = tkinter.Button(window, text="after")
+        button.pack()
+        window.update()
+        button.winfo_id()  # Tk makes a widget's native window on demand
+        inner = window.winfo_id()
+        wrapper = int(window.wm_frame(), 16)
+        desktop = ctypes.windll.user32.GetDesktopWindow()
+
+        assert has_child_window_of_class(inner, frozenset({"Button"}))
+        assert has_child_window_of_class(inner, frozenset({"Chrome_WidgetWin_0", "Button"}))
+        assert not has_child_window_of_class(inner, frozenset({"Chrome_WidgetWin_0"}))
+        assert not has_child_window_of_class(wrapper, frozenset({"Button"}))
+        assert not has_child_window_of_class(desktop, frozenset({"TkTopLevel"}))
+    finally:
+        window.destroy()
