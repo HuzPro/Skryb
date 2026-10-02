@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from voicetotext.output.dictation_trace import (
     ANSWER_FIELD,
@@ -333,7 +333,9 @@ def _session_file(session_dir: Path, relative: object) -> Path | None:
     if not isinstance(relative, str) or not relative.strip():
         return None
     path = Path(relative.strip())
-    if path.anchor or ".." in path.parts:
+    # Judged under both path flavours: "C:/Windows/x.wav" is relative on Linux.
+    anchored = PureWindowsPath(path).anchor or PurePosixPath(path).anchor
+    if anchored or ".." in path.parts:
         return None
     return session_dir / path
 

@@ -115,7 +115,8 @@ _VK_RBUTTON = 0x02
 _SM_SWAPBUTTON = 23
 
 _LRESULT = ctypes.c_ssize_t
-_WNDPROC = ctypes.WINFUNCTYPE(
+# CFUNCTYPE stands in off Windows, so the pure drawing code imports on CI.
+_WNDPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(
     _LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
 )
 
