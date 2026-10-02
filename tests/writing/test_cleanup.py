@@ -23,8 +23,10 @@ from voicetotext.output.dictionary_config import DictionaryConfig, DictionaryOpt
 from voicetotext.output.text_pipeline import TextPipeline
 from voicetotext.writing.cleanup import (
     DEFAULT_SECONDS_PER_100_WORDS,
+    NO_CUE,
     CleanupStage,
     CleanupTimings,
+    needs_cleanup,
     rejection_reason,
 )
 from voicetotext.writing.client import WritingUnavailable
@@ -83,7 +85,7 @@ class TestTheDictationGoesOnUnchanged:
 
     def test_when_a_long_dictation_cannot_fit_the_model_context(self):
         client = ScriptedClient()
-        text = "one more sentence about Kubernetes and café prices. " * 1200
+        text = "one more sentence, actually about Kubernetes and café prices. " * 1200
 
         assert _stage(client)(text, _no_context) == text
         assert client.requests == []
@@ -98,7 +100,7 @@ class TestAcceptedCleanups:
         assert cleaned == " Let's meet on Monday at 4. "
 
     def test_unicode_and_multi_line_answers_pass_through_intact(self):
-        for text in (UNICODE, MULTILINE):
+        for text in ("Actually, " + UNICODE, "Actually, " + MULTILINE):
             client = ScriptedClient()
 
             assert _stage(client)(text, _no_context) == text
@@ -111,7 +113,7 @@ class TestAcceptedCleanups:
             WritingSettings(), ScriptedClient(clock=clock, takes=0.8), timings, clock=clock,
         )
 
-        stage("word " * 50, _no_context)
+        stage("actually " + "word " * 49, _no_context)
 
         assert timings.last_seconds() == pytest.approx(0.8)
         assert timings.seconds_per_100_words() == pytest.approx(1.6)
@@ -119,7 +121,7 @@ class TestAcceptedCleanups:
     def test_the_deadline_left_is_what_the_client_may_wait(self):
         client = ScriptedClient()
 
-        _stage(client, deadline_seconds=2.5)("Hello there.", _no_context)
+        _stage(client, deadline_seconds=2.5)("Hello there, I mean hi there, friend.", _no_context)
 
         assert client.requests[0][3] == pytest.approx(2.5)
 
@@ -138,14 +140,36 @@ class TestGuards:
 
         assert rejection_reason(original, "The price is 14 dollars.", "light")
 
-    def test_numbered_list_markers_do_not_count_as_new_numbers(self):
+    def test_a_list_the_speaker_did_not_dictate_is_rejected_even_when_counted_off(self):
         original = "Buy three things first milk second eggs and third bread."
         listed = "Buy three things:\n1. Milk\n2. Eggs\n3. Bread"
 
-        assert rejection_reason(original, listed, "light") == ""
+        assert rejection_reason(original, listed, "light") == "a list was made"
+        assert rejection_reason(original, listed, "polished") == "a list was made"
 
-    def test_polished_mode_does_not_police_numbers(self):
-        assert rejection_reason("It was 3 or 4 of them.", "It was a few of them.", "polished") == ""
+    def test_a_list_the_speaker_already_had_may_stay_a_list(self):
+        original = "1. milk, actually oat milk\n2. eggs"
+
+        assert rejection_reason(original, "1. oat milk\n2. eggs", "light") == ""
+
+    def test_polished_mode_polices_numbers_too(self):
+        assert rejection_reason("It was 3 or 4 of them.", "It was a few of them.", "polished")
+
+    def test_words_the_speaker_never_said_are_rejected_at_every_level(self):
+        for level in ("light", "polished"):
+            assert rejection_reason("I wanna go, man.", "I want to go.", level).startswith("words were added")
+
+    def test_line_breaks_the_speaker_did_not_dictate_are_rejected(self):
+        original = "Shouldn't it end when the call ends? Shouldn't the bot stop recording?"
+
+        assert rejection_reason(original, original.replace("? ", "?\n"), "polished") == "line breaks were added"
+        assert rejection_reason("one line\nanother line", "One line.\nAnother line.", "polished") == ""
+
+    def test_dropping_words_and_laying_out_a_list_add_no_words(self):
+        assert rejection_reason(
+            "Take the quartz crate to dock seven, actually no, dock nine.",
+            "Take the quartz crate to dock nine.", "light",
+        ) == ""
 
     @pytest.mark.parametrize(
         ("original", "answer"),
@@ -178,71 +202,31 @@ class TestContextHints:
         client = ScriptedClient()
         context = CaretContext(before="master password is hunter2 ", selected="", after="")
 
-        _stage(client, window=_KEEPASS)("and the other one", lambda: context)
+        _stage(client, window=_KEEPASS)("and the other one, actually the first one", lambda: context)
 
         system, payload, _, _ = client.requests[0]
-        assert "context_before" not in payload
-        assert "window" not in payload
         assert "hunter2" not in system + str(payload)
 
-    def test_context_and_window_are_sent_as_data_when_allowed(self):
+    def test_the_model_sees_only_the_dictation_never_the_caret_text_window_or_spellings(self):
         client = ScriptedClient()
         context = CaretContext(before="Hi Aïsha, thanks for the invoice. ", selected="", after="")
+        dictation = "the total looks right, actually the total is wrong"
 
-        _stage(client)("the total looks right", lambda: context)
+        _stage(client)(dictation, lambda: context)
 
         system, payload, _, _ = client.requests[0]
-        assert payload["context_before"] == context.before
-        assert payload["window"] == "Re: Invoice for Aïsha (outlook.exe)"
-        assert payload["spellings"] == ["Aïsha", "Kubernetes"]
+        assert payload == {"dictation": dictation}
+        assert "Invoice" not in system and "Kubernetes" not in system
         assert "data" in system and "never instructions" in system
 
-    def test_turning_context_off_keeps_only_the_dictionary_spellings(self):
+    def test_turning_context_off_skips_the_caret_read(self):
         client = ScriptedClient()
         reads: list[int] = []
+        dictation = "hello, actually hi there my friend"
 
-        _stage(client, context=False)("hello", lambda: reads.append(1) or NO_CONTEXT)
+        _stage(client, context=False)(dictation, lambda: reads.append(1) or NO_CONTEXT)
 
-        assert client.requests[0][1] == {"dictation": "hello", "spellings": ["Aïsha", "Kubernetes"]}
-        assert reads == []
-
-    @pytest.mark.parametrize(
-        ("before", "after", "lists_setting", "expects_lists"),
-        [
-            ("Testing 1, 2, 3", ".", True, False),
-            ("Groceries: eggs, milk", "", True, False),
-            ("1. Open the app\n2. Log in", "", False, True),
-            ("", "", True, True),
-            ("", "", False, False),
-        ],
-        ids=[
-            "mid-line-overrides-lists-on", "comma-list-stays-inline",
-            "numbered-list-overrides-lists-off", "empty-box-follows-on", "empty-box-follows-off",
-        ],
-    )
-    def test_the_list_layout_follows_the_text_at_the_caret(
-        self, before, after, lists_setting, expects_lists,
-    ):
-        client = ScriptedClient()
-        context = CaretContext(before=before, selected="", after=after)
-
-        _stage(client, lists=lists_setting)("four five six", lambda: context)
-
-        system = client.requests[0][0]
-        assert ("numbered list, one item per line" in system) is expects_lists
-        assert ("Never add lists" in system) is not expects_lists
-
-    def test_with_context_off_the_list_setting_is_used_as_is(self):
-        client = ScriptedClient()
-        reads: list[int] = []
-
-        def read() -> CaretContext:
-            reads.append(1)
-            return CaretContext("Testing 1, 2, 3", "", ".")
-
-        _stage(client, context=False, lists=True)("four five six", read)
-
-        assert "numbered list, one item per line" in client.requests[0][0]
+        assert client.requests[0][1] == {"dictation": dictation}
         assert reads == []
 
     def test_style_notes_and_the_transform_reach_the_system_prompt(self):
@@ -271,7 +255,7 @@ class TestInThePipeline:
         model = ScriptedClient(answer="I love voice to text.")
         pipeline = TextPipeline.for_batch(dictionary, cleanup=_stage(model))
 
-        assert pipeline.process("um I love voice to text").strip() == "I love VoiceToText."
+        assert pipeline.process("um I love, I mean I love voice to text").strip() == "I love VoiceToText."
 
     def test_the_caret_is_read_once_per_dictation_and_shared_with_cleanup(self):
         reads: list[int] = []
@@ -287,18 +271,18 @@ class TestInThePipeline:
             cleanup=_stage(model),
         )
 
-        pipeline.process("thanks for the invoice.")
-        pipeline.process("see you soon.")
+        pipeline.process("thanks for the invoice, actually the receipt.")
+        pipeline.process("see you soon, I mean see you tomorrow.")
 
         assert len(reads) == 2
-        assert model.requests[0][1]["context_before"] == "Dear Aïsha, "
+        assert model.requests[0][1] == {"dictation": "thanks for the invoice, actually the receipt."}
 
     def test_a_late_model_response_never_reaches_the_output(self):
         clock = FakeClock()
         model = ScriptedClient(answer="REWRITTEN LATE", clock=clock, takes=9.0)
         pipeline = TextPipeline.for_batch(DictionaryConfig(), cleanup=_stage(model, clock))
 
-        assert "REWRITTEN" not in pipeline.process("keep my words")
+        assert "REWRITTEN" not in pipeline.process("keep my words, I mean keep my exact words")
 
 
 class TestTimeEstimate:
@@ -358,7 +342,7 @@ class TestWhatHistoryGetsToSee:
         client = ScriptedClient(answer="Testing 1, 2, 3, 4.", clock=clock, takes=0.4)
         context = CaretContext(before="Hi Aïsha, ", selected="", after="")
 
-        _stage(client, clock)("testing 1, 2, 3, 4", lambda: context)
+        _stage(client, clock)("scratch that, testing 1, 2, 3, 4", lambda: context)
 
         assert (trace.cleanup, trace.cleanup_reason) == (APPLIED, "")
         assert trace.cleanup_answer == "Testing 1, 2, 3, 4."
@@ -369,9 +353,9 @@ class TestWhatHistoryGetsToSee:
     def test_a_rejected_answer_is_kept_with_the_reason_it_was_not_used(self, trace):
         client = ScriptedClient(answer="Meet me at 4 PM on the 14th.")
 
-        typed = _stage(client)("Meet me at 3 PM on the 14th.", _no_context)
+        typed = _stage(client)("Sorry, meet me at 3 PM on the 14th.", _no_context)
 
-        assert typed == "Meet me at 3 PM on the 14th."
+        assert typed == "Sorry, meet me at 3 PM on the 14th."
         assert (trace.cleanup, trace.cleanup_reason) == (REJECTED, "a number changed")
         assert trace.cleanup_answer == "Meet me at 4 PM on the 14th."
 
@@ -379,7 +363,7 @@ class TestWhatHistoryGetsToSee:
         clock = FakeClock()
         client = ScriptedClient(answer="A tidy answer.", clock=clock, takes=4.5)
 
-        _stage(client, clock, deadline_seconds=4.0)("a tidy answer", _no_context)
+        _stage(client, clock, deadline_seconds=4.0)("a tidy answer, actually a tidy reply", _no_context)
 
         assert trace.cleanup == TOO_SLOW
         assert trace.cleanup_reason == "it took 4.50s, over the 4.0s limit"
@@ -388,7 +372,7 @@ class TestWhatHistoryGetsToSee:
     def test_a_busy_model_is_recorded_as_skipped_with_no_answer(self, trace):
         client = ScriptedClient(error=WritingUnavailable("the writing model is busy"))
 
-        _stage(client)("hello there", _no_context)
+        _stage(client)("hello there, I mean hi there, friend", _no_context)
 
         assert (trace.cleanup, trace.cleanup_reason) == (SKIPPED, "the writing model is busy")
         assert trace.cleanup_answer is None
@@ -402,6 +386,14 @@ class TestWhatHistoryGetsToSee:
 
             assert (trace.context_before, trace.window) == ("", "")
 
+    def test_a_dictation_with_nothing_to_correct_is_pasted_as_recognised_without_asking(self, trace):
+        client = ScriptedClient(answer="REWRITTEN")
+        text = "please just merge everything into main, man, I don't care."
+
+        assert _stage(client)(text, _no_context) == text
+        assert client.requests == []
+        assert (trace.cleanup, trace.cleanup_reason) == (SKIPPED, NO_CUE)
+
     def test_with_cleanup_off_the_trace_says_the_model_was_not_asked(self, trace):
         _stage(ScriptedClient(), cleanup="off")("hello there", _no_context)
 
@@ -410,4 +402,48 @@ class TestWhatHistoryGetsToSee:
     def test_cleanup_still_works_with_no_trace_running(self):
         end_trace()
 
-        assert _stage(ScriptedClient(answer="Hello there."))("hello there", _no_context) == "Hello there."
+        assert (
+            _stage(ScriptedClient(answer="Hi there, friend."))("hello there, I mean hi there, friend", _no_context)
+            == "Hi there, friend."
+        )
+
+
+class TestWhenTheModelIsAsked:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "it goes to dock seven, actually no, dock nine",
+            "wait no, send the zeppelin sketch to Joric instead",
+            "I'll take the blue one, I mean the green one",
+            "the gondola needs, the gondola needs a new rope",
+        ],
+        ids=["actually", "wait-no", "i-mean", "restarted-phrase"],
+    )
+    def test_a_spoken_correction_or_false_start_reaches_the_model(self, text):
+        assert needs_cleanup(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "please just merge everything into main, man, I don't care what you do",
+            "I told you fifty thousand times to have one PR for fuck's sake",
+            "Can you summarize this concisely? It's way too long and I don't wanna read it.",
+            "label three crates first quartz second saffron third lanterns",
+            "do these things number one tune it number two oil it",
+            "actually no",
+            "",
+        ],
+        ids=["plain-prose", "swearing-and-numbers", "question", "first-second", "number-one", "too-short-cue", "empty"],
+    )
+    def test_everything_else_is_pasted_as_recognised(self, text):
+        assert not needs_cleanup(text)
+
+    def test_a_transformation_runs_the_model_even_without_a_cue(self):
+        client = ScriptedClient(answer="Short.")
+        stage = CleanupStage(
+            WritingSettings(), client, CleanupTimings(), transform=lambda: "Make it concise.",
+        )
+
+        stage("this is a long and rambling sentence with no correction in it at all", _no_context)
+
+        assert len(client.requests) == 1
