@@ -1,7 +1,5 @@
 import re
 
-import pytest
-
 from voicetotext.writing.prompt import cleanup_system_prompt
 from voicetotext.writing.settings import WritingSettings
 
@@ -20,20 +18,19 @@ _JSON_KEYS = {"dictation", "spellings", "input", "output"}
 
 
 def _example_words(prompt: str) -> set[str]:
-    examples = prompt.split("Examples:\n", 1)[1].split("\nLevel: ", 1)[0]
+    examples = prompt.split("Examples:\n", 1)[1]
     return set(re.findall(r"[^\W\d_]+", examples.casefold())) - _JSON_KEYS
 
 
-@pytest.mark.parametrize("lists", [True, False], ids=["lists", "prose"])
-def test_the_examples_use_no_everyday_shopping_or_agenda_words(lists):
-    prompt = cleanup_system_prompt(WritingSettings(lists=lists))
+def test_the_examples_use_no_everyday_shopping_or_agenda_words():
+    prompt = cleanup_system_prompt(WritingSettings())
 
     words = _example_words(prompt)
 
     assert len(words) > 30
     assert not words & _EVERYDAY_WORDS
     assert "Never take words from the examples." in prompt
-    assert "Never add an item." in prompt
+    assert "Never make lists" in prompt
 
 
 def test_a_part_note_goes_after_the_shared_prompt_so_every_part_reuses_its_cache():
@@ -44,3 +41,21 @@ def test_a_part_note_goes_after_the_shared_prompt_so_every_part_reuses_its_cache
 
     assert second == whole + "\nThis is part 2 of 3 of one dictation; clean only this part."
     assert cleanup_system_prompt(settings, ("No sign-off.",), "", part=(1, 1)) == whole
+
+
+def test_the_rules_and_examples_are_the_same_for_every_setting_so_the_server_cache_holds():
+    prefixes = {
+        cleanup_system_prompt(WritingSettings(cleanup=level, lists=lists)).split("\nLevel: ")[0]
+        for level in ("light", "polished")
+        for lists in (True, False)
+    }
+
+    assert len(prefixes) == 1
+
+
+def test_the_model_is_told_to_keep_the_speakers_words_slang_and_swearing():
+    prompt = cleanup_system_prompt(WritingSettings(cleanup="polished"))
+
+    assert "slang, swearing" in prompt
+    assert "Do not fix grammar" in prompt
+    assert "never replace, add or remove a word" in prompt

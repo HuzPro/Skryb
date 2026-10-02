@@ -4,7 +4,6 @@ Every way this stage can fail ends the same way: the dictation goes on
 exactly as it came in, so cleanup can only ever add polish, never lose text.
 """
 
-import dataclasses
 import logging
 import re
 import threading
@@ -15,7 +14,7 @@ from typing import Protocol
 
 from voicetotext.edit_capture.recorder import DENIED_PROCESSES
 from voicetotext.edit_capture.window import ForegroundWindow
-from voicetotext.output.caret_context import NO_CONTEXT, CaretContext, ListLayout, list_layout
+from voicetotext.output.caret_context import NO_CONTEXT, CaretContext
 from voicetotext.output.dictation_trace import (
     APPLIED,
     REJECTED,
@@ -54,6 +53,22 @@ _CORRECTED_NUMBER = re.compile(
     re.IGNORECASE,
 )
 _NEGATION = re.compile(r"\b(?:not|never|cannot|without)\b|n't\b", re.IGNORECASE)
+_WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)*")
+# The model's only jobs are a spoken correction and a false start. Of 302
+# real dictations, under 30 had one; calling the model on the rest cost
+# 0.4 s each and gave nothing but rewrites ("According to the." became
+# "According to God"). Without a cue the dictation is pasted as recognised.
+# Spoken lists are not a job: every list the model laid out from a real
+# dictation was wrong, so a list in its answer is rejected below.
+_CUES = re.compile(
+    r"\b(?:actually|no wait|wait no|i mean|make (?:that|it)|scratch that|strike that|"
+    r"never ?mind|sorry|correction)\b"
+    # a restarted phrase: "the gondola needs, the gondola needs a rope"
+    r"|\b((?:[^\W\d_]+ ){1,3}[^\W\d_]+)[,.]? \1\b",
+    re.IGNORECASE,
+)
+_MIN_WORDS = 6
+NO_CUE = "no spoken correction, false start or list"
 # Words that soften a claim. "I was thinking" is left out: as a lead-in
 # ("so I was thinking we should...") it is filler, not doubt.
 _HEDGES = ("maybe", "perhaps", "probably", "might", "not sure", "i think", "i guess")
@@ -126,17 +141,19 @@ class CleanupStage:
         started = self._clock()
         transform = self._transform()
         dictation = text.strip()
+        trace = current_trace() or DictationTrace()
+        if not transform.strip() and not needs_cleanup(dictation):
+            return _outcome(text, trace, SKIPPED, NO_CUE)
         window = self._window() if self._settings.context else None
         context = (
             caret_context()
             if window is not None and window.process not in DENIED_PROCESSES
             else NO_CONTEXT
         )
-        system = cleanup_system_prompt(self._settings_at(context), self._style(), transform)
+        system = cleanup_system_prompt(self._settings, self._style(), transform)
         hints = self._hints(window, context)
-        trace = current_trace() or DictationTrace()
         trace.context_before, trace.window = hints.context_before, hints.window
-        user = cleanup_user_message(dictation, hints)
+        user = cleanup_user_message(dictation)
         max_tokens = estimated_tokens(dictation) * 2 + 64
         if estimated_tokens(system + user) + max_tokens > CONTEXT_TOKENS:
             return _outcome(text, trace, SKIPPED, "the dictation is too long for the writing model")
@@ -161,13 +178,6 @@ class CleanupStage:
         trace.cleanup = APPLIED
         return _with_edges_of(text, answer.strip())
 
-    def _settings_at(self, context: CaretContext) -> WritingSettings:
-        """The settings, with lists laid out the way the text at the caret already is."""
-        layout = list_layout(context)
-        if layout is None:
-            return self._settings
-        return dataclasses.replace(self._settings, lists=layout is ListLayout.VERTICAL)
-
     def _style(self) -> tuple[str, ...]:
         notes = self._settings.style_notes.strip()
         learned = self._learned_style() if self._settings.learn_style else ()
@@ -179,6 +189,11 @@ class CleanupStage:
             return Hints(spellings=self._spellings)
         title = f"{window.title} ({window.process})" if window.process else window.title
         return Hints(self._spellings, context.before, title)
+
+
+def needs_cleanup(dictation: str) -> bool:
+    """Whether the dictation has anything the model is for."""
+    return len(dictation.split()) >= _MIN_WORDS and _CUES.search(dictation) is not None
 
 
 _LOGGED_OUTCOMES = {SKIPPED: "skipped", TOO_SLOW: "discarded", REJECTED: "rejected"}
@@ -207,13 +222,28 @@ def rejection_reason(
         return "the answer talked to the speaker"
     if _is_quoted(answer) and not _is_quoted(original.strip()):
         return "the answer was wrapped in quotes"
-    if level == "light" and not _numbers_kept(original, answer):
+    if not _numbers_kept(original, answer):
         return "a number changed"
     if len(_NEGATION.findall(answer)) < len(_NEGATION.findall(original)):
         return "a negation was dropped"
     if _hedge_count(answer) < _hedge_count(original):
         return "a hedge was dropped"
+    if not transformed and (added := _added_words(original, answer)):
+        return "words were added: " + ", ".join(sorted(added)[:5])
+    if transformed:
+        return ""
+    if _LIST_MARKER.search(answer) and not _LIST_MARKER.search(original):
+        return "a list was made"
+    if "\n" in answer and "\n" not in original.strip():
+        return "line breaks were added"
     return ""
+
+
+def _added_words(original: str, cleaned: str) -> set[str]:
+    """Words in the answer the speaker never said; at any level, the model may
+    only drop words, never put words in the speaker's mouth."""
+    spoken = {word.casefold() for word in _WORD.findall(original)}
+    return {word.casefold() for word in _WORD.findall(cleaned)} - spoken
 
 
 def _numbers_kept(original: str, cleaned: str) -> bool:

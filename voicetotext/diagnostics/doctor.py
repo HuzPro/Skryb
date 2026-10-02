@@ -25,7 +25,7 @@ from voicetotext.writing.llama_server import (
     ServerState,
     last_line,
 )
-from voicetotext.writing.prompt import Hints, cleanup_system_prompt, cleanup_user_message
+from voicetotext.writing.prompt import cleanup_system_prompt, cleanup_user_message
 from voicetotext.writing.settings import WritingSettings, read_writing_settings
 
 _CTRANSLATE2_INSTALL_HINT = "see INSTALL.md - the wheel differs per GPU vendor"
@@ -258,7 +258,7 @@ def _time_one_cleanup(
     answer = post_completion(
         endpoint,
         cleanup_system_prompt(settings),
-        cleanup_user_message(_WRITING_SAMPLE, Hints()),
+        cleanup_user_message(_WRITING_SAMPLE),
         64,
         30.0,
     )
