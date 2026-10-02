@@ -24,7 +24,7 @@ from voicetotext.writing.install import (
 )
 from voicetotext.writing.learning import Learner
 from voicetotext.writing.llama_server import LlamaServer, ServerState, ServerStatus
-from voicetotext.writing.prompt import Hints, cleanup_system_prompt, cleanup_user_message
+from voicetotext.writing.prompt import cleanup_system_prompt, cleanup_user_message
 from voicetotext.writing.settings import WritingSettings
 from voicetotext.writing.transforms import TransformStore
 
@@ -79,7 +79,7 @@ def warm_up_writing_model(
     post_completion(
         endpoint,
         cleanup_system_prompt(settings()),
-        cleanup_user_message(_WARM_UP_DICTATION, Hints()),
+        cleanup_user_message(_WARM_UP_DICTATION),
         96,
         _WARM_UP_SECONDS,
     )
