@@ -64,6 +64,10 @@ def _no_warning() -> float:
     return 0.0
 
 
+def _never_wake() -> float:
+    return 0.0
+
+
 class RecordAndTranscribeUseCase:
 
     def __init__(
@@ -83,6 +87,8 @@ class RecordAndTranscribeUseCase:
         writing_seconds: Callable[[float], float] = _no_writing_time,
         warn_before_cap_seconds: Callable[[], float] = _no_warning,
         last_dictation: LastDictation | None = None,
+        wake_after_idle_seconds: Callable[[], float] = _never_wake,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -137,6 +143,13 @@ class RecordAndTranscribeUseCase:
         # kept in memory so the notice beside it can still transcribe it.
         self._unfinished_audio: AudioSegment | None = None
         self._unfinished_lock = threading.Lock()
+        # After a quiet spell the first decode ran several times slower in
+        # the logs, most likely the GPU clocking down and the driver paging
+        # the idle model out. A recording that starts after this long wakes
+        # the engine while the speaker is still talking. Zero turns it off.
+        self._wake_after_idle_seconds = wake_after_idle_seconds
+        self._clock = clock
+        self._engine_used_at = clock()
         event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
     def on_hotkey_activated(self) -> None:
@@ -223,7 +236,33 @@ class RecordAndTranscribeUseCase:
     def _transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         heard = self._prepare_audio(audio)
         with self._engine_lock:
-            return self._engine.transcribe(heard)
+            try:
+                return self._engine.transcribe(heard)
+            finally:
+                self._engine_used_at = self._clock()
+
+    def _wake_engine_if_idle(self) -> None:
+        wake_after = self._wake_after_idle_seconds()
+        if wake_after <= 0 or self._clock() - self._engine_used_at < wake_after:
+            return
+        self._engine_used_at = self._clock()
+        self._dispatcher.dispatch(self._wake_engine)
+
+    def _wake_engine(self) -> None:
+        # The engine lock makes the dictation's own decode wait for this
+        # warmup rather than run beside it on the same GPU.
+        with self._engine_lock:
+            started = self._clock()
+            try:
+                self._engine.warmup()
+            except Exception as exc:  # noqa: BLE001 - the dictation decodes anyway
+                _logger.warning("Waking the engine after an idle spell failed: %s", exc)
+                return
+            finally:
+                self._engine_used_at = self._clock()
+        _logger.info(
+            "Engine woken after an idle spell in %.2fs.", self._engine_used_at - started,
+        )
 
     def retranscribe(
         self, wav_path: Path, on_done: Callable[[str | Exception], None],
@@ -232,9 +271,7 @@ class RecordAndTranscribeUseCase:
 
         def run() -> None:
             try:
-                audio = self._prepare_audio(load_wav(wav_path))
-                with self._engine_lock:
-                    result = self._engine.transcribe(audio)
+                result = self._transcribe(load_wav(wav_path))
             except Exception as exc:  # noqa: BLE001 - reported to the window
                 on_done(exc)
                 return
@@ -360,9 +397,13 @@ class RecordAndTranscribeUseCase:
         # background thread, before the state machine flips to
         # ``IDLE``.
         self._require_swappable_state()
-        old_engine = self._engine
-        self._engine = engine
-        old_engine.dispose()
+        # Under the engine lock, so a wake or a history retry still
+        # decoding finishes before its engine is disposed.
+        with self._engine_lock:
+            old_engine = self._engine
+            self._engine = engine
+            old_engine.dispose()
+            self._engine_used_at = self._clock()
         if self._streaming is not None:
             self._streaming.set_engine(None)
 
@@ -379,9 +420,10 @@ class RecordAndTranscribeUseCase:
             engine.dispose()
             raise EngineSwapError("no streaming controller configured")
         self._streaming.set_engine(engine)
-        old_engine = self._engine
-        self._engine = PlaceholderEngine()
-        old_engine.dispose()
+        with self._engine_lock:
+            old_engine = self._engine
+            self._engine = PlaceholderEngine()
+            old_engine.dispose()
 
     def _require_swappable_state(self) -> None:
         if self._state_machine.state not in {AppState.IDLE, AppState.LOADING}:
@@ -430,6 +472,7 @@ class RecordAndTranscribeUseCase:
         self._event_bus.publish(RecordingStartedEvent(caption=caption))
         self._schedule_cap_timer()
         _logger.info("Recording started.")
+        self._wake_engine_if_idle()
 
     def _start_streaming(self) -> None:
         try:
