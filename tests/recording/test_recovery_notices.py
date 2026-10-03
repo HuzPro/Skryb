@@ -41,8 +41,6 @@ class Setup:
             self.scheduled.append,
             retry=lambda: self.calls.append("retry"),
             open_history=lambda: self.calls.append("history"),
-            paste_again=lambda: self.calls.append("paste"),
-            copy_again=lambda: self.calls.append("copy"),
         )
 
     def publish_on_worker(self, event) -> None:
@@ -78,19 +76,8 @@ def test_nothing_to_paste_into_says_where_the_text_went() -> None:
     setup.publish_on_worker(DeliveryFailedEvent(reason="no_text_field", text="Hi — ✓"))
     setup.notice.press("Open history")
 
-    assert setup.notice.shown[0][0] == "Nothing to paste into. The text is on your clipboard."
+    assert setup.notice.shown[0][0] == "No text box here, so it's on your clipboard."
     assert setup.calls == ["history"]
-
-
-def test_a_paste_that_did_not_land_offers_paste_again_and_copy() -> None:
-    setup = Setup()
-
-    setup.publish_on_worker(DeliveryFailedEvent(reason="not_landed", text="Ship it."))
-    setup.notice.press("Paste again")
-    setup.notice.press("Copy")
-
-    assert setup.notice.shown[0][0] == "The paste did not land."
-    assert setup.calls == ["paste", "copy"]
 
 
 def test_a_cancel_offers_transcribe_anyway_only_when_there_is_audio() -> None:
@@ -109,7 +96,6 @@ def test_failures_are_marked_as_warnings_and_a_cancel_is_not() -> None:
     warned = []
     for event in (
         TranscriptionFailedEvent(error="CUDA OOM", recoverable=True),
-        DeliveryFailedEvent(reason="not_landed", text="Ship it."),
         DeliveryFailedEvent(reason="no_text_field", text="Zoë ✓"),
         RecordingCancelledEvent(recoverable=True),
     ):
@@ -117,7 +103,7 @@ def test_failures_are_marked_as_warnings_and_a_cancel_is_not() -> None:
         setup.publish_on_worker(event)
         warned.extend(setup.notice.warnings)
 
-    assert warned == [True, True, True, False]
+    assert warned == [True, True, False]
 
 
 def test_an_empty_transcription_shows_no_notice() -> None:

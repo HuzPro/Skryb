@@ -189,8 +189,7 @@ class DeliveryFailedEvent(DomainEvent):
     """Dictated text did not reach a text field; ``reason`` says why.
 
     ``reason`` is a :class:`voicetotext.output.app_aware_delivery.DeliveryFailure`
-    value: ``no_text_field`` (the text went to the clipboard instead) or
-    ``not_landed`` (the paste was sent but never showed up).
+    value: ``no_text_field`` (the text went to the clipboard instead).
     """
 
     reason: str = ""

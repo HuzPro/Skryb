@@ -8,7 +8,6 @@ from voicetotext.core.events import (
     RecordingCancelledEvent,
     TranscriptionFailedEvent,
 )
-from voicetotext.output.app_aware_delivery import DeliveryFailure
 from voicetotext.recording.notice import NoticeAction
 
 ScheduleOnGuiThread = Callable[[Callable[[], None]], None]
@@ -36,15 +35,11 @@ class RecoveryNotices:
         *,
         retry: Callable[[], None],
         open_history: Callable[[], None],
-        paste_again: Callable[[], None],
-        copy_again: Callable[[], None],
     ) -> None:
         self._notice = notice
         self._schedule = schedule
         self._retry = retry
         self._open_history = open_history
-        self._paste_again = paste_again
-        self._copy_again = copy_again
         event_bus.subscribe(TranscriptionFailedEvent, self._on_transcription_failed)
         event_bus.subscribe(DeliveryFailedEvent, self._on_delivery_failed)
         event_bus.subscribe(RecordingCancelledEvent, self._on_recording_cancelled)
@@ -61,18 +56,11 @@ class RecoveryNotices:
     def _on_delivery_failed(self, event: DomainEvent) -> None:
         if not isinstance(event, DeliveryFailedEvent):
             return
-        if event.reason == DeliveryFailure.NOT_LANDED.value:
-            self._show(
-                "The paste did not land.",
-                [("Paste again", self._paste_again), ("Copy", self._copy_again)],
-                warning=True,
-            )
-        else:
-            self._show(
-                "Nothing to paste into. The text is on your clipboard.",
-                [("Open history", self._open_history)],
-                warning=True,
-            )
+        self._show(
+            "No text box here, so it's on your clipboard.",
+            [("Open history", self._open_history)],
+            warning=True,
+        )
 
     def _on_recording_cancelled(self, event: DomainEvent) -> None:
         if isinstance(event, RecordingCancelledEvent) and event.recoverable:
