@@ -173,6 +173,11 @@ class SessionDiagnostics:
     def _engine_key(self) -> str:
         return engine_key(self._active_model, self._active_engine, self._active_device)
 
+    @property
+    def active_device(self) -> str:
+        """The device the engine last loaded on, or the configured one before that."""
+        return self._active_device
+
     def engine_loaded(self, seconds: float, device: str) -> None:
         model, engine = self._model_context()
         self._active_model = model

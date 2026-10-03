@@ -395,6 +395,99 @@ class TestHotSwapEngine:
         new_engine.dispose.assert_not_called()
 
 
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _build_waking_use_case(
+    clock: _Clock,
+    wake_after: float = 60.0,
+    dispatcher: ActionDispatcher | None = None,
+):
+    event_bus = SimpleEventBus()
+    recorder = MagicMock()
+    engine = MagicMock()
+    use_case = RecordAndTranscribeUseCase(
+        recorder=recorder,
+        engine=engine,
+        output=MagicMock(),
+        state_machine=AppStateMachine(event_bus, initial_state=AppState.IDLE),
+        event_bus=event_bus,
+        action_dispatcher=dispatcher or InlineActionDispatcher(),
+        diagnostics=MagicMock(spec=SessionDiagnostics),
+        wake_after_idle_seconds=lambda: wake_after,
+        clock=clock,
+    )
+    return use_case, recorder, engine
+
+
+class TestWakeAfterIdle:
+    def test_a_recording_after_a_quiet_spell_wakes_the_engine(self) -> None:
+        clock = _Clock()
+        use_case, _, engine = _build_waking_use_case(clock)
+        clock.now += 61
+
+        use_case.on_hotkey_activated()
+
+        engine.warmup.assert_called_once()
+
+    def test_a_recording_soon_after_the_last_decode_does_not(self) -> None:
+        clock = _Clock()
+        use_case, recorder, engine = _build_waking_use_case(clock)
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("hello")
+        clock.now += 61
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+        engine.warmup.reset_mock()
+        clock.now += 30
+
+        use_case.on_hotkey_activated()
+
+        engine.warmup.assert_not_called()
+
+    def test_zero_turns_waking_off(self) -> None:
+        clock = _Clock()
+        use_case, _, engine = _build_waking_use_case(clock, wake_after=0.0)
+        clock.now += 3600
+
+        use_case.on_hotkey_activated()
+
+        engine.warmup.assert_not_called()
+
+    def test_the_wake_runs_before_the_dictation_is_decoded(self) -> None:
+        clock = _Clock()
+        dispatcher = DeferredActionDispatcher()
+        use_case, recorder, engine = _build_waking_use_case(clock, dispatcher=dispatcher)
+        recorder.stop_recording.return_value = _make_audio()
+        engine.transcribe.return_value = _make_result("hello")
+        clock.now += 61
+
+        use_case.on_hotkey_activated()
+        dispatcher.drain_all()
+        use_case.on_hotkey_activated()
+        dispatcher.drain_all()
+
+        assert [call[0] for call in engine.method_calls] == ["warmup", "transcribe"]
+
+    def test_a_failed_wake_still_lets_the_dictation_through(self) -> None:
+        clock = _Clock()
+        use_case, recorder, engine = _build_waking_use_case(clock)
+        recorder.stop_recording.return_value = _make_audio()
+        engine.warmup.side_effect = RuntimeError("driver hiccup")
+        engine.transcribe.return_value = _make_result("hello")
+        clock.now += 61
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+        engine.transcribe.assert_called_once()
+
+
 class TestLoadingStateBehaviour:
     """While the engine is loading on a background thread, the use case
     holds a :class:`PlaceholderEngine` and must (a) accept the real

@@ -230,6 +230,8 @@ def _ignore_delivery(text: str) -> None:
 # One per process, like the keyboard hook and the caret it stands in for.
 _paste_memory = PasteMemory(foreground_hwnd, click_count, VOICETOTEXT_INPUT_TAG)
 _REREAD_CARET_AFTER_SECONDS = 0.1
+# A recording that starts after a minute without a decode wakes the engine.
+_WAKE_AFTER_IDLE_SECONDS = 60.0
 
 
 # Folders that a sync client uploads. Edit capture records what the user
@@ -583,6 +585,19 @@ def _describe_dictation_shortcuts(config: JsonConfigAdapter) -> str:
 
 def _chosen_microphone(config: JsonConfigAdapter) -> str:
     return str(config.get("audio.input_device", "") or "")
+
+
+def _wake_after_idle_seconds(
+    config: JsonConfigAdapter, diagnostics: SessionDiagnostics,
+) -> float:
+    # A CPU engine has no clocked-down GPU to wake, and its warmup decode
+    # is slow enough to hold up the dictation behind it.
+    if diagnostics.active_device == "cpu":
+        return 0.0
+    value = config.get("transcription.wake_after_idle_seconds", _WAKE_AFTER_IDLE_SECONDS)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return _WAKE_AFTER_IDLE_SECONDS
+    return max(float(value), 0.0)
 
 
 def _prepare_audio(config: JsonConfigAdapter, audio: AudioSegment) -> AudioSegment:
@@ -1164,6 +1179,9 @@ def build_app(
         ),
         writing_seconds=functools.partial(_writing_seconds, config, writing),
         last_dictation=last_dictation,
+        wake_after_idle_seconds=functools.partial(
+            _wake_after_idle_seconds, config, diagnostics,
+        ),
     )
 
     def _use_learned_words() -> None:
