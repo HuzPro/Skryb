@@ -1,5 +1,6 @@
 import itertools
 import math
+import sys
 
 import numpy
 import pytest
@@ -111,6 +112,32 @@ class TestFinishingProgress:
 
     def test_a_zero_length_finish_is_simply_full(self):
         assert finishing_progress(0.3, 0.0, 0.0) == 1.0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows fonts")
+def test_the_pill_draws_its_text_in_segoe_ui_semibold() -> None:
+    from voicetotext.recording.pill import _font
+
+    assert _font(36).getname() == ("Segoe UI", "Semibold")
+
+
+class TestOnePill:
+    def test_the_transcribing_bar_takes_the_recording_pills_exact_size_and_place(self):
+        recording, transcribing = target_size(Mode.RECORDING), target_size(Mode.TRANSCRIBING)
+
+        assert transcribing == recording
+        assert pill_box(*transcribing) == pill_box(*recording)
+
+    def test_the_transcribing_bar_keeps_the_recording_pills_colour(self):
+        width, height = target_size(Mode.RECORDING)
+        left, top, _right, _bottom = pill_box(width, height)
+        # Bare pill in both: above the buttons, the waveform and the label.
+        point = (round(left + 60), round(top + 3))
+
+        recording = render(_recording_frame()).getpixel(point)
+        transcribing = render(Frame(width, height, 1.0, 0.0, 1.0)).getpixel(point)
+
+        assert transcribing == recording
 
 
 class TestSettledBar:
