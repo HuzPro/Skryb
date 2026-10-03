@@ -254,6 +254,7 @@ class TestPauseBreaks:
         [
             "I don't know what it's like. ",
             "What's it like? I'd love to know. ",
+            "Do you want tea or? ",
             "And? So what. ",
             "Plan A. Then plan B. ",
             "We went home. The end. ",

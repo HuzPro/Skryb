@@ -340,6 +340,9 @@ def join_pause_breaks(text: str) -> str:
 
 def _is_pause_mark(text: str, match: re.Match[str]) -> bool:
     word = match["word"]
+    if match["mark"] == "?" and match["next"] is None:
+        # "Do you want tea or?" ends a dictation as a real question.
+        return False
     if word in _PAUSE_ONLY_BEFORE_MORE:
         is_pause_word = match["mark"] == "." and match["next"] is not None
     else:
