@@ -124,6 +124,19 @@ _DOLLARS_AND_CENTS_PATTERN = re.compile(
 _DOLLARS_PATTERN = re.compile(
     rf"\b({_NUMBER})\s+dollars\b", re.IGNORECASE,
 )
+# Words a sentence never ends on. A full stop or question mark after one is
+# the transcriber hearing a pause to think, as in "Make a plan and. Do
+# adversarial reviews", so the sentence carries on through it.
+_NEVER_FINAL_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "my", "your", "our", "their",
+})
+# "like" can end a question ("What's it like?") or a whole sentence at the
+# end of a dictation, so only a full stop before more words is a pause.
+_PAUSE_ONLY_BEFORE_MORE = frozenset({"like"})
+_PAUSE_MARK = re.compile(
+    r"(?P<word>(?<![\w'’])[^\W\d_]+)(?P<mark>[.?])(?:[ \t]+(?P<next>\w[\w'’]*)|[ \t]*$)",
+)
+_SENTENCE_START = re.compile(r"(?:^|[.!?\n])[^.!?\n]*$")
 _PHONETIC_PRIORITY_BASE = 1 << 60
 _PHONETIC_DISTANCE_LIMIT = 0.34
 _MAX_PHONETIC_WORDS = 4
@@ -206,6 +219,9 @@ class TextPipeline:
             stages.append(PunctuationStage(backend).apply)
         if config.options.remove_fillers:
             stages.append(remove_fillers)
+        # Before spoken commands, so a full stop the speaker asked for by
+        # saying "period" is never taken for a pause.
+        stages.append(join_pause_breaks)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
         if cleanup is not None:
@@ -295,6 +311,57 @@ def apply_spoken_commands(text: str) -> str:
         cursor = action.end
     formatter.append_text(text[cursor:])
     return formatter.value()
+
+
+def join_pause_breaks(text: str) -> str:
+    """Carry a sentence on through a mark the transcriber put at a pause.
+
+    Only after a word no sentence ends on, and never after a sentence's
+    first word, where "And?" is a question of its own. The next word drops
+    its capital unless it is a name: "I", a word with capitals inside it,
+    or one written with a capital mid-sentence elsewhere in the dictation.
+    At the end of a dictation the mark goes and a space stays, so the next
+    dictation carries the sentence on.
+    """
+    names = _capitalized_mid_sentence(text)
+
+    def join(match: re.Match[str]) -> str:
+        word, following = match["word"], match["next"]
+        if not _is_pause_mark(text, match):
+            return match.group(0)
+        if following is None:
+            return word + " "
+        if following not in names and not _is_deliberate_capital(following):
+            following = following[0].lower() + following[1:]
+        return f"{word} {following}"
+
+    return _PAUSE_MARK.sub(join, text)
+
+
+def _is_pause_mark(text: str, match: re.Match[str]) -> bool:
+    word = match["word"]
+    if word in _PAUSE_ONLY_BEFORE_MORE:
+        is_pause_word = match["mark"] == "." and match["next"] is not None
+    else:
+        is_pause_word = word in _NEVER_FINAL_WORDS
+    if not is_pause_word:
+        return False
+    sentence = _SENTENCE_START.search(text, 0, match.start())
+    return sentence is not None and _WORD_PATTERN.search(sentence.group(0)) is not None
+
+
+def _capitalized_mid_sentence(text: str) -> set[str]:
+    """Capitalized words that follow another word, so are names, not sentence starts."""
+    return {
+        match.group(1)
+        for match in re.finditer(r"(?<=[\w,;:] )([A-Z][\w'’]*)", text)
+    }
+
+
+def _is_deliberate_capital(word: str) -> bool:
+    return word == "I" or word.startswith(("I'", "I’")) or any(
+        character.isupper() for character in word[1:]
+    )
 
 
 def add_trailing_sentence_space(text: str) -> str:
