@@ -1,5 +1,6 @@
 import itertools
 import math
+import sys
 
 import numpy
 import pytest
@@ -111,6 +112,13 @@ class TestFinishingProgress:
 
     def test_a_zero_length_finish_is_simply_full(self):
         assert finishing_progress(0.3, 0.0, 0.0) == 1.0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows fonts")
+def test_the_pill_draws_its_text_in_segoe_ui_semibold() -> None:
+    from voicetotext.recording.pill import _font
+
+    assert _font(36).getname() == ("Segoe UI", "Semibold")
 
 
 class TestOnePill:
