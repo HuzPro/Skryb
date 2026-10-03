@@ -490,8 +490,6 @@ def _deliver_with_hooks(
             gui=gui_dispatcher,
             on_failed=hooks.on_failed,
             text_field_focused=text_field_focused,
-            read_context=read_caret_context,
-            foreground=foreground_hwnd,
         )
     hooks.last_dictation.route(
         paste=delivery,
@@ -1312,8 +1310,6 @@ def build_app(
         gui_dispatcher.dispatch,
         retry=record_and_transcribe_use_case.retry_last_recording,
         open_history=functools.partial(show_page, "history"),
-        paste_again=record_and_transcribe_use_case.paste_last,
-        copy_again=record_and_transcribe_use_case.copy_last,
     )
     history_pruner = HistoryPruner(
         paths.diagnostics_dir, functools.partial(history_retention_days, config),
