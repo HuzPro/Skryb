@@ -11,6 +11,7 @@ from voicetotext.core.action_dispatcher import (
     ActionDispatcher,
     ThreadedActionDispatcher,
 )
+from voicetotext.core.build_info import RunningBuild, source_checkout
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
 from voicetotext.core.events import (
     DeliveryFailedEvent,
@@ -1334,6 +1335,7 @@ def build_app(
             on_devices_changed=hot_plug.devices_changed,
         ),
         on_open_settings=functools.partial(show_page, "settings"),
+        build_status=RunningBuild(source_checkout()).status,
         download_manager=download_manager,
         owned_disposables=(
             (overlay, ducking, history_pruner, writing) if overlay is not None

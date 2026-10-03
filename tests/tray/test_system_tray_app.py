@@ -73,6 +73,25 @@ class TestTrayIconFactoryInvocation:
         assert captured["initial_state"] == AppState.IDLE
 
 
+class TestStateLabel:
+    def test_the_menu_names_the_running_build_beside_the_state(self):
+        app = SystemTrayApp(
+            use_case=MagicMock(),
+            state_machine=AppStateMachine(event_bus=SimpleEventBus()),
+            event_bus=SimpleEventBus(),
+            hotkey_listener=MagicMock(),
+            tray_factory=lambda **kwargs: MagicMock(),
+            build_status=lambda: "main fe502a2, restart for main 1a2b3c4",
+        )
+
+        assert app._current_state_label() == (
+            "Idle - ready  ·  main fe502a2, restart for main 1a2b3c4"
+        )
+
+    def test_the_state_stands_alone_when_the_build_is_unknown(self):
+        assert _build_app()._current_state_label() == "Idle - ready"
+
+
 class TestStateChangeForwarding:
     def test_should_call_update_state_on_icon_when_state_changes(self):
         icon = MagicMock()

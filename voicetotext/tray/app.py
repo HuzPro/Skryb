@@ -88,6 +88,7 @@ class SystemTrayApp:
         on_open_settings: Callable[[], None] | None = None,
         download_manager: DownloadManager | None = None,
         owned_disposables: tuple[Disposable, ...] = (),
+        build_status: Callable[[], str] = str,
     ) -> None:
         self._use_case = use_case
         self._state_machine = state_machine
@@ -97,6 +98,8 @@ class SystemTrayApp:
         self._on_open_settings = on_open_settings
         self._download_manager = download_manager
         self._owned_disposables = owned_disposables
+        # The running commit, and the one a restart would pick up.
+        self._build_status = build_status
         self._icon: TrayIcon | None = None
         self._pending_engine_failure: str | None = None
         self._pending_engine_ready = False
@@ -185,7 +188,9 @@ class SystemTrayApp:
             icon.update_state(AppState.IDLE, _STATE_LABELS[AppState.IDLE])
 
     def _current_state_label(self) -> str:
-        return _STATE_LABELS.get(self._state_machine.state, "Unknown")
+        label = _STATE_LABELS.get(self._state_machine.state, "Unknown")
+        build = self._build_status()
+        return f"{label}  ·  {build}" if build else label
 
     def _handle_settings_clicked(self) -> None:
         if self._on_open_settings is None:
