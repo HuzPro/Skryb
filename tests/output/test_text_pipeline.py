@@ -231,6 +231,64 @@ class TestTrailingSentenceSpace:
         assert _batch("") == ""
 
 
+class TestPauseBreaks:
+    @pytest.mark.parametrize(
+        ("heard", "expected"),
+        [
+            ("Make a plan and. Do adversarial reviews.", "Make a plan and do adversarial reviews. "),
+            ("Opus 5 isn't like. As smart as Fable.", "Opus 5 isn't like as smart as Fable. "),
+            ("Send it to the? Team chat.", "Send it to the team chat. "),
+            ("Is this your. Laptop?", "Is this your laptop? "),
+        ],
+    )
+    def test_should_carry_the_sentence_on_through_a_mark_after_a_word_it_never_ends_on(
+        self, heard: str, expected: str,
+    ) -> None:
+        assert _batch(heard) == expected
+
+    def test_should_drop_the_mark_at_the_end_so_the_next_dictation_carries_on(self) -> None:
+        assert _batch("Make a plan and.") == "Make a plan and "
+
+    @pytest.mark.parametrize(
+        "heard",
+        [
+            "I don't know what it's like. ",
+            "What's it like? I'd love to know. ",
+            "And? So what. ",
+            "Plan A. Then plan B. ",
+            "We went home. The end. ",
+        ],
+    )
+    def test_should_keep_a_mark_that_can_end_the_sentence(self, heard: str) -> None:
+        assert _batch(heard) == heard
+
+    @pytest.mark.parametrize(
+        ("heard", "expected"),
+        [
+            ("Ask the. Claude team, Claude knows.", "Ask the Claude team, Claude knows. "),
+            ("Use the. API key.", "Use the API key. "),
+            ("Me and. I think so.", "Me and I think so. "),
+        ],
+    )
+    def test_should_keep_the_capital_of_a_name(self, heard: str, expected: str) -> None:
+        assert _batch(heard) == expected
+
+    def test_should_keep_a_full_stop_the_speaker_said(self) -> None:
+        options = DictionaryOptions(spoken_commands=True)
+
+        assert _batch("this and period", options=options) == "this and. "
+
+    def test_should_join_after_a_filler_is_gone(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+
+        assert _batch("Make a plan and um. Do it.", options=options) == "Make a plan and do it. "
+
+    def test_should_leave_verbatim_transcripts_alone(self) -> None:
+        pipeline = build_pipeline(DictionaryConfig(), PipelineMode.VERBATIM)
+
+        assert pipeline.process("Make a plan and. Do it.") == "Make a plan and. Do it."
+
+
 class TestRuleStage:
     def test_should_apply_the_longest_multi_alias_literal_match(self) -> None:
         rules = (
