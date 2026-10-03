@@ -752,7 +752,8 @@ def _text_width(text: str, size: int) -> float:
 
 @cache
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for name in ("segoeuisb.ttf", "segoeui.ttf", "arial.ttf"):
+    # Segoe UI Semibold ships as seguisb.ttf.
+    for name in ("seguisb.ttf", "segoeui.ttf", "arial.ttf"):
         try:
             return ImageFont.truetype(name, size)
         except OSError:
