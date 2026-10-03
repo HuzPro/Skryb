@@ -11,6 +11,7 @@ from voicetotext.core.action_dispatcher import (
     ActionDispatcher,
     ThreadedActionDispatcher,
 )
+from voicetotext.core.build_info import RunningBuild, source_checkout
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
 from voicetotext.core.events import (
     DeliveryFailedEvent,
@@ -230,6 +231,8 @@ def _ignore_delivery(text: str) -> None:
 # One per process, like the keyboard hook and the caret it stands in for.
 _paste_memory = PasteMemory(foreground_hwnd, click_count, VOICETOTEXT_INPUT_TAG)
 _REREAD_CARET_AFTER_SECONDS = 0.1
+# A recording that starts after a minute without a decode wakes the engine.
+_WAKE_AFTER_IDLE_SECONDS = 60.0
 
 
 # Folders that a sync client uploads. Edit capture records what the user
@@ -487,8 +490,6 @@ def _deliver_with_hooks(
             gui=gui_dispatcher,
             on_failed=hooks.on_failed,
             text_field_focused=text_field_focused,
-            read_context=read_caret_context,
-            foreground=foreground_hwnd,
         )
     hooks.last_dictation.route(
         paste=delivery,
@@ -583,6 +584,19 @@ def _describe_dictation_shortcuts(config: JsonConfigAdapter) -> str:
 
 def _chosen_microphone(config: JsonConfigAdapter) -> str:
     return str(config.get("audio.input_device", "") or "")
+
+
+def _wake_after_idle_seconds(
+    config: JsonConfigAdapter, diagnostics: SessionDiagnostics,
+) -> float:
+    # A CPU engine has no clocked-down GPU to wake, and its warmup decode
+    # is slow enough to hold up the dictation behind it.
+    if diagnostics.active_device == "cpu":
+        return 0.0
+    value = config.get("transcription.wake_after_idle_seconds", _WAKE_AFTER_IDLE_SECONDS)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return _WAKE_AFTER_IDLE_SECONDS
+    return max(float(value), 0.0)
 
 
 def _prepare_audio(config: JsonConfigAdapter, audio: AudioSegment) -> AudioSegment:
@@ -1164,6 +1178,9 @@ def build_app(
         ),
         writing_seconds=functools.partial(_writing_seconds, config, writing),
         last_dictation=last_dictation,
+        wake_after_idle_seconds=functools.partial(
+            _wake_after_idle_seconds, config, diagnostics,
+        ),
     )
 
     def _use_learned_words() -> None:
@@ -1286,15 +1303,13 @@ def build_app(
         run_in_background=action_dispatcher.dispatch,
     )
 
-    notice = Notice(root)
+    notice = Notice(root, load_position=functools.partial(load_pill_position, config))
     RecoveryNotices(
         event_bus,
         notice,
         gui_dispatcher.dispatch,
         retry=record_and_transcribe_use_case.retry_last_recording,
         open_history=functools.partial(show_page, "history"),
-        paste_again=record_and_transcribe_use_case.paste_last,
-        copy_again=record_and_transcribe_use_case.copy_last,
     )
     history_pruner = HistoryPruner(
         paths.diagnostics_dir, functools.partial(history_retention_days, config),
@@ -1316,6 +1331,7 @@ def build_app(
             on_devices_changed=hot_plug.devices_changed,
         ),
         on_open_settings=functools.partial(show_page, "settings"),
+        build_status=RunningBuild(source_checkout()).status,
         download_manager=download_manager,
         owned_disposables=(
             (overlay, ducking, history_pruner, writing) if overlay is not None

@@ -36,6 +36,7 @@ DEFAULT_CONFIG = {
         "beam_size": 5,
         "mode": "batch",
         "crisperwhisper_mode": "intended",
+        "wake_after_idle_seconds": 60.0,
     },
     "audio": {
         "sample_rate": 16000,

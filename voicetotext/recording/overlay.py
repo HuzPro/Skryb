@@ -262,6 +262,9 @@ class Win32LayeredOverlayWindow:
     beneath, so only the drawn pill is clickable.
     """
 
+    # The pill's canvas unless resized; the notice above it uses one too.
+    _size: tuple[int, int] = (CANVAS_WIDTH, CANVAS_HEIGHT)
+
     def __init__(self) -> None:
         self._user32 = ctypes.WinDLL("user32")
         self._gdi32 = ctypes.WinDLL("gdi32")
@@ -396,8 +399,7 @@ class Win32LayeredOverlayWindow:
             _WS_POPUP,
             0,
             0,
-            CANVAS_WIDTH,
-            CANVAS_HEIGHT,
+            *self._size,
             None,
             None,
             self._kernel32.GetModuleHandleW(None),
@@ -432,7 +434,7 @@ class Win32LayeredOverlayWindow:
         self._acquire_surface()
         self._origin = (x, y)
         self._user32.SetWindowPos(
-            self._hwnd, _HWND_TOPMOST, x, y, CANVAS_WIDTH, CANVAS_HEIGHT,
+            self._hwnd, _HWND_TOPMOST, x, y, *self._size,
             _SWP_NOACTIVATE,
         )
         self._user32.ShowWindow(self._hwnd, _SW_SHOWNOACTIVATE)
@@ -443,7 +445,7 @@ class Win32LayeredOverlayWindow:
         # A numpy copy into the DIB stays inside Python, where memmove
         # would give the GIL away and have to wait to win it back.
         self._pixels[:] = numpy.frombuffer(pixels, dtype=numpy.uint8)
-        size = wintypes.SIZE(CANVAS_WIDTH, CANVAS_HEIGHT)
+        size = wintypes.SIZE(*self._size)
         source = wintypes.POINT(0, 0)
         blend = BlendFunction(_AC_SRC_OVER, 0, 255, _AC_SRC_ALPHA)
         if not self._user32.UpdateLayeredWindow(
@@ -458,6 +460,12 @@ class Win32LayeredOverlayWindow:
             _ULW_ALPHA,
         ):
             raise OSError("UpdateLayeredWindow failed")
+
+    def resize(self, width: int, height: int) -> None:
+        """Takes effect from the next ``show_at``; a window showing is hidden first."""
+        if (width, height) != self._size:
+            self.hide()
+            self._size = (width, height)
 
     def hide(self) -> None:
         self._user32.ShowWindow(self._hwnd, _SW_HIDE)
@@ -531,9 +539,10 @@ class Win32LayeredOverlayWindow:
         self._memory_dc = self._gdi32.CreateCompatibleDC(self._screen_dc)
         info = BitmapInfo()
         info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
-        info.bmiHeader.biWidth = CANVAS_WIDTH
+        width, height = self._size
+        info.bmiHeader.biWidth = width
         # Negative height selects a top-down DIB, matching PIL's row order.
-        info.bmiHeader.biHeight = -CANVAS_HEIGHT
+        info.bmiHeader.biHeight = -height
         info.bmiHeader.biPlanes = 1
         info.bmiHeader.biBitCount = 32
         info.bmiHeader.biCompression = _BI_RGB
@@ -549,7 +558,7 @@ class Win32LayeredOverlayWindow:
             raise OSError("CreateDIBSection failed")
         self._pixels = numpy.ctypeslib.as_array(
             ctypes.cast(self._bits, ctypes.POINTER(ctypes.c_uint8)),
-            shape=(CANVAS_WIDTH * CANVAS_HEIGHT * 4,),
+            shape=(width * height * 4,),
         )
         self._previous_bitmap = self._gdi32.SelectObject(
             self._memory_dc, self._bitmap,
