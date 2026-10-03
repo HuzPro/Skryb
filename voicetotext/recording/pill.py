@@ -6,6 +6,7 @@ transparent margin passes clicks through to whatever is underneath.
 """
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import cache, lru_cache
@@ -31,7 +32,9 @@ BOTTOM_MARGIN = 26
 _PIXEL_SLACK = 1e-6
 
 _RECORDING_SIZE = (220.0, 48.0)
-_TRANSCRIBING_SIZE = (156.0, 34.0)
+# One pill: the progress bar takes over the recording pill's exact shape
+# and colour, so nothing jumps when the recording stops.
+_TRANSCRIBING_SIZE = _RECORDING_SIZE
 _COLLAPSED_SIZE = (44.0, 10.0)
 
 _PADDING = 8.0
@@ -43,8 +46,8 @@ _BAR_GAP = 4.0
 _BAR_MIN_HEIGHT = 3.0
 _BREATHING_RATE = 0.18
 
-_RECORDING_FILL = (12, 12, 14)
-_TRANSCRIBING_FILL = (38, 38, 42)
+_PILL_FILL = (12, 12, 14)
+_BADGE_FILL = (38, 38, 42)
 # The dark theme accent, blended into the bar so the white label stays readable.
 _PROGRESS_FILL = (76, 96, 138)
 _BORDER = (255, 255, 255, 26)
@@ -352,8 +355,9 @@ def _draw_pill(image: Image.Image, frame: Frame) -> None:
     radius = frame.height * scale / 2
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    fill = _mix(_RECORDING_FILL, _TRANSCRIBING_FILL, frame.label)
-    draw.rounded_rectangle(box, radius=radius, fill=(*fill, 250), outline=_BORDER, width=scale)
+    draw.rounded_rectangle(
+        box, radius=radius, fill=(*_PILL_FILL, 250), outline=_BORDER, width=scale,
+    )
     # ImageDraw replaces pixels rather than blending them, so anything
     # drawn part-transparent would punch a hole through the pill. Each
     # fading part is drawn opaque on its own layer and blended in instead.
@@ -432,7 +436,7 @@ def _draw_caption(draw: ImageDraw.ImageDraw, box: tuple[float, ...], caption: st
     draw.rounded_rectangle(
         (centre - half_width, top - half_height, centre + half_width, top + half_height),
         radius=half_height,
-        fill=(*_TRANSCRIBING_FILL, 255),
+        fill=(*_BADGE_FILL, 255),
         outline=_BORDER,
         width=scale,
     )
@@ -599,13 +603,151 @@ def _bar_height(
     return _BAR_MIN_HEIGHT + ((tallest - _BAR_MIN_HEIGHT) * amplitude)
 
 
-def _mix(
-    first: tuple[int, int, int], second: tuple[int, int, int], amount: float,
-) -> tuple[int, int, int]:
-    amount = min(max(amount, 0.0), 1.0)
-    return tuple(
-        round(a + (b - a) * amount) for a, b in zip(first, second, strict=True)
+# The notice above the pill is drawn the way the pill is: the same dark
+# capsule, border, type and round buttons, a white first button like the
+# finish button, and an amber dot when something went wrong.
+NOTICE_CLOSE = -1
+_NOTICE_HEIGHT = _RECORDING_SIZE[1]
+_NOTICE_LINE_HEIGHT = 16.0
+_NOTICE_MAX_TEXT_WIDTH = 360
+_NOTICE_TEXT_INSET = 18.0
+_NOTICE_DOT = 7.0
+_NOTICE_DOT_GAP = 8.0
+_NOTICE_TEXT_GAP = 14.0
+_NOTICE_BUTTON_HEIGHT = _NOTICE_HEIGHT - 2 * _PADDING
+_NOTICE_BUTTON_PADDING = 14.0
+# A transparent pixel all round, so the border is never cut off.
+_NOTICE_MARGIN = 1
+
+
+@dataclass(frozen=True)
+class NoticeLayout:
+    """Where everything in a notice goes, in window pixels."""
+
+    width: int
+    height: int
+    lines: tuple[str, ...]
+    labels: tuple[str, ...]
+    warning: bool
+    text_left: float
+    buttons: tuple[tuple[float, float, float, float], ...]
+    # The close cross's centre and radius.
+    close: tuple[float, float, float]
+
+
+def notice_layout(message: str, labels: Sequence[str], warning: bool) -> NoticeLayout:
+    """One line is exactly as tall as the pill; a long message wraps instead of widening."""
+    lines = _wrapped(message, _LABEL_SIZE, _NOTICE_MAX_TEXT_WIDTH)
+    height = math.ceil(_NOTICE_HEIGHT + (len(lines) - 1) * _NOTICE_LINE_HEIGHT)
+    middle = _NOTICE_MARGIN + height / 2
+    radius = _NOTICE_BUTTON_HEIGHT / 2
+    x = _NOTICE_MARGIN + _NOTICE_TEXT_INSET
+    if warning:
+        x += _NOTICE_DOT + _NOTICE_DOT_GAP
+    text_left = x
+    x += max(_text_width(line, _LABEL_SIZE) for line in lines) + _NOTICE_TEXT_GAP
+    buttons = []
+    for label in labels:
+        width = _text_width(label, _LABEL_SIZE) + 2 * _NOTICE_BUTTON_PADDING
+        buttons.append((x, middle - radius, x + width, middle + radius))
+        x += width + _BUTTON_GAP
+    close = (x + radius, middle, radius)
+    x += 2 * radius + _PADDING
+    return NoticeLayout(
+        width=math.ceil(x) + _NOTICE_MARGIN,
+        height=height + 2 * _NOTICE_MARGIN,
+        lines=lines,
+        labels=tuple(labels),
+        warning=warning,
+        text_left=text_left,
+        buttons=tuple(buttons),
+        close=close,
     )
+
+
+def notice_target(layout: NoticeLayout, x: float, y: float) -> int | None:
+    """The index of the button at ``x, y``, ``NOTICE_CLOSE`` for the cross, else None."""
+    for index, (left, top, right, bottom) in enumerate(layout.buttons):
+        if left <= x <= right and top <= y <= bottom:
+            return index
+    cx, cy, radius = layout.close
+    # The same slack as the pill's buttons.
+    if math.hypot(x - cx, y - cy) <= radius + 2:
+        return NOTICE_CLOSE
+    return None
+
+
+def render_notice(layout: NoticeLayout, hovered: int | None = None) -> Image.Image:
+    scale = _SUPERSAMPLE
+    image = Image.new("RGBA", (layout.width * scale, layout.height * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    margin = _NOTICE_MARGIN * scale
+    draw.rounded_rectangle(
+        (margin, margin, layout.width * scale - margin, layout.height * scale - margin),
+        radius=_NOTICE_HEIGHT * scale / 2,
+        fill=(*_PILL_FILL, 250),
+        outline=_BORDER,
+        width=scale,
+    )
+    middle = layout.height / 2
+    font = _font(_LABEL_SIZE * scale)
+    if layout.warning:
+        dot_left = layout.text_left - _NOTICE_DOT_GAP - _NOTICE_DOT
+        draw.ellipse(
+            (dot_left * scale, (middle - _NOTICE_DOT / 2) * scale,
+             (dot_left + _NOTICE_DOT) * scale, (middle + _NOTICE_DOT / 2) * scale),
+            fill=(*_AMBER, 255),
+        )
+    first_line = middle - (len(layout.lines) - 1) * _NOTICE_LINE_HEIGHT / 2
+    for index, line in enumerate(layout.lines):
+        draw.text(
+            (layout.text_left * scale, (first_line + index * _NOTICE_LINE_HEIGHT) * scale),
+            line, font=font, fill=(*_LABEL, 255), anchor="lm",
+        )
+    for index, (box, label) in enumerate(zip(layout.buttons, layout.labels, strict=True)):
+        lit = index == hovered
+        if index == 0:
+            fill, text = (_FINISH_HOVER_FILL if lit else _FINISH_FILL), _FINISH_GLYPH
+        else:
+            fill, text = (_BUTTON_HOVER_FILL if lit else _BUTTON_FILL), _LABEL
+        left, top, right, bottom = (edge * scale for edge in box)
+        draw.rounded_rectangle(
+            (left, top, right, bottom), radius=(bottom - top) / 2, fill=(*fill, 255),
+        )
+        draw.text(
+            ((left + right) / 2, (top + bottom) / 2), label,
+            font=font, fill=(*text, 255), anchor="mm",
+        )
+    cx, cy, radius = layout.close
+    fill = _BUTTON_HOVER_FILL if hovered == NOTICE_CLOSE else _BUTTON_FILL
+    draw.ellipse(
+        ((cx - radius) * scale, (cy - radius) * scale,
+         (cx + radius) * scale, (cy + radius) * scale),
+        fill=(*fill, 255),
+    )
+    _draw_glyph(draw, Button.CANCEL, cx, cy, radius, paused=False)
+    return image.resize((layout.width, layout.height), Image.Resampling.LANCZOS)
+
+
+def _wrapped(text: str, size: int, width: int) -> tuple[str, ...]:
+    lines: list[str] = []
+    line = ""
+    for word in text.split():
+        candidate = f"{line} {word}" if line else word
+        if line and _text_width(candidate, size) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    lines.append(line)
+    # A single word too long for a line is cut short rather than overflowing.
+    # No character is under a pixel wide, so a line never needs more
+    # characters than pixels, and the cut never searches far.
+    return tuple(_fitted(line[:width], size, width) for line in lines)
+
+
+def _text_width(text: str, size: int) -> float:
+    return _font(size * _SUPERSAMPLE).getlength(text) / _SUPERSAMPLE
 
 
 @cache

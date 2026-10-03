@@ -1303,7 +1303,7 @@ def build_app(
         run_in_background=action_dispatcher.dispatch,
     )
 
-    notice = Notice(root)
+    notice = Notice(root, load_position=functools.partial(load_pill_position, config))
     RecoveryNotices(
         event_bus,
         notice,
