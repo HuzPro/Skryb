@@ -359,20 +359,17 @@ export function WritingPage() {
           onChange={(cleanup) => edit({ cleanup })}
           choices={[
             { value: "off", title: "Off", description: "Paste exactly what was recognised." },
-            { value: "light", title: "Light", description: "Fix fillers, slips and changes of mind, keep my wording." },
-            { value: "polished", title: "Polished", description: "Also tidy grammar and repetition." },
+            { value: "light", title: "Light", description: "When I correct myself, keep only the final version. Every other word stays as spoken." },
+            { value: "polished", title: "Polished", description: "Also fix punctuation and capitals, never a word." },
           ]}
         />
         <Rows className="mt-2.5">
-          <Row title="Turn spoken lists into lists" description="Numbered steps and bullet points when you dictate them.">
-            <Switch aria-label="Turn spoken lists into lists" checked={writing.lists} onCheckedChange={(lists) => edit({ lists })} />
-          </Row>
           <Row title="Give up after" description="Then the raw dictation is pasted. Long dictations may skip cleanup when this is short.">
             <NumberField label="Seconds" value={writing.deadline_seconds} min={0.5} max={30} step={0.5} suffix="seconds" onChange={(deadline_seconds) => edit({ deadline_seconds })} />
           </Row>
           <Row
             title="Use the text around the cursor"
-            description="And the window title, to spell names and terms. Never read from password fields or password managers."
+            description="With the window title, saved in History beside each cleanup. The writing model is not shown either. Never read from password fields or password managers."
           >
             <Switch aria-label="Use the text around the cursor" checked={writing.context} onCheckedChange={(context) => edit({ context })} />
           </Row>
