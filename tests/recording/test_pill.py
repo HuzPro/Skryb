@@ -113,6 +113,25 @@ class TestFinishingProgress:
         assert finishing_progress(0.3, 0.0, 0.0) == 1.0
 
 
+class TestOnePill:
+    def test_the_transcribing_bar_takes_the_recording_pills_exact_size_and_place(self):
+        recording, transcribing = target_size(Mode.RECORDING), target_size(Mode.TRANSCRIBING)
+
+        assert transcribing == recording
+        assert pill_box(*transcribing) == pill_box(*recording)
+
+    def test_the_transcribing_bar_keeps_the_recording_pills_colour(self):
+        width, height = target_size(Mode.RECORDING)
+        left, top, _right, _bottom = pill_box(width, height)
+        # Bare pill in both: above the buttons, the waveform and the label.
+        point = (round(left + 60), round(top + 3))
+
+        recording = render(_recording_frame()).getpixel(point)
+        transcribing = render(Frame(width, height, 1.0, 0.0, 1.0)).getpixel(point)
+
+        assert transcribing == recording
+
+
 class TestSettledBar:
     def _bar(self):
         from voicetotext.recording.overlay import premultiplied_array
