@@ -1,4 +1,6 @@
-from collections.abc import Iterator
+import threading
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -130,3 +132,144 @@ class TestCrisperWhisperCt2Adapter:
         adapter.dispose()
 
         assert adapter.is_model_loaded() is False
+
+
+class _ThreadTrackingModel:
+    """Records which thread created and freed it, and whether the creator still ran."""
+
+    freed: list[tuple[str, bool]]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        self.created_on = threading.current_thread()
+        self.freed = _ThreadTrackingModel.freed
+
+    def __del__(self) -> None:
+        self.freed.append(
+            (threading.current_thread().name, self.created_on.is_alive()),
+        )
+
+
+@pytest.fixture
+def tracked_models() -> Iterator[list[tuple[str, bool]]]:
+    _ThreadTrackingModel.freed = []
+    with (
+        patch(
+            "voicetotext.transcription.crisperwhisper_ct2_adapter._import_backend",
+            return_value=_ThreadTrackingModel,
+        ),
+        patch(
+            "voicetotext.transcription.crisperwhisper_ct2_adapter.WhisperTokens",
+        ),
+    ):
+        yield _ThreadTrackingModel.freed
+
+
+def _on_a_thread_that_then_exits(step: Callable[[], object]) -> None:
+    thread = threading.Thread(target=step)
+    thread.start()
+    thread.join()
+
+
+class TestModelThreadLifetime:
+    """CTranslate2 crashes the process when it frees a model whose creating
+    thread has exited, so the model is created on a thread that outlives it."""
+
+    def test_the_model_is_created_on_its_own_thread_not_the_callers(
+        self, tracked_models,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+
+        adapter.load_model()
+
+        assert adapter._model.created_on.name == "ct2-model"
+        assert adapter._model.created_on is not threading.current_thread()
+        adapter.dispose()
+
+    def test_a_model_loaded_by_an_exited_thread_is_freed_while_its_creator_still_runs(
+        self, tracked_models,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+        _on_a_thread_that_then_exits(adapter.load_model)
+
+        adapter.dispose()
+
+        assert tracked_models == [("ct2-model", True)]
+
+    def test_a_model_disposed_from_another_exiting_thread_is_freed_on_its_creator(
+        self, tracked_models,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+        _on_a_thread_that_then_exits(adapter.load_model)
+
+        _on_a_thread_that_then_exits(adapter.dispose)
+
+        assert tracked_models == [("ct2-model", True)]
+
+    def test_the_models_thread_ends_once_the_model_is_freed(
+        self, tracked_models,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+        adapter.load_model()
+        model_thread = adapter._model.created_on
+
+        adapter.dispose()
+        model_thread.join(timeout=5)
+
+        assert not model_thread.is_alive()
+
+    def test_loading_again_frees_the_previous_model_first(
+        self, tracked_models,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+        adapter.load_model()
+
+        adapter.load_model()
+
+        assert tracked_models == [("ct2-model", True)]
+        assert adapter.is_model_loaded()
+        adapter.dispose()
+
+    def test_a_load_that_fails_raises_and_leaves_no_thread_behind(self) -> None:
+        before = {thread.ident for thread in threading.enumerate()}
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+
+        with (
+            patch(
+                "voicetotext.transcription.crisperwhisper_ct2_adapter._import_backend",
+                return_value=MagicMock(side_effect=RuntimeError("hipErrorNoDevice")),
+            ),
+            patch(
+                "voicetotext.transcription.crisperwhisper_ct2_adapter.WhisperTokens",
+            ),
+            pytest.raises(RuntimeError, match="hipErrorNoDevice"),
+        ):
+            adapter.load_model()
+
+        _wait_for_threads_to_settle(before)
+        assert not adapter.is_model_loaded()
+
+    def test_disposing_an_engine_that_never_loaded_does_nothing(self) -> None:
+        CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en").dispose()
+
+    def test_a_thousand_swaps_from_short_lived_threads_free_every_model_safely(
+        self, tracked_models,
+    ) -> None:
+        before = {thread.ident for thread in threading.enumerate()}
+        for _ in range(1000):
+            adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+            _on_a_thread_that_then_exits(adapter.load_model)
+            _on_a_thread_that_then_exits(adapter.dispose)
+
+        assert len(tracked_models) == 1000
+        assert all(freed == ("ct2-model", True) for freed in tracked_models)
+        _wait_for_threads_to_settle(before)
+
+
+def _wait_for_threads_to_settle(before: set[int | None]) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        extra = [t for t in threading.enumerate() if t.ident not in before]
+        if not extra:
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"threads left running: {[t.name for t in extra]}")
