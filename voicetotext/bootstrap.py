@@ -128,6 +128,7 @@ from voicetotext.settings.service import SettingsService
 from voicetotext.settings.settings_draft import ChangeSet
 from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
 from voicetotext.transcription.engine import TranscriptionEngine
+from voicetotext.transcription.engine_preload import EnginePreload
 from voicetotext.transcription.engine_factory import (
     build_composite_model_manager,
     create_engine_for_active_model,
@@ -634,6 +635,7 @@ def _load_engine_with_fallback(
     hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
+    preload: EnginePreload | None = None,
 ) -> TranscriptionEngine:
     """Try the active engine on its preferred device, falling back to CPU.
 
@@ -641,7 +643,8 @@ def _load_engine_with_fallback(
     engine explicitly (or via ``transcription.engine="auto"`` at config
     time), and a runtime swap to a different engine would download
     different model files. CPU-fallback within the same engine is the
-    only automatic step.
+    only automatic step. A *preload* that startup already began stands
+    in for the first attempt.
     """
     started_at = time.monotonic()
     device = resolve_device(
@@ -650,8 +653,11 @@ def _load_engine_with_fallback(
     )
     try:
         try:
-            engine = _load_engine(
-                config, paths, registry, hardware_detector, license_policy,
+            engine = (
+                _take_preloaded(preload) if preload is not None
+                else _load_engine(
+                    config, paths, registry, hardware_detector, license_policy,
+                )
             )
         except (RuntimeError, OSError) as exc:
             _logger.warning("load_engine: primary device failed: %s", exc)
@@ -682,6 +688,14 @@ def _load_engine(
     engine.load_model()
     milestone("model-loaded")
     _warmup_safely(engine)
+    return engine
+
+
+def _take_preloaded(preload: EnginePreload) -> TranscriptionEngine:
+    """The engine startup began loading before the tray existed."""
+    engine = preload.wait()
+    if not preload.warmed:
+        _warmup_safely(engine)
     return engine
 
 
@@ -780,11 +794,13 @@ def _load_active_engine_installer(
     hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     diagnostics: SessionDiagnostics,
+    preload: EnginePreload | None = None,
 ) -> EngineInstaller:
     """Load the engine for the active mode and return its installer.
 
     Streaming is GPU-only and never falls back to CPU; batch keeps the
-    CPU fallback inside ``_load_engine_with_fallback``.
+    CPU fallback inside ``_load_engine_with_fallback``. Startup preloads
+    batch engines only, so a *preload* never reaches the streaming path.
     """
     if config.get("transcription.mode", "batch") == "streaming":
         engine = _load_streaming_engine(
@@ -795,6 +811,7 @@ def _load_active_engine_installer(
         )
     engine = _load_engine_with_fallback(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
+        preload,
     )
     return make_engine_installer(
         engine, lambda use_case, loaded: use_case.set_engine(loaded),
@@ -812,6 +829,7 @@ def _load_engine_and_attach(
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
     event_bus: EventBus,
+    preload: EnginePreload | None = None,
 ) -> None:
     """Background-thread entry point for engine load + state attach.
 
@@ -825,6 +843,7 @@ def _load_engine_and_attach(
     try:
         installer = _load_active_engine_installer(
             config, paths, registry, hardware_detector, license_policy, diagnostics,
+            preload,
         )
         installer(use_case)
     except Exception as exc:
@@ -880,6 +899,7 @@ def _spawn_engine_load_thread(
     use_case: RecordAndTranscribeUseCase,
     state_machine: AppStateMachine,
     event_bus: EventBus,
+    preload: EnginePreload | None = None,
 ) -> None:
     thread = threading.Thread(
         target=_load_engine_and_attach,
@@ -890,6 +910,7 @@ def _spawn_engine_load_thread(
             "use_case": use_case,
             "state_machine": state_machine,
             "event_bus": event_bus,
+            "preload": preload,
         },
         daemon=True,
         name="engine-load",
@@ -1056,6 +1077,7 @@ def build_app(
     hardware_detector: HardwareDetector,
     license_policy: LicensePolicy,
     api_server: ApiServer,
+    preload: EnginePreload | None = None,
 ) -> SystemTrayApp:
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
@@ -1361,6 +1383,7 @@ def build_app(
         use_case=record_and_transcribe_use_case,
         state_machine=state_machine,
         event_bus=event_bus,
+        preload=preload,
     )
 
     return app
