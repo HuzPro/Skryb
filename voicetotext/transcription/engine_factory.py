@@ -1,4 +1,5 @@
 import importlib.util
+import threading
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
@@ -473,9 +474,6 @@ def build_composite_model_manager(
     ``models--*`` directory under the shared models root. Listing aggregates
     across them; download/delete routes to the active engine.
     """
-    import requests
-    from huggingface_hub import HfApi
-
     from voicetotext.downloads.chunked_file_downloader import ChunkedFileDownloader
     from voicetotext.downloads.hf_repo_resolver import HfRepoResolver
     from voicetotext.downloads.requests_http_client import RequestsHttpClient
@@ -484,10 +482,12 @@ def build_composite_model_manager(
     )
     from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
 
-    session = requests.Session()
-    http = RequestsHttpClient(session=session)
+    # Both clients are built on first download. Importing requests and
+    # huggingface_hub here put about a hundred modules on every launch's
+    # path to the tray, for downloads most launches never make.
+    http = RequestsHttpClient(session=_BuiltOnFirstUse(_requests_session))
     file_downloader = ChunkedFileDownloader(http=http)
-    resolver = HfRepoResolver(api=HfApi())
+    resolver = HfRepoResolver(api=_BuiltOnFirstUse(_hf_api))
 
     parakeet_models = {
         name: info for name, info in PARAKEET_MODELS.items() if info.repo_id
@@ -533,3 +533,31 @@ def build_composite_model_manager(
         },
         active_engine_provider=active_engine_provider,
     )
+
+
+class _BuiltOnFirstUse:
+    """Stands in for an object that is only built when first used."""
+
+    def __init__(self, build: Callable[[], object]) -> None:
+        self._build = build
+        self._built: object | None = None
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> object:
+        # Download chunks run on several threads, so only one may build it.
+        with self._lock:
+            if self._built is None:
+                self._built = self._build()
+        return getattr(self._built, name)
+
+
+def _requests_session() -> object:
+    import requests
+
+    return requests.Session()
+
+
+def _hf_api() -> object:
+    from huggingface_hub import HfApi
+
+    return HfApi()
