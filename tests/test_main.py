@@ -28,6 +28,7 @@ from voicetotext.__main__ import (
     _start_engine_preload,
     _start_torch_prewarm_if_needed,
     _stderr_is_console,
+    _take_instance_lock,
     _try_show_error_dialog,
     main,
     _parse_cli,
@@ -374,6 +375,7 @@ class TestBindingStartupOrder:
                 side_effect=lambda *_args, **_kwargs: timeline.append("build-app")
                 or app,
             ) as build_app,
+            patch("voicetotext.core.single_instance.LaunchSignal"),
         ):
             _run(paths, startup)
 
@@ -389,6 +391,9 @@ class TestBindingStartupOrder:
             "build-app",
         ]
         assert build_app.call_args.kwargs["preload"] is preload
+        # A fresh launch looks for newer code once the tray is up.
+        assert build_app.call_args.kwargs["check_for_updates"] is True
+        assert build_app.call_args.kwargs["second_launches"] is not None
         detect.assert_not_called()
         assert build_app.call_args.kwargs["registry"] is startup.registry
         assert build_app.call_args.kwargs["api_server"] is api_server
@@ -505,6 +510,7 @@ class TestOneLicensePolicyForTheProcess:
             ) as create_model_manager,
             patch("voicetotext.__main__._run_first_time_setup") as first_run_setup,
             patch("voicetotext.bootstrap.build_app") as build_app,
+            patch("voicetotext.core.single_instance.LaunchSignal"),
         ):
             _run(paths, _startup())
 
@@ -563,3 +569,98 @@ class TestShowError:
         # propagate out of the crash-reporting path.
         with patch("tkinter.Tk", side_effect=RuntimeError("no display")):
             _try_show_error_dialog("import failed")
+
+
+class TestLaunchingWhileACopyIsRunning:
+    """What a launch does when another copy already holds the lock."""
+
+    def _launch(
+        self,
+        *,
+        held: list[bool],
+        answered: bool = False,
+        ended: bool = False,
+        restarting: bool = False,
+    ):
+        mutex = MagicMock()
+        mutex.acquire.side_effect = [not still_held for still_held in held]
+        paths = SimpleNamespace(config_path=Path("C:/Users/Zoë/AppData/Roaming/VoiceToText/config.json"))
+        with (
+            patch("voicetotext.core.single_instance.LaunchSignal") as signal,
+            patch("voicetotext.core.single_instance.RunningCopy") as copy,
+            patch("voicetotext.__main__._show_instance_conflict") as conflict,
+        ):
+            signal.return_value.ask.return_value = answered
+            copy.return_value.end.return_value = ended
+            took_lock = _take_instance_lock(mutex, paths, restarting=restarting)
+        return took_lock, mutex, signal.return_value, copy, conflict
+
+    def test_the_first_copy_takes_the_lock_and_records_itself(self) -> None:
+        took_lock, _mutex, signal, copy, conflict = self._launch(held=[False])
+
+        assert took_lock is True
+        copy.assert_called_once_with(
+            Path("C:/Users/Zoë/AppData/Roaming/VoiceToText/running.pid"),
+        )
+        copy.return_value.record.assert_called_once_with()
+        signal.ask.assert_not_called()
+        conflict.assert_not_called()
+
+    def test_a_second_launch_is_handed_to_the_copy_running_when_it_answers(self) -> None:
+        took_lock, _mutex, signal, copy, conflict = self._launch(held=[True], answered=True)
+
+        assert took_lock is False
+        signal.ask.assert_called_once()
+        copy.return_value.end.assert_not_called()
+        conflict.assert_not_called()
+
+    def test_a_copy_that_never_answers_is_ended_and_replaced(self) -> None:
+        took_lock, mutex, _signal, copy, conflict = self._launch(
+            held=[True, False], answered=False, ended=True,
+        )
+
+        assert took_lock is True
+        copy.return_value.end.assert_called_once_with()
+        copy.return_value.record.assert_called_once_with()
+        assert mutex.acquire.call_args.kwargs["wait_seconds"] > 0
+        conflict.assert_not_called()
+
+    def test_a_stuck_copy_that_cannot_be_ended_gets_the_conflict_message(self) -> None:
+        took_lock, _mutex, _signal, copy, conflict = self._launch(
+            held=[True, True], answered=False, ended=False,
+        )
+
+        assert took_lock is False
+        copy.return_value.record.assert_not_called()
+        conflict.assert_called_once_with()
+
+    def test_a_copy_that_exits_on_its_own_while_unanswered_is_replaced(self) -> None:
+        took_lock, mutex, _signal, copy, conflict = self._launch(
+            held=[True, False], answered=False, ended=False,
+        )
+
+        assert took_lock is True
+        assert mutex.acquire.call_args.kwargs["wait_seconds"] == 0.0
+        copy.return_value.record.assert_called_once_with()
+        conflict.assert_not_called()
+
+    def test_an_ended_copy_that_still_holds_the_lock_gets_the_conflict_message(self) -> None:
+        took_lock, _mutex, _signal, _copy, conflict = self._launch(
+            held=[True, True], answered=False, ended=True,
+        )
+
+        assert took_lock is False
+        conflict.assert_called_once_with()
+
+    def test_a_restarting_copy_waits_for_the_lock_instead_of_asking(self) -> None:
+        took_lock, mutex, signal, _copy, _conflict = self._launch(
+            held=[False], restarting=True,
+        )
+
+        assert took_lock is True
+        assert mutex.acquire.call_args.kwargs["wait_seconds"] >= 10
+        signal.ask.assert_not_called()
+
+    def test_the_restart_flag_is_read_from_the_command_line(self) -> None:
+        assert _parse_cli(["--restart"]).restart is True
+        assert _parse_cli([]).restart is False
