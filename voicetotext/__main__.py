@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from voicetotext.core.event_bus import SimpleEventBus
     from voicetotext.core.json_config_adapter import JsonConfigAdapter
     from voicetotext.core.paths import AppPaths
+    from voicetotext.core.single_instance import SingleInstanceMutex
     from voicetotext.transcription.engine_preload import EnginePreload
     from voicetotext.transcription.engine_registry import EngineRegistry
     from voicetotext.transcription.hardware_detector import HardwareDetector
@@ -91,6 +92,8 @@ def _parse_cli(arguments: list[str] | None = None) -> argparse.Namespace:
     maintenance.add_argument("--create-shortcut", action="store_true")
     maintenance.add_argument("--enable-autostart", action="store_true")
     maintenance.add_argument("--disable-autostart", action="store_true")
+    # Passed by a copy restarting onto newer code to the copy replacing it.
+    parser.add_argument("--restart", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(arguments)
 
 
@@ -113,8 +116,7 @@ def main() -> None:
     from voicetotext.core.single_instance import SingleInstanceMutex
 
     mutex = SingleInstanceMutex()
-    if not mutex.acquire():
-        _show_instance_conflict()
+    if not _take_instance_lock(mutex, paths, restarting=options.restart):
         raise SystemExit(0)
 
     try:
@@ -127,7 +129,7 @@ def main() -> None:
         )
         paths.activate_session(session_dir)
         startup = _prepare_startup(paths)
-        _run(paths, startup)
+        _run(paths, startup, restarted=options.restart)
     except Exception:
         logging.getLogger(__name__).exception("Startup failed")
         _show_error(traceback.format_exc())
@@ -180,6 +182,38 @@ def _import_libraries(names: tuple[str, ...]) -> None:
         # logging exists to record it.
         with contextlib.suppress(ImportError, OSError):
             importlib.import_module(name)
+
+
+# How long a restarting copy waits for the one it replaces to clean up and exit.
+_REPLACE_WAIT_SECONDS = 30.0
+# A copy still starting answers only once its tray is built, so this covers
+# a slow cold start.
+_ANSWER_WAIT_SECONDS = 20.0
+
+
+def _take_instance_lock(
+    mutex: SingleInstanceMutex, paths: AppPaths, *, restarting: bool,
+) -> bool:
+    """Hold the one-copy lock, or hand this launch to the copy already running.
+
+    The copy running answers by checking for newer code. One that never
+    answers is stuck, so it is ended and this launch takes its place.
+    """
+    from voicetotext.core.single_instance import LaunchSignal, RunningCopy
+
+    running_copy = RunningCopy(paths.config_path.with_name("running.pid"))
+    if mutex.acquire(wait_seconds=_REPLACE_WAIT_SECONDS if restarting else 0.0):
+        running_copy.record()
+        return True
+    if LaunchSignal().ask(_ANSWER_WAIT_SECONDS):
+        return False
+    # A copy that can't be ended may still have exited on its own meanwhile.
+    ended = running_copy.end()
+    if mutex.acquire(wait_seconds=_REPLACE_WAIT_SECONDS if ended else 0.0):
+        running_copy.record()
+        return True
+    _show_instance_conflict()
+    return False
 
 
 def _run_maintenance(options: argparse.Namespace) -> int | None:
@@ -302,7 +336,7 @@ def _nothing_to_await() -> None:
     return None
 
 
-def _run(paths: AppPaths, startup: _Startup) -> None:
+def _run(paths: AppPaths, startup: _Startup, *, restarted: bool = False) -> None:
     import tkinter
 
     from voicetotext.core.event_bus import SimpleEventBus
@@ -361,6 +395,9 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     root = tkinter.Tk()
     root.withdraw()
     milestone("Tk-created")
+    from voicetotext.core.single_instance import LaunchSignal, SecondLaunches
+
+    second_launches = SecondLaunches(root, LaunchSignal())
 
     if needs_setup:
         from voicetotext.ui.launcher import ShellLauncher
@@ -390,6 +427,9 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
         license_policy=license_policy,
         api_server=api_server,
         preload=preload,
+        second_launches=second_launches,
+        # The copy it replaced has just checked.
+        check_for_updates=not restarted,
     )
     app.run()
 
@@ -528,7 +568,8 @@ def _show_setup_problem(message: str) -> None:
 def _show_instance_conflict() -> None:
     _try_show_message(
         "VoiceToText",
-        "VoiceToText is already running in this Windows session.",
+        "VoiceToText is already running but not responding, and it couldn't "
+        "be closed. End it in Task Manager, then start VoiceToText again.",
     )
 
 
