@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.transcription import FakeTranscriptionEngine
-from voicetotext import bootstrap
 from voicetotext.transcription.engine_preload import EnginePreload
 from voicetotext.transcription.result import TranscriptionResult
 
@@ -108,8 +107,15 @@ class TestEnginePreload:
         assert engine.load_model_calls == 1
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="bootstrap imports Win32-only modules")
 class TestTakingAPreloadedEngine:
-    def test_a_warmed_preload_is_used_without_a_second_warmup(self, monkeypatch) -> None:
+    @pytest.fixture()
+    def bootstrap(self):
+        from voicetotext import bootstrap
+
+        return bootstrap
+
+    def test_a_warmed_preload_is_used_without_a_second_warmup(self, monkeypatch, bootstrap) -> None:
         warmups = MagicMock()
         monkeypatch.setattr(bootstrap, "_warmup_safely", warmups)
         engine = _ready_engine()
@@ -118,7 +124,7 @@ class TestTakingAPreloadedEngine:
         assert bootstrap._take_preloaded(preload) is engine
         warmups.assert_not_called()
 
-    def test_a_preload_whose_warmup_failed_gets_the_loaders_own_warmup(self, monkeypatch) -> None:
+    def test_a_preload_whose_warmup_failed_gets_the_loaders_own_warmup(self, monkeypatch, bootstrap) -> None:
         warmups = MagicMock()
         monkeypatch.setattr(bootstrap, "_warmup_safely", warmups)
         engine = FakeTranscriptionEngine()
@@ -130,7 +136,7 @@ class TestTakingAPreloadedEngine:
         warmups.assert_called_once_with(engine)
 
     def test_a_gpu_failure_in_the_preload_falls_back_to_the_cpu_like_any_load(
-        self, monkeypatch,
+        self, monkeypatch, bootstrap,
     ) -> None:
         cpu_engine = _ready_engine()
         monkeypatch.setattr(bootstrap, "resolve_device", lambda *_args: "auto")
