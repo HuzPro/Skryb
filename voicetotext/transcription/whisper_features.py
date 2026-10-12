@@ -48,6 +48,10 @@ _SEAM_WORDS = 2
 _SEAM_SPEECH_SECONDS = 2.5
 _SPEECH_LEVEL = 0.1
 
+# Nyra's hallucination-repair thresholds: this many back-to-back copies
+# of a phrase of 1 to 5 words is a decoding loop, not speech.
+_LOOP_COPIES = {1: 8, 2: 8, 3: 4, 4: 3, 5: 3}
+
 # Slaney mel scale: linear below 1 kHz, logarithmic above.
 _MEL_LINEAR_STEP_HZ = 200.0 / 3.0
 _MEL_LOG_START_HZ = 1000.0
@@ -73,13 +77,54 @@ def transcribe_in_windows(
     """
     windows = split_into_encoder_windows(audio)
     confirmed: list[str] = []
+    seam: list[str] = []
     for index, window in enumerate(windows):
         context = " ".join(confirmed[-_CONTEXT_WORDS:])
-        words = transcribe_window(window, context).split()
+        words = _heard_words(window, context, transcribe_window)
+        if not words:
+            # This window was to hear the seam words again and heard nothing.
+            confirmed.extend(seam)
+        seam = []
         if index < len(windows) - 1 and _ends_mid_speech(words, window):
-            words = words[:-_SEAM_WORDS]
+            words, seam = words[:-_SEAM_WORDS], words[-_SEAM_WORDS:]
         confirmed.extend(words)
     return " ".join(confirmed)
+
+
+def _heard_words(
+    window: AudioSegment,
+    context: str,
+    transcribe_window: Callable[[AudioSegment, str], str],
+) -> list[str]:
+    """What *window* says after *context*, without any decoding loop.
+
+    Context can prime the model to hear words in background audio, and it
+    then tends to loop. A window that loops under context and holds no
+    words without it is taken as silent.
+    """
+    words = transcribe_window(window, context).split()
+    heard = _without_loop(words)
+    if context and len(heard) < len(words) and not transcribe_window(window, "").strip():
+        return []
+    return heard
+
+
+def _without_loop(words: list[str]) -> list[str]:
+    """*words* cut after the first copy of a phrase the decoder got stuck on.
+
+    Noise after speech can send Whisper round one phrase until it runs out
+    of tokens.
+    """
+    # ponytail: cuts the loop and whatever follows it. Nyra rewinds, bans
+    # the token that restarts the loop for one step and decodes on, which
+    # needs token-by-token stepping their CTranslate2 build has and the
+    # stock wheel lacks. Port that if speech after a loop goes missing.
+    for start in range(len(words)):
+        for size, copies in _LOOP_COPIES.items():
+            phrase = words[start:start + size]
+            if words[start:start + size * copies] == phrase * copies:
+                return words[:start + size]
+    return words
 
 
 def split_into_encoder_windows(audio: AudioSegment) -> list[AudioSegment]:
