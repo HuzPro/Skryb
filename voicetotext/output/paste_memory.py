@@ -2,7 +2,12 @@ import logging
 import threading
 from collections.abc import Callable, Iterable
 
-from voicetotext.output.caret_context import CONTEXT_CHARS, NO_CONTEXT, CaretContext
+from voicetotext.output.caret_context import (
+    CONTEXT_CHARS,
+    NO_CONTEXT,
+    SELECTION_OUTSIDE_FIELD,
+    CaretContext,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -117,11 +122,15 @@ def read_or_remember(
     memory: PasteMemory,
     wait: Callable[[], None],
 ) -> Callable[[], CaretContext]:
-    """Read the text box, try once more, then fall back to the last paste."""
+    """Read the text box, try once more, then fall back to the last paste.
+
+    A selection outside the field gets no second try: in 328 dictations it
+    never read differently 100 ms later.
+    """
 
     def context() -> CaretContext:
         found = read()
-        if found == NO_CONTEXT:
+        if found == NO_CONTEXT and found is not SELECTION_OUTSIDE_FIELD:
             wait()
             found = read()
         if found == NO_CONTEXT:

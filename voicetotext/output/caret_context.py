@@ -39,6 +39,9 @@ class CaretContext:
 
 
 NO_CONTEXT = CaretContext("", "", "")
+# Equal to NO_CONTEXT, told apart only by identity: the selection lies outside
+# the field, which reading again a moment later has never changed.
+SELECTION_OUTSIDE_FIELD = CaretContext("", "", "")
 
 _LOGGED_TEXT_CHARS = 20
 
