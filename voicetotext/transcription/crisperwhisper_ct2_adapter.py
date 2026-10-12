@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import logging
+import queue
+import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import Future
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 import numpy as np
 
@@ -62,6 +66,52 @@ class _WhisperResult(Protocol):
     def sequences_ids(self) -> list[list[int]]: ...
 
 
+_T = TypeVar("_T")
+
+
+class _ModelThread:
+    """The thread a CTranslate2 model is created on, kept alive until it is freed.
+
+    CTranslate2 4.8.2 (ROCm build, Windows) frees a model's memory through
+    state that belongs to the thread that created the model. Once that
+    thread has exited, freeing the model corrupts the heap and the process
+    dies (0xC0000374 or 0xC0000005, inside ctranslate2.dll). Freeing it from
+    any thread is safe while the creating thread is still alive. Engines
+    used to be created on loader threads that exit right after loading, so
+    every model swap, quit cleanup and interpreter exit could crash.
+
+    Daemon, so a model still loaded at interpreter exit is freed while this
+    thread still exists rather than after it has been joined.
+    """
+
+    def __init__(self) -> None:
+        self._jobs: queue.SimpleQueue[
+            tuple[Callable[[], object], Future[object]] | None
+        ] = queue.SimpleQueue()
+        self._thread = threading.Thread(
+            target=self._serve, daemon=True, name="ct2-model",
+        )
+        self._thread.start()
+
+    def call(self, job: Callable[[], _T]) -> _T:
+        """Run *job* on this thread and return its result or raise its error."""
+        done: Future[object] = Future()
+        self._jobs.put((job, done))
+        return done.result()  # type: ignore[return-value]
+
+    def close(self) -> None:
+        """Let the thread end; only once the model it created is freed."""
+        self._jobs.put(None)
+
+    def _serve(self) -> None:
+        while (item := self._jobs.get()) is not None:
+            job, done = item
+            try:
+                done.set_result(job())
+            except BaseException as exc:  # noqa: BLE001 - re-raised by call()
+                done.set_exception(exc)
+
+
 class CrisperWhisperCt2Adapter(TranscriptionEngine):
     """Whisper adapter that never imports torch or Transformers.
 
@@ -89,16 +139,26 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
         self._model: _WhisperRuntime | None = None
         self._tokens: WhisperTokens | None = None
         self._prompt: list[int] | None = None
+        self._model_thread: _ModelThread | None = None
 
     def load_model(self) -> None:
         started_at = time.monotonic()
+        self.dispose()
         whisper_type = _import_backend()
         tokens = WhisperTokens(self._model_dir)
-        model = whisper_type(
-            str(self._model_dir),
-            device=self._device,
-            compute_type=self._compute_type(),
-        )
+        model_thread = _ModelThread()
+        try:
+            model = model_thread.call(
+                lambda: whisper_type(
+                    str(self._model_dir),
+                    device=self._device,
+                    compute_type=self._compute_type(),
+                ),
+            )
+        except BaseException:
+            model_thread.close()
+            raise
+        self._model_thread = model_thread
         self._tokens = tokens
         self._model = model
         self._prompt = tokens.decoder_prompt(self._language, self._mode)
@@ -149,9 +209,16 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
         return _GPU_COMPUTE_TYPE
 
     def dispose(self) -> None:
-        self._model = None
+        model_thread, self._model_thread = self._model_thread, None
+        model, self._model = [self._model], None
         self._tokens = None
         self._prompt = None
+        if model_thread is None:
+            return
+        # The last reference goes on the thread that created the model,
+        # and only then may that thread end (see ``_ModelThread``).
+        model_thread.call(model.clear)
+        model_thread.close()
 
 
 def _storage_view(features: np.ndarray) -> object:
