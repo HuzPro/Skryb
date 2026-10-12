@@ -69,9 +69,9 @@ class HistoryService:
         self._stop = stop
         self._now = now
 
-    def entries(self, query: str = "") -> list[HistoryEntry]:
-        """Newest first; *query* keeps those whose text holds it, ignoring case."""
-        return filter_entries(load_history(self._dir), query)
+    def entries(self, query: str = "", limit: int | None = None) -> list[HistoryEntry]:
+        """The newest *limit* (all by default) whose text holds *query*, ignoring case."""
+        return filter_entries(load_history(self._dir), query)[:limit]
 
     def find(self, entry_id: str) -> HistoryEntry | None:
         key = parse_entry_id(entry_id)
