@@ -187,6 +187,114 @@ class TestTranscribeInWindows:
 
         assert text == "one two three four five six."
 
+    def test_should_cut_a_phrase_the_decoder_looped_on_down_to_one_copy(
+        self,
+    ) -> None:
+        # What the model made of background audio on 2026-10-09.
+        looped = (
+            "Try the truck to get around and join the theme song. "
+            "The recreation of the night" + " and the night" * 140
+        )
+        windows = _ScriptedWindows(looped)
+
+        text = transcribe_in_windows(_speech(25.0), windows)
+
+        assert text == (
+            "Try the truck to get around and join the theme song. "
+            "The recreation of the night and"
+        )
+
+    def test_should_cut_a_loop_of_one_word_including_non_latin_text(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows("Merci. " + "ありがとう " * 300)
+
+        text = transcribe_in_windows(_speech(12.0), windows)
+
+        assert text == "Merci. ありがとう"
+
+    @pytest.mark.parametrize(
+        "spoken",
+        [
+            "No, no, no, no, no, no, no, that is not what I meant.",
+            "I I I I I I I think so.",
+            "It was very very very very very very very good.",
+            "Go left, go left, go left, then right.",
+            "One more time, one more time, and done.",
+            "the the",
+            "",
+        ],
+    )
+    def test_should_leave_repeats_that_stop_short_of_a_loop_alone(
+        self, spoken: str,
+    ) -> None:
+        windows = _ScriptedWindows(spoken)
+
+        text = transcribe_in_windows(_speech(12.0), windows)
+
+        assert text == spoken
+
+    def test_should_leave_thousands_of_words_without_a_loop_alone(
+        self,
+    ) -> None:
+        spoken = " ".join(f"item{index}, then" for index in range(3000))
+        windows = _ScriptedWindows(spoken)
+
+        text = transcribe_in_windows(_speech(12.0), windows)
+
+        assert text == spoken
+
+    def test_should_treat_a_window_that_loops_only_under_context_as_silent(
+        self,
+    ) -> None:
+        # The 2026-10-09 failure: two seconds of speech, then a video
+        # playing in the background for the other 49.
+        windows = _ScriptedWindows(
+            "Yeah, I'm just building everything.",
+            "Try the truck to get around and join the theme song. "
+            "The recreation of the night" + " and the night" * 140,
+            "",
+        )
+
+        text = transcribe_in_windows(_speech(51.0), windows)
+
+        assert text == "Yeah, I'm just building everything."
+        assert windows.contexts == ["", "Yeah, I'm just", ""]
+
+    def test_should_keep_the_words_before_a_loop_when_the_window_alone_has_speech(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows(
+            "We moved the launch to",
+            "Friday, because the build" + " was green" * 30,
+            "Friday, because the build was green.",
+        )
+
+        text = transcribe_in_windows(_speech_then_silence(20.0, 40.0), windows)
+
+        assert text == "We moved the launch to Friday, because the build was green"
+
+    def test_should_keep_seam_words_the_next_window_heard_nothing_of(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows("After that we can finally see.", "")
+
+        text = transcribe_in_windows(_speech(50.0), windows)
+
+        assert text == "After that we can finally see."
+
+    def test_should_not_carry_a_loop_into_the_next_windows_context(
+        self,
+    ) -> None:
+        windows = _ScriptedWindows(
+            "We shipped it and" + " then we" * 50,
+            "Monday.",
+        )
+
+        transcribe_in_windows(_speech_then_silence(20.0, 40.0), windows)
+
+        assert windows.contexts[1] == "We shipped it and then we"
+
 
 class TestFeatureExtractionDependencies:
     def test_should_import_without_torch_or_transformers(self) -> None:

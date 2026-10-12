@@ -31,11 +31,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 _CPU_DEVICE = "cpu"
-# CTranslate2 halves whatever budget it is given
-# (min(max_length / 2, max_length - start_step)), so the doubled value is
-# what yields the 438 new tokens the model's 448 decoder positions allow
-# after the nine-token prompt.
-_MAX_LENGTH = 876
+_DECODER_POSITIONS = 448
 # bfloat16 matches the checkpoint on disk, so no weights are rewritten at
 # load. CPU has no efficient bfloat16, and asking for it there makes
 # CTranslate2 convert to float32 while logging a warning; "default" lets
@@ -133,7 +129,7 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
             beam_size=1,
             sampling_topk=1,
             suppress_blank=False,
-            max_length=_MAX_LENGTH,
+            max_length=_max_length(prompt),
         )
         return tokens.decode(results[0].sequences_ids[0])
 
@@ -152,6 +148,17 @@ class CrisperWhisperCt2Adapter(TranscriptionEngine):
         self._model = None
         self._tokens = None
         self._prompt = None
+
+
+def _max_length(prompt: list[int]) -> int:
+    """Budget that keeps the prompt plus generation inside 448 positions.
+
+    CTranslate2 halves whatever budget it is given
+    (min(max_length / 2, max_length - start_step)), so this is double the
+    new tokens the prompt leaves room for. The prompt is longer on every
+    window after the first, by the continuation context it carries.
+    """
+    return 2 * (_DECODER_POSITIONS - len(prompt) - 1)
 
 
 def _storage_view(features: np.ndarray) -> object:
