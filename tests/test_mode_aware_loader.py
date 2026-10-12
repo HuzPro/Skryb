@@ -41,7 +41,9 @@ class TestModeAwareLoader:
         fake_batch = MagicMock()
         monkeypatch.setattr(
             bootstrap, "_load_engine_with_fallback",
-            lambda config, paths, registry, hardware, policy, diagnostics: fake_batch,
+            lambda config, paths, registry, hardware, policy, diagnostics, preload=None: (
+                fake_batch
+            ),
         )
         monkeypatch.setattr(
             bootstrap, "_load_streaming_engine",
