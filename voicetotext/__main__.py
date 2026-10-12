@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from voicetotext.core.event_bus import SimpleEventBus
     from voicetotext.core.json_config_adapter import JsonConfigAdapter
     from voicetotext.core.paths import AppPaths
+    from voicetotext.transcription.engine_preload import EnginePreload
     from voicetotext.transcription.engine_registry import EngineRegistry
     from voicetotext.transcription.hardware_detector import HardwareDetector
     from voicetotext.transcription.license_policy import LicensePolicy
@@ -97,6 +98,7 @@ def main() -> None:
     from voicetotext.core.startup_log import begin_startup_timing
 
     begin_startup_timing()
+    _start_library_prewarm()
     options = _parse_cli()
 
     from voicetotext.core.paths import AppPaths
@@ -132,6 +134,52 @@ def main() -> None:
         raise SystemExit(1)
     finally:
         mutex.release()
+
+
+# Third-party libraries on the path to the tray, the one needed soonest
+# first. Only libraries belong here: they never import voicetotext, so a
+# second thread importing them cannot deadlock against the main thread's
+# imports (Python 3.12 raises that as an error). sounddevice stays out
+# because importing it starts PortAudio on the importing thread.
+_PREWARM_LIBRARIES = (
+    "numpy",
+    "tkinter",
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "PIL.ImageFont",
+    "jellyfish",
+    "text_to_num",
+)
+
+
+def _start_library_prewarm() -> None:
+    """Import the tray path's libraries on a second thread.
+
+    After a Defender definitions update or a reboot, every file the app
+    opens is scanned first, which turns these imports into seconds. Started
+    here, they load while the main thread parses arguments, takes the
+    instance lock, opens the log and reads the config, and the main
+    thread's own imports find them done.
+    """
+    import threading
+
+    threading.Thread(
+        target=_import_libraries,
+        args=(_PREWARM_LIBRARIES,),
+        daemon=True,
+        name="library-prewarm",
+    ).start()
+
+
+def _import_libraries(names: tuple[str, ...]) -> None:
+    import contextlib
+    import importlib
+
+    for name in names:
+        # The main thread's own import of it raises properly, once
+        # logging exists to record it.
+        with contextlib.suppress(ImportError, OSError):
+            importlib.import_module(name)
 
 
 def _run_maintenance(options: argparse.Namespace) -> int | None:
@@ -263,10 +311,6 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     from voicetotext.transcription.engine_factory import create_model_manager
     from voicetotext.transcription.license_policy import LicensePolicy
 
-    root = tkinter.Tk()
-    root.withdraw()
-    milestone("Tk-created")
-
     config = startup.config
     registry = startup.registry
 
@@ -305,9 +349,20 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
     if not startup.model_was_configured:
         config.set("transcription.model_size", DEFAULT_MODEL)
 
-    if paths.is_first_run() or not _configured_model_installed(
+    needs_setup = paths.is_first_run() or not _configured_model_installed(
         config, model_manager,
-    ):
+    )
+    # Before the window and the tray: the model takes longer to load than
+    # both take to build, so it starts first and they are built meanwhile.
+    preload = None if needs_setup else _start_engine_preload(
+        config, paths, registry, hardware_detector, license_policy,
+    )
+
+    root = tkinter.Tk()
+    root.withdraw()
+    milestone("Tk-created")
+
+    if needs_setup:
         from voicetotext.ui.launcher import ShellLauncher
 
         _run_first_time_setup(
@@ -334,8 +389,57 @@ def _run(paths: AppPaths, startup: _Startup) -> None:
         hardware_detector=hardware_detector,
         license_policy=license_policy,
         api_server=api_server,
+        preload=preload,
     )
     app.run()
+
+
+def _start_engine_preload(
+    config: ConfigurationStore,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware_detector: HardwareDetector,
+    license_policy: LicensePolicy,
+) -> EnginePreload | None:
+    """Start loading the batch engine, or return None to leave it to the tray.
+
+    Only the torch-free CTranslate2 engine is preloaded. Its modules are
+    imported here, on the main thread, so the preload thread imports no
+    voicetotext module: two threads importing the same modules can
+    deadlock, which Python 3.12 raises as an error. A torch engine would
+    import torch to pick its device, and its adapter imports more of the
+    app, so it keeps loading after the tray as before.
+
+    Also skipped where ``build_app`` would change what gets loaded first:
+    streaming builds its engine elsewhere, and a legacy ``None``/``"auto"``
+    language is rewritten by ``migrate_language`` before the load.
+    """
+    from voicetotext.transcription.engine_factory import (
+        create_engine_for_active_model,
+        startup_requires_torch,
+    )
+
+    if config.get("transcription.mode", "batch") == "streaming":
+        return None
+    if config.get("transcription.language") in (None, "auto"):
+        return None
+    if startup_requires_torch(config, registry, paths.models_dir):
+        return None
+    import importlib
+
+    for module in (
+        "voicetotext.transcription.crisperwhisper_ct2_adapter",
+        "voicetotext.transcription.ct2_conversion",
+    ):
+        importlib.import_module(module)
+    from voicetotext.transcription.engine_preload import EnginePreload
+
+    return EnginePreload.start(
+        lambda: create_engine_for_active_model(
+            config, paths, registry, hardware_detector,
+            license_policy=license_policy,
+        ),
+    )
 
 
 def _start_api_server(event_bus: SimpleEventBus) -> ApiServer:

@@ -7,8 +7,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Protocol, cast
 
-import requests
-
 PUNCTUATION_MODEL_NAME = "sherpa-onnx-online-punct-en-2024-08-06"
 PUNCTUATION_MODEL_URL = (
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
@@ -125,6 +123,10 @@ def _model_is_complete(model_dir: Path) -> bool:
 
 
 def _fetch_model(models_dir: Path) -> bool:
+    # Imported here, not at the top: this module is on the startup path and
+    # requests is not, until the model is actually missing.
+    import requests
+
     archive_path: Path | None = None
     try:
         models_dir.mkdir(parents=True, exist_ok=True)

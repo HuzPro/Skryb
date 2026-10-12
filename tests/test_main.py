@@ -25,6 +25,7 @@ from voicetotext.__main__ import (
     _apply_torch_env_overrides,
     _configured_model_installed,
     _show_error,
+    _start_engine_preload,
     _start_torch_prewarm_if_needed,
     _stderr_is_console,
     _try_show_error_dialog,
@@ -68,6 +69,75 @@ def _resolved_prewarm() -> Future[ModuleType]:
     prewarm: Future[ModuleType] = Future()
     prewarm.set_result(ModuleType("torch"))
     return prewarm
+
+
+class TestStartingTheEnginePreload:
+    """Which launches start loading the model before the tray is built."""
+
+    @staticmethod
+    def _start(settings: dict[str, object], tmp_path: Path) -> tuple[object, MagicMock]:
+        config = FakeConfig({
+            "transcription.model_size": "crisperwhisper-2.0-turbo",
+            "transcription.engine": "crisperwhisper_ct2",
+            "transcription.language": "en",
+            "transcription.mode": "batch",
+            **settings,
+        })
+        with patch(
+            "voicetotext.transcription.engine_preload.EnginePreload.start",
+        ) as start:
+            result = _start_engine_preload(
+                config, SimpleNamespace(models_dir=tmp_path),
+                build_engine_registry(), MagicMock(), MagicMock(),
+            )
+        return result, start
+
+    def test_a_ctranslate2_batch_launch_starts_the_preload(self, tmp_path) -> None:
+        result, start = self._start({}, tmp_path)
+
+        start.assert_called_once()
+        assert result is start.return_value
+
+    def test_streaming_mode_leaves_the_load_to_the_tray(self, tmp_path) -> None:
+        result, start = self._start({"transcription.mode": "streaming"}, tmp_path)
+
+        assert result is None
+        start.assert_not_called()
+
+    @pytest.mark.parametrize("legacy_language", [None, "auto"])
+    def test_a_legacy_language_the_tray_will_migrate_leaves_the_load_to_the_tray(
+        self, legacy_language, tmp_path,
+    ) -> None:
+        result, start = self._start(
+            {"transcription.language": legacy_language}, tmp_path,
+        )
+
+        assert result is None
+        start.assert_not_called()
+
+    def test_a_torch_engine_leaves_the_load_to_the_tray(self, tmp_path) -> None:
+        result, start = self._start(
+            {
+                "transcription.model_size": "parakeet-tdt-0.6b-v3",
+                "transcription.engine": "nano_parakeet",
+            },
+            tmp_path,
+        )
+
+        assert result is None
+        start.assert_not_called()
+
+    def test_the_preload_builds_the_engine_for_the_active_model(self, tmp_path) -> None:
+        with patch(
+            "voicetotext.transcription.engine_factory.create_engine_for_active_model",
+        ) as create:
+            _result, start = self._start({}, tmp_path)
+            build = start.call_args.args[0]
+            assert build() is create.return_value
+
+        assert create.call_args.args[0].get("transcription.model_size") == (
+            "crisperwhisper-2.0-turbo"
+        )
 
 
 class TestConfiguredModelInstalled:
@@ -274,8 +344,13 @@ class TestBindingStartupOrder:
         startup = _startup(
             await_torch_prewarm=lambda: timeline.append("await-prewarm"),
         )
+        preload = MagicMock()
 
         with (
+            patch(
+                "voicetotext.__main__._start_engine_preload",
+                side_effect=lambda *_args: timeline.append("preload") or preload,
+            ),
             patch("tkinter.Tk", side_effect=lambda: timeline.append("tk") or root),
             patch(
                 "voicetotext.__main__._start_api_server",
@@ -302,14 +377,18 @@ class TestBindingStartupOrder:
         ):
             _run(paths, startup)
 
+        # The model starts loading before the window and the tray, which
+        # are built while it loads.
         assert timeline == [
-            "tk",
             "api-server",
             "downloads",
             "manager",
             "await-prewarm",
+            "preload",
+            "tk",
             "build-app",
         ]
+        assert build_app.call_args.kwargs["preload"] is preload
         detect.assert_not_called()
         assert build_app.call_args.kwargs["registry"] is startup.registry
         assert build_app.call_args.kwargs["api_server"] is api_server
