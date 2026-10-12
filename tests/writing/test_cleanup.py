@@ -416,8 +416,9 @@ class TestWhenTheModelIsAsked:
             "wait no, send the zeppelin sketch to Joric instead",
             "I'll take the blue one, I mean the green one",
             "the gondola needs, the gondola needs a new rope",
+            "book the hall for thirty people, make that forty",
         ],
-        ids=["actually", "wait-no", "i-mean", "restarted-phrase"],
+        ids=["actually", "wait-no", "i-mean", "restarted-phrase", "make-that"],
     )
     def test_a_spoken_correction_or_false_start_reaches_the_model(self, text):
         assert needs_cleanup(text)
@@ -432,8 +433,14 @@ class TestWhenTheModelIsAsked:
             "do these things number one tune it number two oil it",
             "actually no",
             "",
+            "can you make it async and add a retry for the upload",
+            "Make it work on the Linux runner too, then push the branch",
         ],
-        ids=["plain-prose", "swearing-and-numbers", "question", "first-second", "number-one", "too-short-cue", "empty"],
+        ids=[
+            "plain-prose", "swearing-and-numbers", "question", "first-second",
+            "number-one", "too-short-cue", "empty", "make-it-instruction",
+            "make-it-capitalised",
+        ],
     )
     def test_everything_else_is_pasted_as_recognised(self, text):
         assert not needs_cleanup(text)
