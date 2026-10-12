@@ -90,8 +90,31 @@ class TestCrisperWhisperCt2Adapter:
             "beam_size": 1,
             "sampling_topk": 1,
             "suppress_blank": False,
-            "max_length": 876,
+            "max_length": 888,
         }
+
+    def test_should_keep_a_window_with_continuation_context_inside_448_positions(
+        self,
+    ) -> None:
+        adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
+        model = _loaded(adapter, [[1, 2, 3, 4], [5], [6]])
+        bare_prompt = list(range(9))
+        adapter._tokens.decoder_prompt.side_effect = (
+            lambda _language, _mode, context="": (
+                bare_prompt + [7] * 45 if context else bare_prompt
+            )
+        )
+
+        adapter.transcribe(_audio(seconds=70.0))
+
+        # CTranslate2 generates min(max_length / 2, max_length - start_step)
+        # tokens, start_step being the prompt length minus one.
+        for generate_call in model.generate.call_args_list:
+            prompt = generate_call.args[1][0]
+            max_length = generate_call.kwargs["max_length"]
+            new_tokens = min(max_length // 2, max_length - (len(prompt) - 1))
+            assert len(prompt) + new_tokens <= 448
+        assert model.generate.call_args_list[0].kwargs["max_length"] == 876
 
     def test_should_join_one_result_per_encoder_window(self) -> None:
         adapter = CrisperWhisperCt2Adapter(_MODEL_DIR, "cuda", "en")
