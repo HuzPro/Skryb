@@ -11,7 +11,13 @@ from voicetotext.core.action_dispatcher import (
     ActionDispatcher,
     ThreadedActionDispatcher,
 )
-from voicetotext.core.build_info import RunningBuild, source_checkout
+from voicetotext.core.build_info import (
+    RunningBuild,
+    source_changed_since,
+    source_checkout,
+)
+from voicetotext.core.checkout_update import pull_main
+from voicetotext.core.dev_install import start_another_copy
 from voicetotext.core.event_bus import EventBus, SimpleEventBus
 from voicetotext.core.events import (
     DeliveryFailedEvent,
@@ -27,7 +33,9 @@ from voicetotext.core.exceptions import (
 )
 from voicetotext.core.json_config_adapter import JsonConfigAdapter
 from voicetotext.core.paths import AppPaths
-from voicetotext.core.startup_log import milestone, session_id
+from voicetotext.core.self_update import SelfUpdate
+from voicetotext.core.single_instance import SecondLaunches
+from voicetotext.core.startup_log import milestone, process_started_at, session_id
 from voicetotext.core.timestamps import utc_now
 from voicetotext.core.state_machine import AppState, AppStateMachine
 from voicetotext.diagnostics.session import SessionDiagnostics, content_recording_enabled
@@ -983,6 +991,8 @@ def _make_active_engine_provider(
 
 
 _ENGINE_LOAD_TIMEOUT_SECONDS = 120.0
+# A restart onto newer code waits while either is under way.
+_DICTATING = (AppState.RECORDING, AppState.TRANSCRIBING)
 
 
 def _build_settings_service(
@@ -1078,6 +1088,8 @@ def build_app(
     license_policy: LicensePolicy,
     api_server: ApiServer,
     preload: EnginePreload | None = None,
+    second_launches: SecondLaunches | None = None,
+    check_for_updates: bool = False,
 ) -> SystemTrayApp:
     from voicetotext.transcription.model_info import (
         migrate_engine_field,
@@ -1354,6 +1366,7 @@ def build_app(
         ),
         on_open_settings=functools.partial(show_page, "settings"),
         build_status=RunningBuild(source_checkout()).status,
+        start_replacement=functools.partial(start_another_copy, "--restart"),
         download_manager=download_manager,
         owned_disposables=(
             (overlay, ducking, history_pruner, writing) if overlay is not None
@@ -1385,6 +1398,21 @@ def build_app(
         event_bus=event_bus,
         preload=preload,
     )
+    self_update = SelfUpdate(
+        pull=functools.partial(pull_main, source_checkout()),
+        source_changed=functools.partial(
+            source_changed_since, process_started_at().timestamp(),
+        ),
+        is_busy=lambda: state_machine.state in _DICTATING,
+        restart=app.restart,
+        tell=lambda message: gui_dispatcher.dispatch(lambda: notice.show(message)),
+        on_gui_thread=gui_dispatcher.dispatch,
+        in_background=action_dispatcher.dispatch,
+    )
+    if second_launches is not None:
+        second_launches.on_launch = functools.partial(self_update.check, asked=True)
+    if check_for_updates:
+        self_update.check(asked=False)
 
     return app
 
