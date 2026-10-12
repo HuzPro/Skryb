@@ -116,6 +116,49 @@ def test_thousands_of_dictations_list_newest_first_and_filter_ignoring_case(seed
     assert _history(seeded, "no dictation says this") == []
 
 
+def test_a_limit_lists_only_that_many_of_the_newest_dictations(seeded: Rig) -> None:
+    everything = _history(seeded)
+
+    assert seeded.call("GET", "/api/history?limit=100") == (200, everything[:100])
+    assert seeded.call("GET", "/api/history?limit=0") == (200, [])
+    assert seeded.call("GET", "/api/history?limit=100000") == (200, everything)
+
+
+def test_a_search_is_limited_the_same_way(seeded: Rig) -> None:
+    cafe = _history(seeded, "café")
+
+    status, first = seeded.call("GET", "/api/history?query=caf%C3%A9&limit=7")
+
+    assert status == 200
+    assert first == cafe[:7]
+
+
+def test_a_limited_list_checks_the_disk_only_for_the_recordings_it_lists(
+    seeded: Rig, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a spinning disk each check is a seek: 5,500 of them took 14 s.
+    checked: list[Path] = []
+    is_file = Path.is_file
+
+    def counting_is_file(path: Path) -> bool:
+        checked.append(path)
+        return is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", counting_is_file)
+
+    seeded.call("GET", "/api/history?limit=5")
+
+    assert len([path for path in checked if path.suffix == ".wav"]) == 5
+
+
+@pytest.mark.parametrize("limit", ["-1", "ten", "1.5", "²", "1e3"])
+def test_a_limit_that_is_not_a_whole_number_is_refused(seeded: Rig, limit: str) -> None:
+    status, body = seeded.call("GET", f"/api/history?limit={urllib.parse.quote(limit)}")
+
+    assert status == 400
+    assert body["error"] == "limit must be a whole number."
+
+
 def test_one_dictation_can_be_exported_played_retried_and_deleted(seeded: Rig, tmp_path: Path) -> None:
     stream = seeded.events()
     entry = next(entry for entry in _history(seeded) if entry["has_audio"] and entry["id"].endswith(".499"))

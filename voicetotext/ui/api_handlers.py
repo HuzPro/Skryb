@@ -701,7 +701,9 @@ class CoreApi:
         return entry
 
     def _list_history(self, request: ApiRequest) -> ApiResponse:
-        entries = self._require_history().entries(request.query.get("query", ""))
+        entries = self._require_history().entries(
+            request.query.get("query", ""), _history_limit(request),
+        )
         return ApiResponse(200, [history_entry_json(entry) for entry in entries])
 
     def _delete_history_entry(self, request: ApiRequest) -> ApiResponse:
@@ -810,6 +812,15 @@ def _path_from(request: ApiRequest) -> Path:
     if not text.strip():
         raise ApiError(400, "Say which file to use.")
     return Path(text)
+
+
+def _history_limit(request: ApiRequest) -> int | None:
+    text = request.query.get("limit")
+    if text is None:
+        return None
+    if not (text.isascii() and text.isdigit()):
+        raise ApiError(400, "limit must be a whole number.")
+    return int(text)
 
 
 def _model_named(request: ApiRequest) -> str:

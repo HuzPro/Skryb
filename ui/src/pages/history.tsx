@@ -22,6 +22,10 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_HEIGHT = 30;
 const ROW_HEIGHT = 50;
+// Each listed entry costs the core a disk check for its recording, so the
+// list asks for this many more whenever the last LOAD_AHEAD rows come into view.
+const PAGE_SIZE = 100;
+const LOAD_AHEAD = 20;
 
 type Item = { kind: "day"; label: string } | { kind: "entry"; entry: HistoryEntry };
 type Retry = { state: "running" } | { state: "done"; text: string } | { state: "failed"; error: string };
@@ -246,12 +250,16 @@ export function HistoryPage() {
   const client = useQueryClient();
   const [query, setQuery] = useState("");
   const search = useDebounced(query.trim(), 150);
+  const [shown, setShown] = useState({ search, limit: PAGE_SIZE });
+  const limit = shown.search === search ? shown.limit : PAGE_SIZE;
   const history = useQuery({
-    queryKey: ["history", search],
-    queryFn: () => api.get<HistoryEntry[]>(`/api/history?query=${encodeURIComponent(search)}`),
+    queryKey: ["history", search, limit],
+    queryFn: () => api.get<HistoryEntry[]>(`/api/history?query=${encodeURIComponent(search)}&limit=${limit}`),
     placeholderData: keepPreviousData,
   });
   const entries = useMemo(() => history.data ?? [], [history.data]);
+  // Fewer than asked for means the end; previous data shown while more load is always fewer.
+  const hasMore = entries.length === limit;
   const items = useMemo(() => groupByDay(entries, new Date()), [entries]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [retries, setRetries] = useState<Record<string, Retry>>({});
@@ -266,6 +274,10 @@ export function HistoryPage() {
     estimateSize: (index) => (items[index]?.kind === "day" ? DAY_HEIGHT : ROW_HEIGHT),
     overscan: 10,
   });
+  const lastRendered = virtualizer.getVirtualItems().at(-1)?.index ?? 0;
+  useEffect(() => {
+    if (hasMore && lastRendered >= items.length - LOAD_AHEAD) setShown({ search, limit: limit + PAGE_SIZE });
+  }, [hasMore, lastRendered, items.length, search, limit]);
 
   const selected = entries.find((entry) => entry.id === selectedId) ?? null;
   const retry = selected ? retries[selected.id] : undefined;

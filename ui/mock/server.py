@@ -592,7 +592,8 @@ class Handler(BaseHTTPRequestHandler):
             if any(needle in text.casefold() for text in (entry["text"], *((entry["writing"] or {}).get(key, "") for key in ("typed", "answer"))))
         ]
         if method == "GET":
-            self._send(200, found)
+            limit = query.get("limit", [""])[0]
+            self._send(200, found[:int(limit)] if limit.isdigit() else found)
             return
         if method == "POST" and rest == ["export"]:
             self._send(200, {"rows": len(found)})
