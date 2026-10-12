@@ -60,8 +60,10 @@ _WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)*")
 # "According to God"). Without a cue the dictation is pasted as recognised.
 # Spoken lists are not a job: every list the model laid out from a real
 # dictation was wrong, so a list in its answer is rejected below.
+# "make it" is left out: it is almost always an instruction to someone ("make
+# it async"), and 16 of 17 dictations it sent to the model came back unchanged.
 _CUES = re.compile(
-    r"\b(?:actually|no wait|wait no|i mean|make (?:that|it)|scratch that|strike that|"
+    r"\b(?:actually|no wait|wait no|i mean|make that|scratch that|strike that|"
     r"never ?mind|sorry|correction)\b"
     # a restarted phrase: "the gondola needs, the gondola needs a rope"
     r"|\b((?:[^\W\d_]+ ){1,3}[^\W\d_]+)[,.]? \1\b",

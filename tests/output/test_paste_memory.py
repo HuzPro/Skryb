@@ -3,6 +3,7 @@ import pytest
 from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
+    SELECTION_OUTSIDE_FIELD,
     CaretContext,
     fit_to_context,
 )
@@ -210,6 +211,17 @@ class TestReadOrRemember:
 
         assert context() == CaretContext("Hello ", "", "")
         assert len(waits) == 1
+
+    def test_a_selection_outside_the_field_goes_straight_to_the_last_paste(self, memory):
+        memory.remember("Ok, ")
+        waits: list[None] = []
+
+        context = read_or_remember(
+            lambda: SELECTION_OUTSIDE_FIELD, memory, lambda: waits.append(None),
+        )
+
+        assert context() == CaretContext("Ok, ", "", "")
+        assert waits == []
 
     def test_falls_back_to_the_last_paste_when_both_reads_fail(self, memory):
         memory.remember("okay")

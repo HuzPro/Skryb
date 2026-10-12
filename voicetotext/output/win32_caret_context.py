@@ -12,6 +12,7 @@ from typing import Protocol
 from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
+    SELECTION_OUTSIDE_FIELD,
     CaretContext,
     caret_log_line,
 )
@@ -107,9 +108,11 @@ def read_caret_context() -> CaretContext:
     edit-control reader picks up what UI Automation cannot see.
     """
     context = read_ui_automation_context()
-    if context == NO_CONTEXT:
-        return read_edit_control_context()
-    return context
+    if context != NO_CONTEXT:
+        return context
+    fallback = read_edit_control_context()
+    # Kept as it is, so the caller can tell why nothing was read.
+    return context if fallback == NO_CONTEXT else fallback
 
 
 def read_ui_automation_context() -> CaretContext:
@@ -249,7 +252,7 @@ def _context_of(element: _Element) -> CaretContext:
     document = pattern.DocumentRange
     if not _lies_within(selection, document):
         _logger.debug("No caret context: the selection lies outside the field.")
-        return NO_CONTEXT
+        return SELECTION_OUTSIDE_FIELD
     context = CaretContext(
         before=_adjacent_text(
             selection, document, uia.TextPatternRangeEndpoint_Start,

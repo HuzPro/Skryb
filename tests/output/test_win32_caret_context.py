@@ -20,6 +20,7 @@ from voicetotext.output import win32_caret_context as module
 from voicetotext.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
+    SELECTION_OUTSIDE_FIELD,
     CaretContext,
     log_caret_text_when,
 )
@@ -276,7 +277,7 @@ class TestFieldsInsideALargerDocument:
         field = FakeTextRange(page, len(_CHROME_BEFORE), len(page) - len(_CHROME_AFTER))
         automation = _automation_within(field, 0, 0)
 
-        assert _context_from(automation) == NO_CONTEXT
+        assert _context_from(automation) is SELECTION_OUTSIDE_FIELD
 
     def test_should_read_the_full_width_when_it_fits_inside_the_field(self):
         field = "a" * 200 + "b" * 200
@@ -357,6 +358,17 @@ class TestContextWhenNoneCanBeRead:
 
 
 class TestReadCaretContext:
+    def test_a_selection_outside_the_field_survives_the_edit_control_fallback(
+        self, monkeypatch,
+    ):
+        page = _CHROME_BEFORE + "Hello there. " + _CHROME_AFTER
+        field = FakeTextRange(page, len(_CHROME_BEFORE), len(page) - len(_CHROME_AFTER))
+        automation = _automation_within(field, 0, 0)
+        monkeypatch.setattr(module, "_automation", lambda: automation)
+        monkeypatch.setattr(module, "read_edit_control_context", lambda: NO_CONTEXT)
+
+        assert read_caret_context() is SELECTION_OUTSIDE_FIELD
+
     def test_should_read_the_focused_element(self, monkeypatch):
         automation = _automation_over(_DOCUMENT, _SELECTION_START, _SELECTION_END)
         monkeypatch.setattr(module, "_automation", lambda: automation)
