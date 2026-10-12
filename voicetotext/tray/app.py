@@ -89,6 +89,7 @@ class SystemTrayApp:
         download_manager: DownloadManager | None = None,
         owned_disposables: tuple[Disposable, ...] = (),
         build_status: Callable[[], str] = str,
+        start_replacement: Callable[[], None] = lambda: None,
     ) -> None:
         self._use_case = use_case
         self._state_machine = state_machine
@@ -100,6 +101,7 @@ class SystemTrayApp:
         self._owned_disposables = owned_disposables
         # The running commit, and the one a restart would pick up.
         self._build_status = build_status
+        self._start_replacement = start_replacement
         self._icon: TrayIcon | None = None
         self._pending_engine_failure: str | None = None
         self._pending_engine_ready = False
@@ -196,6 +198,15 @@ class SystemTrayApp:
         if self._on_open_settings is None:
             return
         self._on_open_settings()
+
+    def restart(self) -> None:
+        """Quit, with a fresh copy of the app already starting in its place.
+
+        The fresh copy waits for this one to exit, so it starts first and
+        loads its libraries while this one cleans up.
+        """
+        self._start_replacement()
+        self._handle_quit()
 
     def _handle_quit(self) -> None:
         # Schedule a hard exit FIRST, before any cleanup. Cleanup may

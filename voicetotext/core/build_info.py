@@ -67,6 +67,24 @@ class RunningBuild:
         return f"{self._started.label}, restart for {on_disk.label}"
 
 
+def source_changed_since(started_at: float, package: Path | None = None) -> bool:
+    """Whether any of the app's Python files was written after *started_at*.
+
+    A pull, a branch switch and an edit in place all rewrite the files they
+    touch, so this sees each of them.
+    """
+    root = package or Path(__file__).resolve().parents[1]
+    return any(_modified_at(path) > started_at for path in root.rglob("*.py"))
+
+
+def _modified_at(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        # Deleted since the folder was listed.
+        return 0.0
+
+
 def _git_dir(checkout: Path) -> Path | None:
     dot_git = checkout / ".git"
     if dot_git.is_dir():

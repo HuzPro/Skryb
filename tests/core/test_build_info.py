@@ -1,6 +1,12 @@
+import os
 from pathlib import Path
 
-from voicetotext.core.build_info import Build, RunningBuild, read_build
+from voicetotext.core.build_info import (
+    Build,
+    RunningBuild,
+    read_build,
+    source_changed_since,
+)
 
 _FIRST = "fe502a2a2032de7e3a1a03ee3ddf9d25068b6e4f"
 _SECOND = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
@@ -78,3 +84,44 @@ class TestRunningBuild:
 
     def test_says_nothing_when_not_run_from_a_checkout(self, tmp_path: Path) -> None:
         assert RunningBuild(tmp_path).status() == ""
+
+
+_STARTED = 1_790_000_000.0
+
+
+def _source_tree(root: Path, files: int) -> list[Path]:
+    """A package of *files* modules spread over nested folders, all older than the start."""
+    paths = []
+    for index in range(files):
+        folder = root / f"feature_{index % 40}" / f"part_{index % 7}"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"module_{index}.py"
+        path.write_text(f"VALUE = {index}\n", encoding="utf-8")
+        os.utime(path, (_STARTED - 3600, _STARTED - 3600))
+        paths.append(path)
+    return paths
+
+
+class TestSourceChangedSince:
+    def test_thousands_of_files_written_before_the_start_mean_no_change(
+        self, tmp_path: Path,
+    ) -> None:
+        _source_tree(tmp_path, 2_000)
+
+        assert source_changed_since(_STARTED, tmp_path) is False
+
+    def test_one_file_written_after_the_start_counts_however_deep_it_is(
+        self, tmp_path: Path,
+    ) -> None:
+        paths = _source_tree(tmp_path, 2_000)
+        os.utime(paths[1_337], (_STARTED + 1, _STARTED + 1))
+
+        assert source_changed_since(_STARTED, tmp_path) is True
+
+    def test_files_that_are_not_python_do_not_count(self, tmp_path: Path) -> None:
+        _source_tree(tmp_path, 10)
+        notes = tmp_path / "README.md"
+        notes.write_text("notes", encoding="utf-8")
+        os.utime(notes, (_STARTED + 60, _STARTED + 60))
+
+        assert source_changed_since(_STARTED, tmp_path) is False

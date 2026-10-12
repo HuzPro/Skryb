@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from voicetotext.core.event_bus import SimpleEventBus
 from voicetotext.core.events import (
     MicrophoneConnectedEvent,
@@ -810,3 +812,50 @@ class TestWritingServerFailure:
         app = _build_app()
 
         app._event_bus.publish(WritingServerFailedEvent(message="The writing model could not start."))
+
+
+class TestRestart:
+    def _app(self, call_order: list[str], start_replacement):
+        listener = MagicMock()
+        listener.stop.side_effect = lambda: call_order.append("cleanup")
+        app = SystemTrayApp(
+            use_case=MagicMock(),
+            state_machine=AppStateMachine(event_bus=SimpleEventBus()),
+            event_bus=SimpleEventBus(),
+            hotkey_listener=listener,
+            tray_factory=lambda **kwargs: MagicMock(),
+            start_replacement=start_replacement,
+        )
+        app._icon = MagicMock()
+        return app
+
+    def test_restart_starts_the_replacement_before_cleaning_up_and_exiting(self):
+        call_order: list[str] = []
+        app = self._app(call_order, lambda: call_order.append("replacement"))
+        with (
+            patch("voicetotext.tray.app.threading.Timer"),
+            patch(
+                "voicetotext.tray.app.os._exit",
+                side_effect=lambda code: call_order.append(f"exit {code}"),
+            ),
+        ):
+            app.restart()
+
+        assert call_order == ["replacement", "cleanup", "exit 0"]
+
+    def test_a_replacement_that_cannot_start_leaves_this_copy_running(self):
+        call_order: list[str] = []
+
+        def cannot_start():
+            raise FileNotFoundError("voicetotext-gui.exe")
+
+        app = self._app(call_order, cannot_start)
+        with (
+            patch("voicetotext.tray.app.threading.Timer"),
+            patch("voicetotext.tray.app.os._exit") as os_exit,
+            pytest.raises(FileNotFoundError),
+        ):
+            app.restart()
+
+        os_exit.assert_not_called()
+        assert call_order == []

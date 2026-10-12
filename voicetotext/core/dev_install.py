@@ -38,6 +38,11 @@ def shortcut_path() -> Path:
     )
 
 
+def start_another_copy(*arguments: str) -> None:
+    """Start the app again through its launcher, the way the Start Menu shortcut does."""
+    subprocess.Popen([str(launcher_path()), *arguments], close_fds=True)
+
+
 def create_shortcut(
     target: Path | None = None,
     destination: Path | None = None,
