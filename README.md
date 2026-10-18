@@ -13,7 +13,7 @@ leaving the box.
 - **Local models.** Parakeet provides accurate batch transcription and
   Nemotron provides low-latency streaming.
 - **Live streaming mode (experimental).** Text appears while you speak,
-  using `parakeet-tdt-0.6b-v3` or the cache-aware
+  using `parakeet-tdt-0.6b-v3`, `parakeet-ultra` or the cache-aware
   `nemotron-speech-streaming-en-0.6b`. GPU only.
 - **GPU-focused.** CUDA and ROCm (including Windows ROCm) are first-class.
   A GPU is expected; Parakeet technically runs on CPU but is about 15x slower

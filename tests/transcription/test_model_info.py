@@ -81,6 +81,7 @@ class TestPinnedRevisions:
     _EXPECTED_PINS: ClassVar[dict[str, str]] = {
         "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
         "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
+        "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
     }
 
     @pytest.mark.parametrize(

@@ -87,3 +87,77 @@ class TestParakeetModelLoader:
             loader.load("cpu")
 
         assert nano_parakeet.hf_hub_download is sentinel
+
+
+def _install_snapshot(models_dir: Path, repo_id: str, *filenames: str) -> Path:
+    repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
+    snapshot = repo_dir / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    for filename in filenames:
+        (snapshot / filename).write_bytes(b"")
+    (repo_dir / "refs").mkdir()
+    (repo_dir / "refs" / "main").write_text("abc123")
+    return snapshot
+
+
+class TestTransformersLayoutSnapshots:
+    def test_a_safetensors_snapshot_without_a_nemo_loads_through_the_transformers_layout_loader(
+        self, monkeypatch, tmp_path,
+    ):
+        import nano_parakeet
+        import torch
+
+        from voicetotext.transcription import parakeet_loader
+
+        snapshot = _install_snapshot(
+            tmp_path, "moondream/parakeet-ultra",
+            "config.json", "model.safetensors",
+        )
+        captured: dict = {}
+
+        def fake_load_hf(nano_parakeet_module, torch_module, path, device, dtype):
+            captured.update(path=path, device=device, dtype=dtype)
+            return "ultra"
+
+        def refuse_nemo_loader(*args, **kwargs):
+            raise AssertionError("nano-parakeet's .nemo loader must not run")
+
+        monkeypatch.setattr(parakeet_loader, "load_hf_parakeet", fake_load_hf)
+        monkeypatch.setattr(nano_parakeet, "from_pretrained", refuse_nemo_loader)
+
+        model = ParakeetModelLoader(
+            repo_id="moondream/parakeet-ultra", model_dir=tmp_path,
+        ).load("cuda")
+
+        assert model == "ultra"
+        assert captured == {
+            "path": snapshot / "model.safetensors",
+            "device": "cuda",
+            "dtype": torch.bfloat16,
+        }
+
+    def test_a_nemo_snapshot_keeps_using_nano_parakeets_own_loader(
+        self, monkeypatch, tmp_path,
+    ):
+        import nano_parakeet
+
+        from voicetotext.transcription import parakeet_loader
+
+        _install_snapshot(
+            tmp_path, "nvidia/parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v3.nemo",
+        )
+
+        def refuse_hf_loader(*args, **kwargs):
+            raise AssertionError("the transformers-layout loader must not run")
+
+        monkeypatch.setattr(parakeet_loader, "load_hf_parakeet", refuse_hf_loader)
+        monkeypatch.setattr(
+            nano_parakeet, "from_pretrained",
+            lambda model_name, device, dtype: "v3",
+        )
+
+        model = ParakeetModelLoader(
+            repo_id="nvidia/parakeet-tdt-0.6b-v3", model_dir=tmp_path,
+        ).load("cpu")
+
+        assert model == "v3"
