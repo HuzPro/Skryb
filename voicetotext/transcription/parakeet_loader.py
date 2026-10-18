@@ -4,9 +4,15 @@ from pathlib import Path
 from voicetotext.transcription.backend_imports import (
     make_engine_dependency_error,
 )
+from voicetotext.transcription.hf_model_manager import (
+    loadable_snapshot_dir,
+    repo_has_loadable_snapshot,
+)
+from voicetotext.transcription.parakeet_hf_checkpoint import load_hf_parakeet
 
 
 _CPU_DEVICE = "cpu"
+_HF_WEIGHTS_FILENAME = "model.safetensors"
 
 
 class ParakeetModelLoader:
@@ -17,6 +23,10 @@ class ParakeetModelLoader:
     one place. nano-parakeet caches by ``(repo, device, dtype)``, so asking
     for the same tuple twice returns the same in-memory model - the batch
     and streaming engines never pay for two loads.
+
+    A snapshot holding transformers-layout ``model.safetensors`` and no
+    ``.nemo`` (``moondream/parakeet-ultra``) goes through
+    :func:`load_hf_parakeet` instead, which keeps the same cache rule.
     """
 
     def __init__(self, repo_id: str, model_dir: Path) -> None:
@@ -25,9 +35,25 @@ class ParakeetModelLoader:
 
     def load(self, device: str) -> object:
         nano_parakeet_module, torch_module = self._import_backend()
+        hf_weights = self._hf_layout_weights()
+        if hf_weights is not None:
+            return load_hf_parakeet(
+                nano_parakeet_module, torch_module, hf_weights, device,
+                self._dtype_for(torch_module, device),
+            )
         return self._load_with_scoped_hf_patch(
             nano_parakeet_module, torch_module, device,
         )
+
+    def _hf_layout_weights(self) -> Path | None:
+        repo_dir = self._model_dir / f"models--{self._repo_id.replace('/', '--')}"
+        if not repo_has_loadable_snapshot(repo_dir):
+            return None
+        snapshot = loadable_snapshot_dir(self._model_dir, self._repo_id)
+        weights = snapshot / _HF_WEIGHTS_FILENAME
+        if any(snapshot.glob("*.nemo")) or not weights.exists():
+            return None
+        return weights
 
     def _import_backend(self) -> tuple[object, object]:
         try:

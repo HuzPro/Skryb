@@ -138,7 +138,9 @@ class TestHuggingFaceModelManagerCatalog:
     def test_should_list_supplied_models(self, tmp_path: Path) -> None:
         manager = _make_manager(tmp_path)
 
-        assert [model.name for model in manager.list_models()] == [DEFAULT_MODEL]
+        assert [model.name for model in manager.list_models()] == [
+            DEFAULT_MODEL, "parakeet-ultra",
+        ]
         assert manager.has_model(DEFAULT_MODEL) is True
         assert manager.has_model("unknown") is False
 
