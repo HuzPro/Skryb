@@ -181,7 +181,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, _NEMOTRON, *_CRISPERWHISPER,
+            _PARAKEET, "parakeet-ultra", _NEMOTRON, *_CRISPERWHISPER,
         }
 
     def test_should_mark_installed_status_on_view(self):

@@ -31,7 +31,8 @@ class NanoParakeetAdapter(TranscriptionEngine):
     """Parakeet TDT engine backed by *nano-parakeet* (pure PyTorch).
 
     Works on any GPU that PyTorch supports, including AMD via ROCm.
-    Models are downloaded from HuggingFace Hub (``nvidia/parakeet-tdt-*``).
+    Models are downloaded from HuggingFace Hub (``nvidia/parakeet-tdt-*``,
+    ``moondream/parakeet-ultra``).
     """
 
     def __init__(
