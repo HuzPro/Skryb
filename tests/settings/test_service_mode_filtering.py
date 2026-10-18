@@ -7,6 +7,7 @@ from voicetotext.transcription.engine_types import HardwareProfile
 from voicetotext.transcription.model_info import ALL_MODELS
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
+_PARAKEET_ULTRA = "parakeet-ultra"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _CRISPERWHISPER = {
     "crisperwhisper-2.0-turbo",
@@ -69,7 +70,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, *_CRISPERWHISPER,
+            _PARAKEET, _PARAKEET_ULTRA, *_CRISPERWHISPER,
         }
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
@@ -82,6 +83,7 @@ class TestServiceModeFiltering:
 
         assert names == {
             _PARAKEET,
+            _PARAKEET_ULTRA,
             _NEMOTRON,
         }
 
@@ -127,7 +129,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, *_CRISPERWHISPER,
+            _PARAKEET, _PARAKEET_ULTRA, *_CRISPERWHISPER,
         }
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
@@ -142,6 +144,7 @@ class TestServiceModeFiltering:
 
         assert names == {
             _PARAKEET,
+            _PARAKEET_ULTRA,
             _NEMOTRON,
         }
 

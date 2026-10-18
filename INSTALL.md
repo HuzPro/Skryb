@@ -43,8 +43,10 @@ that development entry is intentionally out of scope.
 
 Parakeet (`parakeet-tdt-0.6b-v3`) is the batch model and the fresh-install
 default. Nemotron (`nemotron-speech-streaming-en-0.6b`) is available in
-streaming mode. A CUDA or ROCm GPU is expected. Parakeet technically runs on
-CPU, but measured throughput is about 15x slower than real time.
+streaming mode. `parakeet-ultra` (Moondream's retrained v3, same languages,
+fewer errors) is an optional download that runs on the same engine. A CUDA or
+ROCm GPU is expected. Parakeet technically runs on CPU, but measured throughput
+is about 15x slower than real time.
 
 ## Streaming dictation (experimental)
 
@@ -52,7 +54,7 @@ Streaming mode types text live as you speak, instead of recording first and tran
 
 - **GPU-only.** A CUDA or ROCm GPU is required; the streaming models are rejected at load on CPU. On a box with no detected GPU the Settings UI disables the Streaming toggle. It is still experimental on AMD ROCm.
 - **Parakeet is a core dependency.** Every supported requirements path and a plain `pip install -e .` install `nano-parakeet` (which pulls `sentencepiece`).
-- **Models:** `parakeet-tdt-0.6b-v3` (windowed) and `nemotron-speech-streaming-en-0.6b` (cache-aware, lowest latency). Choose **Streaming** on the Transcription page, then download a streaming model.
+- **Models:** `parakeet-tdt-0.6b-v3` or `parakeet-ultra` (windowed) and `nemotron-speech-streaming-en-0.6b` (cache-aware, lowest latency). Choose **Streaming** on the Transcription page, then download a streaming model.
 
 ## CTranslate2 (fast CrisperWhisper launch, optional)
 

@@ -56,8 +56,20 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
     "parakeet-tdt-0.6b-v3": ModelInfo(
         name="parakeet-tdt-0.6b-v3",
         size_mb=2510,
-        description="Best accuracy, built-in punctuation (25 languages)",
+        description="NVIDIA's original, built-in punctuation (25 languages)",
         repo_id="nvidia/parakeet-tdt-0.6b-v3",
+        compatible_engines=("nano_parakeet",),
+        engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
+    ),
+    # Moondream's post-trained v3: the same network saved in transformers'
+    # layout. Pinned because the loader's key renames are written against
+    # this exact file.
+    "parakeet-ultra": ModelInfo(
+        name="parakeet-ultra",
+        size_mb=1260,
+        description="Parakeet v3 retrained by Moondream: fewer errors, same 25 languages",
+        repo_id="moondream/parakeet-ultra",
+        revision="73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         compatible_engines=("nano_parakeet",),
         engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
     ),
