@@ -474,6 +474,13 @@ class CoreApi:
             for mode in TranscriptionMode
             for view in self._service.list_models(mode)
         }
+        if self._first_run:
+            # Setup lists this computer's default first (Phonon-2 without a GPU).
+            selected = self._service.selected_model()
+            views = {
+                view.name: view
+                for view in sorted(views.values(), key=lambda view: view.name != selected)
+            }
         return ApiResponse(200, [
             {
                 "name": view.name,

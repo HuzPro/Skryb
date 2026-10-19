@@ -16,6 +16,7 @@ from voicetotext.transcription.model_manager import ModelManager
 
 _CONFIG_FILENAME = "config.json"
 _SHARD_INDEX_FILENAME = "model.safetensors.index.json"
+_PACKED_ARCHIVE_SUFFIX = ".tar.zst"
 
 
 def repo_has_loadable_snapshot(repo_dir: Path, revision: str = "") -> bool:
@@ -163,6 +164,15 @@ class HuggingFaceModelManager(ModelManager):
         return (
             HuggingFaceModelManager._is_nemo_layout(snapshot)
             or HuggingFaceModelManager._is_safetensors_layout(snapshot)
+            or HuggingFaceModelManager._is_packed_archive_layout(snapshot)
+        )
+
+    @staticmethod
+    def _is_packed_archive_layout(snapshot: Path) -> bool:
+        # Phonon-2: the whole model is one zstd tar, unpacked at first load.
+        return any(
+            p.name.endswith(_PACKED_ARCHIVE_SUFFIX)
+            for p in snapshot.iterdir() if p.is_file()
         )
 
     @staticmethod
