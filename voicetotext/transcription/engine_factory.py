@@ -30,6 +30,7 @@ from voicetotext.transcription.model_info import (
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
+    PHONON2_MODELS,
     ModelInfo,
     get_model_info,
 )
@@ -52,6 +53,14 @@ _NEMOTRON_STREAMING_DESCRIPTOR = EngineDescriptor(
     streaming_only=True,
 )
 
+# Runs on the CPU whatever the hardware, so every hardware kind can select it.
+_PHONON2_CPU_DESCRIPTOR = EngineDescriptor(
+    engine_id="phonon2_cpu",
+    display_name="Phonon-2 (Fermion CPU engine)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=80,
+)
+
 _CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
     engine_id="crisperwhisper",
     display_name="CrisperWhisper 2.0 (Transformers)",
@@ -72,6 +81,7 @@ _CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
+    "phonon2_cpu": 1,
     "crisperwhisper": 1,
     "crisperwhisper_ct2": 1,
 }
@@ -84,12 +94,14 @@ def build_engine_registry() -> EngineRegistry:
         descriptors=[
             _NANO_PARAKEET_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
+            _PHONON2_CPU_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
+            "phonon2_cpu": _build_phonon2_cpu_engine,
             "crisperwhisper": _build_crisperwhisper_engine,
             "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
         },
@@ -114,6 +126,17 @@ def _build_nano_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
         repo_id=spec.repo_id,
         device=spec.device,
         model_dir=spec.model_dir,
+    )
+
+
+def _build_phonon2_cpu_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.hf_model_manager import (
+        loadable_snapshot_dir,
+    )
+    from voicetotext.transcription.phonon2_cpu_adapter import Phonon2CpuAdapter
+
+    return Phonon2CpuAdapter(
+        loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
     )
 
 
@@ -495,6 +518,9 @@ def build_composite_model_manager(
     nemotron_streaming_models = {
         name: info for name, info in NEMOTRON_STREAMING_MODELS.items() if info.repo_id
     }
+    phonon2_models = {
+        name: info for name, info in PHONON2_MODELS.items() if info.repo_id
+    }
     crisperwhisper_models = {
         name: info for name, info in CRISPERWHISPER_MODELS.items() if info.repo_id
     }
@@ -515,6 +541,14 @@ def build_composite_model_manager(
         models=nemotron_streaming_models,
         license_policy=license_policy,
     )
+    phonon2_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=phonon2_models,
+        license_policy=license_policy,
+    )
     crisperwhisper_manager = HuggingFaceModelManager(
         models_dir=models_dir,
         download_manager=download_manager,
@@ -528,6 +562,7 @@ def build_composite_model_manager(
         by_engine={
             "nano_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
+            "phonon2_cpu": phonon2_manager,
             "crisperwhisper": crisperwhisper_manager,
             "crisperwhisper_ct2": crisperwhisper_manager,
         },

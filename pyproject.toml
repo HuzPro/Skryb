@@ -40,6 +40,12 @@ dependencies = [
     # Per-app volume (Core Audio sessions) for lowering other apps while
     # recording. MIT licensed, over comtypes.
     "pycaw>=20240210; sys_platform == 'win32'",
+    # Phonon-2's CPU engine (Apache-2.0). Pinned exactly: the app calls its
+    # internals, and its native libraries were audited at this version.
+    "fermion-research==0.2.11",
+    # Counts physical cores for Phonon-2's thread count. pycaw already
+    # pulls it in; listed because the app now imports it directly.
+    "psutil>=5.9; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
