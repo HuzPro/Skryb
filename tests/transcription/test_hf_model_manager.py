@@ -178,6 +178,32 @@ class TestHuggingFaceModelManagerInstallation:
         assert _example_model_is_installed(tmp_path) is True
 
 
+class TestPackedArchiveInstallation:
+    """Phonon-2 ships its whole model as one zstd tar beside a config.json."""
+
+    def test_a_snapshot_holding_the_archive_is_installed(self, tmp_path: Path) -> None:
+        _write_transformers_snapshot(tmp_path, {"phonon-2.bps.tar.zst": "zstd tar"})
+
+        assert _example_model_is_installed(tmp_path) is True
+
+    def test_the_repos_metadata_without_the_archive_is_not_installed(
+        self, tmp_path: Path,
+    ) -> None:
+        _write_transformers_snapshot(
+            tmp_path, {"packed_manifest.json": "{}", "fermion_container.py": "", "NOTICE": ""},
+        )
+
+        assert _example_model_is_installed(tmp_path) is False
+
+    def test_an_archive_still_downloading_is_not_installed(self, tmp_path: Path) -> None:
+        snapshot = tmp_path / "models--example--transformers" / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").touch()
+        (snapshot / "phonon-2.bps.tar.zst").write_text("first chunks")
+
+        assert _example_model_is_installed(tmp_path) is False
+
+
 class TestShardedSafetensorsInstallation:
     """``model.safetensors.index.json`` is a manifest, so its presence
     proves nothing about the weights: a cancelled 8 GB download leaves

@@ -5,7 +5,7 @@ from types import MappingProxyType
 
 from voicetotext.core.config import ConfigurationStore
 from voicetotext.core.exceptions import ConfigurationError
-from voicetotext.transcription.engine_types import EngineId
+from voicetotext.transcription.engine_types import EngineId, HardwareKind
 
 _logger = logging.getLogger(__name__)
 
@@ -76,6 +76,34 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_PHONON2_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"phonon2_cpu": 100},
+)
+
+
+# Fermion Research's 164 MB compression of parakeet-tdt-0.6b-v3. Pinned
+# because the CPU engine release (``fermion-research``) is pinned against
+# this archive.
+PHONON2_MODELS: dict[str, ModelInfo] = {
+    "phonon-2": ModelInfo(
+        name="phonon-2",
+        size_mb=164,
+        description="Parakeet v3 shrunk to 164 MB by Fermion Research: fast on CPU, English only",
+        repo_id="FermionResearch/Phonon-2",
+        revision="fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
+        compatible_engines=("phonon2_cpu",),
+        engine_priorities=_PHONON2_ENGINE_PRIORITIES,
+    ),
+}
+
+CPU_DEFAULT_MODEL = "phonon-2"
+
+
+def default_model_for(hardware: HardwareKind) -> str:
+    """The model a fresh install starts on: Phonon-2 when there is no GPU."""
+    return CPU_DEFAULT_MODEL if hardware == "cpu" else DEFAULT_MODEL
+
+
 _NEMOTRON_STREAMING_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"nemotron_streaming": 100},
 )
@@ -142,7 +170,8 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
 
 
 ALL_MODELS: dict[str, ModelInfo] = {
-    **PARAKEET_MODELS, **NEMOTRON_STREAMING_MODELS, **CRISPERWHISPER_MODELS,
+    **PARAKEET_MODELS, **PHONON2_MODELS, **NEMOTRON_STREAMING_MODELS,
+    **CRISPERWHISPER_MODELS,
 }
 
 
