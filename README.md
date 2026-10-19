@@ -15,9 +15,10 @@ leaving the box.
 - **Live streaming mode (experimental).** Text appears while you speak,
   using `parakeet-tdt-0.6b-v3`, `parakeet-ultra` or the cache-aware
   `nemotron-speech-streaming-en-0.6b`. GPU only.
-- **GPU-focused.** CUDA and ROCm (including Windows ROCm) are first-class.
-  A GPU is expected; Parakeet technically runs on CPU but is about 15x slower
-  than real time.
+- **GPU-focused, with a CPU option.** CUDA and ROCm (including Windows ROCm)
+  are first-class. On a computer with no GPU the default is `phonon-2`
+  (Parakeet v3 shrunk to 164 MB, English only), which runs on Fermion
+  Research's CPU engine at roughly 15-30x faster than real time.
 - **Native and lightweight UI.** Win32 tray icon plus a Tkinter settings
   window with OS-aware dark mode. No browser, no Electron, no Qt.
 - **Self-diagnosis.** `python -m voicetotext --doctor` reports Python,

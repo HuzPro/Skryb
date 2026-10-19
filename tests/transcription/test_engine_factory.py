@@ -87,8 +87,8 @@ class TestBuildEngineRegistry:
         registry = build_engine_registry()
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
-            "nano_parakeet", "nemotron_streaming", "crisperwhisper",
-            "crisperwhisper_ct2",
+            "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
+            "crisperwhisper", "crisperwhisper_ct2",
         }
 
     def test_should_declare_the_ct2_engine_torch_free(self) -> None:
@@ -548,3 +548,63 @@ class TestAutoPrefersTheTorchFreeEngine:
         assert selectable_engine_ids(
             config, build_engine_registry(), tmp_path,
         ) == ("crisperwhisper",)
+
+
+class TestPhonon2OnTheCpuEngine:
+    """Phonon-2 runs on Fermion's CPU engine whatever GPU the machine has."""
+
+    def _installed(self, models_dir: Path) -> Path:
+        model_info = get_model_info("phonon-2")
+        repo = models_dir / "models--FermionResearch--Phonon-2"
+        snapshot = repo / "snapshots" / model_info.revision
+        snapshot.mkdir(parents=True)
+        (snapshot / "phonon-2.bps.tar.zst").write_bytes(b"zstd tar")
+        (snapshot / "config.json").write_text("{}")
+        (repo / "refs").mkdir()
+        (repo / "refs" / "main").write_text(model_info.revision)
+        return snapshot
+
+    def test_auto_picks_the_cpu_engine_without_probing_the_gpu(self) -> None:
+        detector = FakeHardwareDetector()
+
+        engine_id = resolve_engine_id(
+            _config(model_size="phonon-2"), get_model_info("phonon-2"),
+            detector, build_engine_registry(),
+        )
+
+        assert engine_id == "phonon2_cpu"
+        assert detector.detect_calls == 0
+
+    @pytest.mark.parametrize("hardware", [_CPU, _GPU])
+    def test_the_engine_opens_the_pinned_snapshot_on_any_hardware(
+        self, tmp_path: Path, hardware: FakeHardwareDetector,
+    ) -> None:
+        from voicetotext.transcription.phonon2_cpu_adapter import Phonon2CpuAdapter
+
+        snapshot = self._installed(tmp_path)
+
+        engine = create_engine_for_active_model(
+            _config(model_size="phonon-2"), _paths(tmp_path),
+            build_engine_registry(), hardware,
+            license_policy=AllowAllLicensePolicy(),
+        )
+
+        assert isinstance(engine, Phonon2CpuAdapter)
+        assert engine._snapshot == snapshot
+
+    def test_a_snapshot_at_another_commit_is_not_opened(self, tmp_path: Path) -> None:
+        snapshot = self._installed(tmp_path)
+        (snapshot.parent.parent / "refs" / "main").write_text("0" * 40)
+
+        assert engines_with_model_on_disk(get_model_info("phonon-2"), tmp_path) == frozenset()
+
+    def test_the_composite_manager_downloads_it_through_its_own_child(
+        self, tmp_path: Path,
+    ) -> None:
+        manager = build_composite_model_manager(
+            tmp_path, MagicMock(), lambda: "nano_parakeet", AllowAllLicensePolicy(),
+        )
+        self._installed(tmp_path)
+
+        assert manager.has_model("phonon-2") is True
+        assert manager.is_installed("phonon-2") is True

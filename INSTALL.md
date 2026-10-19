@@ -42,11 +42,19 @@ development install's per-user startup entry. Installer uninstall cleanup for
 that development entry is intentionally out of scope.
 
 Parakeet (`parakeet-tdt-0.6b-v3`) is the batch model and the fresh-install
-default. Nemotron (`nemotron-speech-streaming-en-0.6b`) is available in
+default on a GPU. Nemotron (`nemotron-speech-streaming-en-0.6b`) is available in
 streaming mode. `parakeet-ultra` (Moondream's retrained v3, same languages,
 fewer errors) is an optional download that runs on the same engine. A CUDA or
-ROCm GPU is expected. Parakeet technically runs on CPU, but measured throughput
-is about 15x slower than real time.
+ROCm GPU is expected for those. Parakeet technically runs on CPU, but measured
+throughput is about 15x slower than real time.
+
+On a computer with no GPU, a fresh install defaults to `phonon-2`: Fermion
+Research's 164 MB compression of Parakeet v3 (English only, batch only). It
+runs on Fermion's CPU engine from the pinned `fermion-research` package, which
+uses native AVX2 / AVX-512 kernels on the packed weights. On a 6-core desktop
+forced to the AVX2 kernels, a 3 s dictation took about 0.2 s and long audio ran
+about 30x faster than real time. The first load unpacks the 164 MB archive once
+into the snapshot's `.phonon2` folder.
 
 ## Streaming dictation (experimental)
 

@@ -11,7 +11,9 @@ from voicetotext.transcription.model_info import (
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
+    PHONON2_MODELS,
     ModelInfo,
+    default_model_for,
     get_model_info,
     is_catalog_model,
     migrate_engine_field,
@@ -82,6 +84,7 @@ class TestPinnedRevisions:
         "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
         "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
+        "phonon-2": "fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
     }
 
     @pytest.mark.parametrize(
@@ -133,6 +136,7 @@ class TestModelCatalog:
     def test_should_contain_only_surviving_model_lineups(self) -> None:
         assert set(ALL_MODELS) == (
             set(PARAKEET_MODELS)
+            | set(PHONON2_MODELS)
             | set(NEMOTRON_STREAMING_MODELS)
             | set(CRISPERWHISPER_MODELS)
         )
@@ -233,3 +237,20 @@ class TestRemovedEngineMigration:
         migrate_engine_field(config)
 
         assert config.get("transcription.engine") == "nano_parakeet"
+
+
+class TestDefaultModelForHardware:
+    def test_a_machine_without_a_gpu_starts_on_phonon_2(self) -> None:
+        assert default_model_for("cpu") == "phonon-2"
+
+    @pytest.mark.parametrize("gpu", ["nvidia_cuda", "amd_rocm"])
+    def test_a_machine_with_a_gpu_keeps_parakeet(self, gpu: str) -> None:
+        assert default_model_for(gpu) == DEFAULT_MODEL
+
+    def test_phonon_2_is_ungated_english_only_and_cpu_engine_only(self) -> None:
+        info = get_model_info("phonon-2")
+
+        assert info.license_id == ""
+        assert "English only" in info.description
+        assert info.compatible_engines == ("phonon2_cpu",)
+        assert info.display_size == "164 MB"

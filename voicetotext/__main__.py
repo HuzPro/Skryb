@@ -378,10 +378,13 @@ def _run(paths: AppPaths, startup: _Startup, *, restarted: bool = False) -> None
     hardware_detector = CachedHardwareDetector(
         TorchHardwareDetector(), config, display_adapter_fingerprint,
     )
-    from voicetotext.transcription.model_info import DEFAULT_MODEL
+    from voicetotext.transcription.model_info import default_model_for
 
     if not startup.model_was_configured:
-        config.set("transcription.model_size", DEFAULT_MODEL)
+        config.set(
+            "transcription.model_size",
+            default_model_for(hardware_detector.detect().kind),
+        )
 
     needs_setup = paths.is_first_run() or not _configured_model_installed(
         config, model_manager,
