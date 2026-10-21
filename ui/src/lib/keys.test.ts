@@ -30,6 +30,23 @@ describe("key caps", () => {
     expect(endsOnKey(" ")).toBe(false);
   });
 
+  it("shows punctuation keys as the characters they print", () => {
+    expect(formatCombo("cmd+shift+f23+quote")).toBe("Win + Shift + F23 + '");
+    expect(keyCaps("semicolon+equals+comma+minus+period+slash+backtick+bracket_left+backslash+bracket_right+quote")).toEqual(
+      [";", "=", ",", "-", ".", "/", "`", "[", "\\", "]", "'"],
+    );
+    expect(formatCombo("Ctrl + QUOTE")).toBe("Ctrl + '");
+  });
+
+  it("keeps recording after the Copilot key so another key can follow it", () => {
+    const pressed = ["cmd", "cmd+shift", "cmd+shift+f23", "cmd+shift+f23+quote"];
+    expect(pressed.map(endsOnKey)).toEqual([false, false, false, true]);
+    expect(endsOnKey(" CMD + Shift + F23 ")).toBe(false);
+    expect(endsOnKey("shift+f23")).toBe(true);
+    expect(endsOnKey("ctrl+f23")).toBe(true);
+    expect(endsOnKey("f23")).toBe(true);
+  });
+
   it("ignores stray spaces and empty parts", () => {
     expect(formatCombo(" ctrl + a ")).toBe("Ctrl + A");
     expect(formatCombo("")).toBe("");
@@ -61,6 +78,11 @@ describe("shortcut validation mirrors the core", () => {
   it("names an unknown key the way the core does", () => {
     expect(validateBindings([bind("ctrl+ä")])).toEqual({ message: "Shortcut 'ctrl+ä' is not valid: Unknown key: ä.", index: 0 });
     expect(validateBindings([bind("ctrl+")])?.message).toBe("Shortcut 'ctrl+' is not valid: Unknown key: .");
+  });
+
+  it("accepts punctuation keys by name and refuses the character they print, like the core", () => {
+    expect(validateBindings([bind("cmd+shift+f23+quote"), bind("ctrl+alt+bracket_left", "edit_selection")])).toBeNull();
+    expect(validateBindings([bind("ctrl+'")])).toEqual({ message: "Shortcut 'ctrl+'' is not valid: Unknown key: '.", index: 0 });
   });
 
   it("refuses the same keys used twice in any order", () => {

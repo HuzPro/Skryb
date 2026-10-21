@@ -8,8 +8,10 @@ leaving the box.
 ## Features
 
 - **System-wide dictation.** Any number of toggle or hold shortcuts, on keys
-  or mouse buttons 3-5 (default `Ctrl+Alt+M`); double-tap a hold shortcut to
-  go hands-free. Text lands in the focused app; your clipboard is preserved.
+  (punctuation and the Copilot key included) or mouse buttons 3-5 (default
+  `Ctrl+Alt+M`); double-tap a hold shortcut to go hands-free. The shortcut's
+  last key never reaches the focused app. Text lands in the focused app;
+  your clipboard is preserved.
 - **Local models.** Parakeet provides accurate batch transcription and
   Nemotron provides low-latency streaming.
 - **Live streaming mode (experimental).** Text appears while you speak,

@@ -103,6 +103,7 @@ from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
 from voicetotext.output.win32_key_sender import (
     VOICETOTEXT_INPUT_TAG,
     Win32KeySender,
+    send_menu_mask,
 )
 from voicetotext.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
@@ -579,6 +580,7 @@ def _build_hotkey_listener(
         observer,
         cancel=functools.partial(_cancel_with_escape, use_case),
         listen_to_mouse=any(binding.uses_mouse() for binding in bindings),
+        mask_menus=send_menu_mask,
     )
 
 
