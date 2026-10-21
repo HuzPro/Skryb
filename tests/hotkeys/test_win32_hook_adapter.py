@@ -188,6 +188,47 @@ class TestTheKeyThatCompletesAKeyboardShortcutIsSwallowed:
         assert _tap(adapter, _M) == [False, False]
 
 
+# Copilot + ' on a Dell XPS 13 whose Copilot key is set to act as Right Ctrl,
+# as a low-level hook saw it on 2026-10-21. Windows releases Win+Shift+F23 at
+# once and holds Right Ctrl (0xA3) instead; its release comes back injected.
+_COPILOT_QUOTE_UNDER_RIGHT_CTRL_SWAP = [
+    (True, keys.VK_LWIN), (True, keys.VK_LSHIFT), (True, _F23),
+    (False, keys.VK_LWIN), (False, keys.VK_LSHIFT), (False, _F23),
+    (True, keys.VK_RCONTROL), (True, _QUOTE), (False, _QUOTE),
+    (False, _F23), (False, keys.VK_RCONTROL), (False, keys.VK_LSHIFT), (False, keys.VK_LWIN),
+]
+
+
+class TestTheCopilotKeySwappedForRightCtrl:
+    def test_right_ctrl_quote_fires_on_each_press_and_swallows_only_the_quote(self):
+        calls = Calls()
+        masks: list[str] = []
+        adapter = _adapter(
+            calls, _dictate("ctrl_r+quote"), mask_menus=lambda: masks.append("mask"),
+        )
+        events = _COPILOT_QUOTE_UNDER_RIGHT_CTRL_SWAP * 2
+
+        swallowed = [adapter._handle_key(is_down, vk) for is_down, vk in events]
+
+        assert calls.log == ["dictate on", "dictate on"]
+        assert [event for event, gone in zip(events, swallowed) if gone] == [
+            (True, _QUOTE), (False, _QUOTE),
+        ] * 2
+        assert masks == []
+
+    def test_the_raw_copilot_keys_never_match_because_windows_releases_them_at_once(self):
+        calls = Calls()
+        adapter = _adapter(calls, _dictate("cmd+shift+f23+quote"))
+
+        swallowed = [
+            adapter._handle_key(is_down, vk)
+            for is_down, vk in _COPILOT_QUOTE_UNDER_RIGHT_CTRL_SWAP
+        ]
+
+        assert not any(swallowed)
+        assert calls.log == []
+
+
 class TestWinAndAltDoNotOpenMenusWhenTheShortcutKeyIsSwallowed:
     def _adapter_counting_masks(self, combo: str, mode: BindingMode = BindingMode.TOGGLE):
         masks: list[str] = []
