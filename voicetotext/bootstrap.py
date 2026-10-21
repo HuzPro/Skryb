@@ -58,6 +58,7 @@ from voicetotext.hotkeys.bindings import (
     parse_bindings,
 )
 from voicetotext.hotkeys.listener import HotkeyListener
+from voicetotext.hotkeys.win32_copilot_key import copilot_key_acts_as_right_ctrl
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 from voicetotext.hotkeys.win32_keyboard_hook import KeyObserver, ignore_key_event
 from voicetotext.output.app_aware_delivery import (
@@ -1312,6 +1313,7 @@ def build_app(
             functools.partial(api_server.hub.publish, "capture"),
             pause=lambda: app.pause_listener(),
             resume=lambda: app.resume_listener(),
+            copilot_acts_as_right_ctrl=copilot_key_acts_as_right_ctrl,
         ),
         diagnostics_dir=paths.diagnostics_dir,
         state=lambda: state_machine.state,
