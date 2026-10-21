@@ -531,6 +531,7 @@ def _run_first_time_setup(
 
     from voicetotext.bootstrap import build_first_run_settings_service
     from voicetotext.recording.input_devices import Microphones
+    from voicetotext.hotkeys.win32_copilot_key import copilot_key_acts_as_right_ctrl
     from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
     from voicetotext.ui.api_handlers import CoreApi, ShortcutCapture
     from voicetotext.ui.launcher import wait_for_setup
@@ -551,6 +552,7 @@ def _run_first_time_setup(
         microphones=Microphones(),
         capture=ShortcutCapture(
             Win32CaptureBridge(), functools.partial(api_server.hub.publish, "capture"),
+            copilot_acts_as_right_ctrl=copilot_key_acts_as_right_ctrl,
         ),
         diagnostics_dir=diagnostics_dir,
         first_run=True,
