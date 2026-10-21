@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from voicetotext.core.exceptions import OutputError
+from voicetotext.hotkeys import win32_keyboard_hook as wkh
 from voicetotext.output import win32_key_sender as wks
 from voicetotext.output.key_sender import KeySender
 from voicetotext.output.paste_method import PasteMethod
@@ -65,6 +66,34 @@ class TestWin32KeySenderSendCtrlV:
 
         with pytest.raises(OutputError):
             Win32KeySender().send_paste(PasteMethod.CTRL_V, "")
+
+
+class TestMenuMask:
+    @patch.object(wks, "_user32")
+    def test_the_menu_mask_taps_the_no_key_code_once_tagged_as_ours(self, mock_user32):
+        mock_user32.SendInput.return_value = 2
+
+        wks.send_menu_mask()
+
+        count, events, _ = mock_user32.SendInput.call_args.args
+        sent = [
+            (events[i].union.ki.wVk, events[i].union.ki.dwFlags, events[i].union.ki.dwExtraInfo)
+            for i in range(count)
+        ]
+        assert sent == [
+            (0xFF, 0, wks.VOICETOTEXT_INPUT_TAG),
+            (0xFF, _KEYEVENTF_KEYUP, wks.VOICETOTEXT_INPUT_TAG),
+        ]
+
+    def test_the_shortcut_hook_never_offers_the_mask_key_to_a_shortcut(self):
+        assert wks._VK_NONE in wkh._NOT_KEYS
+
+    @patch.object(wks, "_user32")
+    def test_a_refused_menu_mask_raises(self, mock_user32):
+        mock_user32.SendInput.return_value = 0
+
+        with pytest.raises(OutputError):
+            wks.send_menu_mask()
 
 
 class TestWin32KeySenderIsAKeySender:

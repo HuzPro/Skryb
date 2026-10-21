@@ -28,6 +28,22 @@ _VK_Z = 0x5A
 _VK_0 = 0x30
 _VK_9 = 0x39
 
+# Windows' VK_OEM_* punctuation keys, named by what they print on a US
+# layout. Another layout prints something else on the same physical key.
+PUNCTUATION_KEYS: dict[int, str] = {
+    0xBA: "semicolon",
+    0xBB: "equals",
+    0xBC: "comma",
+    0xBD: "minus",
+    0xBE: "period",
+    0xBF: "slash",
+    0xC0: "backtick",
+    0xDB: "bracket_left",
+    0xDC: "backslash",
+    0xDD: "bracket_right",
+    0xDE: "quote",
+}
+
 
 @dataclass(frozen=True)
 class HotkeyKey:
@@ -70,6 +86,7 @@ _NAMED_KEYS: dict[int, str] = {
     VK_XBUTTON1: "mouse4",
     VK_XBUTTON2: "mouse5",
     **{VK_F1 + offset: f"f{offset + 1}" for offset in range(24)},
+    **PUNCTUATION_KEYS,
 }
 
 

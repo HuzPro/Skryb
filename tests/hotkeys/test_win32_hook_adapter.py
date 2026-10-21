@@ -1,10 +1,11 @@
 import ctypes
+import random
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.core.exceptions import HotkeyError
+from voicetotext.core.exceptions import HotkeyError, OutputError
 from voicetotext.hotkeys import keys
 from voicetotext.hotkeys import win32_keyboard_hook as wkh
 from voicetotext.hotkeys.actions import HotkeyActions, strategies_for
@@ -12,9 +13,12 @@ from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
 from voicetotext.hotkeys.listener import HotkeyListener
 from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
 
+_C = 0x43
 _M = 0x4D
 _X = 0x58
 _F13 = 0x7C
+_F23 = 0x86
+_QUOTE = 0xDE
 
 
 class Calls:
@@ -34,10 +38,20 @@ def _adapter(calls: Calls, *bindings: Binding, **kwargs) -> Win32HookAdapter:
     return Win32HookAdapter(strategies, listen_to_mouse=True, **kwargs)
 
 
+def _dictate(combo: str, mode: BindingMode = BindingMode.TOGGLE) -> Binding:
+    return Binding(combo, mode, BindingAction.DICTATE)
+
+
+def _press(adapter: Win32HookAdapter, *vks: int) -> list[bool]:
+    return [adapter._handle_key(True, vk) for vk in vks]
+
+
+def _release(adapter: Win32HookAdapter, *vks: int) -> list[bool]:
+    return [adapter._handle_key(False, vk) for vk in vks]
+
+
 def _tap(adapter: Win32HookAdapter, *vks: int) -> list[bool]:
-    swallowed = [adapter._handle_key(True, vk) for vk in vks]
-    swallowed += [adapter._handle_key(False, vk) for vk in reversed(vks)]
-    return swallowed
+    return _press(adapter, *vks) + _release(adapter, *reversed(vks))
 
 
 class TestSeveralShortcutsInOneAdapter:
@@ -111,14 +125,175 @@ class TestMouseButtonsAreSwallowedOnlyWhenTheyCompleteAShortcut:
         ]
         assert calls.log == ["dictate on"]
 
-    def test_keyboard_shortcut_keys_always_reach_the_app(self):
-        calls = Calls()
-        adapter = _adapter(
-            calls, Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
-        )
 
-        assert _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _M) == [False] * 6
+class TestTheKeyThatCompletesAKeyboardShortcutIsSwallowed:
+    def test_the_last_key_is_swallowed_down_and_up_and_the_modifiers_reach_the_app(self):
+        calls = Calls()
+        adapter = _adapter(calls, _dictate("ctrl+alt+m"))
+
+        assert _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _M) == [
+            False, False, True, True, False, False,
+        ]
         assert calls.log == ["dictate on"]
+
+    def test_keys_that_do_not_complete_the_shortcut_reach_the_app(self):
+        calls = Calls()
+        adapter = _adapter(calls, _dictate("ctrl+alt+m"))
+
+        assert _tap(adapter, _M) == [False, False]
+        assert _tap(adapter, keys.VK_LCONTROL, _M) == [False] * 4
+        assert _tap(adapter, keys.VK_LMENU, keys.VK_LCONTROL, _M) == [False] * 6
+        assert calls.log == []
+
+    def test_a_held_last_key_stays_swallowed_through_every_repeat_until_released(self):
+        calls = Calls()
+        adapter = _adapter(calls, _dictate("ctrl+alt+m", BindingMode.HOLD))
+
+        _press(adapter, keys.VK_LCONTROL, keys.VK_LMENU)
+        repeats = _press(adapter, *[_M] * 200)
+        released = _release(adapter, _M, keys.VK_LMENU, keys.VK_LCONTROL)
+
+        assert all(repeats)
+        assert released == [True, False, False]
+        assert calls.log == ["dictate on", "dictate off"]
+
+    def test_the_next_press_of_a_swallowed_key_on_its_own_reaches_the_app(self):
+        adapter = _adapter(Calls(), _dictate("ctrl+alt+m"))
+        _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _M)
+
+        assert _tap(adapter, _M) == [False, False]
+
+    def test_copilot_then_quote_dictates_while_copilot_alone_and_copilot_c_reach_windows(self):
+        calls = Calls()
+        adapter = _adapter(calls, _dictate("cmd+shift+f23+quote"))
+        copilot = (keys.VK_LWIN, keys.VK_LSHIFT, _F23)
+
+        alone = _tap(adapter, *copilot)
+        copy = _tap(adapter, *copilot, _C)
+        dictate = _tap(adapter, *copilot, _QUOTE)
+
+        assert alone == [False] * 6
+        assert copy == [False] * 8
+        assert dictate == [False, False, False, True, True, False, False, False]
+        assert calls.log == ["dictate on"]
+
+    def test_a_key_swallowed_before_a_pause_does_not_swallow_its_next_press(self):
+        adapter = _adapter(Calls(), _dictate("ctrl+alt+m"))
+        _press(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _M)
+
+        adapter.pause()
+        _release(adapter, _M, keys.VK_LMENU, keys.VK_LCONTROL)
+        adapter.resume()
+
+        assert _tap(adapter, _M) == [False, False]
+
+
+class TestWinAndAltDoNotOpenMenusWhenTheShortcutKeyIsSwallowed:
+    def _adapter_counting_masks(self, combo: str, mode: BindingMode = BindingMode.TOGGLE):
+        masks: list[str] = []
+        adapter = _adapter(Calls(), _dictate(combo, mode), mask_menus=lambda: masks.append("mask"))
+        return adapter, masks
+
+    @pytest.mark.parametrize(("combo", "pressed"), [
+        ("ctrl+alt+m", (keys.VK_LCONTROL, keys.VK_LMENU, _M)),
+        ("alt_r+x", (keys.VK_RMENU, _X)),
+        ("cmd+shift+f23+quote", (keys.VK_LWIN, keys.VK_LSHIFT, _F23, _QUOTE)),
+        ("cmd+mouse4", (keys.VK_LWIN, keys.VK_XBUTTON1)),
+    ])
+    def test_one_mask_key_is_sent_when_win_or_alt_is_held(self, combo, pressed):
+        adapter, masks = self._adapter_counting_masks(combo)
+
+        _tap(adapter, *pressed)
+
+        assert masks == ["mask"]
+
+    def test_no_mask_key_is_sent_when_only_ctrl_and_shift_are_held(self):
+        adapter, masks = self._adapter_counting_masks("ctrl+shift+m")
+
+        _tap(adapter, keys.VK_LCONTROL, keys.VK_LSHIFT, _M)
+
+        assert masks == []
+
+    def test_no_mask_key_is_sent_for_keys_that_reach_the_app(self):
+        adapter, masks = self._adapter_counting_masks("ctrl+alt+m")
+
+        _tap(adapter, keys.VK_LMENU, _X)
+        _tap(adapter, keys.VK_LWIN, _M)
+
+        assert masks == []
+
+    def test_a_held_shortcut_key_sends_one_mask_key_however_long_it_repeats(self):
+        adapter, masks = self._adapter_counting_masks("ctrl+alt+m", BindingMode.HOLD)
+
+        _press(adapter, keys.VK_LCONTROL, keys.VK_LMENU, *[_M] * 100)
+        _release(adapter, _M, keys.VK_LMENU, keys.VK_LCONTROL)
+
+        assert masks == ["mask"]
+
+    def test_a_refused_mask_key_still_swallows_the_shortcut_key(self):
+        def refuse() -> None:
+            raise OutputError("SendInput injected 0 of 2 menu mask key events.")
+
+        calls = Calls()
+        adapter = _adapter(calls, _dictate("ctrl+alt+m"), mask_menus=refuse)
+
+        assert _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _M) == [
+            False, False, True, True, False, False,
+        ]
+        assert calls.log == ["dictate on"]
+
+
+class TestALongRandomTypingSession:
+    def test_five_thousand_random_key_events_swallow_exactly_the_keys_that_fired_a_shortcut(self):
+        rng = random.Random(20261021)
+        calls = Calls()
+        masks: list[str] = []
+        adapter = _adapter(
+            calls,
+            _dictate("alt+m"),
+            _dictate("mouse4", BindingMode.HOLD),
+            Binding("ctrl+f13", BindingMode.PRESS, BindingAction.PASTE_LAST),
+            mask_menus=lambda: masks.append("mask"),
+        )
+        pool = [
+            keys.VK_LCONTROL, keys.VK_LMENU, keys.VK_RMENU, keys.VK_LSHIFT, keys.VK_LWIN,
+            _M, _X, _QUOTE, _F13, _F23, keys.VK_XBUTTON1,
+        ]
+        held: set[int] = set()
+        swallowed_presses: set[int] = set()
+        fresh_swallows = 0
+        last_pressed = 0
+        events = 0
+
+        while events < 5000:
+            if held and rng.random() < 0.45:
+                vk = rng.choice(sorted(held))
+                assert adapter._handle_key(False, vk) == (vk in swallowed_presses)
+                held.discard(vk)
+                swallowed_presses.discard(vk)
+                events += 1
+                continue
+            vk = rng.choice(pool)
+            # Windows repeats only the key pressed last, and never a mouse button.
+            if vk in held and (vk != last_pressed or vk == keys.VK_XBUTTON1):
+                continue
+            swallowed = adapter._handle_key(True, vk)
+            last_pressed = vk
+            events += 1
+            if vk in held:
+                assert swallowed == (vk in swallowed_presses)
+                continue
+            held.add(vk)
+            if swallowed:
+                swallowed_presses.add(vk)
+                fresh_swallows += 1
+        for vk in sorted(held):
+            adapter._handle_key(False, vk)
+
+        fired = [entry for entry in calls.log if entry != "dictate off"]
+        assert fresh_swallows == len(fired) > 100
+        assert 0 < len(masks) <= fresh_swallows
+        assert adapter._swallowed == set()
 
 
 class TestEscapeCancelsARecording:
