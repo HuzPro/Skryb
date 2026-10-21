@@ -98,6 +98,13 @@ def _idle() -> AppState:
     return AppState.IDLE
 
 
+def _never() -> bool:
+    return False
+
+
+_COPILOT_KEY = ["cmd", "shift", "f23"]
+
+
 class ShortcutCapture:
     """Records a shortcut from the keys pressed while the app's own shortcuts are paused.
 
@@ -105,6 +112,10 @@ class ShortcutCapture:
     between the shell's on and off, or until Esc. Keys arrive on the hook's
     thread, which has to answer Windows at once and cannot stop its own hook,
     so the release after Esc happens on a worker.
+
+    Swallowing the Copilot key also stops Windows swapping it for Right Ctrl,
+    so when ``copilot_acts_as_right_ctrl`` says that swap is on, its
+    Win+Shift+F23 is recorded as the Right Ctrl the shortcut will see.
     """
 
     def __init__(
@@ -115,23 +126,31 @@ class ShortcutCapture:
         pause: Callable[[], None] = _nothing,
         resume: Callable[[], None] = _nothing,
         run_in_background: Callable[[Callable[[], None]], None] = _IN_BACKGROUND.dispatch,
+        copilot_acts_as_right_ctrl: Callable[[], bool] = _never,
     ) -> None:
         self._bridge = bridge
         self._publish = publish
         self._pause = pause
         self._resume = resume
         self._run_in_background = run_in_background
+        self._copilot_acts_as_right_ctrl = copilot_acts_as_right_ctrl
         self._lock = threading.Lock()
         self._active = False
         self._parts: list[str] = []
+        self._last_key = ""
+        self._copilot_is_right_ctrl = False
         bridge.key_pressed.connect(self._on_key)
 
     def start(self) -> None:
+        # Read for each recording: the Windows setting can change while the app runs.
+        copilot_is_right_ctrl = self._copilot_acts_as_right_ctrl()
         with self._lock:
             if self._active:
                 return
             self._active = True
             self._parts = []
+            self._last_key = ""
+            self._copilot_is_right_ctrl = copilot_is_right_ctrl
         self._pause()
         try:
             self._bridge.start()
@@ -162,9 +181,13 @@ class ShortcutCapture:
                 self._run_in_background(self._release)
             return
         with self._lock:
-            if not self._active or (self._parts and self._parts[-1] == name):
+            # A held key repeats; checking the raw key also drops F23 repeating under Right Ctrl.
+            if not self._active or name == self._last_key:
                 return
+            self._last_key = name
             self._parts.append(name)
+            if self._copilot_is_right_ctrl and self._parts[-3:] == _COPILOT_KEY:
+                self._parts[-3:] = ["ctrl_r"]
             combo = "+".join(self._parts)
         self._publish({"keys": combo, "display": shown_combination(combo)})
 
