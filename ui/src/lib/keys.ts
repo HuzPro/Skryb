@@ -6,6 +6,13 @@ const MODIFIERS: Record<string, number> = {
   shift: 0xa0, shift_l: 0xa0, shift_r: 0xa1,
   cmd: 0x5b,
 };
+/** Mirrors `hotkeys.keys.PUNCTUATION_KEYS`: virtual-key code and the character it prints on a US layout. */
+const PUNCTUATION: Record<string, [number, string]> = {
+  semicolon: [0xba, ";"], equals: [0xbb, "="], comma: [0xbc, ","], minus: [0xbd, "-"],
+  period: [0xbe, "."], slash: [0xbf, "/"], backtick: [0xc0, "`"], bracket_left: [0xdb, "["],
+  backslash: [0xdc, "\\"], bracket_right: [0xdd, "]"], quote: [0xde, "'"],
+};
+
 const NAMED: Record<string, number> = {
   ...MODIFIERS,
   space: 0x20,
@@ -14,13 +21,19 @@ const NAMED: Record<string, number> = {
   mouse5: 0x06,
 };
 for (let n = 1; n <= 24; n++) NAMED[`f${n}`] = 0x70 + n - 1;
+for (const [name, [vk]] of Object.entries(PUNCTUATION)) NAMED[name] = vk;
 
 const MODIFIER_VKS = new Set([0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0x5b, 0x5c]);
 
 const CAPS: Record<string, string> = {
   ctrl: "Ctrl", alt: "Alt", shift: "Shift", cmd: "Win", space: "Space", esc: "Esc",
   mouse_middle: "Middle mouse", mouse4: "Mouse 4", mouse5: "Mouse 5",
+  ...Object.fromEntries(Object.entries(PUNCTUATION).map(([name, [, printed]]) => [name, printed])),
 };
+
+// The Copilot key reports itself as these three keys and is often remapped
+// to act as Right Ctrl, so a recording that reaches them waits for one more.
+const COPILOT_KEY = "cmd+shift+f23";
 
 /** Mirrors `hotkeys.key_parser.parse_hotkey_combo`: virtual-key codes, or throws "Unknown key: x". */
 export function parseCombo(combo: string): number[] {
@@ -48,10 +61,11 @@ export function keyCaps(combo: string): string[] {
   return combo.split("+").filter((part) => part.trim()).map(keyCap);
 }
 
-/** The core reports a combination at every key press; it is complete once a key that is not a modifier joins it. */
+/** The core reports a combination at every key press; it is complete once a key that is not a modifier joins it, the Copilot key aside. */
 export function endsOnKey(combo: string): boolean {
-  const last = combo.split("+").map((part) => part.trim().toLowerCase()).filter(Boolean).at(-1);
-  return last !== undefined && !(last in MODIFIERS);
+  const parts = combo.split("+").map((part) => part.trim().toLowerCase()).filter(Boolean);
+  const last = parts.at(-1);
+  return last !== undefined && !(last in MODIFIERS) && parts.join("+") !== COPILOT_KEY;
 }
 
 /** "ctrl+shift+alt+m" -> "Ctrl + Shift + Alt + M". */

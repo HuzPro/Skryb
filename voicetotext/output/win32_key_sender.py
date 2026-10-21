@@ -15,6 +15,9 @@ _VK_SHIFT = 0x10
 _VK_CONTROL = 0x11
 _VK_INSERT = 0x2D
 _VK_V = 0x56
+# Reserved to mean "no key": apps ignore it, yet it still counts as a key
+# pressed between a Win or Alt press and its release.
+_VK_NONE = 0xFF
 
 # Insert sits on the navigation block; without the extended flag an app
 # reading the scan code sees numpad 0.
@@ -96,6 +99,15 @@ class Win32KeySender:
             _type_text(text)
         else:
             _send_combination(_COMBINATIONS[method])
+
+
+def send_menu_mask() -> None:
+    """Tap a key that does nothing, so releasing a held Win or Alt is not a
+    lone tap that opens the Start menu or the focused app's menu bar."""
+    _send(
+        [_key_event(_VK_NONE, key_up=False), _key_event(_VK_NONE, key_up=True)],
+        "menu mask",
+    )
 
 
 def _key_event(virtual_key: int, *, key_up: bool) -> _Input:

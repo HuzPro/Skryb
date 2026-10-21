@@ -13,6 +13,7 @@ from voicetotext.hotkeys.keys import (
     VK_SPACE,
     VK_XBUTTON1,
     VK_XBUTTON2,
+    PUNCTUATION_KEYS,
     HotkeyKey,
     from_char,
 )
@@ -37,6 +38,7 @@ _MODIFIER_MAP: dict[str, HotkeyKey] = {
     "mouse4": HotkeyKey(VK_XBUTTON1, "mouse4"),
     "mouse5": HotkeyKey(VK_XBUTTON2, "mouse5"),
     **{f"f{n}": HotkeyKey(VK_F1 + n - 1, f"f{n}") for n in range(1, 25)},
+    **{name: HotkeyKey(vk, name) for vk, name in PUNCTUATION_KEYS.items()},
 }
 
 _SINGLE_CHARACTER_KEYS = frozenset(ascii_lowercase + digits)

@@ -53,6 +53,19 @@ class TestNewKeysParse:
         with pytest.raises(ValueError, match="Unknown key"):
             parse_hotkey_combo(combo)
 
+    @pytest.mark.parametrize(("vk", "name"), sorted(keys.PUNCTUATION_KEYS.items()))
+    def test_every_punctuation_key_parses_in_any_case_and_names_back(self, vk, name):
+        assert parse_hotkey_combo(f"ctrl + {name.upper()} ")[1].vk == vk
+        assert keys.name_for_vk(vk) == name
+
+    @pytest.mark.parametrize("printed", ["'", ";", "[", "\\", "`", "ä", "😀"])
+    def test_a_punctuation_key_is_written_by_name_not_by_the_character_it_prints(self, printed):
+        with pytest.raises(ValueError, match="Unknown key"):
+            parse_hotkey_combo(f"ctrl+{printed}")
+
+    def test_the_extra_key_on_iso_keyboards_is_still_unsupported(self):
+        assert keys.name_for_vk(0xE2) is None
+
 
 class TestValidation:
     def test_the_default_shortcut_is_valid(self):
@@ -69,6 +82,9 @@ class TestValidation:
 
     def test_two_modifiers_together_are_a_valid_hold(self):
         validate_bindings([_dictate("ctrl+cmd", _HOLD)])
+
+    def test_the_copilot_key_followed_by_quote_is_a_valid_shortcut(self):
+        validate_bindings([_dictate("cmd+shift+f23+quote")])
 
     def test_the_same_keys_in_another_order_are_rejected_as_a_duplicate(self):
         with pytest.raises(BindingError, match="used twice"):
