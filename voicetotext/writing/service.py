@@ -7,6 +7,7 @@ actions. Status listeners are called on whatever thread changed the status.
 
 import logging
 import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,7 @@ _MAX_SPELLING_CHARS = 40
 @dataclass(frozen=True)
 class WritingStatus:
     """One of: not_installed, downloading, install_failed, starting, ready,
-    failed, stopped."""
+    failed, stopped, off (nothing uses the model, so it is not loaded)."""
 
     state: str
     detail: str = ""
@@ -89,6 +90,10 @@ def _open_with_shell(path: Path) -> None:
     os.startfile(path)  # type: ignore[attr-defined]  # Windows only, like the app
 
 
+def _always_needed() -> bool:
+    return True
+
+
 class WritingService:
     def __init__(
         self,
@@ -102,6 +107,7 @@ class WritingService:
         read_window: Callable[[], ForegroundWindow] = ForegroundWindow,
         make_downloader: Callable[[], FileDownloader] = chunked_downloader,
         open_path: Callable[[Path], None] = _open_with_shell,
+        needed: Callable[[], bool] = _always_needed,
     ) -> None:
         self._settings = settings
         self._paths = paths
@@ -112,6 +118,9 @@ class WritingService:
         self._run_in_background = run_in_background
         self._read_window = read_window
         self._open_path = open_path
+        self._needed = needed
+        self._started = False
+        self._server_lock = threading.Lock()
         self._listeners: list[Callable[[], None]] = []
         self._failure_announced = False
         self.client = WritingClient(server.endpoint)
@@ -122,7 +131,13 @@ class WritingService:
     # -- app side -------------------------------------------------------
 
     def start(self) -> None:
-        self._server.start()
+        """From now on the model runs while something uses it; called once dictation is ready."""
+        self._started = True
+        self._follow_settings()
+
+    def follow_settings(self) -> None:
+        """Load or unload the model to match the saved settings."""
+        self._run_in_background(self._follow_settings)
 
     def dispose(self) -> None:
         self._installer.shutdown()
@@ -168,6 +183,8 @@ class WritingService:
             server_files(self._paths, self._settings()) is None
         ):
             return WritingStatus("not_installed")
+        if server.state is ServerState.STOPPED and not self._needed():
+            return WritingStatus("off")
         return WritingStatus(server.state.value, server.detail)
 
     def install(self) -> None:
@@ -183,7 +200,7 @@ class WritingService:
         self.restart_server()
 
     def restart_server(self) -> None:
-        self._run_in_background(self._server.restart)
+        self._run_in_background(self._restart_if_needed)
 
     def open_log(self) -> None:
         log = (
@@ -224,8 +241,26 @@ class WritingService:
 
     def _on_install_changed(self) -> None:
         if self._installer.progress.state == "completed":
-            self._server.restart()
+            self._restart_if_needed()
         self._tell_listeners()
+
+    def _restart_if_needed(self) -> None:
+        with self._server_lock:
+            self._server.stop()
+            if self._needed():
+                self._server.start()
+
+    def _follow_settings(self) -> None:
+        """Run the model only while cleanup or voice editing uses it.
+
+        Only a stopped server is started, so a save never relaunches one
+        that gave up; Retry does that.
+        """
+        with self._server_lock:
+            if not self._needed():
+                self._server.stop()
+            elif self._started and self._server.status.state is ServerState.STOPPED:
+                self._server.start()
 
     def _on_server_status(self, status: ServerStatus) -> None:
         if status.state is ServerState.FAILED and not self._failure_announced:

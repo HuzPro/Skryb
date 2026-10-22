@@ -127,7 +127,7 @@ export interface Dictionary {
   rules: DictionaryRule[];
 }
 
-export type WritingState = "not_installed" | "installing" | "starting" | "ready" | "failed" | "stopped";
+export type WritingState = "not_installed" | "installing" | "starting" | "ready" | "failed" | "stopped" | "off";
 
 export interface WritingStatus {
   state: WritingState;
