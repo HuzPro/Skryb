@@ -88,7 +88,7 @@ class TestBuildEngineRegistry:
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
-            "crisperwhisper", "crisperwhisper_ct2",
+            "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr",
         }
 
     def test_should_declare_the_ct2_engine_torch_free(self) -> None:

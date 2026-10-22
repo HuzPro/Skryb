@@ -70,7 +70,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER,
+            _PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
@@ -129,7 +129,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER,
+            _PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
