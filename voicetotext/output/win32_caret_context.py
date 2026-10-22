@@ -230,6 +230,25 @@ def caret_context_of_hwnd(hwnd: int) -> CaretContext:
         return NO_CONTEXT
 
 
+def read_focused_text(limit: int) -> str | None:
+    """The focused field's whole text, up to ``limit`` characters, or ``None``. Never raises.
+
+    A password field reads as ``None``, as it does for the caret reading.
+    """
+    try:
+        element = _focused_element(_automation())
+        if element.CurrentIsPassword:
+            return None
+        uia = _uia()
+        handle = element.GetCurrentPattern(uia.UIA_TextPatternId)
+        if not handle:
+            return None
+        return handle.QueryInterface(uia.IUIAutomationTextPattern).DocumentRange.GetText(limit)
+    except Exception:
+        _logger.debug("Reading the focused field's text failed.", exc_info=True)
+        return None
+
+
 def _context_from(automation: _Automation) -> CaretContext:
     return _context_of(_focused_element(automation))
 
