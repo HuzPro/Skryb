@@ -1155,6 +1155,10 @@ class TestMicrophoneWiring:
         assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"
 
 
+_DICTATE = {"keys": "ctrl+shift+alt+m", "mode": "toggle", "action": "dictate"}
+_EDIT = {"keys": "ctrl+alt+bracket_left", "mode": "hold", "action": "edit_selection"}
+
+
 class TestWritingWiring:
     def _paths(self, tmp_path: Path) -> AppPaths:
         paths = AppPaths(base=tmp_path)
@@ -1278,6 +1282,70 @@ class TestWritingWiring:
         assert changes.learning_turned_on
         build_listener.assert_called_once()
         app.set_hotkey_listener.assert_called_once_with(build_listener.return_value)
+
+    @pytest.mark.parametrize(
+        ("cleanup", "bindings", "needed"),
+        [
+            ("off", [_DICTATE], False),
+            ("off", None, False),
+            ("off", [_DICTATE, _DICTATE, {"keys": "ctrl+alt+v", "mode": "press", "action": "paste_last"}], False),
+            ("off", [_DICTATE, {"keys": "   ", "mode": "toggle", "action": "edit_selection"}], False),
+            ("off", [_DICTATE, {"keys": "ctrl+alt+e", "mode": "toggle", "action": "edit_selection"}], True),
+            ("off", [_DICTATE, _EDIT], True),
+            ("light", [_DICTATE], True),
+            ("polished", [], True),
+            ("", [_DICTATE], True),
+        ],
+        ids=[
+            "cleanup-off", "cleanup-off-default-shortcuts", "cleanup-off-duplicate-shortcuts",
+            "cleanup-off-blank-edit-shortcut", "cleanup-off-edit-shortcut",
+            "cleanup-off-punctuation-edit-shortcut", "light", "polished-no-shortcuts",
+            "blank-cleanup-reads-as-light",
+        ],
+    )
+    def test_the_writing_model_is_needed_only_for_cleanup_or_a_voice_edit_shortcut(
+        self, cleanup, bindings, needed,
+    ):
+        values = {"writing.cleanup": cleanup}
+        if bindings is not None:
+            values["hotkey.bindings"] = bindings
+
+        assert bootstrap._writing_needed(FakeConfig(values)) is needed
+
+    def test_turning_cleanup_off_in_settings_lets_the_writing_model_unload(self):
+        from voicetotext.writing.settings import WritingSettings
+
+        writing = MagicMock()
+        changes = ChangeSet.between(
+            _draft(writing=WritingSettings()), _draft(writing=WritingSettings(cleanup="off")),
+        )
+
+        with patch("voicetotext.bootstrap._build_output"):
+            apply_settings(
+                changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+                writing=writing,
+            )
+
+        writing.follow_settings.assert_called_once_with()
+        writing.restart_server.assert_not_called()
+
+    def test_a_new_writing_model_file_restarts_the_writing_model(self):
+        from voicetotext.writing.settings import WritingSettings
+
+        writing = MagicMock()
+        changes = ChangeSet.between(
+            _draft(writing=WritingSettings()),
+            _draft(writing=WritingSettings(model_path="D:/models/qwen-é.gguf")),
+        )
+
+        with patch("voicetotext.bootstrap._build_output"):
+            apply_settings(
+                changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
+                writing=writing,
+            )
+
+        writing.restart_server.assert_called_once_with()
+        writing.follow_settings.assert_not_called()
 
     def test_streaming_and_verbatim_dictation_add_no_writing_time(self):
         writing = MagicMock()
