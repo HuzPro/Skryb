@@ -40,6 +40,23 @@ _STATE_LABELS = {
 _QUIT_CLEANUP_TIMEOUT_SECONDS = 3.0
 
 
+def _exit_now() -> None:
+    """End this process without running its libraries' shutdown code.
+
+    ``os._exit`` still runs every loaded DLL's detach code. With ROCm GPU
+    work in flight, such as a model still loading, that code spins forever,
+    so the copy never exits and keeps the one-copy lock.
+    """
+    import ctypes
+    import ctypes.wintypes as wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
+    os._exit(0)
+
+
 class TrayIcon(Protocol):
     """Minimal system-tray contract used by :class:`SystemTrayApp`.
 
@@ -218,12 +235,9 @@ class SystemTrayApp:
         # the previous daemon-thread design was silently hanging on
         # ``self._tray.hide()`` on some Windows versions, leaving the
         # join blocked indefinitely.
-        threading.Timer(
-            _QUIT_CLEANUP_TIMEOUT_SECONDS,
-            lambda: os._exit(0),
-        ).start()
+        threading.Timer(_QUIT_CLEANUP_TIMEOUT_SECONDS, _exit_now).start()
         self._quit_cleanup()
-        os._exit(0)
+        _exit_now()
 
     def _quit_cleanup(self) -> None:
         steps: list[tuple[str, Callable[[], None]]] = [

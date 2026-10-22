@@ -13,6 +13,7 @@ from voicetotext.core.single_instance import (
     RunningCopy,
     SecondLaunches,
     SingleInstanceMutex,
+    Win32KernelMutexApi,
 )
 
 _ASKED, _ANSWERED = "Local\\VoiceToText-launched-again", "Local\\VoiceToText-launch-answered"
@@ -227,9 +228,13 @@ class TestSecondLaunches:
 class FakeProcesses:
     def __init__(self, started: dict[int, int]) -> None:
         self.started = started
+        self.terminated: list[tuple[int, int]] = []
 
     def process_started(self, pid: int) -> int | None:
         return self.started.get(pid)
+
+    def terminate(self, pid: int, started: int) -> None:
+        self.terminated.append((pid, started))
 
 
 class TestRunningCopy:
@@ -271,11 +276,25 @@ class TestRunningCopy:
         path = tmp_path / "running.pid"
         path.write_text("4321 133000000000000000", encoding="ascii")
 
+        processes = FakeProcesses({4321: 133000000099999999})
+
         with patch("voicetotext.core.single_instance.subprocess.run") as run:
-            ended = RunningCopy(path, FakeProcesses({4321: 133000000099999999})).end()
+            ended = RunningCopy(path, processes).end()
 
         assert ended is False
         run.assert_not_called()
+        assert processes.terminated == []
+
+    def test_a_copy_taskkill_cannot_end_is_also_ended_directly(self, tmp_path: Path) -> None:
+        path = tmp_path / "running.pid"
+        path.write_text("4321 133000000000000000", encoding="ascii")
+        processes = FakeProcesses({4321: 133000000000000000})
+
+        with patch("voicetotext.core.single_instance.subprocess.run") as run:
+            assert RunningCopy(path, processes).end() is True
+
+        run.assert_called_once()
+        assert processes.terminated == [(4321, 133000000000000000)]
 
 
 windows_only = pytest.mark.skipif(sys.platform != "win32", reason="real Win32 kernel objects")
@@ -340,7 +359,9 @@ class TestRealKernelObjects:
             path.write_text(f"{bystander.pid} 1", encoding="ascii")
 
             assert RunningCopy(path).end() is False
-            assert bystander.poll() is None
+            Win32KernelMutexApi().terminate(bystander.pid, 1)
+            with pytest.raises(subprocess.TimeoutExpired):
+                bystander.wait(timeout=0.5)
         finally:
             bystander.kill()
             bystander.wait(timeout=10)
