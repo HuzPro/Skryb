@@ -127,6 +127,7 @@ from voicetotext.recording.preferences import (
 from voicetotext.recording.silence_watchdog import SilenceWatchdog
 from voicetotext.recording.recording_cue_player import CueBeeper, EngineReadyBeeper
 from voicetotext.recording.recovery_notices import RecoveryNotices
+from voicetotext.recording.pill import Mode as PillMode
 from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
 from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 from voicetotext.recording.speech_level import boost_quiet_speech
@@ -1390,7 +1391,11 @@ def build_app(
         run_in_background=action_dispatcher.dispatch,
     )
 
-    notice = Notice(root, load_position=functools.partial(load_pill_position, config))
+    notice = Notice(
+        root,
+        load_position=functools.partial(load_pill_position, config),
+        pill_showing=lambda: overlay is not None and overlay.mode is not PillMode.CLOSED,
+    )
     RecoveryNotices(
         event_bus,
         notice,
