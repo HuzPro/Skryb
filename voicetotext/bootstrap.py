@@ -456,6 +456,14 @@ def _build_writing(
         notify=lambda message: event_bus.publish(WritingServerFailedEvent(message=message)),
         run_in_background=ThreadedActionDispatcher().dispatch,
         read_window=foreground_window,
+        needed=functools.partial(_writing_needed, config),
+    )
+
+
+def _writing_needed(config: JsonConfigAdapter) -> bool:
+    """Cleanup and the voice-edit shortcut are the only users of the writing model."""
+    return read_writing_settings(config).cleanup != "off" or any(
+        binding.action is BindingAction.EDIT_SELECTION for binding in parse_bindings(config)
     )
 
 
@@ -1454,8 +1462,11 @@ def apply_settings(
             )
         )
 
-    if changes.writing_server_changed and writing is not None:
-        writing.restart_server()
+    if writing is not None:
+        if changes.writing_server_changed:
+            writing.restart_server()
+        else:
+            writing.follow_settings()
 
     if changes.history_retention_changed and history_pruner is not None:
         history_pruner.prune_now()

@@ -43,6 +43,7 @@ class Rig:
         )
         self.notices: list[str] = []
         self.opened: list[Path] = []
+        self.needed = True
         self.service = WritingService(
             lambda: self.settings,
             WritingPaths(tmp_path / "managed"),
@@ -54,6 +55,7 @@ class Rig:
             run_in_background=lambda action: action(),
             make_downloader=UnreachableDownloader,
             open_path=self.opened.append,
+            needed=lambda: self.needed,
         )
 
 
@@ -126,6 +128,90 @@ class TestStatus:
         assert rig.service.status().detail == DOWNLOAD_FAILED
         assert rig.opened == [tmp_path / "managed" / "install.log"]
         assert "getaddrinfo failed" in rig.opened[0].read_text(encoding="utf-8")
+
+
+class TestLoadedOnlyWhileSomethingUsesIt:
+    def test_the_model_is_not_loaded_at_start_while_nothing_uses_it(self, tmp_path):
+        rig = Rig(tmp_path, [FakeChild(pid=1)])
+        rig.needed = False
+
+        rig.service.start()
+
+        assert rig.launch.launched == []
+        assert rig.service.status().state == "off"
+
+    def test_turning_cleanup_off_unloads_a_loaded_model(self, tmp_path):
+        child = FakeChild(pid=1)
+        rig = Rig(tmp_path, [child])
+        rig.service.start()
+        _wait_for(rig.server.ready_event.is_set)
+
+        rig.needed = False
+        rig.service.follow_settings()
+
+        assert child.killed
+        assert rig.server.endpoint() is None
+        assert rig.service.status().state == "off"
+
+    def test_turning_it_back_on_loads_it_again(self, tmp_path):
+        rig = Rig(tmp_path, [FakeChild(pid=1), FakeChild(pid=2)])
+        rig.needed = False
+        rig.service.start()
+
+        rig.needed = True
+        rig.service.follow_settings()
+        _wait_for(rig.server.ready_event.is_set)
+
+        assert [child.pid for child in rig.launch.launched] == [1]
+        assert rig.service.status().state == "ready"
+        rig.service.dispose()
+
+    def test_saving_while_it_is_loaded_does_not_reload_it(self, tmp_path):
+        rig = Rig(tmp_path, [FakeChild(pid=1)])
+        rig.service.start()
+        _wait_for(rig.server.ready_event.is_set)
+
+        for _ in range(1000):
+            rig.service.follow_settings()
+
+        assert len(rig.launch.launched) == 1
+        assert rig.service.status().state == "ready"
+        rig.service.dispose()
+
+    def test_a_save_before_dictation_is_ready_does_not_load_it_early(self, tmp_path):
+        rig = Rig(tmp_path, [FakeChild(pid=1)])
+
+        rig.service.follow_settings()
+
+        assert rig.launch.launched == []
+        assert rig.service.status().state == "stopped"
+
+    def test_a_save_does_not_relaunch_a_server_that_gave_up(self, tmp_path):
+        rig = Rig(tmp_path, _crashes(4))
+        rig.healthy = False
+        rig.service.start()
+        _wait_for(lambda: rig.server.status.state is ServerState.FAILED)
+
+        rig.service.follow_settings()
+
+        assert len(rig.launch.launched) == 4
+        assert rig.service.status().state == "failed"
+
+    def test_restart_leaves_it_unloaded_while_nothing_uses_it(self, tmp_path):
+        rig = Rig(tmp_path, [FakeChild(pid=1)])
+        rig.needed = False
+        rig.service.start()
+
+        rig.service.restart_server()
+
+        assert rig.launch.launched == []
+        assert rig.service.status().state == "off"
+
+    def test_an_uninstalled_model_still_offers_the_install_while_off(self, tmp_path):
+        rig = Rig(tmp_path, [], locate_files=False)
+        rig.needed = False
+
+        assert rig.service.status().state == "not_installed"
 
 
 class TestWhatCleanupGets:
