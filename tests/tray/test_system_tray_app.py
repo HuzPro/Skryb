@@ -237,21 +237,21 @@ class TestQuitHandling:
         app._icon = icon
         return app, use_case, listener, download_manager, icon
 
-    def test_should_call_os_exit_after_cleanup_runs(self):
+    def test_should_end_the_process_after_cleanup_runs(self):
         with (
             patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app.os._exit") as os_exit,
+            patch("voicetotext.tray.app._exit_now") as exit_now,
         ):
             app, *_ = self._build_app_with_mocks()
 
             app._handle_quit()
 
-            os_exit.assert_called_with(0)
+            exit_now.assert_called_with()
 
     def test_should_schedule_hard_exit_timer_before_cleanup_starts(self):
         with (
             patch("voicetotext.tray.app.threading.Timer") as Timer,
-            patch("voicetotext.tray.app.os._exit") as os_exit,
+            patch("voicetotext.tray.app._exit_now") as exit_now,
         ):
             app, *_ = self._build_app_with_mocks()
 
@@ -262,16 +262,16 @@ class TestQuitHandling:
             assert interval > 0
             # The timer's job is to force-exit if cleanup hangs.
             # Verify the callback actually terminates by invoking it
-            # and confirming ``os._exit`` fires.
-            os_exit.reset_mock()
+            # and confirming ``_exit_now`` fires.
+            exit_now.reset_mock()
             callback()
-            os_exit.assert_called_with(0)
+            exit_now.assert_called_with()
             Timer.return_value.start.assert_called_once()
 
     def test_should_run_cleanup_steps_in_documented_order(self):
         with (
             patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app.os._exit"),
+            patch("voicetotext.tray.app._exit_now"),
         ):
             app, use_case, listener, download_manager, icon = (
                 self._build_app_with_mocks()
@@ -291,7 +291,7 @@ class TestQuitHandling:
     def test_should_continue_remaining_cleanup_when_one_step_raises(self):
         with (
             patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app.os._exit"),
+            patch("voicetotext.tray.app._exit_now"),
         ):
             app, use_case, listener, download_manager, icon = (
                 self._build_app_with_mocks()
@@ -835,13 +835,13 @@ class TestRestart:
         with (
             patch("voicetotext.tray.app.threading.Timer"),
             patch(
-                "voicetotext.tray.app.os._exit",
-                side_effect=lambda code: call_order.append(f"exit {code}"),
+                "voicetotext.tray.app._exit_now",
+                side_effect=lambda: call_order.append("exit"),
             ),
         ):
             app.restart()
 
-        assert call_order == ["replacement", "cleanup", "exit 0"]
+        assert call_order == ["replacement", "cleanup", "exit"]
 
     def test_a_replacement_that_cannot_start_leaves_this_copy_running(self):
         call_order: list[str] = []
@@ -852,10 +852,10 @@ class TestRestart:
         app = self._app(call_order, cannot_start)
         with (
             patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app.os._exit") as os_exit,
+            patch("voicetotext.tray.app._exit_now") as exit_now,
             pytest.raises(FileNotFoundError),
         ):
             app.restart()
 
-        os_exit.assert_not_called()
+        exit_now.assert_not_called()
         assert call_order == []

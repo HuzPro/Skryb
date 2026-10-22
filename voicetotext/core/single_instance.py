@@ -17,6 +17,7 @@ from typing import Protocol
 
 _ERROR_ALREADY_EXISTS = 183
 _WAIT_OBJECT_0 = 0
+_PROCESS_TERMINATE = 0x0001
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _MUTEX_NAME = "Local\\VoiceToText"
@@ -43,6 +44,7 @@ class KernelEventApi(Protocol):
 
 class ProcessApi(Protocol):
     def process_started(self, pid: int) -> int | None: ...
+    def terminate(self, pid: int, started: int) -> None: ...
 
 
 class Win32KernelMutexApi:
@@ -68,6 +70,8 @@ class Win32KernelMutexApi:
             ctypes.POINTER(wintypes.FILETIME),
         ] * 4
         self._kernel32.GetProcessTimes.restype = wintypes.BOOL
+        self._kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self._kernel32.TerminateProcess.restype = wintypes.BOOL
         self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         self._kernel32.CloseHandle.restype = wintypes.BOOL
 
@@ -100,6 +104,22 @@ class Win32KernelMutexApi:
             return self._creation_time(handle)
         finally:
             self._kernel32.CloseHandle(handle)
+
+    def terminate(self, pid: int, started: int) -> None:
+        """End *pid* if it is still the process created at *started*."""
+        handle = self._kernel32.OpenProcess(
+            _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+        )
+        if not handle:
+            return
+        try:
+            self._terminate_if_started_at(handle, started)
+        finally:
+            self._kernel32.CloseHandle(handle)
+
+    def _terminate_if_started_at(self, handle: int, started: int) -> None:
+        if self._creation_time(handle) == started:
+            self._kernel32.TerminateProcess(handle, 1)
 
     def _creation_time(self, handle: int) -> int | None:
         created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
@@ -250,6 +270,9 @@ class RunningCopy:
             creationflags=_CREATE_NO_WINDOW,
             timeout=_TASKKILL_TIMEOUT_SECONDS,
         )
+        # taskkill ends what the copy started, but not a copy stuck in its
+        # own exit: it reports "no running instance" and leaves it running.
+        self._api.terminate(pid, started)
         return True
 
     def _read(self) -> tuple[int, int] | None:
