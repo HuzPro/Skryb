@@ -24,6 +24,7 @@ from voicetotext.core.events import (
     EngineLoadFailedEvent,
     MicrophoneMissingEvent,
     StateChangedEvent,
+    TextPastedEvent,
     WritingNoticeEvent,
     WritingServerFailedEvent,
 )
@@ -349,11 +350,13 @@ def _build_output(
     writer = Win32ClipboardWriter(sleeper=sleeper)
     # Waiting for the hotkey's physical modifiers to come up keeps the
     # injected Ctrl+V from reaching the target as Ctrl+Shift+Alt+V,
-    # which most apps silently drop.
+    # which most apps silently drop. This wait and the clipboard settle
+    # run on the GUI thread, so they keep Tk's events going: a plain sleep
+    # there froze the pill mid-animation on every dictation.
     key_sender = ModifierReleaseWaitingKeySender(
         inner=Win32KeySender(),
         modifier_state=Win32ModifierKeyStateReader(),
-        sleeper=sleeper,
+        sleeper=gui_dispatcher,
     )
     # Reporting the delivery from directly above the adapter that injects
     # Ctrl+V is what keeps edit capture's pairing sound. The report and the
@@ -363,8 +366,9 @@ def _build_output(
     def pasting_adapter() -> TextOutputHandler:
         return DeliveryRecordingDecorator(
             inner=PasteAndClipboardAdapter(
-                sleeper=sleeper, writer=writer, key_sender=key_sender,
+                sleeper=gui_dispatcher, writer=writer, key_sender=key_sender,
                 paste_method=hooks.paste_method if hooks is not None else None,
+                on_pasted=hooks.on_pasted if hooks is not None else _no_paste_report,
             ),
             record=functools.partial(_remember_then_report, on_delivered),
         )
@@ -524,6 +528,10 @@ def _foreground_paste_method(config: JsonConfigAdapter) -> PasteMethod:
         foreground_window().process,
         config.get("output.paste_method_overrides", {}),
     )
+
+
+def _no_paste_report() -> None:
+    return None
 
 
 def _publish_delivery_failure(
@@ -1184,6 +1192,7 @@ def build_app(
         last_dictation=last_dictation,
         paste_method=functools.partial(_foreground_paste_method, config),
         on_failed=functools.partial(_publish_delivery_failure, event_bus),
+        on_pasted=lambda: event_bus.publish(TextPastedEvent()),
     )
     output = _build_output(
         output_mode, gui_dispatcher, paths.dictionary_path,

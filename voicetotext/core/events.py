@@ -88,6 +88,11 @@ class StateChangedEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class TextPastedEvent(DomainEvent):
+    """Ctrl+V has just gone out with a dictation. Published on the GUI thread."""
+
+
+@dataclass(frozen=True)
 class TranscriptionCompletedEvent(DomainEvent):
     text: str = ""
     transcription_seconds: float = 0.0

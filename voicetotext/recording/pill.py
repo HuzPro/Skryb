@@ -44,12 +44,11 @@ _BAR_COUNT = 11
 _BAR_WIDTH = 3.0
 _BAR_GAP = 4.0
 _BAR_MIN_HEIGHT = 3.0
-_BREATHING_RATE = 0.18
 
 _PILL_FILL = (12, 12, 14)
 _BADGE_FILL = (38, 38, 42)
-# The dark theme accent, blended into the bar so the white label stays readable.
-_PROGRESS_FILL = (76, 96, 138)
+# The dark theme accent: the colour the transcribing shimmer lifts the fill towards.
+_SHIMMER_FILL = (76, 96, 138)
 _BORDER = (255, 255, 255, 26)
 _BUTTON_FILL = (58, 58, 62)
 _BUTTON_HOVER_FILL = (82, 82, 88)
@@ -94,32 +93,76 @@ class Button(Enum):
     FINISH = "finish"
 
 
-# The waveform scales to how loud you have been lately rather than to a
-# fixed gain, so speech from across the room fills the bars the way
-# speech up close does. Below the gate is room noise and draws flat.
-_NOISE_GATE = 0.003
-_QUIETEST_LOUDNESS = 0.008
-_LOUDNESS_HALF_LIFE_SECONDS = 4.0
-_STARTING_LOUDNESS = 0.06
+# Loudness is mapped in decibels, between the room's own noise floor and
+# the speaker's recent peak. Hearing is logarithmic: on a linear scale a
+# normal speaking voice (about -34 dBFS on a desk microphone) reads as a
+# third of a shout and quiet speech barely lifts the bars. The floor
+# drops at once to anything quieter and creeps up slowly, so pauses
+# between words keep re-measuring the room; the peak jumps to anything
+# louder and falls a few dB a second, so one cough does not flatten the
+# next sentence.
+_FLOOR_START_DB = -60.0
+_FLOOR_LOWEST_DB = -75.0
+_FLOOR_RISE_DB_PER_SECOND = 2.0
+_GATE_ABOVE_FLOOR_DB = 8.0
+_PEAK_START_DB = -30.0
+_PEAK_FALL_DB_PER_SECOND = 4.0
+_SMALLEST_SPAN_DB = 18.0
+_LEVEL_CURVE = 0.85
 
 
 class VoiceLevel:
-    """Microphone loudness mapped to 0..1 against the speaker's own recent peak.
-
-    The peak rises at once to anything louder and eases back down over a
-    few seconds, so stepping away from the microphone rescales the bars
-    within a sentence while a pause between words does not.
-    """
+    """Microphone loudness mapped to 0..1 between the room's noise floor and the recent peak."""
 
     def __init__(self) -> None:
-        self._loudness = _STARTING_LOUDNESS
+        self._floor = _FLOOR_START_DB
+        self._peak = _PEAK_START_DB
 
     def update(self, rms: float, seconds: float) -> float:
-        if not math.isfinite(rms) or rms < 0:
+        if not math.isfinite(rms) or rms <= 0:
             rms = 0.0
-        decay = 0.5 ** (max(seconds, 0.0) / _LOUDNESS_HALF_LIFE_SECONDS)
-        self._loudness = max(rms, self._loudness * decay, _QUIETEST_LOUDNESS)
-        return min(max((rms - _NOISE_GATE) / (self._loudness - _NOISE_GATE), 0.0), 1.0)
+        db = 20 * math.log10(max(rms, 1e-7))
+        seconds = max(seconds, 0.0)
+        self._floor = max(min(db, self._floor + _FLOOR_RISE_DB_PER_SECOND * seconds), _FLOOR_LOWEST_DB)
+        self._peak = max(db, self._peak - _PEAK_FALL_DB_PER_SECOND * seconds)
+        gate = self._floor + _GATE_ABOVE_FLOOR_DB
+        top = max(self._peak, gate + _SMALLEST_SPAN_DB)
+        return min(max((db - gate) / (top - gate), 0.0), 1.0) ** _LEVEL_CURVE
+
+
+# The waveform scrolls: each bar is one slice of time, the newest on the
+# right still filling as you speak, and the row slides left continuously
+# so a bar never jumps between slots.
+_SLICE_SECONDS = 0.075
+
+
+class VoiceHistory:
+    """Voice level over the last ``slices`` slices of time, oldest first."""
+
+    def __init__(self, slices: int) -> None:
+        self._voice = VoiceLevel()
+        self._levels = [0.0] * slices
+        self._age = 0.0
+
+    def clear(self) -> None:
+        """Flat bars for a new recording; the learnt loudness stays."""
+        self._levels = [0.0] * len(self._levels)
+        self._age = 0.0
+
+    def update(self, rms: float, seconds: float) -> None:
+        level = self._voice.update(rms, seconds)
+        self._age += max(seconds, 0.0)
+        while self._age >= _SLICE_SECONDS:
+            self._age -= _SLICE_SECONDS
+            self._levels = [*self._levels[1:], 0.0]
+        self._levels[-1] = max(self._levels[-1], level)
+
+    def levels(self) -> tuple[float, ...]:
+        return tuple(self._levels)
+
+    def scroll(self) -> float:
+        """How far the row has slid towards the next slot, 0 to 1."""
+        return self._age / _SLICE_SECONDS
 
 
 class Spring:
@@ -158,10 +201,13 @@ class Frame:
     # draw, 0 to 1, so each fades as the pill changes shape.
     controls: float
     label: float
-    level: float = 0.0
-    phase: float = 0.0
+    # Voice level per slice of time, oldest first, and how far the row has
+    # slid towards the next slot.
+    levels: tuple[float, ...] = ()
+    scroll: float = 0.0
     paused: bool = False
-    progress: float = 0.0
+    # Where the transcribing shimmer is across the pill, 0 to 1; below 0 for none.
+    shimmer: float = -1.0
     hovered: Button | None = None
     caption: str = ""
     # Shown in amber in place of the waveform while the microphone is silent.
@@ -253,82 +299,52 @@ def hit_test(frame: Frame, x: float, y: float) -> Button | None:
     return None
 
 
-# With an estimate the bar moves at a steady, honest pace until three
-# quarters full, then eases towards 99% along a curve that starts at the
-# same speed, so there is no visible kink where one hands over to the
-# other and a slow run never looks finished.
-_STEADY_PACE = 0.9
-_STEADY_UNTIL = 0.75
-_EASE_TOWARDS = 0.99
-# Without an estimate there is nothing to be honest about.
-_UNKNOWN_EASE_TOWARDS = 0.9
-_UNKNOWN_EASE_SECONDS = 0.8
+# While transcribing, a soft band of the accent colour sweeps across the
+# pill, easing in and out of each pass. It only lifts the dark fill
+# towards the band colour, never darkens anything, so the white label
+# reads the same throughout. Applied to finished pixels with numpy: a
+# full redraw costs milliseconds, and a frame at 240 Hz has four.
+_SHIMMER_SECONDS = 0.9
+_SHIMMER_WIDTH = 130.0
+_SHIMMER_STRENGTH = 0.6
 
 
-def transcription_progress(elapsed: float, estimate: float | None) -> float:
-    """How full the bar should be ``elapsed`` seconds into a transcription.
-
-    Smooth in time: both the fill and its speed are continuous, which is
-    what keeps the edge from visibly stepping between frames.
-    """
-    elapsed = max(elapsed, 0.0)
-    if estimate is None or estimate <= 0:
-        return _UNKNOWN_EASE_TOWARDS * (1 - math.exp(-elapsed / _UNKNOWN_EASE_SECONDS))
-    pace = _STEADY_PACE / estimate
-    handover = _STEADY_UNTIL / pace
-    if elapsed <= handover:
-        return pace * elapsed
-    remaining = _EASE_TOWARDS - _STEADY_UNTIL
-    return _EASE_TOWARDS - remaining * math.exp(-(elapsed - handover) * pace / remaining)
+def shimmer_position(seconds: float) -> float:
+    """Where the band is ``seconds`` into transcribing: 0 to 1, repeating."""
+    t = (max(seconds, 0.0) / _SHIMMER_SECONDS) % 1.0
+    return t * t * (3 - 2 * t)
 
 
-def finishing_progress(start: float, elapsed: float, duration: float) -> float:
-    """From ``start`` to full over ``duration`` seconds, slowing into the end."""
-    if duration <= 0 or elapsed >= duration:
-        return 1.0
-    t = max(elapsed, 0.0) / duration
-    return start + (1.0 - start) * (1 - (1 - t) ** 3)
+def shimmered(pixels: numpy.ndarray, frame: Frame) -> numpy.ndarray:
+    """``pixels`` (premultiplied BGRA) with the shimmer band drawn at ``frame.shimmer``."""
+    if frame.shimmer < 0 or frame.label <= 0:
+        return pixels
+    left, _top, right, _bottom = pill_box(frame.width, frame.height)
+    centre = left - _SHIMMER_WIDTH / 2 + (right - left + _SHIMMER_WIDTH) * frame.shimmer
+    x = numpy.arange(pixels.shape[1], dtype=numpy.float32) + 0.5
+    distance = numpy.clip(numpy.abs(x - centre) / (_SHIMMER_WIDTH / 2), 0.0, 1.0)
+    weight = (numpy.cos(distance * math.pi) * 0.5 + 0.5) * (_SHIMMER_STRENGTH * frame.label)
+    columns = numpy.nonzero(weight > 0.002)[0]
+    if columns.size == 0:
+        return pixels
+    span = slice(int(columns[0]), int(columns[-1]) + 1)
+    region = pixels[:, span, :].astype(numpy.float32)
+    colour = numpy.array(_SHIMMER_FILL[::-1], dtype=numpy.float32) * (region[:, :, 3:4] / 255.0)
+    rgb = region[:, :, :3]
+    lifted = rgb + (colour - rgb) * weight[span][None, :, None]
+    region[:, :, :3] = numpy.maximum(rgb, lifted)
+    out = pixels.copy()
+    out[:, span, :] = numpy.rint(region).astype(numpy.uint8)
+    return out
 
 
-class SettledBar:
-    """The transcribing bar at rest, drawn once, filled by slicing.
-
-    Redrawing the whole pill costs milliseconds; a frame at 240 Hz has
-    four. Once the pill has settled into the bar only the fill moves, so
-    the bar is drawn empty and full a single time and each frame joins
-    the two at the fill edge, blending the one column the edge falls in
-    so it moves by fractions of a pixel instead of whole-pixel steps.
-    """
-
-    def __init__(self, to_pixels) -> None:
-        width, height = _TRANSCRIBING_SIZE
-        blank = Frame(width, height, opacity=1.0, controls=0.0, label=1.0)
-        self._empty = to_pixels(render(Frame(**{**blank.__dict__, "progress": 0.0})))
-        self._full = to_pixels(render(Frame(**{**blank.__dict__, "progress": 1.0})))
-        left, _top, right, _bottom = pill_box(width, height)
-        self._left = left
-        self._span = right - left
-
-    def pixels(self, progress: float) -> bytes:
-        if progress <= 0:
-            return self._empty.tobytes()
-        if progress >= 1:
-            return self._full.tobytes()
-        edge = self._left + self._span * progress
-        column = math.floor(edge)
-        share = edge - column
-        out = self._empty.copy()
-        out[:, :column] = self._full[:, :column]
-        if 0 <= column < out.shape[1] and share > 0:
-            mixed = (
-                self._full[:, column].astype(numpy.uint16) * round(share * 256)
-                + self._empty[:, column].astype(numpy.uint16) * (256 - round(share * 256))
-            ) >> 8
-            out[:, column] = mixed.astype(numpy.uint8)
-        return out.tobytes()
+def settled_label_frame() -> Frame:
+    """The transcribing pill at rest: drawn once, then only the shimmer moves."""
+    width, height = _TRANSCRIBING_SIZE
+    return Frame(width, height, opacity=1.0, controls=0.0, label=1.0)
 
 
-def is_settled_bar(frame: Frame) -> bool:
+def is_settled_label(frame: Frame) -> bool:
     width, height = _TRANSCRIBING_SIZE
     return (
         abs(frame.width - width) < 0.05
@@ -362,7 +378,6 @@ def _draw_pill(image: Image.Image, frame: Frame) -> None:
     # drawn part-transparent would punch a hole through the pill. Each
     # fading part is drawn opaque on its own layer and blended in instead.
     if frame.label > 0:
-        _draw_progress(layer, box, radius, frame)
         label = _blank(image)
         _draw_label(ImageDraw.Draw(label), box)
         # The label waits for the buttons to be mostly gone, so the two
@@ -392,26 +407,6 @@ def _fade(layer: Image.Image, strength: float) -> None:
 def _blend(base: Image.Image, top: Image.Image, strength: float) -> None:
     _fade(top, strength)
     base.alpha_composite(top)
-
-
-def _draw_progress(
-    layer: Image.Image,
-    box: tuple[float, ...],
-    radius: float,
-    frame: Frame,
-) -> None:
-    left, top, right, bottom = box
-    filled = left + (right - left) * min(max(frame.progress, 0.0), 1.0)
-    if filled <= left:
-        return
-    shape = Image.new("L", layer.size, 0)
-    ImageDraw.Draw(shape).rounded_rectangle(box, radius=radius, fill=255)
-    bar = Image.new("L", layer.size, 0)
-    ImageDraw.Draw(bar).rectangle((left, top, filled, bottom), fill=round(255 * frame.label))
-    mask = Image.fromarray(numpy.minimum(numpy.asarray(shape), numpy.asarray(bar)))
-    tint = Image.new("RGBA", layer.size, (*_PROGRESS_FILL, 255))
-    tint.putalpha(mask)
-    layer.alpha_composite(tint)
 
 
 def _draw_label(draw: ImageDraw.ImageDraw, box: tuple[float, ...]) -> None:
@@ -570,37 +565,36 @@ def _draw_waveform(
     middle: float,
     count: int,
 ) -> None:
+    """The newest slice enters past the right end and slides into the last
+    slot as it fills; older ones keep sliding left and fade out past the
+    first, so the row moves smoothly instead of stepping a slot at a time."""
     scale = _SUPERSAMPLE
+    slot = _BAR_WIDTH + _BAR_GAP
     span = count * _BAR_WIDTH + (count - 1) * _BAR_GAP
     if end - start < span:
         return
     first = (start + end - span) / 2
+    last = first + (count - 1) * slot
     tallest = max(frame.height - 2 * (_PADDING + 6), _BAR_MIN_HEIGHT)
-    alpha = 115 if frame.paused else 255
-    for index in range(count):
-        height = (
-            _BAR_MIN_HEIGHT if frame.paused
-            else _bar_height(index, count, frame.level, frame.phase, tallest)
-        )
-        left = first + index * (_BAR_WIDTH + _BAR_GAP)
+    strength = 115 if frame.paused else 255
+    levels = frame.levels[-(count + 2):]
+    for back, level in enumerate(reversed(levels)):
+        left = last - (back - 1 + frame.scroll) * slot
+        if left > last:
+            fade = 1.0 - (left - last) / slot
+        elif left < first:
+            fade = 1.0 - (first - left) / slot
+        else:
+            fade = 1.0
+        if fade <= 0:
+            continue
+        height = _BAR_MIN_HEIGHT + (tallest - _BAR_MIN_HEIGHT) * (0.0 if frame.paused else level)
         top = middle - height / 2
         draw.rounded_rectangle(
             (left * scale, top * scale, (left + _BAR_WIDTH) * scale, (top + height) * scale),
             radius=_BAR_WIDTH * scale / 2,
-            fill=(*_GLYPH, alpha),
+            fill=(*_GLYPH, round(strength * fade)),
         )
-
-
-def _bar_height(
-    index: int, count: int, level: float, phase: float, tallest: float,
-) -> float:
-    half = max((count - 1) / 2, 1.0)
-    distance = abs(index - half)
-    bias = 1.0 - (0.62 * ((distance / half) ** 1.35))
-    pulse = 0.55 + (0.45 * math.sin(phase + (distance * 0.8)))
-    breathing = 0.06 + (0.06 * math.sin(phase * _BREATHING_RATE))
-    amplitude = max(level * pulse, breathing) * bias
-    return _BAR_MIN_HEIGHT + ((tallest - _BAR_MIN_HEIGHT) * amplitude)
 
 
 # The notice above the pill is drawn the way the pill is: the same dark
