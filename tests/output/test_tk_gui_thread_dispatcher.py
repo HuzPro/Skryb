@@ -112,6 +112,41 @@ class TestTkGuiThreadDispatcherSleep:
 
         assert took < 0.5
 
+    def test_a_frame_loop_keeps_drawing_every_few_milliseconds_while_a_paste_waits(
+        self, root, dispatcher,
+    ) -> None:
+        # The pill reschedules itself 1 ms out after each frame. A 100 ms
+        # clipboard settle that dozed 10 ms between events let it draw only
+        # every 10 ms or so, which showed as a stutter on every dictation.
+        drawn: list[float] = []
+
+        def frame() -> None:
+            drawn.append(time.monotonic())
+            root.after(1, frame)
+
+        root.after(1, frame)
+        dispatcher.sleep(0.1)
+        gaps = [after - before for before, after in zip(drawn, drawn[1:])]
+
+        assert len(drawn) > 25
+        assert sorted(gaps)[len(gaps) // 2] < 0.006
+
+    def test_waiting_off_the_gui_thread_never_touches_tk(self, dispatcher) -> None:
+        failures: list[BaseException] = []
+
+        def wait() -> None:
+            try:
+                dispatcher.sleep(0.02)
+            except BaseException as exc:  # noqa: BLE001
+                failures.append(exc)
+
+        worker = threading.Thread(target=wait)
+        worker.start()
+        worker.join(timeout=2)
+
+        assert failures == []
+        assert not worker.is_alive()
+
 
 class TestTkGuiThreadDispatcherExceptionSafety:
     @pytest.fixture()

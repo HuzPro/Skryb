@@ -27,6 +27,7 @@ class DeliveryHooks:
     last_dictation: LastDictation
     paste_method: Callable[[], PasteMethod]
     on_failed: OnDeliveryFailed
+    on_pasted: Callable[[], None] = lambda: None
 
 
 class AppAwareDelivery(TextOutputHandler):

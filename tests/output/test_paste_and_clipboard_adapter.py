@@ -58,6 +58,36 @@ class TestPasteAndClipboardAdapterOutput:
 
         sleeper.sleep.assert_called_once()
 
+    def test_reports_the_paste_right_after_ctrl_v_goes_out(self):
+        calls = MagicMock()
+        writer = MagicMock(spec=ClipboardWriter)
+        key_sender = MagicMock(spec=KeySender)
+        calls.attach_mock(writer.set_text, "set_text")
+        calls.attach_mock(key_sender.send_paste, "send_paste")
+        adapter = PasteAndClipboardAdapter(
+            sleeper=MagicMock(spec=Sleeper), writer=writer, key_sender=key_sender,
+            on_pasted=calls.pasted,
+        )
+
+        adapter.output("ship it")
+
+        assert [name for name, _args, _kwargs in calls.mock_calls] == [
+            "set_text", "send_paste", "pasted",
+        ]
+
+    def test_still_reports_when_the_paste_could_not_be_sent(self):
+        pasted = MagicMock()
+        key_sender = MagicMock(spec=KeySender)
+        key_sender.send_paste.side_effect = OSError("SendInput blocked")
+        adapter = PasteAndClipboardAdapter(
+            sleeper=MagicMock(spec=Sleeper), writer=MagicMock(spec=ClipboardWriter),
+            key_sender=key_sender, on_pasted=pasted,
+        )
+
+        adapter.output("text stays on the clipboard")
+
+        pasted.assert_called_once()
+
     def test_should_log_warning_and_keep_text_when_paste_fails(self):
         adapter, _, writer, key_sender = _adapter()
         key_sender.send_paste.side_effect = RuntimeError("paste failed")

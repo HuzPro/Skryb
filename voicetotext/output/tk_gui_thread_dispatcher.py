@@ -1,5 +1,6 @@
 import logging
 import queue
+import threading
 import time
 import tkinter
 import _tkinter
@@ -10,7 +11,9 @@ from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
 
 _logger = logging.getLogger(__name__)
 _DRAIN_INTERVAL_MS = 15
-_PUMP_INTERVAL_SECONDS = 0.01
+# Short enough that the pill's frame loop keeps every refresh while a paste
+# waits on this thread; the overlay holds the 1 ms timer resolution then.
+_PUMP_INTERVAL_SECONDS = 0.001
 
 
 class TkGuiThreadDispatcher(GuiThreadDispatcher):
@@ -43,6 +46,9 @@ class TkGuiThreadDispatcher(GuiThreadDispatcher):
         a timer due at all times, so ``update()`` can run it forever, and the
         pill only stops once the drain delivers the state it is waiting for.
         """
+        if threading.current_thread() is not threading.main_thread():
+            time.sleep(seconds)
+            return
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             try:

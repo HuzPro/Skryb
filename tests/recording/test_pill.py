@@ -13,20 +13,21 @@ from voicetotext.recording.pill import (
     Button,
     Frame,
     Mode,
-    SettledBar,
     Spring,
+    VoiceHistory,
     VoiceLevel,
     button_centres,
     countdown_text,
-    finishing_progress,
-    is_settled_bar,
     hit_test,
+    is_settled_label,
     pill_box,
     pill_origin,
     pill_position,
     render,
+    settled_label_frame,
+    shimmer_position,
+    shimmered,
     target_size,
-    transcription_progress,
 )
 
 
@@ -68,50 +69,63 @@ class TestSpring:
         assert max(values) <= 1.0 + 1e-6
 
 
-class TestProgress:
-    @pytest.mark.parametrize(
-        ("elapsed", "estimate", "expected"),
-        [(0.0, 2.0, 0.0), (0.5, 2.0, 0.225), (1.0, 2.0, 0.45)],
-    )
-    def test_moves_at_a_steady_pace_set_by_the_estimate(
-        self, elapsed, estimate, expected,
-    ):
-        assert transcription_progress(elapsed, estimate) == pytest.approx(expected)
+def _settled_pixels():
+    from voicetotext.recording.overlay import premultiplied_array
 
-    @pytest.mark.parametrize("estimate", [0.05, 0.4, 2.0, 30.0])
-    def test_speed_never_jumps_anywhere_along_the_bar(self, estimate):
-        step = estimate / 2000
-        values = [transcription_progress(i * step, estimate) for i in range(8000)]
-        speeds = [after - before for before, after in itertools.pairwise(values)]
-
-        jumps = [abs(after - before) for before, after in itertools.pairwise(speeds)]
-        assert max(jumps) < max(speeds) * 0.01
-
-    def test_is_most_of_the_way_there_when_the_estimate_runs_out(self):
-        assert 0.8 < transcription_progress(2.0, 2.0) < 0.9
-
-    def test_creeps_but_never_finishes_when_the_estimate_is_blown(self):
-        values = [transcription_progress(t, 0.5) for t in (0.6, 1.0, 5.0, 3600.0)]
-
-        assert values == sorted(values)
-        assert all(value < 1.0 for value in values)
-        assert values[-1] == pytest.approx(0.99)
+    return premultiplied_array(render(settled_label_frame()))
 
 
-class TestFinishingProgress:
-    def test_runs_from_where_the_bar_was_to_full(self):
-        assert finishing_progress(0.6, 0.0, 0.2) == pytest.approx(0.6)
-        assert finishing_progress(0.6, 0.2, 0.2) == 1.0
-        assert finishing_progress(0.6, 5.0, 0.2) == 1.0
+def _shimmer_at(position: float) -> Frame:
+    return Frame(**{**settled_label_frame().__dict__, "shimmer": position})
 
-    def test_slows_into_the_end(self):
-        early = finishing_progress(0.0, 0.05, 0.2) - finishing_progress(0.0, 0.0, 0.2)
-        late = finishing_progress(0.0, 0.2, 0.2) - finishing_progress(0.0, 0.15, 0.2)
 
-        assert early > late > 0
+class TestShimmer:
+    def test_each_pass_starts_at_the_left_and_ends_at_the_right(self):
+        assert shimmer_position(0.0) == 0.0
+        assert shimmer_position(0.8999) > 0.99
 
-    def test_a_zero_length_finish_is_simply_full(self):
-        assert finishing_progress(0.3, 0.0, 0.0) == 1.0
+    def test_it_repeats_while_the_transcription_runs(self):
+        assert shimmer_position(0.9 + 0.2) == pytest.approx(shimmer_position(0.2))
+
+    def test_it_eases_in_and_out_of_each_pass(self):
+        start = shimmer_position(0.05) - shimmer_position(0.0)
+        middle = shimmer_position(0.475) - shimmer_position(0.425)
+
+        assert start < middle / 3
+
+    def test_a_clock_that_ran_backwards_counts_as_just_started(self):
+        assert shimmer_position(-3.0) == 0.0
+
+    def test_the_band_lifts_the_fill_under_it_and_leaves_the_rest_alone(self):
+        base = _settled_pixels()
+        width, height = settled_label_frame().width, settled_label_frame().height
+        left, top, right, bottom = pill_box(width, height)
+        lit = shimmered(base, _shimmer_at(0.5))
+        centre_x, far_x = round((left + right) / 2), round(left + 4)
+        row = round(bottom - 4)
+
+        assert lit[row, centre_x, :3].sum() > base[row, centre_x, :3].sum() + 60
+        assert (lit[:, far_x] == base[:, far_x]).all()
+
+    @pytest.mark.parametrize("position", [0.0, 0.17, 0.5, 0.83, 1.0])
+    def test_nothing_gets_darker_so_the_white_label_reads_the_same(self, position):
+        base = _settled_pixels()
+
+        assert (shimmered(base, _shimmer_at(position)) >= base).all()
+
+    def test_no_band_outside_transcribing(self):
+        base = _settled_pixels()
+
+        assert shimmered(base, settled_label_frame()) is base
+        assert shimmered(base, Frame(**{**_shimmer_at(0.5).__dict__, "label": 0.0})) is base
+
+    def test_the_cached_pill_is_only_used_once_it_has_fully_settled(self):
+        width, height = target_size(Mode.TRANSCRIBING)
+
+        assert is_settled_label(Frame(width, height, 1.0, 0.0, 1.0))
+        assert not is_settled_label(Frame(width + 2, height, 1.0, 0.0, 1.0))
+        assert not is_settled_label(Frame(width, height, 0.9, 0.0, 1.0))
+        assert not is_settled_label(Frame(width, height, 1.0, 0.2, 1.0))
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows fonts")
@@ -138,52 +152,6 @@ class TestOnePill:
         transcribing = render(Frame(width, height, 1.0, 0.0, 1.0)).getpixel(point)
 
         assert transcribing == recording
-
-
-class TestSettledBar:
-    def _bar(self):
-        from voicetotext.recording.overlay import premultiplied_array
-
-        return SettledBar(premultiplied_array), premultiplied_array
-
-    @pytest.mark.parametrize("progress", [0.0, 1.0])
-    def test_matches_the_full_drawing_when_empty_and_when_full(self, progress):
-        bar, to_pixels = self._bar()
-        width, height = target_size(Mode.TRANSCRIBING)
-        drawn = to_pixels(
-            render(Frame(width, height, 1.0, 0.0, 1.0, progress=progress)),
-        ).tobytes()
-
-        assert bar.pixels(progress) == drawn
-
-    def test_the_edge_moves_by_fractions_of_a_pixel(self):
-        bar, _ = self._bar()
-
-        frames = {bar.pixels(0.5 + i * 0.0005) for i in range(8)}
-
-        assert len(frames) == 8
-
-    def test_ignores_progress_outside_the_bar(self):
-        bar, _ = self._bar()
-
-        assert bar.pixels(-3.0) == bar.pixels(0.0)
-        assert bar.pixels(7.0) == bar.pixels(1.0)
-
-    def test_is_only_used_once_the_pill_has_fully_settled(self):
-        width, height = target_size(Mode.TRANSCRIBING)
-
-        assert is_settled_bar(Frame(width, height, 1.0, 0.0, 1.0))
-        assert not is_settled_bar(Frame(width + 2, height, 1.0, 0.0, 1.0))
-        assert not is_settled_bar(Frame(width, height, 0.9, 0.0, 1.0))
-        assert not is_settled_bar(Frame(width, height, 1.0, 0.2, 1.0))
-
-    @pytest.mark.parametrize("estimate", [None, 0.0, -1.0])
-    def test_eases_short_of_ninety_percent_without_a_usable_estimate(self, estimate):
-        assert transcription_progress(0.4, estimate) > 0.2
-        assert transcription_progress(3600.0, estimate) <= 0.9
-
-    def test_treats_a_clock_that_ran_backwards_as_just_started(self):
-        assert transcription_progress(-3.0, 2.0) == 0.0
 
 
 class TestLayout:
@@ -233,35 +201,29 @@ class TestRender:
         assert image.getextrema()[3] == (0, 0)
 
     def test_the_corners_stay_transparent_so_clicks_pass_through(self):
-        image = render(_recording_frame(level=0.8, phase=2.0))
+        image = render(_recording_frame(levels=(0.8,) * 13, scroll=0.4))
 
         assert image.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
         assert image.getpixel((0, 0))[3] == 0
         assert image.getpixel((CANVAS_WIDTH - 1, CANVAS_HEIGHT - 1))[3] == 0
 
     def test_the_waveform_moves_with_the_voice(self):
-        quiet = render(_recording_frame(level=0.0, phase=1.0))
-        loud = render(_recording_frame(level=1.0, phase=1.0))
+        quiet = render(_recording_frame(levels=(0.0,) * 13))
+        loud = render(_recording_frame(levels=(1.0,) * 13))
 
         assert quiet.tobytes() != loud.tobytes()
 
+    def test_the_row_slides_by_fractions_of_a_slot_between_slices(self):
+        levels = tuple(i / 12 for i in range(13))
+        frames = {render(_recording_frame(levels=levels, scroll=i / 8)).tobytes() for i in range(8)}
+
+        assert len(frames) == 8
+
     def test_a_paused_pill_looks_different_from_a_recording_one(self):
-        recording = render(_recording_frame(level=0.5, phase=1.0))
-        paused = render(_recording_frame(level=0.5, phase=1.0, paused=True))
+        recording = render(_recording_frame(levels=(0.5,) * 13))
+        paused = render(_recording_frame(levels=(0.5,) * 13, paused=True))
 
         assert recording.tobytes() != paused.tobytes()
-
-    def test_the_progress_fill_grows_across_the_transcribing_bar(self):
-        width, height = target_size(Mode.TRANSCRIBING)
-        left, _top, right, bottom = pill_box(width, height)
-        probe = (round(left + (right - left) * 0.3), round(bottom - 3))
-
-        def pixel(progress: float) -> tuple[int, ...]:
-            frame = Frame(width, height, 1.0, 0.0, 1.0, progress=progress)
-            return render(frame).getpixel(probe)
-
-        assert pixel(0.0) != pixel(0.6)
-        assert pixel(0.6) == pixel(0.9)
 
     @pytest.mark.parametrize("hovered", list(Button))
     def test_hovering_a_button_changes_how_it_looks(self, hovered):
@@ -277,44 +239,129 @@ class TestRender:
             assert render(frame).getpixel((round(x), round(y)))[3] > 240
 
 
+def _db(value: float) -> float:
+    return 10 ** (value / 20)
+
+
+# Speech the way a microphone hears it: syllables with short gaps over the
+# room's own noise, read in 64 ms blocks like the recorder delivers them.
+_BLOCK = 1024 / 16000
+
+
+def _speak(level: VoiceLevel, voice_db: float, seconds: float, room_db: float = -62.0) -> list[float]:
+    values = []
+    for i in range(round(seconds / _BLOCK)):
+        talking = i % 7 not in (5, 6)
+        wobble = (i * 37 % 11 - 5) * 0.6
+        values.append(level.update(_db(voice_db + wobble if talking else room_db), _BLOCK))
+    return values
+
+
+def _talking(values: list[float]) -> list[float]:
+    return [v for i, v in enumerate(values) if i % 7 not in (5, 6)]
+
+
 class TestVoiceLevel:
-    def _settle(self, level: VoiceLevel, rms: float, seconds: float = 10.0) -> float:
-        value = 0.0
-        for _ in range(round(seconds * 30)):
-            value = level.update(rms, 1 / 30)
-        return value
+    def test_quiet_speech_moves_the_bars_clearly(self):
+        values = _talking(_speak(VoiceLevel(), -45.0, 6.0))[20:]
+
+        assert numpy.median(values) > 0.4
 
     def test_speech_from_across_the_room_fills_the_bars_like_speech_up_close(self):
-        near = self._settle(VoiceLevel(), 0.08)
-        far = self._settle(VoiceLevel(), 0.012)
+        near = numpy.median(_talking(_speak(VoiceLevel(), -24.0, 6.0))[20:])
+        far = numpy.median(_talking(_speak(VoiceLevel(), -42.0, 6.0, room_db=-70.0))[20:])
 
-        assert far == pytest.approx(near, abs=0.05)
-        assert far > 0.9
+        assert far == pytest.approx(near, abs=0.15)
 
-    def test_room_noise_below_the_gate_draws_flat(self):
-        assert self._settle(VoiceLevel(), 0.002) == 0.0
-
-    def test_a_short_pause_between_words_does_not_rescale(self):
+    def test_louder_syllables_draw_taller_bars_than_quieter_ones(self):
         level = VoiceLevel()
-        self._settle(level, 0.05)
-        self._settle(level, 0.0, seconds=0.5)
+        _speak(level, -32.0, 4.0)
 
-        assert level.update(0.05, 1 / 30) > 0.9
+        soft = level.update(_db(-40.0), _BLOCK)
+        strong = level.update(_db(-26.0), _BLOCK)
+
+        assert strong > soft + 0.2
+
+    def test_room_noise_alone_draws_flat(self):
+        level = VoiceLevel()
+        values = [level.update(_db(-60.0 + (i % 5) * 0.8), _BLOCK) for i in range(200)]
+
+        assert max(values[10:]) == 0.0
+
+    def test_one_cough_does_not_flatten_the_next_sentence_for_long(self):
+        level = VoiceLevel()
+        _speak(level, -32.0, 3.0)
+        level.update(_db(-3.0), _BLOCK)
+
+        later = _talking(_speak(level, -32.0, 4.0))[-15:]
+
+        assert numpy.median(later) > 0.45
 
     def test_a_sudden_shout_never_overflows_the_bars(self):
         level = VoiceLevel()
-        self._settle(level, 0.01)
+        _speak(level, -40.0, 3.0)
 
-        assert level.update(0.9, 1 / 30) == 1.0
+        assert level.update(0.9, _BLOCK) == 1.0
 
-    @pytest.mark.parametrize("rms", [math.nan, -1.0, math.inf])
+    @pytest.mark.parametrize("rms", [math.nan, -1.0, math.inf, 0.0])
     def test_bad_readings_never_break_it(self, rms):
         level = VoiceLevel()
 
-        value = level.update(rms, 1 / 30)
+        value = level.update(rms, _BLOCK)
 
         assert 0.0 <= value <= 1.0
-        assert 0.0 <= level.update(0.05, 1 / 30) <= 1.0
+        assert 0.0 <= level.update(0.05, _BLOCK) <= 1.0
+
+
+class TestVoiceHistory:
+    def test_the_newest_slice_fills_while_you_speak(self):
+        history = VoiceHistory(13)
+        for _ in range(40):
+            history.update(_db(-60.0), 1 / 240)
+        history.update(_db(-25.0), 1 / 240)
+
+        assert history.levels()[-1] > 0.5
+        assert history.levels()[:-1] == (0.0,) * 12
+
+    def test_each_slice_moves_one_slot_left_as_the_next_begins(self):
+        history = VoiceHistory(13)
+        history.update(_db(-60.0), 0.01)
+        history.update(_db(-25.0), 0.01)
+        newest = history.levels()[-1]
+
+        for _ in range(10):
+            history.update(_db(-60.0), 0.0075)
+
+        assert history.levels()[-2] == newest
+
+    def test_the_row_scrolls_smoothly_and_wraps_at_each_slice(self):
+        history = VoiceHistory(13)
+        scrolls = []
+        for _ in range(60):
+            history.update(_db(-40.0), 1 / 240)
+            scrolls.append(history.scroll())
+
+        assert all(0.0 <= value < 1.0 for value in scrolls)
+        assert sum(after < before for before, after in itertools.pairwise(scrolls)) == 3
+
+    def test_keeps_a_fixed_number_of_slices_however_long_you_talk(self):
+        history = VoiceHistory(13)
+        for _ in range(5000):
+            history.update(_db(-30.0), 1 / 240)
+
+        assert len(history.levels()) == 13
+
+    def test_a_new_recording_starts_flat_but_remembers_the_speaker(self):
+        history = VoiceHistory(13)
+        for _ in range(400):
+            history.update(_db(-45.0 if _ % 3 else -62.0), _BLOCK)
+
+        history.clear()
+
+        assert history.levels() == (0.0,) * 13
+        assert history.scroll() == 0.0
+        history.update(_db(-45.0), _BLOCK)
+        assert history.levels()[-1] > 0.4
 
 
 def test_a_caption_is_drawn_above_the_controls_without_moving_them():
@@ -427,9 +474,9 @@ def _amber_pixels(frame: Frame) -> int:
 
 class TestNotices:
     def test_a_silent_microphone_is_named_in_amber_instead_of_the_waveform(self):
-        plain = _recording_frame(level=1.0, phase=1.0)
+        plain = _recording_frame(levels=(1.0,) * 13)
         silent = _recording_frame(
-            level=1.0, phase=1.0, silent_microphone="Maono PD300X Microphone",
+            levels=(1.0,) * 13, silent_microphone="Maono PD300X Microphone",
         )
 
         assert _amber_pixels(plain) == 0
@@ -451,8 +498,8 @@ class TestNotices:
         assert columns.max() < pause_x - radius
 
     def test_the_countdown_sits_beside_a_narrower_waveform(self):
-        plain = render(_recording_frame(level=1.0, phase=1.0))
-        counting = render(_recording_frame(level=1.0, phase=1.0, countdown="0:30"))
+        plain = render(_recording_frame(levels=(1.0,) * 13))
+        counting = render(_recording_frame(levels=(1.0,) * 13, countdown="0:30"))
 
         assert _amber_pixels(_recording_frame(countdown="0:30")) > 20
         assert plain.tobytes() != counting.tobytes()

@@ -3,6 +3,7 @@ import ctypes.wintypes as wintypes
 import logging
 import math
 import sys
+import threading
 import time
 import tkinter
 from collections.abc import Callable
@@ -22,7 +23,7 @@ from voicetotext.core.events import (
     RecordingResumedEvent,
     RecordingStartedEvent,
     StateChangedEvent,
-    TranscriptionStartedEvent,
+    TextPastedEvent,
 )
 from voicetotext.core.state_machine import AppState
 from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
@@ -35,19 +36,19 @@ from voicetotext.recording.pill import (
     Frame,
     Mode,
     PillPosition,
-    SettledBar,
     Spring,
-    VoiceLevel,
+    VoiceHistory,
     collapsed_size,
     countdown_text,
-    finishing_progress,
     hit_test,
-    is_settled_bar,
+    is_settled_label,
     pill_origin,
     pill_position,
     render,
+    settled_label_frame,
+    shimmer_position,
+    shimmered,
     target_size,
-    transcription_progress,
 )
 
 _logger = logging.getLogger(__name__)
@@ -73,12 +74,9 @@ _ANIMATING_SWITCH_INTERVAL = 0.0002
 # second rather than every frame.
 _CLICK_CHECK_SECONDS = 0.05
 
-_LEVEL_SMOOTHING = 0.62
-_PHASE_PER_SECOND = 9.6
-# Once the transcription is done the bar runs to full, holds for a beat
-# so the finish reads, and only then does the pill leave.
-_FULL_BAR_HOLD_SECONDS = 0.14
-_FINISH_SECONDS = 0.22
+# Two slices beyond the bars on show: one sliding in on the right, one
+# fading out on the left.
+_HISTORY_SLICES = 13
 # Windows' own defaults for telling a drag from a wobbly click and a double
 # click from two single ones.
 _DRAG_THRESHOLD = 4
@@ -591,7 +589,7 @@ def _forget_position(_position: PillPosition) -> None:
 
 
 class RecordingOverlay:
-    """The pill: grows in on record, shrinks into a progress bar, then leaves.
+    """The pill: grows in on record, shimmers while transcribing, leaves as the text is pasted.
 
     Everything here runs on the Tk thread. Events arrive on worker threads
     and are handed over through the dispatcher; clicks arrive on the Tk
@@ -642,16 +640,10 @@ class RecordingOverlay:
         self._mode = Mode.CLOSED
         self._visible = False
         self._paused = False
-        self._level = 0.0
-        self._phase = 0.0
         # Kept across recordings: it has learnt how loud this speaker is.
-        self._voice = VoiceLevel()
-        self._estimate: float | None = None
+        self._voice = VoiceHistory(_HISTORY_SLICES)
         self._transcribing_since = 0.0
-        self._progress = 0.0
-        self._finish_from = 0.0
-        self._finished_at: float | None = None
-        self._settled_bar = SettledBar(premultiplied_array)
+        self._settled_label = premultiplied_array(render(settled_label_frame()))
         self._switch_interval: float | None = None
         self._pressed: Button | None = None
         self._caption = ""
@@ -674,7 +666,7 @@ class RecordingOverlay:
             (StateChangedEvent, self._on_state_changed),
             (RecordingPausedEvent, self._on_paused),
             (RecordingResumedEvent, self._on_resumed),
-            (TranscriptionStartedEvent, self._on_transcribing),
+            (TextPastedEvent, self._on_pasted),
             (MicrophoneSilentEvent, self._on_microphone_silent),
             (MicrophoneAudioResumedEvent, self._on_microphone_back),
             (RecordingCapWarningEvent, self._on_cap_warning),
@@ -708,9 +700,7 @@ class RecordingOverlay:
             self._width.value, self._height.value = collapsed_size()
         self._mode = Mode.RECORDING
         self._paused = False
-        self._level = 0.0
-        self._phase = 0.0
-        self._finished_at = None
+        self._voice.clear()
         self._silent_microphone = ""
         self._countdown = None
         self._retarget()
@@ -741,20 +731,12 @@ class RecordingOverlay:
         self._mode = Mode.TRANSCRIBING
         self._pressed = None
         self._transcribing_since = self._clock()
-        self._progress = 0.0
-        self._finished_at = None
         self._retarget()
         self._start_loop()
 
-    def _finish_transcribing(self) -> None:
-        if self._mode is not Mode.TRANSCRIBING:
+    def _finish_on_paste(self) -> None:
+        if self._mode is Mode.TRANSCRIBING:
             self.hide()
-            return
-        self._finish_from = self._progress
-        self._finished_at = self._clock()
-
-    def _set_estimate(self, estimate: float | None) -> None:
-        self._estimate = estimate
 
     def _set_paused(self, paused: bool) -> None:
         self._paused = paused
@@ -785,7 +767,9 @@ class RecordingOverlay:
         elif old == AppState.RECORDING.value and new == AppState.TRANSCRIBING.value:
             self._dispatcher.dispatch(self._start_transcribing)
         elif old == AppState.TRANSCRIBING.value:
-            self._dispatcher.dispatch(self._finish_transcribing)
+            # Usually the paste has closed it already; this covers an empty
+            # result, a clipboard-only mode and a failure.
+            self._dispatcher.dispatch(self.hide)
         elif old == AppState.RECORDING.value:
             self._dispatcher.dispatch(self.hide)
 
@@ -795,10 +779,14 @@ class RecordingOverlay:
     def _on_resumed(self, _event: DomainEvent) -> None:
         self._dispatcher.dispatch(lambda: self._set_paused(False))
 
-    def _on_transcribing(self, event: DomainEvent) -> None:
-        if isinstance(event, TranscriptionStartedEvent):
-            estimate = event.estimated_seconds
-            self._dispatcher.dispatch(lambda: self._set_estimate(estimate))
+    def _on_pasted(self, _event: DomainEvent) -> None:
+        # Published on the GUI thread in the middle of the paste, which still
+        # has the clipboard restore to wait out: queued, the pill would only
+        # start leaving after it. Run now, so it leaves as the text lands.
+        if threading.current_thread() is threading.main_thread():
+            self._finish_on_paste()
+        else:
+            self._dispatcher.dispatch(self._finish_on_paste)
 
     def _on_recording_started(self, event: DomainEvent) -> None:
         if isinstance(event, RecordingStartedEvent):
@@ -894,7 +882,6 @@ class RecordingOverlay:
         for spring in self._springs():
             spring.step(seconds)
         self._advance_level(seconds)
-        self._advance_progress(now)
         self._advance_countdown(elapsed)
         self._follow_drag()
         if now - self._last_click_check >= _CLICK_CHECK_SECONDS:
@@ -903,11 +890,11 @@ class RecordingOverlay:
         hovered = self._hovered()
         self._window_api.set_hand_cursor(hovered is not None)
         self._frame = self._current_frame(hovered)
-        if is_settled_bar(self._frame):
-            pixels = self._settled_bar.pixels(self._progress)
-        else:
-            pixels = premultiplied_bgra(render(self._frame))
-        self._window_api.push_frame(pixels)
+        base = (
+            self._settled_label if is_settled_label(self._frame)
+            else premultiplied_array(render(self._frame))
+        )
+        self._window_api.push_frame(shimmered(base, self._frame).tobytes())
         if self._mode is Mode.CLOSED and self._opacity.value < 0.01:
             self._visible = False
             self._window_api.hide()
@@ -926,41 +913,14 @@ class RecordingOverlay:
         return self._width, self._height, self._opacity, self._controls, self._label
 
     def _advance_level(self, seconds: float) -> None:
-        if self._mode is not Mode.RECORDING or self._paused:
-            self._level = 0.0
-            return
-        normalized = self._voice.update(self._level_provider(), seconds)
-        self._level = (self._level * _LEVEL_SMOOTHING) + (
-            normalized * (1.0 - _LEVEL_SMOOTHING)
-        )
-        self._phase += _PHASE_PER_SECOND * seconds
+        # Paused, the row holds still rather than scrolling silence past.
+        if self._mode is Mode.RECORDING and not self._paused:
+            self._voice.update(self._level_provider(), seconds)
 
     def _advance_countdown(self, elapsed: float) -> None:
         # Paused time does not count towards the limit, so the clock stops too.
         if self._countdown is not None and self._mode is Mode.RECORDING and not self._paused:
             self._countdown = max(self._countdown - elapsed, 0.0)
-
-    def _advance_progress(self, now: float) -> None:
-        if self._mode is not Mode.TRANSCRIBING:
-            return
-        # A pure function of the clock, not a chase of a moving target: a
-        # chase moves by whatever each frame's gap happens to be, and
-        # uneven gaps show as a stutter.
-        if self._finished_at is None:
-            target = transcription_progress(
-                now - self._transcribing_since, self._estimate,
-            )
-        else:
-            target = finishing_progress(
-                self._finish_from, now - self._finished_at, _FINISH_SECONDS,
-            )
-        # Never backwards: a bar that shrinks reads as the app changing its mind.
-        self._progress = min(1.0, max(self._progress, target))
-        if (
-            self._finished_at is not None
-            and now - self._finished_at >= _FINISH_SECONDS + _FULL_BAR_HOLD_SECONDS
-        ):
-            self.hide()
 
     def _hovered(self) -> Button | None:
         if self._controls.value < 0.9:
@@ -977,10 +937,13 @@ class RecordingOverlay:
             opacity=_unit(self._opacity.value),
             controls=_unit(self._controls.value),
             label=_unit(self._label.value),
-            level=self._level,
-            phase=self._phase,
+            levels=self._voice.levels(),
+            scroll=self._voice.scroll(),
             paused=self._paused,
-            progress=self._progress,
+            shimmer=(
+                shimmer_position(self._clock() - self._transcribing_since)
+                if self._mode is Mode.TRANSCRIBING else -1.0
+            ),
             hovered=hovered,
             caption=self._caption,
             silent_microphone=self._silent_microphone,

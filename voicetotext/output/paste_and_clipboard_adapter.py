@@ -16,6 +16,10 @@ def _always_ctrl_v() -> PasteMethod:
     return PasteMethod.CTRL_V
 
 
+def _nothing() -> None:
+    return None
+
+
 class PasteAndClipboardAdapter(TextOutputHandler):
 
     def __init__(
@@ -24,11 +28,13 @@ class PasteAndClipboardAdapter(TextOutputHandler):
         writer: ClipboardWriter,
         key_sender: KeySender,
         paste_method: Callable[[], PasteMethod] | None = None,
+        on_pasted: Callable[[], None] = _nothing,
     ) -> None:
         self._sleeper = sleeper
         self._writer = writer
         self._key_sender = key_sender
         self._paste_method = paste_method or _always_ctrl_v
+        self._on_pasted = on_pasted
 
     def output(self, text: str) -> None:
         _logger.debug("paste_and_clipboard: writer.set_text")
@@ -36,6 +42,7 @@ class PasteAndClipboardAdapter(TextOutputHandler):
         _logger.debug("paste_and_clipboard: settle sleep")
         self._sleeper.sleep(_CLIPBOARD_SETTLE_DELAY_SECONDS)
         self._paste(text)
+        self._on_pasted()
         _logger.debug("paste_and_clipboard: done")
 
     def _paste(self, text: str) -> None:

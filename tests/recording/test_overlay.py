@@ -1,6 +1,7 @@
 import ctypes
 import itertools
 import sys
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -15,7 +16,7 @@ from voicetotext.core.events import (
     RecordingPausedEvent,
     RecordingResumedEvent,
     StateChangedEvent,
-    TranscriptionStartedEvent,
+    TextPastedEvent,
 )
 from voicetotext.recording import overlay as overlay_module
 from voicetotext.recording.overlay import (
@@ -320,15 +321,17 @@ class TestButtons:
 
 
 class TestPause:
-    def test_a_paused_pill_flattens_its_waveform(self):
+    def test_a_paused_pill_holds_its_waveform_still(self):
         harness = Harness(estimate_level=0.9)
         harness.start_recording()
 
         harness.bus.publish(RecordingPausedEvent())
-        harness.root.run(0.2)
+        harness.root.run(0.1)
+        held = (harness.overlay.frame.levels, harness.overlay.frame.scroll)
+        harness.root.run(0.5)
 
         assert harness.overlay.frame.paused is True
-        assert harness.overlay.frame.level == 0.0
+        assert (harness.overlay.frame.levels, harness.overlay.frame.scroll) == held
 
     def test_resuming_brings_the_waveform_back(self):
         harness = Harness(estimate_level=0.9)
@@ -339,7 +342,18 @@ class TestPause:
         harness.root.run(0.2)
 
         assert harness.overlay.frame.paused is False
-        assert harness.overlay.frame.level > 0.5
+        assert harness.overlay.frame.levels[-1] > 0.5
+
+    def test_the_waveform_scrolls_while_you_speak(self):
+        harness = Harness(estimate_level=0.05)
+        harness.start_recording()
+        scrolls = []
+
+        for _ in range(10):
+            harness.root.run(_FRAME_SECONDS)
+            scrolls.append(harness.overlay.frame.scroll)
+
+        assert len(set(scrolls)) == 10
 
     def test_a_new_recording_never_starts_paused(self):
         harness = Harness()
@@ -353,18 +367,15 @@ class TestPause:
         assert harness.overlay.frame.paused is False
 
 
-class TestTranscribingProgress:
-    def _transcribing(self, estimate: float | None) -> Harness:
+class TestTranscribing:
+    def _transcribing(self) -> Harness:
         harness = Harness()
         harness.start_recording()
         harness.state("recording", "transcribing")
-        harness.bus.publish(
-            TranscriptionStartedEvent(audio_seconds=4.0, estimated_seconds=estimate),
-        )
         return harness
 
-    def test_shrinks_into_the_transcribing_bar(self):
-        harness = self._transcribing(2.0)
+    def test_shrinks_into_the_transcribing_pill(self):
+        harness = self._transcribing()
 
         harness.root.run(1.0)
 
@@ -373,55 +384,59 @@ class TestTranscribingProgress:
         assert frame.controls == pytest.approx(0.0, abs=0.02)
         assert frame.label == pytest.approx(1.0, abs=0.02)
 
-    def test_fills_in_step_with_the_learnt_estimate(self):
-        harness = self._transcribing(2.0)
-
-        harness.root.run(1.0)
-
-        assert harness.overlay.frame.progress == pytest.approx(0.45, abs=0.03)
-
-    def test_never_looks_finished_while_the_engine_is_still_running(self):
-        harness = self._transcribing(0.5)
-
-        harness.root.run(20.0)
-
-        assert 0.95 <= harness.overlay.frame.progress < 1.0
-
-    def test_still_moves_without_an_estimate_but_stops_short(self):
-        harness = self._transcribing(None)
-
-        harness.root.run(0.5)
-        early = harness.overlay.frame.progress
-        harness.root.run(30.0)
-
-        assert 0.2 < early
-        assert harness.overlay.frame.progress <= 0.9
-
-    def test_never_moves_backwards(self):
-        harness = self._transcribing(3.0)
+    def test_a_shimmer_sweeps_across_while_the_engine_runs(self):
+        harness = self._transcribing()
         seen = []
 
-        for _ in range(200):
+        for _ in range(30):
             harness.root.run(_FRAME_SECONDS)
-            seen.append(harness.overlay.frame.progress)
+            seen.append(harness.overlay.frame.shimmer)
 
-        assert seen == sorted(seen)
+        assert all(0.0 <= position <= 1.0 for position in seen)
+        assert max(seen) - min(seen) > 0.5
 
-    def test_fills_holds_then_leaves_when_the_text_is_in(self):
-        harness = self._transcribing(5.0)
-        harness.root.run(0.5)
-
-        harness.state("transcribing", "idle")
+    def test_leaves_the_moment_the_text_is_pasted(self):
+        harness = self._transcribing()
         harness.root.run(0.1)
-        assert harness.overlay.frame.progress > 0.8
-        harness.root.run(2.0)
 
+        harness.bus.publish(TextPastedEvent())
+
+        assert harness.overlay.mode is Mode.CLOSED
+        harness.root.run(1.0)
         assert harness.overlay.visible is False
         assert harness.api.hidden == 1
         assert harness.root.pending is None
 
+    def test_the_transcription_ending_after_the_paste_changes_nothing(self):
+        harness = self._transcribing()
+        harness.bus.publish(TextPastedEvent())
+        harness.root.run(1.0)
+
+        harness.state("transcribing", "idle")
+        harness.root.run(1.0)
+
+        assert harness.api.hidden == 1
+
+    def test_a_paste_while_still_recording_leaves_the_pill_up(self):
+        harness = Harness()
+        harness.start_recording()
+
+        harness.bus.publish(TextPastedEvent())
+        harness.root.run(0.5)
+
+        assert harness.overlay.mode is Mode.RECORDING
+        assert harness.overlay.visible is True
+
+    def test_leaves_when_the_transcription_ends_without_a_paste(self):
+        harness = self._transcribing()
+
+        harness.state("transcribing", "idle")
+        harness.root.run(1.0)
+
+        assert harness.overlay.visible is False
+
     def test_leaves_the_same_way_after_a_failed_transcription(self):
-        harness = self._transcribing(1.0)
+        harness = self._transcribing()
 
         harness.state("transcribing", "error")
         harness.root.run(2.0)
@@ -731,9 +746,23 @@ class TestMarshalling:
 
         bus.publish(StateChangedEvent(old_state="idle", new_state="recording"))
         bus.publish(RecordingPausedEvent())
-        bus.publish(TranscriptionStartedEvent(audio_seconds=1.0, estimated_seconds=0.3))
+        worker = threading.Thread(target=lambda: bus.publish(TextPastedEvent()))
+        worker.start()
+        worker.join()
 
         assert dispatcher.dispatch.call_count == 3
+
+    def test_a_paste_on_the_gui_thread_closes_the_pill_at_once_not_after_the_queue(self):
+        dispatcher = MagicMock()
+        bus = SimpleEventBus()
+        RecordingOverlay(
+            root=FakeRoot(), event_bus=bus, dispatcher=dispatcher,
+            level_provider=lambda: 0.0, window_api=FakeWindowApi(),
+        )
+
+        bus.publish(TextPastedEvent())
+
+        dispatcher.dispatch.assert_not_called()
 
 
 class TestFramePixels:
@@ -902,13 +931,10 @@ def test_clicking_finish_keeps_the_focus_in_the_app_being_dictated_into(
 
 
 class TestSmoothness:
-    def _transcribing(self, estimate: float | None = 2.0) -> Harness:
+    def _transcribing(self) -> Harness:
         harness = Harness()
         harness.start_recording()
         harness.state("recording", "transcribing")
-        harness.bus.publish(
-            TranscriptionStartedEvent(audio_seconds=4.0, estimated_seconds=estimate),
-        )
         harness.root.run(1.0)
         return harness
 
@@ -942,7 +968,7 @@ class TestSmoothness:
 
         assert delays == [overlay_module._UNSYNCED_FRAME_MS]
 
-    def test_a_settled_bar_is_filled_without_redrawing_the_pill(self, monkeypatch):
+    def test_a_settled_transcribing_pill_shimmers_without_redrawing(self, monkeypatch):
         harness = self._transcribing()
         redraws = []
         original = overlay_module.render
@@ -954,32 +980,32 @@ class TestSmoothness:
 
         assert redraws == []
         assert len(harness.api.frames) > 20
+        assert len(set(harness.api.frames[-20:])) > 10
 
-    def test_the_fill_advances_evenly_frame_to_frame(self):
-        harness = self._transcribing(estimate=4.0)
+    def test_the_shimmer_moves_by_small_even_steps(self):
+        harness = self._transcribing()
         seen = []
 
-        for _ in range(60):
+        for _ in range(120):
             harness.root.run(_FRAME_SECONDS)
-            seen.append(harness.overlay.frame.progress)
+            seen.append(harness.overlay.frame.shimmer)
 
-        steps = [after - before for before, after in itertools.pairwise(seen)]
-        assert min(steps) > 0
-        assert max(steps) / min(steps) < 1.2
+        steps = [abs(after - before) for before, after in itertools.pairwise(seen)]
+        wraps = [step for step in steps if step > 0.5]
+        assert len(wraps) <= 3
+        assert max(step for step in steps if step <= 0.5) < 0.06
 
-    def test_the_finish_eases_to_full_then_the_pill_leaves(self):
-        harness = self._transcribing(estimate=5.0)
-        start = harness.overlay.frame.progress
+    def test_after_the_paste_the_pill_fades_out_smoothly_and_is_gone_within_half_a_second(self):
+        harness = self._transcribing()
 
-        harness.state("transcribing", "idle")
-        harness.root.run(0.1)
-        midway = harness.overlay.frame.progress
-        harness.root.run(0.15)
-        full = harness.overlay.frame.progress
-        harness.root.run(1.0)
+        harness.bus.publish(TextPastedEvent())
+        opacities = []
+        for _ in range(30):
+            harness.root.run(_FRAME_SECONDS)
+            if harness.overlay.visible:
+                opacities.append(harness.overlay.frame.opacity)
 
-        assert start < midway < full
-        assert full == pytest.approx(1.0)
+        assert opacities == sorted(opacities, reverse=True)
         assert harness.overlay.visible is False
 
     def test_restores_the_thread_switch_interval_once_the_pill_is_gone(self):
