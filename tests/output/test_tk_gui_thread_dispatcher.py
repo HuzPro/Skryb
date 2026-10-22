@@ -119,13 +119,18 @@ class TestTkGuiThreadDispatcherSleep:
         # clipboard settle that dozed 10 ms between events let it draw only
         # every 10 ms or so, which showed as a stutter on every dictation.
         drawn: list[float] = []
+        stopped = False
 
         def frame() -> None:
             drawn.append(time.monotonic())
-            root.after(1, frame)
+            if not stopped:
+                root.after(1, frame)
 
         root.after(1, frame)
         dispatcher.sleep(0.1)
+        # The root is shared: a loop left running would starve later tests.
+        stopped = True
+        root.update()
         gaps = [after - before for before, after in zip(drawn, drawn[1:])]
 
         assert len(drawn) > 25
