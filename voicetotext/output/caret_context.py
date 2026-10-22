@@ -181,15 +181,25 @@ def _fit_to_visible_context(text: str, context: CaretContext) -> str:
     if item is not None:
         return _continue_vertical_list(text, item)
     core = _continue_number_list(text.strip(), context.before) or text.strip()
-    core = _match_preceding_case(core, context.before)
+    core = _match_preceding_case(core, context.before, context.selected)
     lead = _lead(core, context)
     trail = _trailing_whitespace(context.selected)
     following = context.after.lstrip(" \t")
+    # A replacement takes the shape of what it replaces: words selected
+    # without a full stop get none back, whatever follows them. Several
+    # sentences dictated over a fragment are prose of their own and keep theirs.
+    unended = _replaces_words_without_an_ending(context.selected) and not _holds_a_sentence_ending(core)
     if not following or following[0] in _NEWLINES:
+        if unended:
+            core = _strip_terminal_punctuation(core)
         return lead + core + (trail or _trailing_whitespace(text))
     if following[0] in _PUNCTUATION_THAT_FOLLOWS:
         return lead + _strip_terminal_punctuation(core) + trail
-    if _continues_the_sentence(following[0]):
+    if (
+        unended
+        or _continues_the_sentence(following[0])
+        or _inserted_mid_sentence(context, following[0])
+    ):
         core = _strip_terminal_punctuation(core)
     elif not _starts_a_new_sentence(following[0]):
         return lead + core + trail
@@ -221,13 +231,51 @@ def _starts_with_punctuation(core: str) -> bool:
     return bool(core) and core[0] in _TERMINAL_PUNCTUATION
 
 
-def _match_preceding_case(core: str, before: str) -> str:
-    preceding = _unwrapped(before.rstrip(" \t"))
-    if not preceding or preceding[-1] in _SENTENCE_ENDINGS:
+def _match_preceding_case(core: str, before: str, selected: str = "") -> str:
+    if _at_sentence_start(before):
         return _capitalize_first_word(core)
+    preceding = _unwrapped(before.rstrip(" \t"))
     if _ends_an_unfinished_sentence(preceding[-1]):
+        # A word selected mid-sentence with a capital is a name or an
+        # acronym, so its replacement keeps the capital it was given.
+        if _starts_with_a_capital(selected):
+            return core
         return _lowercase_first_word(core)
     return core
+
+
+def _at_sentence_start(before: str) -> bool:
+    preceding = _unwrapped(before.rstrip(" \t"))
+    return not preceding or preceding[-1] in _SENTENCE_ENDINGS
+
+
+def _starts_with_a_capital(text: str) -> bool:
+    match = _WORD_PATTERN.match(text.lstrip())
+    return match is not None and match.group(0)[0].isupper() and match.group(0) != "I"
+
+
+def _replaces_words_without_an_ending(selected: str) -> bool:
+    words = _unwrapped(selected.strip())
+    return bool(_WORD_PATTERN.search(selected)) and words[-1:] not in tuple(_SENTENCE_ENDINGS)
+
+
+def _holds_a_sentence_ending(core: str) -> bool:
+    """Whether the dictation is prose of its own: a sentence ends before its last word."""
+    return any(mark in core.rstrip(_TERMINAL_PUNCTUATION + " ") for mark in ".!?")
+
+
+def _inserted_mid_sentence(context: CaretContext, following: str) -> bool:
+    """Dictated between two words of one sentence, nothing selected.
+
+    A capital right after the caret does not start a sentence on its own: a
+    name or an acronym can follow. Only a sentence ending right before the
+    caret makes the dictation a sentence of its own.
+    """
+    return (
+        not context.selected.strip()
+        and _starts_a_new_sentence(following)
+        and not _at_sentence_start(context.before)
+    )
 
 
 def _ends_an_unfinished_sentence(character: str) -> bool:
