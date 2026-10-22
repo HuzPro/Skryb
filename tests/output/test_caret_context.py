@@ -113,12 +113,12 @@ class TestTerminalPunctuationFromWhatFollows:
 
         assert result == "near harry potter"
 
-    def test_should_keep_punctuation_when_a_new_sentence_follows(self) -> None:
+    def test_a_capital_after_a_replaced_word_is_not_taken_as_a_new_sentence(self) -> None:
         context = CaretContext("one ", "two", " Three.")
 
         result = fit_to_context("Two.", context)
 
-        assert result == "two."
+        assert result == "two"
 
 
 class TestInvisibleCharacters:
@@ -313,3 +313,75 @@ class TestEdgesOfTheText:
         self, before: str, selected: str, after: str, text: str, expected: str,
     ) -> None:
         assert fit_to_context(text, CaretContext(before, selected, after)) == expected
+
+
+class TestReplacementTakesTheShapeOfTheSelection:
+    """Re-dictating over selected words, the way they get fixed by voice."""
+
+    @pytest.mark.parametrize(
+        ("before", "selected", "after", "text", "expected"),
+        [
+            (
+                "I love what you did with the ", "Quin ", "Three's ASR engine. ",
+                "Quentin.", "Quentin ",
+            ),
+            (
+                "So the end of the sentence can be phrased a bit ", "better worded. ", "",
+                "More clearly.", "more clearly. ",
+            ),
+            ("I have a ", "good ", "word for this. ", "Better.", "better "),
+            ("", "Hey there. ", "How are you?", "hello.", "Hello. "),
+            ("", "Hi ", "Bob, how are you?", "Hello.", "Hello "),
+            ("Ask ", "nasa ", "about it.", "NASA.", "NASA "),
+            ("We met ", "Tom", " yesterday.", "Thomas.", "Thomas"),
+            ("Café is ", "très ", "bien. ", "Très.", "très "),
+            ("Ship it", "", "", "Today.", " today."),
+            ("cheap and easy to attain", ", I guess.", " ", "In terms of ease.", " in terms of ease."),
+            (
+                "Here is the plan. ", "which slack channel ", "",
+                "There are two channels. We use the first one.",
+                "There are two channels. We use the first one. ",
+            ),
+        ],
+        ids=[
+            "a name mid-sentence keeps its capital and gets no full stop",
+            "the end of a sentence, full stop and space selected too",
+            "a word in the middle",
+            "a whole first sentence",
+            "a first word before a name",
+            "an acronym the engine capitalised",
+            "a name without its trailing space",
+            "accented words",
+            "appending at the very end still ends the sentence",
+            "a selection starting with punctuation and the word I",
+            "several sentences dictated over a fragment keep their ending",
+        ],
+    )
+    def test_fits_like_the_text_it_replaced(
+        self, before: str, selected: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext(before, selected, after)) == expected
+
+
+class TestInsertingWithoutASelection:
+    @pytest.mark.parametrize(
+        ("before", "after", "text", "expected"),
+        [
+            ("I spoke with ", "NASA today.", "The.", "the "),
+            ("We use the ", "API every day.", "Public.", "public "),
+            ("Done. ", "Next we eat.", "then we rest.", "Then we rest. "),
+            ("Done.\n", "Next we eat.", "then we rest.", "Then we rest. "),
+            ("This is ", "a test.", "Really.", "really "),
+        ],
+        ids=[
+            "before an acronym inside a sentence",
+            "before a capitalised word inside a sentence",
+            "between two sentences",
+            "at the start of a line before a sentence",
+            "before a lowercase word",
+        ],
+    )
+    def test_ends_a_sentence_only_at_a_sentence_boundary(
+        self, before: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext(before, "", after)) == expected
