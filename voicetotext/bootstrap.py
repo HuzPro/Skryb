@@ -70,7 +70,7 @@ from voicetotext.output.app_aware_delivery import (
 from voicetotext.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
-from voicetotext.output.caret_context import log_caret_text_when
+from voicetotext.output.caret_context import CaretContext, log_caret_text_when
 from voicetotext.output.clipboard_adapter import ClipboardAdapter
 from voicetotext.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -97,6 +97,7 @@ from voicetotext.output.text_filter_decorator import (
 from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
 from voicetotext.output.win32_caret_context import (
     read_caret_context,
+    read_focused_text,
     text_field_focused,
 )
 from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
@@ -180,6 +181,7 @@ from voicetotext.writing.install import WritingPaths, managed_root, server_files
 from voicetotext.writing.learning import Learner
 from voicetotext.writing.llama_server import LlamaServer
 from voicetotext.writing.service import WritingService, warm_up_writing_model
+from voicetotext.writing.redictation import RedictationTracker
 from voicetotext.writing.settings import read_writing_settings
 from voicetotext.writing.transforms import TransformStore
 from voicetotext.writing.voice_edit import VoiceEditor
@@ -330,10 +332,22 @@ def _key_observer(capture: Win32EditObserver | None) -> KeyObserver:
 
 
 def _remember_then_report(
-    on_delivered: Callable[[str], None], text: str,
+    on_delivered: Callable[[str], None], on_pasting: Callable[[str], None], text: str,
 ) -> None:
     _paste_memory.remember(text)
+    on_pasting(text)
     on_delivered(text)
+
+
+def _reporting_reads(
+    read: Callable[[], CaretContext], report: Callable[[CaretContext], None],
+) -> Callable[[], CaretContext]:
+    def read_and_report() -> CaretContext:
+        context = read()
+        report(context)
+        return context
+
+    return read_and_report
 
 
 def _build_output(
@@ -370,7 +384,10 @@ def _build_output(
                 paste_method=hooks.paste_method if hooks is not None else None,
                 on_pasted=hooks.on_pasted if hooks is not None else _no_paste_report,
             ),
-            record=functools.partial(_remember_then_report, on_delivered),
+            record=functools.partial(
+                _remember_then_report, on_delivered,
+                hooks.on_pasting if hooks is not None else _ignore_delivery,
+            ),
         )
 
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
@@ -413,10 +430,13 @@ def _build_output(
             dictionary,
             pipeline_mode,
             models_dir=models_dir,
-            caret_context=read_or_remember(
-                read_caret_context,
-                _paste_memory,
-                functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
+            caret_context=_reporting_reads(
+                read_or_remember(
+                    read_caret_context,
+                    _paste_memory,
+                    functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
+                ),
+                hooks.on_caret_read if hooks is not None else _ignore_caret_read,
             ),
             cleanup=writing.cleanup_stage(dictionary) if writing is not None else None,
         ),
@@ -531,6 +551,10 @@ def _foreground_paste_method(config: JsonConfigAdapter) -> PasteMethod:
 
 
 def _no_paste_report() -> None:
+    return None
+
+
+def _ignore_caret_read(_context: CaretContext) -> None:
     return None
 
 
@@ -1150,6 +1174,12 @@ def build_app(
         lambda message: gui_dispatcher.dispatch(lambda: notice.show(message)),
     )
     edit_capture = _build_edit_capture(config, paths, writing.learner)
+    redictations = RedictationTracker(
+        learn=writing.learner.observe_correction,
+        foreground=foreground_hwnd,
+        read_text=read_focused_text,
+        enabled=lambda: read_writing_settings(config).learn_words,
+    )
     if edit_capture is not None:
         atexit.register(edit_capture.stop)
 
@@ -1193,6 +1223,8 @@ def build_app(
         paste_method=functools.partial(_foreground_paste_method, config),
         on_failed=functools.partial(_publish_delivery_failure, event_bus),
         on_pasted=lambda: event_bus.publish(TextPastedEvent()),
+        on_caret_read=redictations.caret_read,
+        on_pasting=redictations.pasting,
     )
     output = _build_output(
         output_mode, gui_dispatcher, paths.dictionary_path,

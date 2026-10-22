@@ -193,6 +193,21 @@ class Learner:
         if ready:
             self._teach(ready)
 
+    def observe_correction(self, pasted: str, final: str, dictation: str) -> None:
+        """One fix seen outside edit capture: a dictation's words as pasted and as they ended up.
+
+        ``dictation`` names the fix, so the same pair counts once per fix and
+        is taught only when a second, separate fix agrees.
+        """
+        if not self._settings().learn_words:
+            return
+        with self._lock:
+            self._ensure_loaded()
+            ready = self._count_corrections(pasted, final, f"{self._prefix}:{dictation}")
+            self._save()
+        if ready:
+            self._teach(ready)
+
     def style_sentences(self) -> tuple[str, ...]:
         with self._lock:
             self._ensure_loaded()
