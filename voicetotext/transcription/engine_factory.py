@@ -31,6 +31,7 @@ from voicetotext.transcription.model_info import (
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     PHONON2_MODELS,
+    QWEN3_ASR_MODELS,
     ModelInfo,
     get_model_info,
 )
@@ -78,12 +79,23 @@ _CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# Hand-written kernels for gfx1200 behind a DLL: AMD only, and no torch import.
+_NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="native_qwen3_asr",
+    display_name="Qwen3-ASR (native HIP engine)",
+    supported_hardware=("amd_rocm",),
+    base_priority=95,
+    requires_torch=False,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
     "phonon2_cpu": 1,
     "crisperwhisper": 1,
     "crisperwhisper_ct2": 1,
+    "native_qwen3_asr": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -97,6 +109,7 @@ def build_engine_registry() -> EngineRegistry:
             _PHONON2_CPU_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
+            _NATIVE_QWEN3_ASR_DESCRIPTOR,
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
@@ -104,6 +117,7 @@ def build_engine_registry() -> EngineRegistry:
             "phonon2_cpu": _build_phonon2_cpu_engine,
             "crisperwhisper": _build_crisperwhisper_engine,
             "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
+            "native_qwen3_asr": _build_native_qwen3_asr_engine,
         },
     )
 
@@ -136,6 +150,19 @@ def _build_phonon2_cpu_engine(spec: EngineSpec) -> TranscriptionEngine:
     from voicetotext.transcription.phonon2_cpu_adapter import Phonon2CpuAdapter
 
     return Phonon2CpuAdapter(
+        loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
+    )
+
+
+def _build_native_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from voicetotext.transcription.hf_model_manager import (
+        loadable_snapshot_dir,
+    )
+    from voicetotext.transcription.native_qwen3_asr_adapter import (
+        NativeQwen3AsrAdapter,
+    )
+
+    return NativeQwen3AsrAdapter(
         loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
     )
 
@@ -524,6 +551,9 @@ def build_composite_model_manager(
     crisperwhisper_models = {
         name: info for name, info in CRISPERWHISPER_MODELS.items() if info.repo_id
     }
+    qwen3_asr_models = {
+        name: info for name, info in QWEN3_ASR_MODELS.items() if info.repo_id
+    }
 
     nano_parakeet_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -558,6 +588,15 @@ def build_composite_model_manager(
         license_policy=license_policy,
     )
 
+    qwen3_asr_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=qwen3_asr_models,
+        license_policy=license_policy,
+    )
+
     return CompositeModelManager(
         by_engine={
             "nano_parakeet": nano_parakeet_manager,
@@ -565,6 +604,7 @@ def build_composite_model_manager(
             "phonon2_cpu": phonon2_manager,
             "crisperwhisper": crisperwhisper_manager,
             "crisperwhisper_ct2": crisperwhisper_manager,
+            "native_qwen3_asr": qwen3_asr_manager,
         },
         active_engine_provider=active_engine_provider,
     )

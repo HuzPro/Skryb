@@ -104,6 +104,26 @@ def default_model_for(hardware: HardwareKind) -> str:
     return CPU_DEFAULT_MODEL if hardware == "cpu" else DEFAULT_MODEL
 
 
+_QWEN3_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"native_qwen3_asr": 100},
+)
+
+# The most accurate open model on the Open ASR Leaderboard as of Oct 2026,
+# run by this repo's own HIP engine (native/engine). Pinned because the
+# packer's tensor layout is written against this exact checkpoint.
+QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
+    "qwen3-asr-1.7b": ModelInfo(
+        name="qwen3-asr-1.7b",
+        size_mb=4080,
+        description="Qwen3-ASR 1.7B on the native AMD engine: most accurate, no PyTorch (RX 9060 XT)",
+        repo_id="Qwen/Qwen3-ASR-1.7B-hf",
+        revision="bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
+        compatible_engines=("native_qwen3_asr",),
+        engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
+    ),
+}
+
+
 _NEMOTRON_STREAMING_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"nemotron_streaming": 100},
 )
@@ -171,7 +191,7 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
 
 ALL_MODELS: dict[str, ModelInfo] = {
     **PARAKEET_MODELS, **PHONON2_MODELS, **NEMOTRON_STREAMING_MODELS,
-    **CRISPERWHISPER_MODELS,
+    **CRISPERWHISPER_MODELS, **QWEN3_ASR_MODELS,
 }
 
 
@@ -205,7 +225,6 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "granite-speech-4.1-2b": DEFAULT_MODEL,
     "granite-speech-5.0-470m-turboctc": DEFAULT_MODEL,
     "ark-asr-3b": DEFAULT_MODEL,
-    "qwen3-asr-1.7b": DEFAULT_MODEL,
     "parakeet-tdt-0.6b-v2": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
 }

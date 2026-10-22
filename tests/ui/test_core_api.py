@@ -407,7 +407,7 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(rig: Rig) -> None
     assert status == 200
     by_name = {model["name"]: model for model in models}
     assert set(by_name) == {
-        PARAKEET, "parakeet-ultra", "phonon-2", NEMOTRON, TURBO, "crisperwhisper-2.0-large",
+        PARAKEET, "parakeet-ultra", "phonon-2", NEMOTRON, TURBO, "crisperwhisper-2.0-large", "qwen3-asr-1.7b",
     }
     assert by_name[PARAKEET]["installed"] is True
     assert by_name[PARAKEET]["license_id"] is None

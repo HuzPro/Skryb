@@ -12,6 +12,7 @@ from voicetotext.transcription.model_info import (
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     PHONON2_MODELS,
+    QWEN3_ASR_MODELS,
     ModelInfo,
     default_model_for,
     get_model_info,
@@ -30,7 +31,6 @@ _REMOVED_MODEL_EXPECTATIONS = (
     ("granite-speech-4.1-2b", DEFAULT_MODEL),
     ("granite-speech-5.0-470m-turboctc", DEFAULT_MODEL),
     ("ark-asr-3b", DEFAULT_MODEL),
-    ("qwen3-asr-1.7b", DEFAULT_MODEL),
     ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
     ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
 )
@@ -85,6 +85,7 @@ class TestPinnedRevisions:
         "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         "phonon-2": "fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
+        "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
     }
 
     @pytest.mark.parametrize(
@@ -139,6 +140,7 @@ class TestModelCatalog:
             | set(PHONON2_MODELS)
             | set(NEMOTRON_STREAMING_MODELS)
             | set(CRISPERWHISPER_MODELS)
+            | set(QWEN3_ASR_MODELS)
         )
 
     def test_default_should_be_current_parakeet(self) -> None:
