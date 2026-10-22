@@ -53,6 +53,8 @@ export function describeWriting(status: WritingStatus): { pill: string; tone: To
       return { pill: "Failed", tone: "destructive", detail: `Failed: ${lastLine(status.detail) || "no reason was given"}` };
     case "stopped":
       return { pill: "Waiting", tone: "muted", detail: "Starts once dictation is ready." };
+    case "off":
+      return { pill: "Off", tone: "muted", detail: "Not loaded while cleanup is off and no shortcut edits selected text." };
   }
 }
 
