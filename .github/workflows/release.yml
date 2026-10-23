@@ -107,6 +107,21 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
+      # The settings window (Tauri) ships inside the app wheel, and the
+      # installer build refuses to run without it. Rust comes with the runner.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Build settings window
+        shell: pwsh
+        run: ./scripts/build_ui.ps1
+
       # Bundle a relocatable CPython 3.12 (python-build-standalone). AMD's
       # Windows ROCm wheels are cp312-only, so the bundled runtime is 3.12.
       - name: Fetch standalone CPython 3.12
@@ -175,6 +190,10 @@ jobs:
             small. After install, run `voicetotext` from any terminal or
             launch it from the Start Menu. Speech-to-text models download on
             first run.
+
+            The installer is not code-signed yet, so Windows SmartScreen may
+            say it "protected your PC". Click **More info**, then **Run
+            anyway**.
 
             Third-party license notices are written to the install folder
             (`THIRD-PARTY-NOTICES.txt`) and `NOTICE.txt` covers the bundled

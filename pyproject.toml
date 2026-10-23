@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voicetotext"
 version = "0.1.0"
-description = "Local voice-to-text with Parakeet and Nemotron - CUDA/ROCm/CPU"
+description = "Local, offline speech-to-text dictation for Windows on NVIDIA, AMD or CPU"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE.txt", "NOTICE"]
@@ -99,6 +99,7 @@ include = ["voicetotext*"]
 # The gated-model licence texts are runtime resources: the app displays
 # them and hashes them to record consent. Undeclared, they would be
 # absent from the installed wheel and the gate would have no terms to
-# show.
+# show. ui-bin/ holds the settings window exe, which only the installer
+# build puts there.
 [tool.setuptools.package-data]
-voicetotext = ["licenses/*.md"]
+voicetotext = ["licenses/*.md", "ui-bin/*.exe"]

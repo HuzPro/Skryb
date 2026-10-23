@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 
 from release import APP_NAME
@@ -38,6 +39,11 @@ _ISCC_DEFAULT_LOCATIONS = (
     r"%ProgramFiles%\Inno Setup 6\ISCC.exe",
     r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe",
 )
+
+# The settings window (Tauri) as scripts\build_ui.ps1 leaves it, and where it
+# sits in the wheel: voicetotext.ui.launcher looks in ui-bin/ when installed.
+_UI_SHELL_BUILD = Path("ui") / "src-tauri" / "target" / "release" / "voicetotext-ui.exe"
+_UI_SHELL_IN_WHEEL = "voicetotext/ui-bin/voicetotext-ui.exe"
 
 
 def iss_defines(version: str, payload_dir: Path, wheel_filename: str) -> dict[str, str]:
@@ -179,7 +185,17 @@ def _build_app_wheel(python_dir: Path, repo_root: Path, wheels_dir: Path) -> str
         raise InstallerBuildError(
             f"expected exactly one app wheel in {wheels_dir}, found {len(wheels)}"
         )
+    _require_ui_shell_in_wheel(wheels[0])
     return wheels[0].name
+
+
+def _require_ui_shell_in_wheel(wheel: Path) -> None:
+    with zipfile.ZipFile(wheel) as archive:
+        if _UI_SHELL_IN_WHEEL not in archive.namelist():
+            raise InstallerBuildError(
+                f"{wheel.name} is missing {_UI_SHELL_IN_WHEEL}; check "
+                f"[tool.setuptools.package-data] in pyproject.toml"
+            )
 
 
 def _stage_wheel_source(repo_root: Path, scratch: Path) -> Path:
@@ -197,7 +213,19 @@ def _stage_wheel_source(repo_root: Path, scratch: Path) -> Path:
         source / "voicetotext",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
+    _copy_ui_shell(repo_root, source / "voicetotext" / "ui-bin")
     return source
+
+
+def _copy_ui_shell(repo_root: Path, destination: Path) -> None:
+    built = repo_root / _UI_SHELL_BUILD
+    if not built.exists():
+        raise InstallerBuildError(
+            f"the settings window is not built ({built} is missing); "
+            f"run scripts\\build_ui.ps1 first"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(built, destination / built.name)
 
 
 def _require_standalone_runtime(python_dir: Path) -> None:

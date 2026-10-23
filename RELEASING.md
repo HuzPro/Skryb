@@ -26,11 +26,14 @@ tab) is an escape hatch for re-runs; leave its version blank to use
 
 ## Build the installer locally
 
-Requires [Inno Setup 6](https://jrsoftware.org/isdl.php) and a relocatable
+Requires [Inno Setup 6](https://jrsoftware.org/isdl.php), a relocatable
 CPython 3.12 (a [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-`install_only` build):
+`install_only` build), and the settings window built first. The build stops
+if `ui\src-tauri\target\release\voicetotext-ui.exe` is missing, because it
+ships inside the app wheel:
 
 ```powershell
+.\scripts\build_ui.ps1
 python build_installer.py --python-dir C:\path\to\standalone\python
 python build_installer.py --python-dir ... --version 0.2.0 --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ```
