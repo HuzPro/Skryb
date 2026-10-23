@@ -20,6 +20,7 @@ from voicetotext.core.exceptions import TranscriptionError
 from voicetotext.recording.audio_segment import AudioSegment
 from voicetotext.transcription.engine import TranscriptionEngine
 from voicetotext.transcription.result import TranscriptionResult
+from voicetotext.transcription.roman_urdu import romanize
 
 
 _logger = logging.getLogger(__name__)
@@ -82,7 +83,8 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
             raise TranscriptionError(f"Native Qwen3-ASR failed: {self._text.value.decode(errors='replace')}")
         _logger.debug("native qwen3-asr %s", self._stats())
         return TranscriptionResult(
-            text=self._text.raw[:length].decode("utf-8", errors="replace"),
+            # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
+            text=romanize(self._text.raw[:length].decode("utf-8", errors="replace")),
             language="en",
             language_probability=0.0,
             transcription_seconds=time.perf_counter() - started_at,

@@ -4,6 +4,7 @@ Real-weights accuracy and speed are checked by hand with native/bench
 (reference.py, qasr-bench.exe, compare.py) against the PyTorch reference.
 """
 
+import ctypes
 import json
 from pathlib import Path
 
@@ -38,6 +39,28 @@ def test_transcribing_before_loading_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(TranscriptionError, match="not loaded"):
         adapter.transcribe(audio)
+
+
+class _FakeQasr:
+    """Stands in for qasr.dll: writes a fixed transcript into the caller's buffer."""
+
+    def __init__(self, transcript: str) -> None:
+        self._transcript = transcript.encode()
+
+    def qasr_transcribe(self, handle, samples, count, buffer, size) -> int:  # noqa: ANN001
+        ctypes.memmove(buffer, self._transcript, len(self._transcript))
+        return len(self._transcript)
+
+    def qasr_stats(self, handle) -> bytes:  # noqa: ANN001
+        return b"{}"
+
+
+def test_spoken_urdu_written_in_hindi_script_is_typed_as_roman_urdu(tmp_path: Path) -> None:
+    adapter = NativeQwen3AsrAdapter(tmp_path)
+    adapter._lib, adapter._handle = _FakeQasr("Slack से निकाल रहे हैं, ठीक है?"), 1
+    audio = AudioSegment(data=np.zeros(16000, dtype=np.float32), sample_rate=16000)
+
+    assert adapter.transcribe(audio).text == "Slack se nikal rahe hain, thik hai?"
 
 
 def test_dispose_before_loading_does_nothing(tmp_path: Path) -> None:
