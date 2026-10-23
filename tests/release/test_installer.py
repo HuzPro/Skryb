@@ -102,21 +102,43 @@ class TestRuntimeNotice:
         assert "proprietary" not in notice.lower()
 
 
+def _fake_repo(root: Path, *, ui_built: bool = True) -> Path:
+    repo = root / "repo"
+    (repo / "voicetotext").mkdir(parents=True)
+    (repo / "voicetotext" / "__init__.py").write_text("", encoding="utf-8")
+    for name in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
+        (repo / name).write_text(name, encoding="utf-8")
+    if ui_built:
+        exe = repo / "ui" / "src-tauri" / "target" / "release" / "voicetotext-ui.exe"
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b"MZ settings window")
+    (root / "scratch").mkdir()
+    return repo
+
+
 class TestStageWheelSource:
     def test_stages_package_metadata_and_license_files(self, tmp_path):
         # pyproject.toml declares `license-files = ["LICENSE.txt", "NOTICE"]`,
         # so the staged wheel source must carry them or the build fails.
-        repo = tmp_path / "repo"
-        (repo / "voicetotext").mkdir(parents=True)
-        (repo / "voicetotext" / "__init__.py").write_text("", encoding="utf-8")
-        for name in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
-            (repo / name).write_text(name, encoding="utf-8")
-        scratch = tmp_path / "scratch"
-        scratch.mkdir()
+        repo = _fake_repo(tmp_path)
 
-        source = _stage_wheel_source(repo, scratch)
+        source = _stage_wheel_source(repo, tmp_path / "scratch")
 
         assert (source / "pyproject.toml").is_file()
         assert (source / "LICENSE.txt").is_file()
         assert (source / "NOTICE").is_file()
         assert (source / "voicetotext" / "__init__.py").is_file()
+
+    def test_puts_the_built_settings_window_where_the_installed_app_looks(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+
+        source = _stage_wheel_source(repo, tmp_path / "scratch")
+
+        shipped = source / "voicetotext" / "ui-bin" / "voicetotext-ui.exe"
+        assert shipped.read_bytes() == b"MZ settings window"
+
+    def test_refuses_to_build_an_installer_without_the_settings_window(self, tmp_path):
+        repo = _fake_repo(tmp_path, ui_built=False)
+
+        with pytest.raises(InstallerBuildError, match=r"build_ui\.ps1"):
+            _stage_wheel_source(repo, tmp_path / "scratch")
