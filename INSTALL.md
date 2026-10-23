@@ -2,9 +2,14 @@
 
 ## Prerequisites
 
+Most people should use the installer from the
+[latest release](https://github.com/HuzPro/VoiceToText/releases/latest). This
+page is for running from a source checkout.
+
 - **Python 3.12** (required for the AMD Windows path; 3.11+ works for everything else)
 - Git
 - Windows 10 or 11, 64-bit. The tray, hotkeys, and text output require Windows.
+- [Rust](https://rustup.rs), Node 22 and pnpm 11, to build the settings window once.
 
 ## Pick a requirements file
 
@@ -29,8 +34,11 @@ py -3.12 -m venv .venv             # Python 3.12 explicitly for AMD Windows
 
 pip install -r requirements-amd.txt   # or requirements-nvidia.txt / requirements-cpu.txt
 pip install --no-deps -e .
+.\scripts\build_ui.ps1             # builds the settings window, about a minute
 python -m voicetotext
 ```
+
+Run `scripts\build_ui.ps1` again after pulling changes under `ui\`.
 
 First run opens a setup window where you pick a model and download it.
 
