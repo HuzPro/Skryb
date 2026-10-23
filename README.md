@@ -2,80 +2,92 @@
 
 Local, offline speech-to-text dictation for Windows. Press a hotkey, speak,
 and the transcription is typed straight into whatever window has focus. All
-transcription runs on your own machine: no cloud, no accounts, no audio ever
-leaving the box.
+transcription runs on your own machine. There's no cloud and no account, and
+your audio never leaves the computer.
+
+## Download
+
+Get `VoiceToText-Setup-<version>.exe` from the
+[latest release](https://github.com/HuzPro/VoiceToText/releases/latest) and
+run it. The installer detects your GPU, lets you pick NVIDIA (CUDA), AMD
+(ROCm) or CPU, and downloads the matching PyTorch build during setup. On a GPU
+machine that download is several GB.
+
+The installer isn't code-signed yet, so Windows SmartScreen may say it
+protected your PC. Click **More info**, then **Run anyway**.
+
+You need 64-bit Windows 11, or Windows 10 with the Microsoft Edge WebView2
+Runtime, which most Windows 10 PCs already have. A GPU is recommended but not
+required. On AMD, the ROCm runtime needs Adrenalin driver 26.2.2 or newer.
+
+To run from source instead, follow
+[INSTALL.md](https://github.com/HuzPro/VoiceToText/blob/main/INSTALL.md).
+
+## Getting started
+
+Launch VoiceToText from the Start Menu, or run `voicetotext` in a terminal.
+The first run opens a setup window where you pick a model, download it and
+set your hotkey. Then dictate anywhere. Press the hotkey, talk, press it
+again, and the text is typed into the active window.
+
+If something misbehaves, run `voicetotext --doctor` and read the report. It
+covers Python, PyTorch, the GPU and the model cache in one go, and it's the
+first thing to include in a bug report.
 
 ## Features
 
-- **System-wide dictation.** Any number of toggle or hold shortcuts, on keys
-  (punctuation and the Copilot key included) or mouse buttons 3-5 (default
-  `Ctrl+Alt+M`); double-tap a hold shortcut to go hands-free. The shortcut's
-  last key never reaches the focused app. Text lands in the focused app;
-  your clipboard is preserved.
-- **Local models.** Parakeet provides accurate batch transcription and
-  Nemotron provides low-latency streaming.
-- **Live streaming mode (experimental).** Text appears while you speak,
-  using `parakeet-tdt-0.6b-v3`, `parakeet-ultra` or the cache-aware
-  `nemotron-speech-streaming-en-0.6b`. GPU only.
-- **GPU-focused, with a CPU option.** CUDA and ROCm (including Windows ROCm)
-  are first-class. On a computer with no GPU the default is `phonon-2`
-  (Parakeet v3 shrunk to 164 MB, English only), which runs on Fermion
-  Research's CPU engine at roughly 15-30x faster than real time.
-- **Native and lightweight UI.** Win32 tray icon plus a Tkinter settings
-  window with OS-aware dark mode. No browser, no Electron, no Qt.
-- **Self-diagnosis.** `python -m voicetotext --doctor` reports Python,
-  PyTorch, GPU, and model-cache state in one shot.
-
-## Install
-
-Install from source on Windows using
-[INSTALL.md](https://github.com/HuzPro/VoiceToText/blob/main/INSTALL.md).
-It covers Python setup and the NVIDIA, AMD, and CPU dependency options.
-No packaged installer has been published yet.
-
-## Quickstart
-
-```powershell
-python -m voicetotext
-```
-
-For a source checkout installed with `pip install -e .`, create a console-free
-Start Menu entry with `voicetotext --create-shortcut`. Optional development
-autostart is managed with `voicetotext --enable-autostart` and
-`voicetotext --disable-autostart`. The dev Run entry is intentionally not
-removed by the packaged installer or its uninstaller.
-
-First run opens a setup window: pick a model, download it, set your hotkey.
-Then dictate anywhere: hit the hotkey, talk, hit it again, and the text is
-typed into the active window. If anything misbehaves, run
-`python -m voicetotext --doctor` and read the report.
+- **Dictate into any app.** Set up as many toggle or hold shortcuts as you
+  like, on keys (punctuation and the Copilot key included) or mouse buttons 3
+  to 5. The default is `Ctrl+Alt+M`. Double-tap a hold shortcut to go
+  hands-free. The shortcut's last key never reaches the focused app, and your
+  clipboard is preserved.
+- **Local models.** Parakeet (`parakeet-tdt-0.6b-v3`) is the default on a GPU.
+  `parakeet-ultra` is an optional download with fewer errors, and
+  CrisperWhisper is there too, under a non-commercial license.
+- **Live streaming mode (experimental).** Text appears while you speak, using
+  Parakeet or the cache-aware `nemotron-speech-streaming-en-0.6b`. GPU only.
+- **GPU first, CPU works too.** CUDA and ROCm, Windows ROCm included, are
+  first-class. On a computer with no GPU the default is `phonon-2`, Parakeet
+  v3 shrunk to 164 MB (English only). It runs on Fermion Research's CPU engine
+  at roughly 15 to 30 times faster than real time.
+- **Optional writing model.** A small local language model, run by llama.cpp,
+  drops your self-corrections, so "dock 7, actually no, dock 9" comes out as
+  "dock 9". It can also rewrite selected text when you say something like
+  "make this shorter". If it fails, your dictation goes through unchanged.
+- **Learns your spellings.** Select a word it got wrong and dictate over it.
+  Once two separate fixes agree, it uses your spelling from then on.
+- **Small footprint.** A tray icon, plus a pill on screen while you dictate.
+  Settings and History open in a separate 3.5 MB window only when you ask for
+  them, and it closes completely when you close it.
 
 ## Privacy
 
-Audio and transcripts are not saved by default. Settings > History > Save
-history lets you opt into saving them in the logs folder. Changes apply when you save.
-Ordinary logs contain timing and status information, without transcript text.
+Audio and transcripts aren't saved by default. The **Save history** switch on
+the History page lets you opt in, and saved sessions go to the logs folder.
+Ordinary logs hold timing and status information, never transcript text.
 
 The default folder is `%APPDATA%\VoiceToText\diagnostics`. Use a local folder
-that is not synced or shared. Turning recording off keeps existing files;
-delete those files separately if you no longer want them. Automatic cleanup
-keeps 50 marked sessions. Older, unmarked folders remain for manual cleanup.
+that isn't synced or shared. Turning history off keeps the files already
+saved, so delete them yourself if you no longer want them. Automatic cleanup
+keeps the last 50 marked sessions. Older, unmarked folders stay until you
+remove them.
 
-Edit capture is also off by default. It requires recording consent and the
-separate `diagnostics.capture_edits=true` configuration setting before launch.
-It saves edits and window titles for dictation, so only enable it deliberately.
-Disabling recording consent stops further edit writes too.
+Edit capture is also off by default. It needs history turned on and the
+separate `diagnostics.capture_edits=true` setting in the config file before
+launch. It saves your edits to dictated text along with window titles, so only
+turn it on deliberately. Turning history off stops edit capture writing too.
 
 ## License
 
 The application is licensed under
 [Apache-2.0](https://github.com/HuzPro/VoiceToText/blob/main/LICENSE.txt).
 Downloaded models have their own licenses. CrisperWhisper weights and outputs
-have non-commercial restrictions and require acceptance before download or use.
-Commercial or production use requires separate permission under its
+are restricted to non-commercial use, and the app asks you to accept those
+terms before downloading or using them. Commercial or production use needs
+separate permission under its
 [model license](https://github.com/HuzPro/VoiceToText/blob/main/voicetotext/licenses/crisperwhisper-nc.md).
 
 ## Sponsorship
 
-The open-source release of VoiceToText was sponsored by
+The open-source release of VoiceToText was partly sponsored by
 [BitSmith365](https://github.com/BitSmith365).

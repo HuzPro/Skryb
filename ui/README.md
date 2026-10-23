@@ -7,8 +7,10 @@ spawns on demand:
 voicetotext-ui.exe --port 12345 --token <token> --page settings|history|setup
 ```
 
-It talks to the core only over the loopback API in `ui_api_contract.md` (fetch +
-one EventSource), keeps nothing on disk except what the user saves through its
+It talks to the core only over a loopback API (fetch + one EventSource). The
+code is the contract: `voicetotext/ui/shapes.py` and
+`voicetotext/ui/api_handlers.py` in the core, `src/lib/types.ts` and
+`src/lib/api.ts` here. It keeps nothing on disk except what the user saves through its
 own file dialogs, and exits when its window closes. A second launch focuses the
 open window and switches it to the requested page.
 
