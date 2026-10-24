@@ -18,7 +18,7 @@ struct LaunchArgs {
     native_titlebar: bool,
 }
 
-/// `voicetotext-ui.exe --port 12345 --token <token> --page settings`, as the core spawns it.
+/// `skryb-ui.exe --port 12345 --token <token> --page settings`, as the core spawns it.
 fn parse_args(args: &[String]) -> LaunchArgs {
     let value = |flag: &str| {
         args.iter()
@@ -78,7 +78,7 @@ fn main() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("the VoiceToText window could not start");
+        .expect("the Skryb window could not start");
 }
 
 #[cfg(test)]

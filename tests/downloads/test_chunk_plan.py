@@ -1,6 +1,6 @@
 import pytest
 
-from voicetotext.downloads.chunk_plan import plan_chunks
+from skryb.downloads.chunk_plan import plan_chunks
 
 
 class TestPlanChunks:

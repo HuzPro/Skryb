@@ -1,4 +1,4 @@
-from voicetotext.transcription.streaming.local_agreement import (
+from skryb.transcription.streaming.local_agreement import (
     LocalAgreementPolicy,
 )
 

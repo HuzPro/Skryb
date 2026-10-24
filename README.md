@@ -1,14 +1,14 @@
-# VoiceToText
+# Skryb
 
-Local, offline speech-to-text dictation for Windows. Press a hotkey, speak,
+*Said like "scribe".* Local, offline speech-to-text dictation for Windows. Press a hotkey, speak,
 and the transcription is typed straight into whatever window has focus. All
 transcription runs on your own machine. There's no cloud and no account, and
 your audio never leaves the computer.
 
 ## Download
 
-Get `VoiceToText-Setup-<version>.exe` from the
-[latest release](https://github.com/HuzPro/VoiceToText/releases/latest) and
+Get `Skryb-Setup-<version>.exe` from the
+[latest release](https://github.com/HuzPro/Skryb/releases/latest) and
 run it. The installer detects your GPU, lets you pick NVIDIA (CUDA), AMD
 (ROCm) or CPU, and downloads the matching PyTorch build during setup. On a GPU
 machine that download is several GB.
@@ -21,16 +21,16 @@ Runtime, which most Windows 10 PCs already have. A GPU is recommended but not
 required. On AMD, the ROCm runtime needs Adrenalin driver 26.2.2 or newer.
 
 To run from source instead, follow
-[INSTALL.md](https://github.com/HuzPro/VoiceToText/blob/main/INSTALL.md).
+[INSTALL.md](https://github.com/HuzPro/Skryb/blob/main/INSTALL.md).
 
 ## Getting started
 
-Launch VoiceToText from the Start Menu, or run `voicetotext` in a terminal.
+Launch Skryb from the Start Menu, or run `skryb` in a terminal.
 The first run opens a setup window where you pick a model, download it and
 set your hotkey. Then dictate anywhere. Press the hotkey, talk, press it
 again, and the text is typed into the active window.
 
-If something misbehaves, run `voicetotext --doctor` and read the report. It
+If something misbehaves, run `skryb --doctor` and read the report. It
 covers Python, PyTorch, the GPU and the model cache in one go, and it's the
 first thing to include in a bug report.
 
@@ -66,7 +66,7 @@ Audio and transcripts aren't saved by default. The **Save history** switch on
 the History page lets you opt in, and saved sessions go to the logs folder.
 Ordinary logs hold timing and status information, never transcript text.
 
-The default folder is `%APPDATA%\VoiceToText\diagnostics`. Use a local folder
+The default folder is `%APPDATA%\Skryb\diagnostics`. Use a local folder
 that isn't synced or shared. Turning history off keeps the files already
 saved, so delete them yourself if you no longer want them. Automatic cleanup
 keeps the last 50 marked sessions. Older, unmarked folders stay until you
@@ -80,14 +80,14 @@ turn it on deliberately. Turning history off stops edit capture writing too.
 ## License
 
 The application is licensed under
-[Apache-2.0](https://github.com/HuzPro/VoiceToText/blob/main/LICENSE.txt).
+[Apache-2.0](https://github.com/HuzPro/Skryb/blob/main/LICENSE.txt).
 Downloaded models have their own licenses. CrisperWhisper weights and outputs
 are restricted to non-commercial use, and the app asks you to accept those
 terms before downloading or using them. Commercial or production use needs
 separate permission under its
-[model license](https://github.com/HuzPro/VoiceToText/blob/main/voicetotext/licenses/crisperwhisper-nc.md).
+[model license](https://github.com/HuzPro/Skryb/blob/main/skryb/licenses/crisperwhisper-nc.md).
 
 ## Sponsorship
 
-The open-source release of VoiceToText was partly sponsored by Andrew
+The open-source release of Skryb was partly sponsored by Andrew
 ([BitSmith365](https://github.com/BitSmith365)).

@@ -2,13 +2,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from voicetotext.edit_capture.recorder import (
+from skryb.edit_capture.recorder import (
     DELIVERY_TIMEOUT,
     IDLE_TIMEOUT,
     EditRecorder,
 )
-from voicetotext.edit_capture.replay import KeyStroke
-from voicetotext.edit_capture.window import ForegroundWindow
+from skryb.edit_capture.replay import KeyStroke
+from skryb.edit_capture.window import ForegroundWindow
 
 pytestmark = pytest.mark.unit
 

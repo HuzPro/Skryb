@@ -1,7 +1,7 @@
 import json
 
-from voicetotext.bootstrap import migrate_output_mode
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
+from skryb.bootstrap import migrate_output_mode
+from skryb.core.json_config_adapter import JsonConfigAdapter
 
 
 class TestConfigRoundTrip:

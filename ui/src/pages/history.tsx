@@ -373,7 +373,7 @@ export function HistoryPage() {
 
   const exportAll = async () => {
     try {
-      const path = await chooseSavePath("Export history", `voicetotext-history-${new Date().toISOString().slice(0, 10)}.csv`, "Spreadsheet (CSV)", "csv");
+      const path = await chooseSavePath("Export history", `skryb-history-${new Date().toISOString().slice(0, 10)}.csv`, "Spreadsheet (CSV)", "csv");
       if (!path) return;
       const { rows } = await api.post<{ rows: number }>(`/api/history/export?query=${encodeURIComponent(search)}`, { path });
       setExportNote({ text: `Exported ${rows} ${rows === 1 ? "dictation" : "dictations"}.`, error: false });

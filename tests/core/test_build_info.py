@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from voicetotext.core.build_info import (
+from skryb.core.build_info import (
     Build,
     RunningBuild,
     read_build,

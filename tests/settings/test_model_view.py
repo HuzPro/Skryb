@@ -1,7 +1,7 @@
 import pytest
 
-from voicetotext.settings.model_view import ModelView
-from voicetotext.transcription.model_info import ModelInfo
+from skryb.settings.model_view import ModelView
+from skryb.transcription.model_info import ModelInfo
 
 
 class TestModelViewFromInfo:

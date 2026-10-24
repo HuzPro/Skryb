@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from voicetotext.transcription.engine_types import HardwareProfile
+from skryb.transcription.engine_types import HardwareProfile
 
 from tests.performance._identity import BenchmarkIdentity
 from tests.performance._runner import BenchmarkResult

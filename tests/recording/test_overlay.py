@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.dispatcher import InlineActionDispatcher
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     MicrophoneAudioResumedEvent,
     MicrophoneSilentEvent,
     RecordingCapWarningEvent,
@@ -18,13 +18,13 @@ from voicetotext.core.events import (
     StateChangedEvent,
     TextPastedEvent,
 )
-from voicetotext.recording import overlay as overlay_module
-from voicetotext.recording.overlay import (
+from skryb.recording import overlay as overlay_module
+from skryb.recording.overlay import (
     RecordingOverlay,
     Win32LayeredOverlayWindow,
     premultiplied_bgra,
 )
-from voicetotext.recording.pill import (
+from skryb.recording.pill import (
     BOTTOM_MARGIN,
     CANVAS_HEIGHT,
     CANVAS_WIDTH,

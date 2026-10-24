@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
-from voicetotext.history.entries import (
+from skryb.history.entries import (
     CANCELLED,
     EMPTY,
     FAILED,

@@ -4,9 +4,9 @@ from dataclasses import replace
 import pytest
 
 from tests.fakes.config import FakeConfig
-from voicetotext.core.exceptions import LicenseNotAcceptedError
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import (
+from skryb.core.exceptions import LicenseNotAcceptedError
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import (
     ALL_MODELS,
     CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,

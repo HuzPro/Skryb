@@ -1,9 +1,9 @@
 from collections.abc import Callable
 
 from tests.fakes import FakeTextOutputHandler
-from voicetotext.output.app_aware_delivery import AppAwareDelivery, DeliveryFailure
-from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
-from voicetotext.output.last_dictation import LastDictation, LastDictationDecorator
+from skryb.output.app_aware_delivery import AppAwareDelivery, DeliveryFailure
+from skryb.output.gui_thread_dispatcher import GuiThreadDispatcher
+from skryb.output.last_dictation import LastDictation, LastDictationDecorator
 
 
 class InlineGui(GuiThreadDispatcher):

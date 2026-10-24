@@ -1,9 +1,9 @@
-from voicetotext.transcription.engine_selector import rank_engines
-from voicetotext.transcription.engine_types import (
+from skryb.transcription.engine_selector import rank_engines
+from skryb.transcription.engine_types import (
     EngineDescriptor,
     HardwareProfile,
 )
-from voicetotext.transcription.model_info import ModelInfo
+from skryb.transcription.model_info import ModelInfo
 
 
 _PARAKEET = EngineDescriptor(

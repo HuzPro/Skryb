@@ -3,8 +3,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from tests.fakes.writing import FakeChild, FakeLaunch
-from voicetotext.writing.client import Endpoint
-from voicetotext.writing.llama_server import (
+from skryb.writing.client import Endpoint
+from skryb.writing.llama_server import (
     BACKOFF_SECONDS,
     LlamaServer,
     ServerFiles,

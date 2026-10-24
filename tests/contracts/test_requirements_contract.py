@@ -103,8 +103,8 @@ def test_editable_install_declares_console_free_gui_launcher() -> None:
         (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
 
-    assert pyproject["project"]["gui-scripts"]["voicetotext-gui"] == (
-        "voicetotext.__main__:main"
+    assert pyproject["project"]["gui-scripts"]["skryb-gui"] == (
+        "skryb.__main__:main"
     )
 
 

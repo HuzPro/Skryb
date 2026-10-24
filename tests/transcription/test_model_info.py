@@ -3,9 +3,9 @@ from typing import ClassVar
 
 import pytest
 
-from voicetotext.core.exceptions import ConfigurationError
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.transcription.model_info import (
+from skryb.core.exceptions import ConfigurationError
+from skryb.core.json_config_adapter import JsonConfigAdapter
+from skryb.transcription.model_info import (
     ALL_MODELS,
     CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,

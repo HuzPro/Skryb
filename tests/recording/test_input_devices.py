@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from voicetotext.recording.input_devices import (
+from skryb.recording.input_devices import (
     DEFAULT_LABEL,
     SYSTEM_DEFAULT,
     Microphones,

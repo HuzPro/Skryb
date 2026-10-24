@@ -1,12 +1,12 @@
 """Clipboard preservation - the user's clipboard contents survive
 the transcription paste."""
 
-from tests.acceptance.app_fixture import VoiceToTextApp
+from tests.acceptance.app_fixture import SkrybApp
 
 
 class TestClipboardIsPreserved:
     def test_original_clipboard_contents_are_restored_after_paste(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("hello")
 
@@ -16,7 +16,7 @@ class TestClipboardIsPreserved:
         assert voice_to_text_app.clipboard_was_preserved
 
     def test_save_is_called_exactly_once_per_transcription(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.press_hotkey()
         voice_to_text_app.press_hotkey()
@@ -27,7 +27,7 @@ class TestClipboardIsPreserved:
 
 class TestClipboardFailures:
     def test_restore_runs_even_when_paste_fails(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.output_fails_with(RuntimeError("paste crashed"))
 
@@ -42,7 +42,7 @@ class TestClipboardFailures:
         assert voice_to_text_app.clipboard_restored_count == 1
 
     def test_save_failure_aborts_paste_and_does_not_type_anything(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.clipboard_save_fails_with(OSError("locked"))
 

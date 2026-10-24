@@ -1,4 +1,4 @@
-from voicetotext.transcription.model_info import ModelInfo
+from skryb.transcription.model_info import ModelInfo
 
 
 class ModelInfoBuilder:

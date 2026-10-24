@@ -31,7 +31,7 @@ class TestDecidingWhichPackagesToInclude:
         assert should_include("Pillow")
 
     def test_excludes_the_application_itself(self):
-        assert not should_include("voicetotext")
+        assert not should_include("skryb")
 
     def test_excludes_build_and_test_tooling(self):
         assert not should_include("pyinstaller")
@@ -137,7 +137,7 @@ class TestRenderingTheWholeDocument:
     def test_states_the_product_and_the_runtime_model_disclaimer(self):
         document = render_document([self._package("torch")])
 
-        assert "VoiceToText" in document
+        assert "Skryb" in document
         assert "model" in document.lower()
 
     def test_reproduces_every_component_license(self):

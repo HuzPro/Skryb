@@ -23,11 +23,11 @@ def main() -> None:
     args = parser.parse_args()
     started = time.perf_counter()
 
-    from voicetotext.core.json_config_adapter import JsonConfigAdapter
-    from voicetotext.core.paths import AppPaths
-    from voicetotext.recording.audio_segment import AudioSegment
-    from voicetotext.transcription.engine_factory import build_engine_registry, create_engine_for_active_model
-    from voicetotext.transcription.license_policy import LicensePolicy
+    from skryb.core.json_config_adapter import JsonConfigAdapter
+    from skryb.core.paths import AppPaths
+    from skryb.recording.audio_segment import AudioSegment
+    from skryb.transcription.engine_factory import build_engine_registry, create_engine_for_active_model
+    from skryb.transcription.license_policy import LicensePolicy
 
     paths = AppPaths()
     with tempfile.TemporaryDirectory() as tmp:
@@ -60,7 +60,7 @@ class _NoProbe:
     """The cached probe the app would read from config: this machine's AMD card."""
 
     def detect(self):
-        from voicetotext.transcription.engine_types import HardwareProfile
+        from skryb.transcription.engine_types import HardwareProfile
 
         return HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200")
 

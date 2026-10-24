@@ -1,15 +1,15 @@
-# VoiceToText window (Tauri shell)
+# Skryb window (Tauri shell)
 
 The settings, history and first-run window. A separate process the Python core
 spawns on demand:
 
 ```
-voicetotext-ui.exe --port 12345 --token <token> --page settings|history|setup
+skryb-ui.exe --port 12345 --token <token> --page settings|history|setup
 ```
 
 It talks to the core only over a loopback API (fetch + one EventSource). The
-code is the contract: `voicetotext/ui/shapes.py` and
-`voicetotext/ui/api_handlers.py` in the core, `src/lib/types.ts` and
+code is the contract: `skryb/ui/shapes.py` and
+`skryb/ui/api_handlers.py` in the core, `src/lib/types.ts` and
 `src/lib/api.ts` here. It keeps nothing on disk except what the user saves through its
 own file dialogs, and exits when its window closes. A second launch focuses the
 open window and switches it to the requested page.
@@ -27,7 +27,7 @@ pnpm install --frozen-lockfile
 pnpm tauri build
 ```
 
-The exe is `ui/src-tauri/target/release/voicetotext-ui.exe` (about 3.5 MB; no
+The exe is `ui/src-tauri/target/release/skryb-ui.exe` (about 3.5 MB; no
 installer is bundled, `bundle.active` is off). Build through `pnpm tauri build`:
 a bare `cargo build --release` leaves out the `custom-protocol` feature and gives
 an exe that loads the dev server instead of the embedded page
@@ -90,7 +90,7 @@ child processes.
 Tried and not kept: `--in-process-gpu` removes the GPU process but saves only
 8 MB of private bytes, and a GPU fault would then take the whole window down.
 
-The tree is `voicetotext-ui.exe` plus six `msedgewebview2.exe` (browser,
+The tree is `skryb-ui.exe` plus six `msedgewebview2.exe` (browser,
 renderer, GPU, network, storage, crashpad). Summed working sets count the
 shared WebView2 DLL pages once per process, which is why that figure is far
 above the private ones. There are no timers or polling loops: data arrives on

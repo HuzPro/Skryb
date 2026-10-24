@@ -15,16 +15,16 @@ from types import SimpleNamespace
 import pytest
 
 from tests.fakes.config import FakeConfig
-from voicetotext.diagnostics.session import content_recording_enabled
-from voicetotext.output import win32_caret_context as module
-from voicetotext.output.caret_context import (
+from skryb.diagnostics.session import content_recording_enabled
+from skryb.output import win32_caret_context as module
+from skryb.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     SELECTION_OUTSIDE_FIELD,
     CaretContext,
     log_caret_text_when,
 )
-from voicetotext.output.win32_caret_context import (
+from skryb.output.win32_caret_context import (
     _context_from,
     read_caret_context,
 )
@@ -417,7 +417,7 @@ class TestWhatReachesTheLog:
     _PRIVATE = "Dear Zoë, my PIN is 4471 — see you at the café. "
 
     def _logged_line(self, app_caplog) -> str:
-        app_caplog.set_level(logging.DEBUG, logger="voicetotext")
+        app_caplog.set_level(logging.DEBUG, logger="skryb")
         app_caplog.clear()
         _context_from(_automation_over(self._PRIVATE, 20, 20))
         return next(

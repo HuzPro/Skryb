@@ -7,11 +7,11 @@ import pytest
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
-from voicetotext.core.exceptions import ConfigurationError, LicenseNotAcceptedError
-from voicetotext.transcription.crisperwhisper_adapter import (
+from skryb.core.exceptions import ConfigurationError, LicenseNotAcceptedError
+from skryb.transcription.crisperwhisper_adapter import (
     CrisperWhisperAdapter,
 )
-from voicetotext.transcription.engine_factory import (
+from skryb.transcription.engine_factory import (
     build_composite_model_manager,
     build_engine_registry,
     create_engine_for_active_model,
@@ -22,17 +22,17 @@ from voicetotext.transcription.engine_factory import (
     selectable_engine_ids,
     startup_requires_torch,
 )
-from voicetotext.transcription.engine_registry import EngineRegistry
-from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import (
+from skryb.transcription.engine_registry import EngineRegistry
+from skryb.transcription.engine_types import HardwareProfile
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import (
     ALL_MODELS,
     DEFAULT_MODEL,
     PARAKEET_MODELS,
     ModelInfo,
     get_model_info,
 )
-from voicetotext.transcription.nano_parakeet_adapter import NanoParakeetAdapter
+from skryb.transcription.nano_parakeet_adapter import NanoParakeetAdapter
 
 
 def _config(
@@ -501,7 +501,7 @@ class TestAutoPrefersTheTorchFreeEngine:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            "voicetotext.transcription.engine_factory._ctranslate2_installed",
+            "skryb.transcription.engine_factory._ctranslate2_installed",
             lambda: True,
         )
         self._turbo_installed(tmp_path)
@@ -527,7 +527,7 @@ class TestAutoPrefersTheTorchFreeEngine:
         registry = build_engine_registry()
 
         with patch(
-            "voicetotext.transcription.engine_factory."
+            "skryb.transcription.engine_factory."
             "_ctranslate2_installed",
             return_value=False,
         ):
@@ -579,7 +579,7 @@ class TestPhonon2OnTheCpuEngine:
     def test_the_engine_opens_the_pinned_snapshot_on_any_hardware(
         self, tmp_path: Path, hardware: FakeHardwareDetector,
     ) -> None:
-        from voicetotext.transcription.phonon2_cpu_adapter import Phonon2CpuAdapter
+        from skryb.transcription.phonon2_cpu_adapter import Phonon2CpuAdapter
 
         snapshot = self._installed(tmp_path)
 

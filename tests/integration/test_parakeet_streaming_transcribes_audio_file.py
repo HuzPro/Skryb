@@ -6,7 +6,7 @@ the sentencepiece-backed Parakeet model in the same process as pytest's
 Qt plugin segfaults on Windows (a native contamination unrelated to the
 streaming logic), exactly the reason the performance suite shells out too.
 
-Opt-in (``VOICETOTEXT_RUN_REAL_MODEL_TESTS``), GPU-only, skipped when the
+Opt-in (``SKRYB_RUN_REAL_MODEL_TESTS``), GPU-only, skipped when the
 Parakeet model isn't downloaded. Assertions are lenient - streaming
 revises its tail, so we pin behaviours any working run satisfies.
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
+from skryb.transcription.hf_model_manager import HuggingFaceModelManager
 
 from tests.helpers.gpu import require_cuda
 from tests.helpers.model_cache import models_dir
@@ -30,7 +30,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = _REPO_ROOT / "scripts" / "bench_parakeet_streaming.py"
 _REPO_ID = "nvidia/parakeet-tdt-0.6b-v3"
-_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
+_OPT_IN = "SKRYB_RUN_REAL_MODEL_TESTS"
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 

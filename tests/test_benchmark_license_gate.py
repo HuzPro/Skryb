@@ -15,9 +15,9 @@ from tests.fakes.config import FakeConfig
 from tests.performance._combos import BenchmarkCombo
 from tests.performance._pre_download import ensure_models_downloaded
 from tests.performance._runner import BenchmarkResult, run_benchmark
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import ALL_MODELS
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import ALL_MODELS
 
 
 _GATED_COMBO = BenchmarkCombo("crisperwhisper-2.0-turbo", "crisperwhisper", "cpu")

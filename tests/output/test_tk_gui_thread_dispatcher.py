@@ -11,11 +11,11 @@ import time
 
 import pytest
 
-from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
-from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
+from skryb.output.gui_thread_dispatcher import GuiThreadDispatcher
+from skryb.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 
 
-_DISPATCHER_LOGGER = "voicetotext.output.tk_gui_thread_dispatcher"
+_DISPATCHER_LOGGER = "skryb.output.tk_gui_thread_dispatcher"
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 import numpy as np
 
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.streaming.audio_chunker import iter_chunks
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.streaming.audio_chunker import iter_chunks
 
 
 def _ramp(samples: int, sample_rate: int = 16000) -> AudioSegment:

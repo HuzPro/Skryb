@@ -1,9 +1,9 @@
 """Engine hot-swap - swapping the transcription model at runtime."""
 
-from tests.acceptance.app_fixture import VoiceToTextApp
+from tests.acceptance.app_fixture import SkrybApp
 from tests.builders import a_transcription_result
 from tests.fakes import FakeTranscriptionEngine
-from voicetotext.core.events import (
+from skryb.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
 )
@@ -11,7 +11,7 @@ from voicetotext.core.events import (
 
 class TestEngineHotSwap:
     def test_switching_model_while_idle_loads_new_engine(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         new_engine = FakeTranscriptionEngine()
         new_engine.will_return(
@@ -26,7 +26,7 @@ class TestEngineHotSwap:
         assert completed[0].model_name == "nemotron-speech-streaming-en-0.6b"
 
     def test_new_engine_is_used_for_next_transcription(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         new_engine = FakeTranscriptionEngine()
         new_engine.will_return(
@@ -41,7 +41,7 @@ class TestEngineHotSwap:
         assert voice_to_text_app.typed_text == "from new engine"
 
     def test_switching_model_while_recording_is_rejected(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.press_hotkey()  # state = RECORDING
         new_engine = FakeTranscriptionEngine()
@@ -54,7 +54,7 @@ class TestEngineHotSwap:
         assert "idle" in failed[0].error.lower()
 
     def test_old_engine_is_disposed_on_successful_swap(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         old_engine = voice_to_text_app.current_engine
         new_engine = FakeTranscriptionEngine()
@@ -66,7 +66,7 @@ class TestEngineHotSwap:
         assert old_engine.dispose_called is True
 
     def test_old_engine_stays_live_when_swap_rejected_mid_recording(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         old_engine = voice_to_text_app.current_engine
         old_engine.will_return(

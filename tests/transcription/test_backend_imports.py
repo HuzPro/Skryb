@@ -13,8 +13,8 @@ between two distinct failure modes:
 from unittest.mock import MagicMock, patch
 
 
-from voicetotext.core.exceptions import EngineDependencyMissingError
-from voicetotext.transcription.backend_imports import (
+from skryb.core.exceptions import EngineDependencyMissingError
+from skryb.transcription.backend_imports import (
     make_engine_dependency_error,
 )
 
@@ -24,7 +24,7 @@ class TestPackageMissing:
         underlying = ImportError("No module named 'nano_parakeet'")
 
         with patch(
-            "voicetotext.transcription.backend_imports."
+            "skryb.transcription.backend_imports."
             "importlib.util.find_spec",
             return_value=None,
         ):
@@ -42,7 +42,7 @@ class TestPackageMissing:
         underlying = ModuleNotFoundError("No module named 'nano_parakeet'")
 
         with patch(
-            "voicetotext.transcription.backend_imports."
+            "skryb.transcription.backend_imports."
             "importlib.util.find_spec",
             return_value=None,
         ):
@@ -64,7 +64,7 @@ class TestPackageInstalledButBroken:
         )
 
         with patch(
-            "voicetotext.transcription.backend_imports."
+            "skryb.transcription.backend_imports."
             "importlib.util.find_spec",
             return_value=MagicMock(),
         ):
@@ -81,7 +81,7 @@ class TestPackageInstalledButBroken:
 
     def test_should_name_the_package_in_the_failure_message(self) -> None:
         with patch(
-            "voicetotext.transcription.backend_imports."
+            "skryb.transcription.backend_imports."
             "importlib.util.find_spec",
             return_value=MagicMock(),
         ):
@@ -99,7 +99,7 @@ class TestPackageInstalledButBroken:
         level package loads but a submodule import dies.
         """
         with patch(
-            "voicetotext.transcription.backend_imports."
+            "skryb.transcription.backend_imports."
             "importlib.util.find_spec",
             return_value=MagicMock(),
         ):
@@ -115,7 +115,7 @@ class TestPackageInstalledButBroken:
 class TestErrorChaining:
     def test_should_be_an_engine_dependency_missing_error(self) -> None:
         with patch(
-            "voicetotext.transcription.backend_imports."
+            "skryb.transcription.backend_imports."
             "importlib.util.find_spec",
             return_value=None,
         ):

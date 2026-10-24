@@ -1,5 +1,5 @@
 from tests.fakes.config import FakeConfig
-from voicetotext.core.config import ConfigValue
+from skryb.core.config import ConfigValue
 
 
 _DEFAULTS: dict[str, ConfigValue] = {

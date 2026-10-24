@@ -21,7 +21,7 @@ from release.installer import _stage_wheel_source
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_RESOURCE = Path("voicetotext/licenses/crisperwhisper-nc.md")
+_RESOURCE = Path("skryb/licenses/crisperwhisper-nc.md")
 
 # Fetched from both pinned CrisperWhisper commits, where the bytes are
 # identical. Changing this constant means the app now displays different
@@ -45,7 +45,7 @@ def _digest(payload: bytes) -> str:
 @pytest.fixture(scope="module")
 def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     # Staging requires the built settings window, which CI never builds.
-    stand_in = tmp_path_factory.mktemp("ui") / "voicetotext-ui.exe"
+    stand_in = tmp_path_factory.mktemp("ui") / "skryb-ui.exe"
     stand_in.write_bytes(b"MZ")
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(installer, "_UI_SHELL_BUILD", stand_in)
@@ -83,7 +83,7 @@ class TestPyprojectDeclaration:
 
         package_data = pyproject["tool"]["setuptools"]["package-data"]
 
-        assert "licenses/*.md" in package_data["voicetotext"]
+        assert "licenses/*.md" in package_data["skryb"]
 
 
 class TestStagedInstallerPayload:

@@ -40,9 +40,9 @@ def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else "short"
     cadence = float(sys.argv[2]) if len(sys.argv) > 2 else 0.6
 
-    from voicetotext.core.paths import AppPaths
-    from voicetotext.transcription.streaming.audio_chunker import iter_chunks
-    from voicetotext.transcription.streaming.parakeet_streaming_engine import (
+    from skryb.core.paths import AppPaths
+    from skryb.transcription.streaming.audio_chunker import iter_chunks
+    from skryb.transcription.streaming.parakeet_streaming_engine import (
         StreamingNanoParakeetEngine,
     )
     from tests.helpers.audio_file_loader import load_audio_file

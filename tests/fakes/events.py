@@ -1,5 +1,5 @@
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import DomainEvent
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import DomainEvent
 
 
 class RecordingEventBus(SimpleEventBus):

@@ -1,4 +1,4 @@
-"""Fluent Test Data Builders for VoiceToText domain objects.
+"""Fluent Test Data Builders for Skryb domain objects.
 
 Each builder exposes a module-level constructor that reads as a
 noun-phrase - ``an_audio_segment()``, ``a_transcription_result()`` -

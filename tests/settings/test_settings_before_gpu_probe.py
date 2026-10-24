@@ -11,14 +11,14 @@ from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.state_machine import AppStateMachine
-from voicetotext.settings.download_coordinator import DownloadCoordinator
-from voicetotext.settings.engine_hot_swap import NullEngineHotSwap
-from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.settings.service import SettingsService
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.engine_types import HardwareProfile
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.state_machine import AppStateMachine
+from skryb.settings.download_coordinator import DownloadCoordinator
+from skryb.settings.engine_hot_swap import NullEngineHotSwap
+from skryb.settings.model_installation_cache import ModelInstallationCache
+from skryb.settings.service import SettingsService
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_types import HardwareProfile
 
 _TURBO = "crisperwhisper-2.0-turbo"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"

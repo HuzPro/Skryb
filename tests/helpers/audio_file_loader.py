@@ -3,7 +3,7 @@
 This is a thin test-only bridge between ``soundfile`` and the
 ``TranscriptionEngine`` port.  Production code does not need it today;
 if a "transcribe a file" feature ever lands, promote this module to
-``voicetotext/recording/`` behind an ``AudioFileLoader`` Protocol.
+``skryb/recording/`` behind an ``AudioFileLoader`` Protocol.
 
 The loader always returns mono float32 samples at 16 kHz, matching the
 application's transcription input format.
@@ -16,7 +16,7 @@ import numpy as np
 import soundfile
 from scipy.signal import resample_poly
 
-from voicetotext.recording.audio_segment import AudioSegment
+from skryb.recording.audio_segment import AudioSegment
 
 
 _TARGET_SAMPLE_RATE = 16000

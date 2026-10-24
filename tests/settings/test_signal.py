@@ -1,4 +1,4 @@
-from voicetotext.settings.signal import Signal
+from skryb.settings.signal import Signal
 
 
 class TestSignal:

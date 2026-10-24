@@ -1,6 +1,6 @@
-"""Acceptance-test DSL harness for VoiceToText.
+"""Acceptance-test DSL harness for Skryb.
 
-``VoiceToTextApp`` composes the real ``RecordAndTranscribeUseCase``,
+``SkrybApp`` composes the real ``RecordAndTranscribeUseCase``,
 ``AppStateMachine``, ``ClipboardPreservingDecorator``, and
 ``EngineHotSwapCoordinator`` with hand-rolled fakes at every port
 boundary.  Its methods read as business actions; its properties as
@@ -22,22 +22,22 @@ from tests.fakes import (
     InstantSleeper,
     RecordingEventBus,
 )
-from voicetotext.core.events import (
+from skryb.core.events import (
     DomainEvent,
     EngineLoadCompletedEvent,
 )
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.output.clipboard_preserving_decorator import (
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
-from voicetotext.transcription.engine_install import make_engine_installer
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.recording.audio_segment import AudioSegment
+from skryb.settings.engine_hot_swap import EngineHotSwapCoordinator
+from skryb.transcription.engine_install import make_engine_installer
+from skryb.transcription_use_case import RecordAndTranscribeUseCase
 
 
-class VoiceToTextApp:
+class SkrybApp:
     """DSL harness for acceptance-testing the voice-to-text flow.
 
     All components are wired synchronously via an

@@ -1,19 +1,19 @@
 """Full-pipeline scenario: press, speak, release → text appears and
 the whole event sequence is emitted in order."""
 
-from tests.acceptance.app_fixture import VoiceToTextApp
-from voicetotext.core.events import (
+from tests.acceptance.app_fixture import SkrybApp
+from skryb.core.events import (
     RecordingStartedEvent,
     RecordingStoppedEvent,
     StateChangedEvent,
     TranscriptionCompletedEvent,
 )
-from voicetotext.core.state_machine import AppState
+from skryb.core.state_machine import AppState
 
 
 class TestFullTogglePipeline:
     def test_should_record_transcribe_and_output_text(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("integration test works")
 
@@ -41,7 +41,7 @@ class TestFullTogglePipeline:
 
 class TestFullPushToTalkPipeline:
     def test_should_record_on_activate_and_transcribe_on_deactivate(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("push to talk works")
 

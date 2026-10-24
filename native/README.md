@@ -1,7 +1,7 @@
 # Native Qwen3-ASR engine (RX 9060 XT, gfx1200)
 
 Hand-written HIP kernels behind `qasr.dll`, loaded by
-`voicetotext/transcription/native_qwen3_asr_adapter.py` for the `qwen3-asr-1.7b` model. No torch.
+`skryb/transcription/native_qwen3_asr_adapter.py` for the `qwen3-asr-1.7b` model. No torch.
 
 Build (needs the ROCm 7.2.1 SDK wheels in the global Python 3.12, `rocm-sdk-devel` included):
 

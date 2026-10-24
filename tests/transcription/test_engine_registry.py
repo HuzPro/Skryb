@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.engine_registry import EngineRegistry, EngineSpec
-from voicetotext.transcription.engine_types import EngineDescriptor
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.engine_registry import EngineRegistry, EngineSpec
+from skryb.transcription.engine_types import EngineDescriptor
+from skryb.transcription.result import TranscriptionResult
 
 _DESCRIPTOR = EngineDescriptor(
     engine_id="nano_parakeet",

@@ -3,8 +3,8 @@ from collections.abc import Callable
 import numpy
 import pytest
 
-from voicetotext.recording.notice import Notice
-from voicetotext.recording.pill import (
+from skryb.recording.notice import Notice
+from skryb.recording.pill import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     DEFAULT_PILL_POSITION,

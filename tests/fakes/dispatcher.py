@@ -1,6 +1,6 @@
 from collections.abc import Callable
 
-from voicetotext.core.action_dispatcher import ActionDispatcher
+from skryb.core.action_dispatcher import ActionDispatcher
 
 
 class InlineActionDispatcher(ActionDispatcher):

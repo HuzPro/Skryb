@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 
 from tests.ui.rig import Rig
-from voicetotext.diagnostics.jsonl import JsonlWriter
-from voicetotext.history.service import RetryOutcome
+from skryb.diagnostics.jsonl import JsonlWriter
+from skryb.history.service import RetryOutcome
 
 _SESSIONS = 5
 _PER_SESSION = 500

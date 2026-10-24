@@ -14,9 +14,9 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from voicetotext.transcription.streaming.cache_aware.loader import _load_checkpoint
+from skryb.transcription.streaming.cache_aware.loader import _load_checkpoint
 
-from voicetotext.transcription.streaming.cache_aware.loader import remap_state_dict
+from skryb.transcription.streaming.cache_aware.loader import remap_state_dict
 
 _W = "WINDOW_BUFFER"
 _FB = "FILTERBANK_BUFFER"
@@ -25,7 +25,7 @@ _V = "PARAM_VALUE"
 
 def test_rejects_unsafe_checkpoint_without_unrestricted_retry() -> None:
     with patch(
-        "voicetotext.transcription.streaming.cache_aware.loader.torch.load",
+        "skryb.transcription.streaming.cache_aware.loader.torch.load",
         side_effect=ValueError("unsafe checkpoint"),
     ) as load:
         with pytest.raises(ValueError, match="unsafe checkpoint"):

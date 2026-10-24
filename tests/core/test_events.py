@@ -1,4 +1,4 @@
-from voicetotext.core.events import (
+from skryb.core.events import (
     DomainEvent,
     EngineLoadFailedEvent,
     ErrorOccurredEvent,

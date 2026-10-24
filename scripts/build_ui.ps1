@@ -1,5 +1,5 @@
 # Builds the UI shell (Tauri + WebView2) in ui\ and prints where the exe landed.
-# The app finds it there on its own; set VOICETOTEXT_UI_EXE to use another build.
+# The app finds it there on its own; set SKRYB_UI_EXE to use another build.
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -15,6 +15,6 @@ finally {
     Pop-Location
 }
 
-$exe = Join-Path $ui "src-tauri\target\release\voicetotext-ui.exe"
+$exe = Join-Path $ui "src-tauri\target\release\skryb-ui.exe"
 if (-not (Test-Path $exe)) { throw "The build finished but $exe is missing." }
 Write-Output $exe

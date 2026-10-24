@@ -7,9 +7,9 @@ app writes, read straight from the user's config file: the only way past
 the gate is to accept the licence in the app first.
 """
 
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.core.paths import AppPaths
-from voicetotext.transcription.license_policy import LicensePolicy
+from skryb.core.json_config_adapter import JsonConfigAdapter
+from skryb.core.paths import AppPaths
+from skryb.transcription.license_policy import LicensePolicy
 
 
 def user_license_policy() -> LicensePolicy:

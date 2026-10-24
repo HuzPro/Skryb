@@ -3,23 +3,23 @@ from pathlib import Path
 from tests.fakes.config import FakeConfig
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.state_machine import AppStateMachine
-from voicetotext.output.dictionary_config import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.state_machine import AppStateMachine
+from skryb.output.dictionary_config import (
     DictionaryConfig,
     DictionaryOptions,
     LiteralRule,
 )
-from voicetotext.output.handler import TextOutputHandler
-from voicetotext.output.text_filter_decorator import (
+from skryb.output.handler import TextOutputHandler
+from skryb.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
-from voicetotext.output.text_pipeline import TextPipeline
-from voicetotext.settings.download_coordinator import DownloadCoordinator
-from voicetotext.settings.engine_hot_swap import NullEngineHotSwap
-from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.settings.service import SettingsService
+from skryb.output.text_pipeline import TextPipeline
+from skryb.settings.download_coordinator import DownloadCoordinator
+from skryb.settings.engine_hot_swap import NullEngineHotSwap
+from skryb.settings.model_installation_cache import ModelInstallationCache
+from skryb.settings.service import SettingsService
 
 
 class CapturingOutput(TextOutputHandler):

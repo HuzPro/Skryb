@@ -6,7 +6,7 @@ payload and is run there afterwards (``python -m release.notices
 <path>``), reproducing the license texts of the environment that was
 actually installed so the distribution discharges those attribution
 duties. The licensing audit flagged this as the one legal to-do for
-shipping VoiceToText installers, and it keeps that duty discharged for
+shipping Skryb installers, and it keeps that duty discharged for
 any downstream fork - including proprietary ones, which the app's
 Apache-2.0 license deliberately permits.
 
@@ -29,7 +29,7 @@ from release import APP_NAME
 # stack. Names are compared normalised (lower-case, dashes).
 _NOT_BUNDLED = frozenset(
     {
-        "voicetotext",
+        "skryb",
         "pip",
         "setuptools",
         "wheel",

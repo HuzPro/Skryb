@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from voicetotext.output import win32_caret_context as module
+from skryb.output import win32_caret_context as module
 
 _EDIT, _DOCUMENT, _BUTTON, _MENU_ITEM, _LIST_ITEM, _PANE = (
     50004, 50030, 50000, 50011, 50007, 50033,

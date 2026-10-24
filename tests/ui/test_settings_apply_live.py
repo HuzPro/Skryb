@@ -4,8 +4,8 @@ from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 from tests.ui.rig import Rig
-from voicetotext.bootstrap import apply_settings
-from voicetotext.settings.settings_draft import ChangeSet
+from skryb.bootstrap import apply_settings
+from skryb.settings.settings_draft import ChangeSet
 
 
 def _applied_live(make_rig: Callable[..., Rig]) -> tuple[Rig, MagicMock, MagicMock]:
@@ -19,7 +19,7 @@ def _applied_live(make_rig: Callable[..., Rig]) -> tuple[Rig, MagicMock, MagicMo
     return rigs[0], use_case, app
 
 
-@patch("voicetotext.bootstrap._build_hotkey_listener")
+@patch("skryb.bootstrap._build_hotkey_listener")
 def test_new_shortcuts_rebuild_the_hotkey_listener(build_listener: MagicMock, make_rig) -> None:
     rig, use_case, app = _applied_live(make_rig)
     status, settings = rig.call("GET", "/api/settings")
@@ -35,7 +35,7 @@ def test_new_shortcuts_rebuild_the_hotkey_listener(build_listener: MagicMock, ma
     use_case.set_output.assert_not_called()
 
 
-@patch("voicetotext.bootstrap._build_output")
+@patch("skryb.bootstrap._build_output")
 def test_a_new_output_mode_rebuilds_the_text_pipeline(build_output: MagicMock, make_rig) -> None:
     rig, use_case, app = _applied_live(make_rig)
     status, settings = rig.call("GET", "/api/settings")
@@ -48,7 +48,7 @@ def test_a_new_output_mode_rebuilds_the_text_pipeline(build_output: MagicMock, m
     app.set_hotkey_listener.assert_not_called()
 
 
-@patch("voicetotext.bootstrap._build_output")
+@patch("skryb.bootstrap._build_output")
 def test_a_changed_dictionary_rebuilds_the_text_pipeline(build_output: MagicMock, make_rig) -> None:
     rig, use_case, _app = _applied_live(make_rig)
     dictionary = {

@@ -1,6 +1,6 @@
 from tests.fakes.events import RecordingEventBus
-from voicetotext.core.events import MicrophoneConnectedEvent
-from voicetotext.recording.hot_plug import (
+from skryb.core.events import MicrophoneConnectedEvent
+from skryb.recording.hot_plug import (
     SETTLE_MS,
     MicrophoneHotPlug,
     plugged_changes,

@@ -12,7 +12,7 @@ import logging
 import threading
 import time
 
-from voicetotext.core.action_dispatcher import ThreadedActionDispatcher
+from skryb.core.action_dispatcher import ThreadedActionDispatcher
 
 
 def _wait_for_thread_count_baseline(timeout: float = 1.0) -> None:
@@ -41,12 +41,12 @@ class TestThreadedActionDispatcherDispatch:
                 records.append(record)
 
         # Attach our own handler directly to the dispatcher's logger;
-        # caplog captures via the root handler, but the ``voicetotext``
+        # caplog captures via the root handler, but the ``skryb``
         # subtree has ``propagate=False`` after ``setup_debug_logger``
         # has been called by an earlier test, which makes caplog blind
         # to it.
         dispatcher_logger = logging.getLogger(
-            "voicetotext.core.action_dispatcher"
+            "skryb.core.action_dispatcher"
         )
         capture = _Capture(level=logging.ERROR)
         dispatcher_logger.addHandler(capture)

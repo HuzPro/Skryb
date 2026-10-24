@@ -1,4 +1,4 @@
-from voicetotext.transcription.streaming.streaming_engine import StreamingUpdate
+from skryb.transcription.streaming.streaming_engine import StreamingUpdate
 
 
 class TestStreamingUpdateText:

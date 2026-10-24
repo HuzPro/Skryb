@@ -1,13 +1,13 @@
 import pytest
 
-from voicetotext.output.caret_context import (
+from skryb.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     SELECTION_OUTSIDE_FIELD,
     CaretContext,
     fit_to_context,
 )
-from voicetotext.output.paste_memory import PasteMemory, read_or_remember
+from skryb.output.paste_memory import PasteMemory, read_or_remember
 
 _OWN_TAG = 0x56325458
 _INJECTED = 0x10

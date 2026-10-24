@@ -18,8 +18,8 @@ is safe - it pulls only ABC/Literal definitions, no torch or HF.
 
 from dataclasses import dataclass
 
-from voicetotext.transcription.engine_types import EngineId
-from voicetotext.transcription.model_info import ALL_MODELS
+from skryb.transcription.engine_types import EngineId
+from skryb.transcription.model_info import ALL_MODELS
 
 
 @dataclass(frozen=True, slots=True)

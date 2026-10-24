@@ -114,7 +114,7 @@ export function Sidebar({ items }: { items: NavItem[] }) {
   };
   const exportSettings = () =>
     run(async () => {
-      const path = await chooseSavePath("Export settings", "voicetotext-settings.json", "Settings", "json");
+      const path = await chooseSavePath("Export settings", "skryb-settings.json", "Settings", "json");
       if (!path) return "";
       await api.post("/api/settings/export", { path });
       return "Settings exported.";
@@ -133,7 +133,7 @@ export function Sidebar({ items }: { items: NavItem[] }) {
     <aside className="flex w-[212px] shrink-0 flex-col border-r bg-sidebar">
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="pointer-events-none size-3 rounded-full bg-primary shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_20%,transparent)]" />
-        <span className="pointer-events-none text-[13px] font-semibold">VoiceToText</span>
+        <span className="pointer-events-none text-[13px] font-semibold">Skryb</span>
       </div>
       <nav className="flex flex-col gap-0.5 px-2 pt-2">
         {items.map(({ path, label, icon: Icon }) => (
@@ -211,7 +211,7 @@ export function ConnectionBanner({ onQuit }: { onQuit: () => void }) {
   return (
     <div role="alert" className="absolute inset-x-0 top-10 z-30 flex items-center gap-3 border-b border-destructive/30 bg-card px-4 py-2.5 shadow-md">
       <CircleAlert className="size-4 shrink-0 text-destructive" />
-      <span className="flex-1 text-[13px] font-medium">VoiceToText is not running</span>
+      <span className="flex-1 text-[13px] font-medium">Skryb is not running</span>
       <span className="text-[12.5px] text-muted-foreground">Start it from the Start menu, then this window reconnects.</span>
       <Button variant="outline" onClick={onQuit}>
         Quit

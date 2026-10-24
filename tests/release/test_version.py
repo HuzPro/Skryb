@@ -18,7 +18,7 @@ from release.version import read_pyproject_version, resolve_version
 def _write_pyproject(directory: Path, version_line: str) -> Path:
     path = directory / "pyproject.toml"
     path.write_text(
-        f'[project]\nname = "voicetotext"\n{version_line}\n',
+        f'[project]\nname = "skryb"\n{version_line}\n',
         encoding="utf-8",
     )
     return path

@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from tests.fakes.writing import UnreachableDownloader
-from voicetotext.downloads.chunked_file_downloader import FileDownloadPlan
-from voicetotext.writing import install
-from voicetotext.writing.install import (
+from skryb.downloads.chunked_file_downloader import FileDownloadPlan
+from skryb.writing import install
+from skryb.writing.install import (
     DOWNLOAD_CORRUPTED,
     DOWNLOAD_FAILED,
     INSTALL_BYTES,
@@ -28,7 +28,7 @@ from voicetotext.writing.install import (
     WritingPaths,
     server_files,
 )
-from voicetotext.writing.settings import WritingSettings
+from skryb.writing.settings import WritingSettings
 
 
 def _zip_of(members: dict[str, bytes]) -> bytes:

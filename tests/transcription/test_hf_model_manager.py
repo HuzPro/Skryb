@@ -6,17 +6,17 @@ import pytest
 
 from tests.fakes.config import FakeConfig
 from tests.fakes.licensing import AllowAllLicensePolicy
-from voicetotext.core.exceptions import LicenseNotAcceptedError
-from voicetotext.downloads.hf_repo_resolver import ResolvedFile, ResolvedRepo
-from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import (
+from skryb.core.exceptions import LicenseNotAcceptedError
+from skryb.downloads.hf_repo_resolver import ResolvedFile, ResolvedRepo
+from skryb.transcription.hf_model_manager import HuggingFaceModelManager
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import (
     CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     PARAKEET_MODELS,
     ModelInfo,
 )
-from voicetotext.transcription.model_manager import ModelManager
+from skryb.transcription.model_manager import ModelManager
 
 
 _PINNED_SHA = "1e28271b79edc97635783bea65abc89195a09ed3"

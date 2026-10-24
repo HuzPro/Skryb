@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from voicetotext.core.exceptions import HotkeyError
-from voicetotext.hotkeys import win32_keyboard_hook as wkh
-from voicetotext.hotkeys.win32_keyboard_hook import Win32KeyboardHook
+from skryb.core.exceptions import HotkeyError
+from skryb.hotkeys import win32_keyboard_hook as wkh
+from skryb.hotkeys.win32_keyboard_hook import Win32KeyboardHook
 
 
 def _lparam(vk: int, flags: int = 0, extra: int = 0, scan_code: int = 0):

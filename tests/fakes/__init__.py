@@ -1,4 +1,4 @@
-"""Hand-rolled test fakes for VoiceToText ports.
+"""Hand-rolled test fakes for Skryb ports.
 
 Each module in this package provides concrete in-memory implementations
 of a production port ABC.  Unlike ``unittest.mock.MagicMock``, these

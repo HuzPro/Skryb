@@ -2,8 +2,8 @@ from collections.abc import Callable
 
 import numpy as np
 
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.recording.recorder import AudioRecorder
+from skryb.recording.audio_segment import AudioSegment
+from skryb.recording.recorder import AudioRecorder
 
 
 class FakeAudioRecorder(AudioRecorder):

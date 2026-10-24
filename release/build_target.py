@@ -1,6 +1,6 @@
 """The hardware acceleration targets and their requirements files.
 
-VoiceToText supports CPU, NVIDIA CUDA, and AMD ROCm PyTorch builds, each
+Skryb supports CPU, NVIDIA CUDA, and AMD ROCm PyTorch builds, each
 installed from a different wheel index (see the ``requirements-*.txt``
 files). The installer ships all three requirements files and pip-installs
 exactly one at setup time, chosen from the user's detected hardware.

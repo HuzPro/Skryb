@@ -3,8 +3,8 @@ import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from voicetotext.core.debug_logger import VoiceToTextConsoleHandler
-from voicetotext.core.startup_log import (
+from skryb.core.debug_logger import SkrybConsoleHandler
+from skryb.core.startup_log import (
     begin_startup_timing,
     initialize_session_log,
     is_owned_session,
@@ -14,15 +14,15 @@ from voicetotext.core.startup_log import (
 
 def _file_handlers() -> list[logging.Handler]:
     return [
-        handler for handler in logging.getLogger("voicetotext").handlers
+        handler for handler in logging.getLogger("skryb").handlers
         if isinstance(handler, RotatingFileHandler)
     ]
 
 
 def _console_handlers() -> list[logging.Handler]:
     return [
-        handler for handler in logging.getLogger("voicetotext").handlers
-        if isinstance(handler, VoiceToTextConsoleHandler)
+        handler for handler in logging.getLogger("skryb").handlers
+        if isinstance(handler, SkrybConsoleHandler)
     ]
 
 
@@ -38,7 +38,7 @@ class TestStartupLog:
         milestone("engine-load-started")
         milestone("model-loaded")
         milestone("warm-ready")
-        logger = logging.getLogger("voicetotext")
+        logger = logging.getLogger("skryb")
         handlers = _file_handlers()
         for handler in handlers:
             handler.flush()
@@ -66,7 +66,7 @@ class TestStartupLog:
     def test_should_not_duplicate_handlers_on_reinitialization(
         self, tmp_path,
     ) -> None:
-        logger = logging.getLogger("voicetotext")
+        logger = logging.getLogger("skryb")
         try:
             initialize_session_log(tmp_path / "first", console=True)
             initialize_session_log(tmp_path / "second", console=True)
@@ -80,7 +80,7 @@ class TestStartupLog:
     def test_should_add_a_console_handler_despite_a_foreign_stream_handler(
         self, tmp_path: Path,
     ) -> None:
-        logger = logging.getLogger("voicetotext")
+        logger = logging.getLogger("skryb")
         foreign_handler = logging.StreamHandler()
         logger.addHandler(foreign_handler)
         try:

@@ -1,4 +1,4 @@
-from voicetotext.transcription.streaming.streaming_output_writer import (
+from skryb.transcription.streaming.streaming_output_writer import (
     StreamingOutputWriter,
 )
 

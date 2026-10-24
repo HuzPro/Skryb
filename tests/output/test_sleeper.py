@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from voicetotext.output.sleeper import Sleeper, TimeSleeper
+from skryb.output.sleeper import Sleeper, TimeSleeper
 
 
 class TestTimeSleeperIsASleeper:
@@ -11,7 +11,7 @@ class TestTimeSleeperIsASleeper:
 
 
 class TestTimeSleeperDelegatesToTimeModule:
-    @patch("voicetotext.output.sleeper.time")
+    @patch("skryb.output.sleeper.time")
     def test_should_call_time_sleep_with_given_duration(self, mock_time):
         sleeper = TimeSleeper()
 

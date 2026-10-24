@@ -1,10 +1,10 @@
 from tests.settings.test_service import _build_service
-from voicetotext.output.output_mode import OutputMode
-from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
-from voicetotext.settings.transcription_mode import TranscriptionMode
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.model_info import ALL_MODELS
+from skryb.output.output_mode import OutputMode
+from skryb.settings.settings_draft import ChangeSet, SettingsDraft
+from skryb.settings.transcription_mode import TranscriptionMode
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_types import HardwareProfile
+from skryb.transcription.model_info import ALL_MODELS
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _PARAKEET_ULTRA = "parakeet-ultra"

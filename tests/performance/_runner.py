@@ -30,10 +30,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine_registry import EngineRegistry, EngineSpec
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import ALL_MODELS, ModelInfo
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine_registry import EngineRegistry, EngineSpec
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import ALL_MODELS, ModelInfo
 
 from tests.performance._combos import BenchmarkCombo
 

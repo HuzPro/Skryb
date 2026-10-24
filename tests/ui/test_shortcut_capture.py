@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 
-from voicetotext.settings.signal import Signal
-from voicetotext.ui.api_handlers import ShortcutCapture
+from skryb.settings.signal import Signal
+from skryb.ui.api_handlers import ShortcutCapture
 
 
 class FakeBridge:

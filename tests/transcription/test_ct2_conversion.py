@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.transcription.ct2_conversion import (
+from skryb.transcription.ct2_conversion import (
     ct2_model_dir,
     ensure_ct2_model,
     prebuild_ct2_model,
@@ -12,7 +12,7 @@ from voicetotext.transcription.ct2_conversion import (
 )
 
 
-_MODULE = "voicetotext.transcription.ct2_conversion"
+_MODULE = "skryb.transcription.ct2_conversion"
 
 _BUILT_FILENAMES = ("model.bin", "config.json", "vocabulary.json")
 _PINNED_SHA = "de0369c8a68025b7f6e86387b6eb5a3b369787c8"

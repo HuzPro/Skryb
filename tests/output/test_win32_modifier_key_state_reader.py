@@ -7,9 +7,9 @@ virtual keys are physically held.
 
 import pytest
 
-from voicetotext.output.modifier_key_state_reader import ModifierKeyStateReader
-from voicetotext.output import win32_modifier_key_state_reader as module
-from voicetotext.output.win32_modifier_key_state_reader import (
+from skryb.output.modifier_key_state_reader import ModifierKeyStateReader
+from skryb.output import win32_modifier_key_state_reader as module
+from skryb.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
 

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.hotkeys import FakeClock, FakeTimers
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.hold_strategy import HoldStrategy
+from skryb.hotkeys import keys
+from skryb.hotkeys.hold_strategy import HoldStrategy
 
 
 CTRL = keys.HotkeyKey(keys.VK_LCONTROL)

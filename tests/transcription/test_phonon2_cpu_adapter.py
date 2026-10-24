@@ -11,13 +11,13 @@ from types import ModuleType, SimpleNamespace
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import (
+from skryb.core.exceptions import (
     EngineDependencyMissingError,
     TranscriptionError,
 )
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription import phonon2_cpu_adapter
-from voicetotext.transcription.phonon2_cpu_adapter import (
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription import phonon2_cpu_adapter
+from skryb.transcription.phonon2_cpu_adapter import (
     ARCHIVE_FILENAME,
     Phonon2CpuAdapter,
     unpacked_model_dir,

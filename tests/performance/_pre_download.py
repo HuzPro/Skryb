@@ -15,8 +15,8 @@ env set at module-load time.
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import ModelInfo
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import ModelInfo
 
 from tests.performance._combos import BenchmarkCombo
 
@@ -54,7 +54,7 @@ def ensure_models_downloaded(
     engine for it, so it lands in the JSON as ``status='error'``.
     """
     from huggingface_hub import snapshot_download
-    from voicetotext.transcription.model_info import ALL_MODELS
+    from skryb.transcription.model_info import ALL_MODELS
 
     needed: dict[tuple[str, str, str], ModelInfo] = {}
     for combo in combos:
@@ -91,7 +91,7 @@ def ensure_models_downloaded(
 
 
 def _repo_complete(models_dir: Path, repo_id: str, revision: str) -> bool:
-    from voicetotext.transcription.hf_model_manager import HuggingFaceModelManager
+    from skryb.transcription.hf_model_manager import HuggingFaceModelManager
 
     snapshots = models_dir / f"models--{repo_id.replace('/', '--')}" / "snapshots"
     if not snapshots.exists():

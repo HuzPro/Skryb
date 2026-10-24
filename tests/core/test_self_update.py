@@ -1,4 +1,4 @@
-from voicetotext.core.self_update import (
+from skryb.core.self_update import (
     AFTER_DICTATION,
     CHECKING,
     NOT_PULLED,

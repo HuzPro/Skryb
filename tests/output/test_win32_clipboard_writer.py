@@ -9,12 +9,12 @@ clipboard, what exception is raised) rather than call sequences.
 import pytest
 
 from tests.fakes import InstantSleeper
-from voicetotext.output.clipboard_write_error import ClipboardWriteError
-from voicetotext.output.clipboard_writer import ClipboardWriter
-from voicetotext.output.win32_clipboard_writer import Win32ClipboardWriter
+from skryb.output.clipboard_write_error import ClipboardWriteError
+from skryb.output.clipboard_writer import ClipboardWriter
+from skryb.output.win32_clipboard_writer import Win32ClipboardWriter
 
 
-_MODULE = "voicetotext.output.win32_clipboard_writer"
+_MODULE = "skryb.output.win32_clipboard_writer"
 
 _CF_UNICODETEXT = 13
 

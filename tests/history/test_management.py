@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.diagnostics.jsonl import JsonlWriter
-from voicetotext.history.entries import HistoryEntry, load_history
-from voicetotext.history.management import (
+from skryb.diagnostics.jsonl import JsonlWriter
+from skryb.history.entries import HistoryEntry, load_history
+from skryb.history.management import (
     default_export_name,
     delete_all_history,
     delete_entries,
     export_audio,
 )
-from voicetotext.history.retention import (
+from skryb.history.retention import (
     HistoryPruner,
     history_retention_days,
     prune_history,
@@ -143,7 +143,7 @@ def test_a_deletion_blanks_that_line_s_text_and_leaves_every_other_line_alone(
 def test_a_log_that_cannot_be_swapped_keeps_its_text_and_its_entry(
     tmp_path, monkeypatch,
 ) -> None:
-    from voicetotext.diagnostics import jsonl
+    from skryb.diagnostics import jsonl
 
     start = _NOW - timedelta(hours=2)
     session = _write_session(tmp_path, _session_name(start, 20), [
@@ -452,8 +452,8 @@ class _CountingPrune:
 
 
 def test_pruning_waits_for_the_engine_then_repeats_until_the_app_quits(tmp_path) -> None:
-    from voicetotext.core.event_bus import SimpleEventBus
-    from voicetotext.core.state_machine import AppState, AppStateMachine
+    from skryb.core.event_bus import SimpleEventBus
+    from skryb.core.state_machine import AppState, AppStateMachine
 
     prune = _CountingPrune()
     bus = SimpleEventBus()

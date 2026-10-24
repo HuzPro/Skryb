@@ -1,14 +1,14 @@
 from collections.abc import Callable, Sequence
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     DeliveryFailedEvent,
     RecordingCancelledEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
 )
-from voicetotext.recording.notice import NoticeAction
-from voicetotext.recording.recovery_notices import RecoveryNotices
+from skryb.recording.notice import NoticeAction
+from skryb.recording.recovery_notices import RecoveryNotices
 
 
 class FakeNotice:

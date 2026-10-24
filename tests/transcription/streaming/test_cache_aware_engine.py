@@ -1,7 +1,7 @@
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.transcription.streaming.cache_aware.engine import (
+from skryb.core.exceptions import TranscriptionError
+from skryb.transcription.streaming.cache_aware.engine import (
     CacheAwareStreamingEngine,
 )
 

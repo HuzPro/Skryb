@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from voicetotext.downloads.download_manager import DownloadHandle
-from voicetotext.transcription.model_info import ALL_MODELS, ModelInfo
-from voicetotext.transcription.model_manager import ModelManager
+from skryb.downloads.download_manager import DownloadHandle
+from skryb.transcription.model_info import ALL_MODELS, ModelInfo
+from skryb.transcription.model_manager import ModelManager
 
 
 class _FakeDownloadHandle:

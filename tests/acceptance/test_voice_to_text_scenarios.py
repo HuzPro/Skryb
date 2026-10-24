@@ -1,18 +1,18 @@
 """Core voice-to-text flow - the user presses a hotkey, speaks, and
 their words are typed into the focused window."""
 
-from tests.acceptance.app_fixture import VoiceToTextApp
-from voicetotext.core.events import (
+from tests.acceptance.app_fixture import SkrybApp
+from skryb.core.events import (
     ErrorOccurredEvent,
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
-from voicetotext.core.state_machine import AppState
+from skryb.core.state_machine import AppState
 
 
-class TestVoiceToTextHappyPath:
+class TestSkrybHappyPath:
     def test_user_speaking_types_their_words_into_focused_window(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("hello world")
 
@@ -22,7 +22,7 @@ class TestVoiceToTextHappyPath:
         assert voice_to_text_app.typed_text == "hello world"
 
     def test_app_returns_to_idle_after_successful_transcription(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.press_hotkey()
         voice_to_text_app.press_hotkey()
@@ -30,7 +30,7 @@ class TestVoiceToTextHappyPath:
         assert voice_to_text_app.state == AppState.IDLE
 
     def test_transcription_completed_event_carries_the_typed_text(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("the quick brown fox")
 
@@ -44,7 +44,7 @@ class TestVoiceToTextHappyPath:
 
 class TestSilentRecordingIsIgnored:
     def test_very_short_recording_is_silently_discarded(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.microphone_captures_silence_of(seconds=0.05)
 
@@ -55,7 +55,7 @@ class TestSilentRecordingIsIgnored:
         assert voice_to_text_app.state == AppState.IDLE
 
     def test_empty_transcription_does_not_type_anything(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("")
 
@@ -65,7 +65,7 @@ class TestSilentRecordingIsIgnored:
         assert voice_to_text_app.typed_text is None
 
     def test_missing_audio_returns_app_to_idle_without_transcribing(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.microphone_captures_nothing()
 
@@ -78,7 +78,7 @@ class TestSilentRecordingIsIgnored:
 
 class TestRecordingFailures:
     def test_microphone_failure_returns_app_to_idle_and_reports_error(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.microphone_fails_to_start_with(
             RuntimeError("mic unavailable")
@@ -94,7 +94,7 @@ class TestRecordingFailures:
 
 class TestTranscriptionFailures:
     def test_engine_failure_returns_app_to_idle_and_reports_error(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.engine_fails_with(RuntimeError("cuda oom"))
 
@@ -107,7 +107,7 @@ class TestTranscriptionFailures:
         assert "cuda oom" in failed[0].error
 
     def test_engine_failure_does_not_type_anything(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.engine_fails_with(RuntimeError("boom"))
 

@@ -1,6 +1,6 @@
 
 
-from voicetotext.downloads.requests_http_client import RequestsHttpClient
+from skryb.downloads.requests_http_client import RequestsHttpClient
 
 
 class _FakeResponse:

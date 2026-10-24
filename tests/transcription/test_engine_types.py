@@ -1,6 +1,6 @@
 import pytest
 
-from voicetotext.transcription.engine_types import (
+from skryb.transcription.engine_types import (
     EngineCandidate,
     EngineDescriptor,
     HardwareProfile,

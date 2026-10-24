@@ -1,6 +1,6 @@
 from collections.abc import Callable
 
-from voicetotext.hotkeys.listener import HotkeyListener
+from skryb.hotkeys.listener import HotkeyListener
 
 
 class FakeHotkeyListener(HotkeyListener):

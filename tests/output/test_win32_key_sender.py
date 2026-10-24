@@ -3,12 +3,12 @@ from unittest.mock import patch
 
 import pytest
 
-from voicetotext.core.exceptions import OutputError
-from voicetotext.hotkeys import win32_keyboard_hook as wkh
-from voicetotext.output import win32_key_sender as wks
-from voicetotext.output.key_sender import KeySender
-from voicetotext.output.paste_method import PasteMethod
-from voicetotext.output.win32_key_sender import Win32KeySender
+from skryb.core.exceptions import OutputError
+from skryb.hotkeys import win32_keyboard_hook as wkh
+from skryb.output import win32_key_sender as wks
+from skryb.output.key_sender import KeySender
+from skryb.output.paste_method import PasteMethod
+from skryb.output.win32_key_sender import Win32KeySender
 
 
 _VK_CONTROL = 0x11
@@ -44,12 +44,12 @@ class TestWin32KeySenderSendCtrlV:
 
         _, events, _ = mock_user32.SendInput.call_args.args
         tags = [events[i].union.ki.dwExtraInfo for i in range(4)]
-        assert tags == [wks.VOICETOTEXT_INPUT_TAG] * 4
+        assert tags == [wks.SKRYB_INPUT_TAG] * 4
 
     def test_should_keep_the_tag_inside_thirty_two_bits(self):
         # dwExtraInfo is an ULONG_PTR; a wider value would not survive a
         # 32-bit build.
-        assert 0 < wks.VOICETOTEXT_INPUT_TAG <= 0xFFFFFFFF
+        assert 0 < wks.SKRYB_INPUT_TAG <= 0xFFFFFFFF
 
     @patch.object(wks, "_user32")
     def test_should_pass_the_real_input_struct_size(self, mock_user32):
@@ -81,8 +81,8 @@ class TestMenuMask:
             for i in range(count)
         ]
         assert sent == [
-            (0xFF, 0, wks.VOICETOTEXT_INPUT_TAG),
-            (0xFF, _KEYEVENTF_KEYUP, wks.VOICETOTEXT_INPUT_TAG),
+            (0xFF, 0, wks.SKRYB_INPUT_TAG),
+            (0xFF, _KEYEVENTF_KEYUP, wks.SKRYB_INPUT_TAG),
         ]
 
     def test_the_shortcut_hook_never_offers_the_mask_key_to_a_shortcut(self):
@@ -129,7 +129,7 @@ class TestWin32KeySenderPasteMethods:
         def send_input(count, events, size):
             for index in range(count):
                 ki = events[index].union.ki
-                assert ki.dwExtraInfo == wks.VOICETOTEXT_INPUT_TAG
+                assert ki.dwExtraInfo == wks.SKRYB_INPUT_TAG
                 assert ki.dwFlags & 0x0004
                 if not ki.dwFlags & _KEYEVENTF_KEYUP:
                     typed.append(ki.wScan)

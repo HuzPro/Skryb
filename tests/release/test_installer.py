@@ -25,11 +25,11 @@ from release.installer import (
 
 class TestIssDefines:
     def test_carries_the_version_payload_and_wheel(self):
-        defines = iss_defines("0.2.0", Path("payload"), "voicetotext-0.2.0-py3-none-any.whl")
+        defines = iss_defines("0.2.0", Path("payload"), "skryb-0.2.0-py3-none-any.whl")
 
         assert defines["AppVersion"] == "0.2.0"
         assert defines["PayloadDir"] == str(Path("payload"))
-        assert defines["WheelFile"] == "voicetotext-0.2.0-py3-none-any.whl"
+        assert defines["WheelFile"] == "skryb-0.2.0-py3-none-any.whl"
 
     def test_maps_each_target_to_its_requirements_file(self):
         defines = iss_defines("0.2.0", Path("payload"), "app.whl")
@@ -42,23 +42,23 @@ class TestIssDefines:
 class TestBuildIsccArgs:
     def test_turns_each_define_into_a_d_flag(self):
         args = build_iscc_args(
-            Path("setup.iss"), Path("dist"), "VoiceToText-Setup-0.2.0", {"AppVersion": "0.2.0"}
+            Path("setup.iss"), Path("dist"), "Skryb-Setup-0.2.0", {"AppVersion": "0.2.0"}
         )
 
         assert "/DAppVersion=0.2.0" in args
 
     def test_sets_the_output_dir_and_basename(self):
         args = build_iscc_args(
-            Path("setup.iss"), Path("out"), "VoiceToText-Setup-0.2.0", {}
+            Path("setup.iss"), Path("out"), "Skryb-Setup-0.2.0", {}
         )
 
         assert f"/O{Path('out')}" in args
-        assert "/FVoiceToText-Setup-0.2.0" in args
+        assert "/FSkryb-Setup-0.2.0" in args
 
     def test_passes_the_script_path_last(self):
-        args = build_iscc_args(Path("installer/VoiceToText.iss"), Path("dist"), "x", {})
+        args = build_iscc_args(Path("installer/Skryb.iss"), Path("dist"), "x", {})
 
-        assert args[-1] == str(Path("installer/VoiceToText.iss"))
+        assert args[-1] == str(Path("installer/Skryb.iss"))
 
 
 class TestLauncherShim:
@@ -66,7 +66,7 @@ class TestLauncherShim:
         shim = cmd_shim_text()
 
         assert "@echo off" in shim
-        assert "voicetotext.exe" in shim
+        assert "skryb.exe" in shim
         assert "%*" in shim
 
 
@@ -104,12 +104,12 @@ class TestRuntimeNotice:
 
 def _fake_repo(root: Path, *, ui_built: bool = True) -> Path:
     repo = root / "repo"
-    (repo / "voicetotext").mkdir(parents=True)
-    (repo / "voicetotext" / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "skryb").mkdir(parents=True)
+    (repo / "skryb" / "__init__.py").write_text("", encoding="utf-8")
     for name in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
         (repo / name).write_text(name, encoding="utf-8")
     if ui_built:
-        exe = repo / "ui" / "src-tauri" / "target" / "release" / "voicetotext-ui.exe"
+        exe = repo / "ui" / "src-tauri" / "target" / "release" / "skryb-ui.exe"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"MZ settings window")
     (root / "scratch").mkdir()
@@ -127,14 +127,14 @@ class TestStageWheelSource:
         assert (source / "pyproject.toml").is_file()
         assert (source / "LICENSE.txt").is_file()
         assert (source / "NOTICE").is_file()
-        assert (source / "voicetotext" / "__init__.py").is_file()
+        assert (source / "skryb" / "__init__.py").is_file()
 
     def test_puts_the_built_settings_window_where_the_installed_app_looks(self, tmp_path):
         repo = _fake_repo(tmp_path)
 
         source = _stage_wheel_source(repo, tmp_path / "scratch")
 
-        shipped = source / "voicetotext" / "ui-bin" / "voicetotext-ui.exe"
+        shipped = source / "skryb" / "ui-bin" / "skryb-ui.exe"
         assert shipped.read_bytes() == b"MZ settings window"
 
     def test_refuses_to_build_an_installer_without_the_settings_window(self, tmp_path):

@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment
+from skryb.recording.audio_segment import AudioSegment
 
 from tests.performance.conftest import PerformanceContext
 

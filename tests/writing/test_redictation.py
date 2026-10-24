@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.output.caret_context import CaretContext
-from voicetotext.output.dictionary_config import LiteralRule, load_dictionary
-from voicetotext.writing.learning import Learner, word_corrections
-from voicetotext.writing.redictation import RedictationTracker, replacement_between
-from voicetotext.writing.settings import WritingSettings
+from skryb.output.caret_context import CaretContext
+from skryb.output.dictionary_config import LiteralRule, load_dictionary
+from skryb.writing.learning import Learner, word_corrections
+from skryb.writing.redictation import RedictationTracker, replacement_between
+from skryb.writing.settings import WritingSettings
 
 _CLAUDE = 197508
 _DISCORD = 40120

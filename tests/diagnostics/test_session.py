@@ -9,14 +9,14 @@ import pytest
 
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
-from voicetotext.core.paths import AppPaths
-from voicetotext.core.startup_log import SESSION_MARKER
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.model_info import ModelInfo, get_model_info
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.core.paths import AppPaths
+from skryb.core.startup_log import SESSION_MARKER
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_types import HardwareProfile
+from skryb.transcription.model_info import ModelInfo, get_model_info
+from skryb.transcription.result import TranscriptionResult
 
 pytestmark = pytest.mark.integration
 _HARDWARE = FakeHardwareDetector(
@@ -72,7 +72,7 @@ class TestSessionEvents:
         ct2_installed: bool,
         expected_hardware: str,
     ) -> None:
-        paths = _session_paths(tmp_path / "VoiceToText – آواز")
+        paths = _session_paths(tmp_path / "Skryb – آواز")
         model = get_model_info("crisperwhisper-2.0-turbo")
         repo = paths.models_dir / f"models--{model.repo_id.replace('/', '--')}"
         snapshot = repo / "snapshots" / model.revision
@@ -82,7 +82,7 @@ class TestSessionEvents:
         (repo / "refs").mkdir()
         (repo / "refs" / "main").write_text(model.revision, encoding="ascii")
         monkeypatch.setattr(
-            "voicetotext.transcription.engine_factory._ctranslate2_installed",
+            "skryb.transcription.engine_factory._ctranslate2_installed",
             lambda: ct2_installed,
         )
         config = FakeConfig({
@@ -131,7 +131,7 @@ class TestSessionEvents:
             )
 
         monkeypatch.setattr(
-            "voicetotext.diagnostics.session.get_model_info",
+            "skryb.diagnostics.session.get_model_info",
             model_without_engine,
         )
 

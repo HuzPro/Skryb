@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from voicetotext.edit_capture import win32_input as wi
-from voicetotext.edit_capture.win32_input import (
+from skryb.edit_capture import win32_input as wi
+from skryb.edit_capture.win32_input import (
     clicked_since_last_check,
     key_character,
 )

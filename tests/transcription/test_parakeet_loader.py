@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.transcription.parakeet_loader import ParakeetModelLoader
+from skryb.transcription.parakeet_loader import ParakeetModelLoader
 
 
 class TestParakeetModelLoader:
@@ -107,7 +107,7 @@ class TestTransformersLayoutSnapshots:
         import nano_parakeet
         import torch
 
-        from voicetotext.transcription import parakeet_loader
+        from skryb.transcription import parakeet_loader
 
         snapshot = _install_snapshot(
             tmp_path, "moondream/parakeet-ultra",
@@ -141,7 +141,7 @@ class TestTransformersLayoutSnapshots:
     ):
         import nano_parakeet
 
-        from voicetotext.transcription import parakeet_loader
+        from skryb.transcription import parakeet_loader
 
         _install_snapshot(
             tmp_path, "nvidia/parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v3.nemo",

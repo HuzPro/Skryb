@@ -6,11 +6,11 @@ the dispatcher; the decorator itself is plain Python and can be tested
 without Qt.
 """
 
-from voicetotext.output.gui_thread_dispatcher import GuiThreadDispatcher
-from voicetotext.output.gui_thread_output_decorator import (
+from skryb.output.gui_thread_dispatcher import GuiThreadDispatcher
+from skryb.output.gui_thread_output_decorator import (
     GuiThreadOutputDecorator,
 )
-from voicetotext.output.handler import TextOutputHandler
+from skryb.output.handler import TextOutputHandler
 
 
 class _RecordingInner(TextOutputHandler):

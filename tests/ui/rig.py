@@ -19,21 +19,21 @@ from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.hotkeys import FakeHotkeyListener
 from tests.fakes.model_manager import FakeModelManager
 from tests.writing.test_service import Rig as WritingRig
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.state_machine import AppStateMachine
-from voicetotext.history.service import HistoryService, RetryOutcome
-from voicetotext.recording.input_devices import Microphones
-from voicetotext.settings.download_coordinator import DownloadCoordinator
-from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
-from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.settings.service import SettingsService
-from voicetotext.settings.settings_draft import ChangeSet
-from voicetotext.settings.signal import Signal
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.ui.api_handlers import CoreApi, ShortcutCapture
-from voicetotext.ui.api_server import ApiServer
-from voicetotext.ui.event_hub import EventHub
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.state_machine import AppStateMachine
+from skryb.history.service import HistoryService, RetryOutcome
+from skryb.recording.input_devices import Microphones
+from skryb.settings.download_coordinator import DownloadCoordinator
+from skryb.settings.engine_hot_swap import EngineHotSwapCoordinator
+from skryb.settings.model_installation_cache import ModelInstallationCache
+from skryb.settings.service import SettingsService
+from skryb.settings.settings_draft import ChangeSet
+from skryb.settings.signal import Signal
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.ui.api_handlers import CoreApi, ShortcutCapture
+from skryb.ui.api_server import ApiServer
+from skryb.ui.event_hub import EventHub
 
 PARAKEET = "parakeet-tdt-0.6b-v3"
 TURBO = "crisperwhisper-2.0-turbo"

@@ -9,9 +9,9 @@ from tests.fakes.writing import (
     FakeClock,
     ScriptedClient,
 )
-from voicetotext.edit_capture.window import ForegroundWindow
-from voicetotext.output.caret_context import NO_CONTEXT, CaretContext
-from voicetotext.output.dictation_trace import (
+from skryb.edit_capture.window import ForegroundWindow
+from skryb.output.caret_context import NO_CONTEXT, CaretContext
+from skryb.output.dictation_trace import (
     APPLIED,
     REJECTED,
     SKIPPED,
@@ -19,9 +19,9 @@ from voicetotext.output.dictation_trace import (
     begin_trace,
     end_trace,
 )
-from voicetotext.output.dictionary_config import DictionaryConfig, DictionaryOptions, LiteralRule
-from voicetotext.output.text_pipeline import TextPipeline
-from voicetotext.writing.cleanup import (
+from skryb.output.dictionary_config import DictionaryConfig, DictionaryOptions, LiteralRule
+from skryb.output.text_pipeline import TextPipeline
+from skryb.writing.cleanup import (
     DEFAULT_SECONDS_PER_100_WORDS,
     NO_CUE,
     CleanupStage,
@@ -29,8 +29,8 @@ from voicetotext.writing.cleanup import (
     needs_cleanup,
     rejection_reason,
 )
-from voicetotext.writing.client import WritingUnavailable
-from voicetotext.writing.settings import WritingSettings
+from skryb.writing.client import WritingUnavailable
+from skryb.writing.settings import WritingSettings
 
 _OUTLOOK = ForegroundWindow(hwnd=11, pid=5, process="outlook.exe", title="Re: Invoice for Aïsha")
 _KEEPASS = ForegroundWindow(hwnd=12, pid=6, process="keepass.exe", title="Passwords.kdbx")
@@ -250,12 +250,12 @@ class TestContextHints:
 class TestInThePipeline:
     def test_manual_dictionary_spellings_survive_cleanup_because_the_dictionary_runs_after_it(self):
         dictionary = DictionaryConfig(
-            rules=(LiteralRule(spoken=("voice to text",), replacement="VoiceToText"),),
+            rules=(LiteralRule(spoken=("voice to text",), replacement="Skryb"),),
         )
         model = ScriptedClient(answer="I love voice to text.")
         pipeline = TextPipeline.for_batch(dictionary, cleanup=_stage(model))
 
-        assert pipeline.process("um I love, I mean I love voice to text").strip() == "I love VoiceToText."
+        assert pipeline.process("um I love, I mean I love voice to text").strip() == "I love Skryb."
 
     def test_the_caret_is_read_once_per_dictation_and_shared_with_cleanup(self):
         reads: list[int] = []
@@ -319,7 +319,7 @@ def test_blank_dictations_never_reach_the_model():
 class TestPipelineModes:
     @pytest.mark.parametrize("mode", ["streaming", "verbatim"])
     def test_streaming_and_verbatim_never_call_the_model(self, mode):
-        from voicetotext.output.text_pipeline import PipelineMode, build_pipeline
+        from skryb.output.text_pipeline import PipelineMode, build_pipeline
 
         model = ScriptedClient(answer="REWRITTEN")
         pipeline = build_pipeline(DictionaryConfig(), PipelineMode(mode), cleanup=_stage(model))

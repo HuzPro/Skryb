@@ -3,8 +3,8 @@ import math
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.transcription.streaming.parakeet_streaming_engine import (
+from skryb.core.exceptions import TranscriptionError
+from skryb.transcription.streaming.parakeet_streaming_engine import (
     StreamingNanoParakeetEngine,
     _ParakeetStreamingSession,
 )

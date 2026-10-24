@@ -5,7 +5,7 @@ import sys
 import numpy
 import pytest
 
-from voicetotext.recording.pill import (
+from skryb.recording.pill import (
     BOTTOM_MARGIN,
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -70,7 +70,7 @@ class TestSpring:
 
 
 def _settled_pixels():
-    from voicetotext.recording.overlay import premultiplied_array
+    from skryb.recording.overlay import premultiplied_array
 
     return premultiplied_array(render(settled_label_frame()))
 
@@ -130,7 +130,7 @@ class TestShimmer:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows fonts")
 def test_the_pill_draws_its_text_in_segoe_ui_semibold() -> None:
-    from voicetotext.recording.pill import _font
+    from skryb.recording.pill import _font
 
     assert _font(36).getname() == ("Segoe UI", "Semibold")
 

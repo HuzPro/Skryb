@@ -11,10 +11,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription import qwen3_asr_pack
-from voicetotext.transcription.native_qwen3_asr_adapter import (
+from skryb.core.exceptions import TranscriptionError
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription import qwen3_asr_pack
+from skryb.transcription.native_qwen3_asr_adapter import (
     NativeQwen3AsrAdapter,
     packed_model_path,
 )

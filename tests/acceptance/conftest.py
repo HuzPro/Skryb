@@ -2,12 +2,12 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.acceptance.app_fixture import VoiceToTextApp
+from tests.acceptance.app_fixture import SkrybApp
 
 
 @pytest.fixture()
-def voice_to_text_app() -> Iterator[VoiceToTextApp]:
-    app = VoiceToTextApp()
+def voice_to_text_app() -> Iterator[SkrybApp]:
+    app = SkrybApp()
     try:
         yield app
     finally:

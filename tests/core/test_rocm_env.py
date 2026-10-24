@@ -6,7 +6,7 @@ import types
 
 import pytest
 
-from voicetotext.core.rocm_env import prepare_rocm_environment, target_family_for
+from skryb.core.rocm_env import prepare_rocm_environment, target_family_for
 
 _ENV = "ROCM_SDK_TARGET_FAMILY"
 _OFFLOAD_ARCH = r"C:\venv\Scripts\offload-arch.exe"

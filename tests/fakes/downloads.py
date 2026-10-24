@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from voicetotext.downloads.chunked_file_downloader import HeadResult
+from skryb.downloads.chunked_file_downloader import HeadResult
 
 
 class FakeHttpClient:

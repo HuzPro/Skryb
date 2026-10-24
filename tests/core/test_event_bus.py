@@ -1,8 +1,8 @@
 import threading
 
 
-from voicetotext.core.event_bus import EventBus, SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import EventBus, SimpleEventBus
+from skryb.core.events import (
     RecordingStartedEvent,
     RecordingStoppedEvent,
 )

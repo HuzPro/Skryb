@@ -3,14 +3,14 @@ import threading
 import pytest
 
 from tests.fakes.events import RecordingEventBus
-from voicetotext.core.events import (
+from skryb.core.events import (
     MicrophoneAudioResumedEvent,
     MicrophoneSilentEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
     StateChangedEvent,
 )
-from voicetotext.recording.silence_watchdog import (
+from skryb.recording.silence_watchdog import (
     SAMPLE_SECONDS,
     SilenceWatchdog,
     run_every,

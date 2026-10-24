@@ -147,7 +147,7 @@ def build(options: _Options) -> None:
 
 def _parse_options() -> _Options:
     parser = argparse.ArgumentParser(
-        description="Build a correction corpus from VoiceToText session logs.",
+        description="Build a correction corpus from Skryb session logs.",
     )
     parser.add_argument(
         "logs_dir",

@@ -1,4 +1,4 @@
 # Licence acceptance is keyed to the SHA-256 of these exact bytes, so a
 # CRLF checkout on Windows (core.autocrlf=true) would change the digest
 # and retire every acceptance recorded against the audited text.
-voicetotext/licenses/*.md -text
+skryb/licenses/*.md -text

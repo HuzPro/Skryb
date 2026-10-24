@@ -1,6 +1,6 @@
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.result import TranscriptionResult
 
 
 class FakeTranscriptionEngine(TranscriptionEngine):

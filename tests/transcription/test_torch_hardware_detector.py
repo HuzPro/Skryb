@@ -1,7 +1,7 @@
 import types
 
-from voicetotext.transcription.hardware_detector import HardwareDetector
-from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
+from skryb.transcription.hardware_detector import HardwareDetector
+from skryb.transcription.torch_hardware_detector import TorchHardwareDetector
 
 
 def _fake_torch(

@@ -5,20 +5,20 @@ import pytest
 
 from tests.fakes import FakeTextOutputHandler, InlineActionDispatcher
 from tests.fakes.writing import FakeClock, ScriptedClient
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import RecordingStartedEvent, WritingNoticeEvent
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.edit_capture.window import ForegroundWindow
-from voicetotext.output.caret_context import NO_CONTEXT, CaretContext
-from voicetotext.output.dictionary_config import DictionaryConfig
-from voicetotext.output.text_filter_decorator import TextFilterDecorator
-from voicetotext.output.text_pipeline import TextPipeline
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
-from voicetotext.writing.client import WritingUnavailable
-from voicetotext.writing.voice_edit import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import RecordingStartedEvent, WritingNoticeEvent
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.edit_capture.window import ForegroundWindow
+from skryb.output.caret_context import NO_CONTEXT, CaretContext
+from skryb.output.dictionary_config import DictionaryConfig
+from skryb.output.text_filter_decorator import TextFilterDecorator
+from skryb.output.text_pipeline import TextPipeline
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.writing.client import WritingUnavailable
+from skryb.writing.voice_edit import (
     MAX_SELECTION_CHARS,
     Selection,
     VoiceEditError,
@@ -255,7 +255,7 @@ class TestVoiceEditInTheUseCase:
         assert output.outputs == ["CHANGE THURSDAY TO FRIDAY"]
 
     def test_a_cancelled_voice_edit_is_never_offered_back_as_a_dictation(self):
-        from voicetotext.core.events import RecordingCancelledEvent
+        from skryb.core.events import RecordingCancelledEvent
 
         use_case, output, _, _, _, _ = self._use_case(Desktop(), ScriptedClient())
         cancelled: list[RecordingCancelledEvent] = []
@@ -269,7 +269,7 @@ class TestVoiceEditInTheUseCase:
         assert output.outputs == []
 
     def test_the_pill_estimate_includes_the_writing_time(self):
-        from voicetotext.core.events import TranscriptionStartedEvent
+        from skryb.core.events import TranscriptionStartedEvent
 
         use_case, _, _, _, _, _ = self._use_case(Desktop(selected=""), ScriptedClient())
         estimates: list[float | None] = []

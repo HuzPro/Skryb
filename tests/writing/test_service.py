@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 from tests.fakes.writing import FakeChild, FakeLaunch, UnreachableDownloader
-from voicetotext.core.json_config_adapter import DEFAULT_CONFIG
-from voicetotext.output.dictionary_config import DictionaryConfig, LiteralRule, RegexRule
-from voicetotext.writing.install import DOWNLOAD_FAILED, WritingPaths
-from voicetotext.writing.learning import Learner
-from voicetotext.writing.llama_server import LlamaServer, ServerFiles, ServerState
-from voicetotext.writing.service import SERVER_FAILED_NOTICE, WritingService, spellings_from
-from voicetotext.writing.settings import WritingSettings
-from voicetotext.writing.transforms import BUILTIN_TRANSFORMS, TransformStore
+from skryb.core.json_config_adapter import DEFAULT_CONFIG
+from skryb.output.dictionary_config import DictionaryConfig, LiteralRule, RegexRule
+from skryb.writing.install import DOWNLOAD_FAILED, WritingPaths
+from skryb.writing.learning import Learner
+from skryb.writing.llama_server import LlamaServer, ServerFiles, ServerState
+from skryb.writing.service import SERVER_FAILED_NOTICE, WritingService, spellings_from
+from skryb.writing.settings import WritingSettings
+from skryb.writing.transforms import BUILTIN_TRANSFORMS, TransformStore
 
 
 class Rig:

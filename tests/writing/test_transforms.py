@@ -1,6 +1,6 @@
 import json
 
-from voicetotext.writing.transforms import (
+from skryb.writing.transforms import (
     BUILTIN_TRANSFORMS,
     MAX_TRANSFORMS,
     TransformStore,

@@ -9,21 +9,21 @@ from tests.fakes import (
     InlineActionDispatcher,
     RecordingEventBus,
 )
-from voicetotext.core.events import (
+from skryb.core.events import (
     RecordingStartedEvent,
     RecordingStoppedEvent,
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription.streaming.live_streaming_controller import (
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
 )
-from voicetotext.transcription.streaming.streaming_engine import StreamingUpdate
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.transcription.streaming.streaming_engine import StreamingUpdate
+from skryb.transcription_use_case import RecordAndTranscribeUseCase
 
 
 class _StubController:

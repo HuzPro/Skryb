@@ -2,7 +2,7 @@
 
 This clean-process driver doubles as the subprocess target for the opt-in
 integration test. It never downloads weights: the adapter requires the turbo
-snapshot at the catalog's pinned commit to already exist in VoiceToText's
+snapshot at the catalog's pinned commit to already exist in Skryb's
 model cache. CrisperWhisper's licence covers use and generated outputs, so
 the run refuses to start until the licence is accepted in the app.
 
@@ -35,12 +35,12 @@ def main() -> None:
     from tests.fixtures import SHORT_MP3
     from tests.helpers.audio_file_loader import load_audio_file
     from tests.helpers.license_gate import user_license_policy
-    from voicetotext.core.paths import AppPaths
-    from voicetotext.transcription.crisperwhisper_adapter import (
+    from skryb.core.paths import AppPaths
+    from skryb.transcription.crisperwhisper_adapter import (
         CrisperWhisperAdapter,
         resolve_crisperwhisper_mode,
     )
-    from voicetotext.transcription.model_info import get_model_info
+    from skryb.transcription.model_info import get_model_info
 
     mode = resolve_crisperwhisper_mode(
         sys.argv[1] if len(sys.argv) > 1 else "intended"

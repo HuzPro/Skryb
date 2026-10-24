@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.state_machine import AppStateMachine
-from voicetotext.tray.app import SystemTrayApp
-from voicetotext.ui.launcher import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.state_machine import AppStateMachine
+from skryb.tray.app import SystemTrayApp
+from skryb.ui.launcher import (
     SHELL_NOT_BUILT,
     SHELL_WOULD_NOT_START,
     UI_EXE_ENV,
@@ -15,7 +15,7 @@ from voicetotext.ui.launcher import (
     shell_candidates,
 )
 
-_PACKAGE = Path(__file__).resolve().parents[2] / "voicetotext"
+_PACKAGE = Path(__file__).resolve().parents[2] / "skryb"
 
 
 @dataclass(frozen=True)
@@ -45,17 +45,17 @@ class _Spawner:
 
 def _exe(folder: Path) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
-    exe = folder / "voicetotext-ui.exe"
+    exe = folder / "skryb-ui.exe"
     exe.write_bytes(b"MZ")
     return exe
 
 
 def test_the_shell_is_looked_for_in_the_configured_path_then_the_repo_build_then_the_package() -> None:
-    repo_build = _PACKAGE.parent / "ui" / "src-tauri" / "target" / "release" / "voicetotext-ui.exe"
-    packaged = _PACKAGE / "ui-bin" / "voicetotext-ui.exe"
+    repo_build = _PACKAGE.parent / "ui" / "src-tauri" / "target" / "release" / "skryb-ui.exe"
+    packaged = _PACKAGE / "ui-bin" / "skryb-ui.exe"
 
-    assert shell_candidates({UI_EXE_ENV: r"D:\Builds\UI ✓\voicetotext-ui.exe"}) == [
-        Path(r"D:\Builds\UI ✓\voicetotext-ui.exe"), repo_build, packaged,
+    assert shell_candidates({UI_EXE_ENV: r"D:\Builds\UI ✓\skryb-ui.exe"}) == [
+        Path(r"D:\Builds\UI ✓\skryb-ui.exe"), repo_build, packaged,
     ]
     assert shell_candidates({UI_EXE_ENV: "   "}) == [repo_build, packaged]
     assert shell_candidates({}) == [repo_build, packaged]
@@ -67,7 +67,7 @@ def test_the_first_shell_found_opens_on_the_page_with_the_servers_port_and_token
     later = _exe(tmp_path / "packaged")
     launcher = ShellLauncher(
         _Address(), MagicMock(), spawn=spawn,
-        candidates=lambda: [tmp_path / "not built" / "voicetotext-ui.exe", found, later],
+        candidates=lambda: [tmp_path / "not built" / "skryb-ui.exe", found, later],
     )
 
     assert launcher.is_running() is False
@@ -104,12 +104,12 @@ def test_with_no_shell_built_the_tray_says_how_to_build_it_and_nothing_starts(tm
     spawn = _Spawner()
     launcher = ShellLauncher(
         _Address(), app.notify, spawn=spawn,
-        candidates=lambda: [tmp_path / "a" / "voicetotext-ui.exe", tmp_path / "b" / "voicetotext-ui.exe"],
+        candidates=lambda: [tmp_path / "a" / "skryb-ui.exe", tmp_path / "b" / "skryb-ui.exe"],
     )
 
     assert launcher.open("settings") is False
 
-    icon.notify.assert_called_once_with("VoiceToText", SHELL_NOT_BUILT)
+    icon.notify.assert_called_once_with("Skryb", SHELL_NOT_BUILT)
     assert spawn.commands == []
     assert SHELL_NOT_BUILT == "The settings window is not built. Run scripts\\build_ui.ps1."
 

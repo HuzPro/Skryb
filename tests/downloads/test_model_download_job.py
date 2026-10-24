@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.downloads.hf_repo_resolver import ResolvedFile
-from voicetotext.downloads.model_download_job import (
+from skryb.downloads.hf_repo_resolver import ResolvedFile
+from skryb.downloads.model_download_job import (
     ModelDownloadJob,
     ModelDownloadError,
 )

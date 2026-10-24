@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.transcription import FakeTranscriptionEngine
-from voicetotext.transcription.engine_preload import EnginePreload
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.transcription.engine_preload import EnginePreload
+from skryb.transcription.result import TranscriptionResult
 
 
 def _ready_engine() -> FakeTranscriptionEngine:
@@ -111,7 +111,7 @@ class TestEnginePreload:
 class TestTakingAPreloadedEngine:
     @pytest.fixture()
     def bootstrap(self):
-        from voicetotext import bootstrap
+        from skryb import bootstrap
 
         return bootstrap
 

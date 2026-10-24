@@ -2,8 +2,8 @@ import sys
 
 import pytest
 
-from voicetotext.transcription import win32_display_adapters
-from voicetotext.transcription.win32_display_adapters import (
+from skryb.transcription import win32_display_adapters
+from skryb.transcription.win32_display_adapters import (
     display_adapter_fingerprint,
 )
 

@@ -1,6 +1,6 @@
-from voicetotext.output.clipboard_preserver import ClipboardPreserver
-from voicetotext.output.handler import TextOutputHandler
-from voicetotext.output.sleeper import Sleeper
+from skryb.output.clipboard_preserver import ClipboardPreserver
+from skryb.output.handler import TextOutputHandler
+from skryb.output.sleeper import Sleeper
 
 
 class FakeTextOutputHandler(TextOutputHandler):

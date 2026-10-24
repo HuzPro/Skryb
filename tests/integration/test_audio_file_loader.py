@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment
+from skryb.recording.audio_segment import AudioSegment
 
 from tests.fixtures import require_long_fixture, require_short_fixture
 from tests.helpers.audio_file_loader import load_audio_file

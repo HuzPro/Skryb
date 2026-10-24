@@ -1,6 +1,6 @@
 import pytest
 
-from voicetotext.output.clipboard_preserver import ClipboardPreserver
+from skryb.output.clipboard_preserver import ClipboardPreserver
 
 
 class TestClipboardPreserverIsAbstract:

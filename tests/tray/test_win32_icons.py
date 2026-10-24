@@ -9,9 +9,9 @@ test, not here.
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
-from voicetotext.core.state_machine import AppState
-from voicetotext.tray import win32_icons
-from voicetotext.tray.win32_icons import ColorScheme, render_image_for_scheme
+from skryb.core.state_machine import AppState
+from skryb.tray import win32_icons
+from skryb.tray.win32_icons import ColorScheme, render_image_for_scheme
 
 
 def _center_pixel(state: AppState, scheme: ColorScheme) -> tuple[int, int, int]:

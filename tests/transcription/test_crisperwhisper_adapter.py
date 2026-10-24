@@ -7,19 +7,19 @@ from unittest.mock import MagicMock, patch, sentinel
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import (
+from skryb.core.exceptions import (
     ConfigurationError,
     EngineDependencyMissingError,
     TranscriptionError,
 )
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.crisperwhisper_adapter import (
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.crisperwhisper_adapter import (
     CrisperWhisperAdapter,
     resolve_crisperwhisper_mode,
 )
-from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription.whisper_features import (
+from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription.whisper_features import (
     split_into_encoder_windows,
 )
 
