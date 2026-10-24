@@ -54,12 +54,16 @@ tab) is an escape hatch for re-runs; leave its version blank to use
 
 Requires [Inno Setup 6](https://jrsoftware.org/isdl.php), a relocatable
 CPython 3.12 (a [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-`install_only` build), and the settings window built first. The build stops
-if `ui\src-tauri\target\release\skryb-ui.exe` is missing, because it
-ships inside the app wheel:
+`install_only` build), and the settings window and the native Qwen3-ASR
+engine built first. The build stops if `ui\src-tauri\target\release\skryb-ui.exe`
+or `native\engine\build\qasr.dll` is missing, because both ship inside the
+app wheel. The engine needs AMD's `rocm-sdk-core` and `rocm-sdk-devel` 7.2.1
+wheels in the Python that runs `build.sh` (see `native/README.md`); the
+Release workflow installs them on the runner:
 
 ```powershell
 .\scripts\build_ui.ps1
+bash native/engine/build.sh
 python build_installer.py --python-dir C:\path\to\standalone\python
 python build_installer.py --python-dir ... --version 0.2.0 --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ```

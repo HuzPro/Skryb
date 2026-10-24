@@ -190,6 +190,7 @@ class SettingsService:
             infos = [info for info in infos if self._is_streaming_model(info)]
         else:
             infos = [info for info in infos if self._is_batch_model(info)]
+        infos = [info for info in infos if self._can_run_here(info)]
         return [
             ModelView.from_info(info, installed=self._install_cache.is_installed(info.name))
             for info in infos
@@ -212,6 +213,13 @@ class SettingsService:
         if self._registry is None:
             return False
         return _model_supports_streaming(info, self._registry.all_descriptors())
+
+    def _can_run_here(self, info: ModelInfo) -> bool:
+        """False only once the hardware is known and no engine for *info* can run on it."""
+        hardware = None if self._hardware_detector is None else self._hardware_detector.peek()
+        if self._registry is None or hardware is None:
+            return True
+        return bool(rank_engines(info, hardware, self._registry.all_descriptors()))
 
     def _is_batch_model(self, info: ModelInfo) -> bool:
         if self._registry is None:

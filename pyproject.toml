@@ -102,4 +102,4 @@ include = ["skryb*"]
 # show. ui-bin/ holds the settings window exe, which only the installer
 # build puts there.
 [tool.setuptools.package-data]
-skryb = ["licenses/*.md", "ui-bin/*.exe"]
+skryb = ["licenses/*.md", "ui-bin/*.exe", "transcription/qasr.dll"]

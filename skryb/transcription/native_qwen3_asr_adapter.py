@@ -19,6 +19,7 @@ import numpy as np
 from skryb.core.exceptions import TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.native_engine_dll import SHIPPED_DLL, native_engine_dll
 from skryb.transcription.result import TranscriptionResult
 from skryb.transcription.roman_urdu import romanize
 
@@ -27,8 +28,6 @@ _logger = logging.getLogger(__name__)
 
 _PACK_DIRECTORY_NAME = ".qasr"
 _PACK_FILENAME = "qwen3-asr.bin"
-_DLL_ENV = "QASR_DLL"
-_DEFAULT_DLL = Path(__file__).resolve().parents[2] / "native" / "engine" / "build" / "qasr.dll"
 _SAMPLE_RATE = 16000
 _TEXT_BUFFER_BYTES = 1 << 20
 _ERROR_BUFFER_BYTES = 1024
@@ -44,7 +43,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 
     def __init__(self, snapshot: Path, dll_path: Path | None = None) -> None:
         self._snapshot = snapshot
-        self._dll_path = dll_path or Path(os.environ.get(_DLL_ENV, _DEFAULT_DLL))
+        self._dll_path = dll_path or native_engine_dll() or SHIPPED_DLL
         self._lib: ctypes.CDLL | None = None
         self._handle: int | None = None
         self._text = ctypes.create_string_buffer(_TEXT_BUFFER_BYTES)
@@ -111,7 +110,8 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 def _open_library(dll_path: Path) -> ctypes.CDLL:
     if not dll_path.exists():
         raise TranscriptionError(
-            f"Native engine not built: {dll_path} is missing. Run native/engine/build.sh."
+            f"The native Qwen3-ASR engine isn't installed ({dll_path} is missing). "
+            "Reinstall Skryb, or in a source checkout run native/engine/build.sh."
         )
     hip_bin = _rocm_runtime_dir()
     if hip_bin is not None:

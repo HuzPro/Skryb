@@ -24,6 +24,7 @@ rocm-sdk-libraries-custom==7.2.1
 # silently jumping to 2.10.
 torch>=2.9.1,<2.10
 torchvision>=0.24.1,<0.25
+torchaudio>=2.9,<2.10
 
 # Rest of the app dependencies.
 -r requirements-all.txt

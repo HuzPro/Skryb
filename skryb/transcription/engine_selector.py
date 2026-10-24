@@ -74,7 +74,14 @@ def _filter_compatible(
         d for d in descriptors
         if d.engine_id in model.compatible_engines
         and hardware.kind in d.supported_hardware
+        and d.available
+        and (not d.supported_gfx or _base_arch(hardware.gfx_arch) in d.supported_gfx)
     ]
+
+
+def _base_arch(gfx_arch: str | None) -> str:
+    # HIP reports feature flags after the name: "gfx90a:sramecc+:xnack-".
+    return (gfx_arch or "").split(":", 1)[0].strip().lower()
 
 
 def _score(

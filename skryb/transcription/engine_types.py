@@ -31,6 +31,11 @@ class EngineDescriptor:
     # torch at all, and importing torch to find out would defeat the point.
     # Defaults to True so an engine that skips the import must say so.
     requires_torch: bool = True
+    # GPU architectures the engine's own kernels were compiled for, such as
+    # "gfx1200"; empty means any GPU of a supported kind.
+    supported_gfx: tuple[str, ...] = ()
+    # False when the engine's native library isn't on this machine.
+    available: bool = True
 
 
 @dataclass(frozen=True)
