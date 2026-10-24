@@ -44,11 +44,14 @@ def _digest(payload: bytes) -> str:
 
 @pytest.fixture(scope="module")
 def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    # Staging requires the built settings window, which CI never builds.
-    stand_in = tmp_path_factory.mktemp("ui") / "skryb-ui.exe"
-    stand_in.write_bytes(b"MZ")
+    # Staging requires the built settings window and native engine, which
+    # the test job never builds.
+    stand_ins = tmp_path_factory.mktemp("built")
+    (stand_ins / "skryb-ui.exe").write_bytes(b"MZ")
+    (stand_ins / "qasr.dll").write_bytes(b"MZ")
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(installer, "_UI_SHELL_BUILD", stand_in)
+        patch.setattr(installer, "_UI_SHELL_BUILD", stand_ins / "skryb-ui.exe")
+        patch.setattr(installer, "_NATIVE_ENGINE_BUILD", stand_ins / "qasr.dll")
         return _stage_wheel_source(_REPO_ROOT, tmp_path_factory.mktemp("stage"))
 
 
