@@ -104,7 +104,11 @@ jobs:
     name: Build installer
     needs: [gate, test]
     if: needs.gate.outputs.should_release == 'true'
-    runs-on: windows-latest
+    # Pinned, not windows-latest: Visual Studio 2026's C++ library made <cmath>
+    # constexpr, and ROCm 7.2.1's HIP compiler then rejects its own GPU math
+    # overloads ("__device__ function cannot overload __host__ __device__").
+    # Visual Studio 2022 predates that change.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
