@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AudioLines, BookA, ClipboardPaste, History, Keyboard, Mic, PenLine } from "lucide-react";
+import { AudioLines, BookA, ClipboardPaste, Download, History, Keyboard, Mic, PenLine } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, type NavItem } from "./components/shell";
@@ -13,6 +13,7 @@ import { OutputPage } from "./pages/output";
 import { SetupPage } from "./pages/setup";
 import { ShortcutsPage } from "./pages/shortcuts";
 import { TranscriptionPage } from "./pages/transcription";
+import { UpdatesPage } from "./pages/updates";
 import { WritingPage } from "./pages/writing";
 
 const queryClient = new QueryClient({
@@ -27,6 +28,7 @@ const NAV: NavItem[] = [
   { path: "microphone", label: "Microphone & sounds", icon: Mic },
   { path: "output", label: "Output", icon: ClipboardPaste },
   { path: "transcription", label: "Transcription", icon: AudioLines },
+  { path: "updates", label: "Updates", icon: Download },
 ];
 
 const LAST_SETTINGS_PAGE = "last-settings-page";
@@ -44,7 +46,7 @@ function browserStorage(): PageMemory | null {
 
 /** `--page settings` reopens the settings page shown last, Transcription the first time. */
 export function launchPath(page: Page, memory: PageMemory | null = browserStorage()): string {
-  if (page === "history" || page === "setup") return `/${page}`;
+  if (page === "history" || page === "setup" || page === "updates") return `/${page}`;
   let last: string | null = null;
   try {
     last = memory?.getItem(LAST_SETTINGS_PAGE) ?? null;
@@ -131,6 +133,7 @@ const PAGES = [
   { path: "microphone", element: <MicrophonePage /> },
   { path: "output", element: <OutputPage /> },
   { path: "transcription", element: <TranscriptionPage /> },
+  { path: "updates", element: <UpdatesPage /> },
   { path: "setup", element: <SetupPage /> },
 ];
 

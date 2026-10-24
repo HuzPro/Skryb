@@ -100,6 +100,7 @@ class Rig:
         play: Callable[[Path], None] | None = None,
         heartbeat_seconds: float = 15.0,
         on_save: Callable[[ChangeSet], None] | None = None,
+        updates: Any = None,
     ) -> None:
         self.config = FakeConfig({
             "transcription.model_size": PARAKEET,
@@ -168,6 +169,7 @@ class Rig:
             first_run=first_run,
             on_setup_done=self.setup_done.set,
             open_path=self.opened.append,
+            updates=updates,
         ).serve_on(self.server)
 
     def _count_stop(self) -> None:

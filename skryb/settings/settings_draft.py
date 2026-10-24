@@ -39,6 +39,8 @@ class SettingsDraft:
     # read at every paste, so neither needs a rebuild.
     history_retention_days: int = 0
     paste_method_overrides: tuple[tuple[str, str], ...] = ()
+    # The updater reads it before every hourly check.
+    check_for_updates: bool = True
 
 
 @dataclass(frozen=True)

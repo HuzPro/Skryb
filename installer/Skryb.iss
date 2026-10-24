@@ -9,8 +9,13 @@
 ; The installer bundles a standalone CPython runtime and the app wheel but
 ; NOT PyTorch. At setup it detects the GPU, lets the user pick a runtime
 ; (NVIDIA / AMD / CPU), then pip-installs the matching requirements plus the
-; app into the bundled Python. A launcher on the system PATH makes
+; app into the bundled Python. A launcher on the user's PATH makes
 ; `skryb` runnable from any terminal.
+;
+; It installs per user, so neither a first install nor an in-app update
+; asks for admin rights. An in-app update runs this silently with
+; /WAITPID=<pid>: setup waits for that Skryb to exit, installs over it
+; with the runtime chosen last time, and starts Skryb again.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -44,7 +49,8 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
+RestartApplications=no
 ChangesEnvironment=yes
 OutputBaseFilename={#AppName}-Setup-{#AppVersion}
 Compression=lzma2/max
@@ -73,6 +79,10 @@ Name: "{group}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; Tasks: desktopicon
 
+[Run]
+; No skipifsilent: after a silent in-app update this is what reopens Skryb.
+Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; Description: "Start {#AppName}"; Flags: nowait postinstall
+
 [UninstallDelete]
 ; pip writes into {app}\python at setup time; those files are not in the
 ; installer manifest, so force-remove the whole tree on uninstall.
@@ -80,7 +90,9 @@ Type: filesandordirs; Name: "{app}"
 
 [Code]
 const
-  EnvironmentKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+  EnvironmentKey = 'Environment';
+  SYNCHRONIZE = $00100000;
+  WaitForExitMilliseconds = 60000;
 
 var
   TargetPage: TInputOptionWizardPage;
@@ -123,6 +135,13 @@ begin
 end;
 
 { --- wizard ------------------------------------------------------------- }
+
+function PreviousTargetIndex(): Integer;
+begin
+  Result := StrToIntDef(GetPreviousData('Target', ''), -1);
+  if (Result < 0) or (Result > 2) then
+    Result := DetectedTarget;
+end;
 
 { A /TARGET=cpu|cuda|rocm command-line switch overrides detection, which
   makes the installer scriptable for silent / unattended deployments. }
@@ -171,7 +190,13 @@ begin
   if ParamTargetIndex() >= 0 then
     TargetPage.SelectedValueIndex := ParamTargetIndex()
   else
-    TargetPage.SelectedValueIndex := DetectedTarget;
+    TargetPage.SelectedValueIndex := PreviousTargetIndex();
+end;
+
+{ Reinstalls and in-app updates keep the runtime chosen last time. }
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'Target', IntToStr(EffectiveTargetIndex()));
 end;
 
 function ChosenRequirements(): String;
@@ -188,11 +213,16 @@ end;
 
 function RunPython(const Args, WorkingDir, StatusText: String): Integer;
 var
-  ResultCode: Integer;
+  ResultCode, ShowCmd: Integer;
 begin
   WizardForm.StatusLabel.Caption := StatusText;
+  { A silent in-app update keeps pip's console out of the way. }
+  if WizardSilent() then
+    ShowCmd := SW_HIDE
+  else
+    ShowCmd := SW_SHOW;
   if not Exec(ExpandConstant('{app}\python\python.exe'), Args, WorkingDir,
-             SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+             ShowCmd, ewWaitUntilTerminated, ResultCode) then
     Result := -1
   else
     Result := ResultCode;
@@ -235,7 +265,7 @@ begin
   Result := True;
 end;
 
-{ --- system PATH -------------------------------------------------------- }
+{ --- user PATH ---------------------------------------------------------- }
 
 function PathContains(const Paths, Dir: String): Boolean;
 begin
@@ -247,13 +277,13 @@ var
   Paths, BinDir: String;
 begin
   BinDir := ExpandConstant('{app}\bin');
-  if not RegQueryStringValue(HKLM, EnvironmentKey, 'Path', Paths) then
+  if not RegQueryStringValue(HKCU, EnvironmentKey, 'Path', Paths) then
     Paths := '';
   if PathContains(Paths, BinDir) then
     Exit;
   if (Paths <> '') and (Paths[Length(Paths)] <> ';') then
     Paths := Paths + ';';
-  RegWriteExpandStringValue(HKLM, EnvironmentKey, 'Path', Paths + BinDir);
+  RegWriteExpandStringValue(HKCU, EnvironmentKey, 'Path', Paths + BinDir);
 end;
 
 procedure RemoveBinFromPath();
@@ -262,7 +292,7 @@ var
   Marker: String;
 begin
   BinDir := ExpandConstant('{app}\bin');
-  if not RegQueryStringValue(HKLM, EnvironmentKey, 'Path', Paths) then
+  if not RegQueryStringValue(HKCU, EnvironmentKey, 'Path', Paths) then
     Exit;
   Marker := ';' + Paths + ';';
   StringChangeEx(Marker, ';' + BinDir + ';', ';', True);
@@ -271,7 +301,39 @@ begin
     Delete(Marker, 1, 1);
   if (Length(Marker) >= 1) and (Copy(Marker, Length(Marker), 1) = ';') then
     Delete(Marker, Length(Marker), 1);
-  RegWriteExpandStringValue(HKLM, EnvironmentKey, 'Path', Marker);
+  RegWriteExpandStringValue(HKCU, EnvironmentKey, 'Path', Marker);
+end;
+
+{ --- in-app update ------------------------------------------------------ }
+
+function OpenProcess(DesiredAccess: DWORD; InheritHandle: BOOL; ProcessId: DWORD): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: DWORD): DWORD;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+{ Skryb starts this and quits; its files are locked until that process is
+  gone. Past the minute, Restart Manager closes whatever is left. }
+procedure WaitForUpdatingCopy();
+var
+  Pid: Integer;
+  Process: THandle;
+begin
+  Pid := StrToIntDef(ExpandConstant('{param:WaitPid|0}'), 0);
+  if Pid <= 0 then
+    Exit;
+  Process := OpenProcess(SYNCHRONIZE, False, Pid);
+  if Process = 0 then
+    Exit;
+  WaitForSingleObject(Process, WaitForExitMilliseconds);
+  CloseHandle(Process);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  WaitForUpdatingCopy();
+  Result := True;
 end;
 
 { --- step hooks --------------------------------------------------------- }

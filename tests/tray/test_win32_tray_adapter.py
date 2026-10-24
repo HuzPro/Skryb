@@ -374,6 +374,41 @@ class TestRepeatLastDictationMenu:
         items = [label for label in labels if label]
         assert items[1:4] == ["Paste last dictation", "Copy last dictation", "History..."]
 
+    def test_a_ready_update_sits_first_and_installs_when_chosen(self, monkeypatch):
+        calls: list = []
+        tray, backend = self._backend(calls)
+        backend._update_offer = lambda: "0.3.0"
+        backend._on_update_clicked = lambda: calls.append("update")
+        labels: list[str] = []
+        user32 = MagicMock()
+        user32.AppendMenuW.side_effect = (
+            lambda menu, flags, item, label: labels.append(label)
+        )
+        user32.TrackPopupMenu.return_value = tray._ID_UPDATE
+        monkeypatch.setattr(tray, "_user32", user32)
+
+        backend._show_context_menu()
+
+        items = [label for label in labels if label]
+        assert items[1:3] == ["Restart and update to 0.3.0", "Paste last dictation"]
+        assert calls == ["update"]
+
+    def test_no_update_item_while_nothing_is_ready(self, monkeypatch):
+        tray, backend = self._backend([])
+        backend._update_offer = lambda: ""
+        backend._on_update_clicked = lambda: None
+        labels: list[str] = []
+        user32 = MagicMock()
+        user32.AppendMenuW.side_effect = (
+            lambda menu, flags, item, label: labels.append(label)
+        )
+        user32.TrackPopupMenu.return_value = 0
+        monkeypatch.setattr(tray, "_user32", user32)
+
+        backend._show_context_menu()
+
+        assert not any("update" in (label or "").lower() for label in labels)
+
     def _open_menu_and_choose(self, monkeypatch, desktop, command, calls):
         tray, backend = self._backend(calls)
         backend._hwnd = _TRAY

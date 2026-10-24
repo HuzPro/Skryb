@@ -54,6 +54,7 @@ export interface Settings {
   recording: RecordingSettings;
   history_retention_days: number;
   paste_method_overrides: [string, PasteMethod][];
+  check_for_updates: boolean;
 }
 
 export interface ChangeSet {
@@ -195,6 +196,15 @@ export interface AppInfo {
   diagnostics_directory: string;
   history_directory: string;
   pill_default_position: [number, number];
+  update: UpdateStatus | null;
+}
+
+export interface UpdateStatus {
+  state: "off" | "idle" | "checking" | "up_to_date" | "downloading" | "ready" | "installing" | "failed";
+  version: string;
+  bytes_done: number;
+  bytes_total: number;
+  error: string;
 }
 
 export interface License {

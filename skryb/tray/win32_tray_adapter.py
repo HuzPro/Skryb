@@ -56,6 +56,7 @@ _ID_QUIT = 3
 _ID_HISTORY = 4
 _ID_PASTE_LAST = 5
 _ID_COPY_LAST = 6
+_ID_UPDATE = 7
 
 # The tray menu takes the focus; paste-last hands it back first.
 _FOCUS_RESTORE_SECONDS = 0.3
@@ -363,6 +364,9 @@ class Win32TrayBackend:
     """
 
     _failure_logged = False
+    # No update item until the release updater offers one.
+    _update_offer: Callable[[], str] | None = None
+    _on_update_clicked: Callable[[], None] | None = None
 
     def __init__(
         self,
@@ -377,8 +381,12 @@ class Win32TrayBackend:
         on_copy_last_clicked: Callable[[], None] | None = None,
         *,
         dispatcher: GuiThreadDispatcher,
+        update_offer: Callable[[], str] | None = None,
+        on_update_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._dispatcher = dispatcher
+        self._update_offer = update_offer
+        self._on_update_clicked = on_update_clicked
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
@@ -506,6 +514,10 @@ class Win32TrayBackend:
             menu, _MF_STRING | _MF_GRAYED, _ID_STATE, self._get_state_label(),
         )
         _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
+        update = self._update_offer() if self._update_offer is not None else ""
+        if update and self._on_update_clicked is not None:
+            _user32.AppendMenuW(menu, _MF_STRING, _ID_UPDATE, f"Restart and update to {update}")
+            _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
         if self._on_paste_last_clicked is not None:
             _user32.AppendMenuW(
                 menu, _MF_STRING, _ID_PASTE_LAST, "Paste last dictation",
@@ -569,6 +581,7 @@ class Win32TrayBackend:
             _ID_SETTINGS: self._on_settings_clicked,
             _ID_HISTORY: self._on_history_clicked,
             _ID_COPY_LAST: self._on_copy_last_clicked,
+            _ID_UPDATE: self._on_update_clicked,
             _ID_QUIT: self._on_quit_clicked,
         }.get(command)
 
@@ -619,6 +632,8 @@ class Win32TrayAdapter:
         on_devices_changed: Callable[[], None] | None = None,
         on_paste_last_clicked: Callable[[], None] | None = None,
         on_copy_last_clicked: Callable[[], None] | None = None,
+        update_offer: Callable[[], str] | None = None,
+        on_update_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
@@ -634,6 +649,8 @@ class Win32TrayAdapter:
             on_devices_changed,
             on_paste_last_clicked, on_copy_last_clicked,
             dispatcher=dispatcher,
+            update_offer=update_offer,
+            on_update_clicked=on_update_clicked,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -745,6 +762,8 @@ def build_win32_tray_adapter(
     on_devices_changed: Callable[[], None] | None = None,
     on_paste_last_clicked: Callable[[], None] | None = None,
     on_copy_last_clicked: Callable[[], None] | None = None,
+    update_offer: Callable[[], str] | None = None,
+    on_update_clicked: Callable[[], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`skryb.tray.app.TrayIconFactory`.
 
@@ -766,4 +785,6 @@ def build_win32_tray_adapter(
         on_devices_changed=on_devices_changed,
         on_paste_last_clicked=on_paste_last_clicked,
         on_copy_last_clicked=on_copy_last_clicked,
+        update_offer=update_offer,
+        on_update_clicked=on_update_clicked,
     )

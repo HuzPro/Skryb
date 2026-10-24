@@ -292,6 +292,9 @@ class SettingsService:
             ),
             recording=RecordingPreferences.from_config(self._config),
             history_retention_days=history_retention_days(self._config),
+            check_for_updates=(
+                self._config.get("updates.check_automatically", True) is not False
+            ),
             paste_method_overrides=tuple(
                 (process, method.value) for process, method in sorted(
                     paste_method_overrides(
@@ -332,6 +335,7 @@ class SettingsService:
         )
         write_writing_settings(self._config, draft.writing)
         self._config.set("history.retention_days", draft.history_retention_days)
+        self._config.set("updates.check_automatically", draft.check_for_updates)
         # A process name holds a dot, so the map is stored whole rather
         # than key by dotted key.
         self._config.set(
