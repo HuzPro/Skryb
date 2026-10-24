@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{webview::PageLoadEvent, Emitter, Manager};
 
-const PAGES: [&str; 3] = ["settings", "history", "setup"];
+const PAGES: [&str; 4] = ["settings", "history", "setup", "updates"];
 // Shown on first page load; this only covers a page that never finishes loading.
 const SHOW_ANYWAY_AFTER: Duration = Duration::from_secs(4);
 

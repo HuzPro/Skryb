@@ -113,6 +113,7 @@ def _default_settings():
                       "max_duration_seconds": 600.0, "warn_before_cap_seconds": 30.0},
         "history_retention_days": 90,
         "paste_method_overrides": [["notepad.exe", "shift_insert"], ["windowsterminal.exe", "ctrl_shift_v"]],
+        "check_for_updates": True,
     }
 
 
@@ -178,7 +179,8 @@ class Core:
                     "engine": {"ready": not first_run, "loading": False, "error": None,
                                "model": "" if first_run else "parakeet-tdt-0.6b-v3"},
                     "first_run": first_run, "diagnostics_directory": "D:\\VoiceToText_logs",
-                    "history_directory": "D:\\VoiceToText_logs", "pill_default_position": [0.5, 1.0]}
+                    "history_directory": "D:\\VoiceToText_logs", "pill_default_position": [0.5, 1.0],
+                    "update": {"state": "up_to_date", "version": "", "bytes_done": 0, "bytes_total": 0, "error": ""}}
         self.gpu = gpu
         self.hardware = {"probe_pending": True, "streaming_supported": False, "kind": "", "device_name": ""}
         self.microphones = [
@@ -634,6 +636,25 @@ class Handler(BaseHTTPRequestHandler):
     def _setup(self, method, rest, query) -> None:
         self.core.app["first_run"] = False
         self._send(204)
+
+    def _updates(self, method, rest, query) -> None:
+        """A check finds 9.9.9, downloads its 31 MB in five steps, and offers it; install only says so."""
+        core = self.core
+
+        def show(**status) -> None:
+            with core.lock:
+                core.app["update"] = {"state": "idle", "version": "", "bytes_done": 0, "bytes_total": 0, "error": "", **status}
+                core.emit("app", core.app)
+
+        size = 30_972_960
+        if rest == ["check"]:
+            show(state="checking")
+            for step in range(1, 6):
+                core.later(0.6 * step, lambda step=step: show(state="downloading", version="9.9.9", bytes_done=size * (step - 1) // 5, bytes_total=size))
+            core.later(3.6, lambda: show(state="ready", version="9.9.9"))
+        elif rest == ["install"]:
+            show(state="installing", version="9.9.9")
+        self._send(202)
 
 
 def main() -> None:
