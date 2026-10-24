@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from release import installer
 from release.installer import _stage_wheel_source
 
 
@@ -43,7 +44,12 @@ def _digest(payload: bytes) -> str:
 
 @pytest.fixture(scope="module")
 def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return _stage_wheel_source(_REPO_ROOT, tmp_path_factory.mktemp("stage"))
+    # Staging requires the built settings window, which CI never builds.
+    stand_in = tmp_path_factory.mktemp("ui") / "voicetotext-ui.exe"
+    stand_in.write_bytes(b"MZ")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(installer, "_UI_SHELL_BUILD", stand_in)
+        return _stage_wheel_source(_REPO_ROOT, tmp_path_factory.mktemp("stage"))
 
 
 @pytest.fixture(scope="module")
