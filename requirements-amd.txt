@@ -29,9 +29,12 @@ rocm==7.2.1
 rocm-sdk-core==7.2.1
 rocm-sdk-libraries-custom==7.2.1
 
-# PyTorch + vision built against ROCm 7.2.1.
+# PyTorch, vision and audio built against ROCm 7.2.1. torchaudio must be
+# pinned too: left to `torchaudio>=2.5` pip takes PyPI's newest CPU build,
+# whose compiled library can't load against this torch.
 torch==2.9.1+rocm7.2.1
 torchvision==0.24.1+rocm7.2.1
+torchaudio==2.9.1+rocm7.2.1
 
 # Rest of the app dependencies.
 -r requirements-all.txt

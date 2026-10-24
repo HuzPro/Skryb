@@ -46,3 +46,6 @@ ui/src-tauri/target/
 ui/dist/
 # Tauri UI shell build output
 ui/src-tauri/gen/
+
+# Copied in by the installer build; never committed.
+skryb/transcription/qasr.dll

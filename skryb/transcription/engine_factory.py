@@ -36,6 +36,7 @@ from skryb.transcription.model_info import (
     get_model_info,
 )
 from skryb.transcription.model_manager import ModelManager
+from skryb.transcription.native_engine_dll import native_engine_dll
 
 _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     engine_id="nano_parakeet",
@@ -79,13 +80,15 @@ _CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
 )
 
 
-# Hand-written kernels for gfx1200 behind a DLL: AMD only, and no torch import.
+# Hand-written kernels compiled for gfx1200 only (the RX 9060 XT they were
+# tuned and checked on), behind a DLL: no torch import.
 _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
     engine_id="native_qwen3_asr",
     display_name="Qwen3-ASR (native HIP engine)",
     supported_hardware=("amd_rocm",),
     base_priority=95,
     requires_torch=False,
+    supported_gfx=("gfx1200",),
 )
 
 
@@ -109,7 +112,7 @@ def build_engine_registry() -> EngineRegistry:
             _PHONON2_CPU_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
-            _NATIVE_QWEN3_ASR_DESCRIPTOR,
+            replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=native_engine_dll() is not None),
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
