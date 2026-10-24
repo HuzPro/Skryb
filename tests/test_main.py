@@ -41,6 +41,37 @@ windows_startup_only = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _app_folders_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """``main()`` renames the real VoiceToText folders and writes a session log under %APPDATA%.
+
+    Run on a developer's PC with the real variables, that moved their
+    settings and models to Skryb's folders mid-session.
+    """
+    roaming, local = tmp_path / "Roaming", tmp_path / "Local"
+    monkeypatch.setenv("APPDATA", str(roaming))
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    return tmp_path
+
+
+def test_running_main_leaves_the_real_voicetotext_folders_alone(tmp_path: Path) -> None:
+    old = tmp_path / "Roaming" / "VoiceToText"
+    old.mkdir(parents=True)
+    (old / "config.json").write_text("{}", encoding="utf-8")
+
+    with (
+        patch.object(sys, "argv", ["skryb", "--doctor"]),
+        patch("sys.stdout", io.StringIO()),
+        patch("skryb.__main__._run"),
+        patch("skryb.diagnostics.doctor.run_doctor", return_value="ok"),
+        pytest.raises(SystemExit),
+    ):
+        main()
+
+    assert os.environ["APPDATA"] == str(tmp_path / "Roaming")
+    assert (tmp_path / "Roaming" / "Skryb" / "config.json").exists()
+
+
 def _startup(
     registry: EngineRegistry | None = None,
     await_torch_prewarm: Callable[[], None] = lambda: None,
