@@ -45,6 +45,11 @@ _ISCC_DEFAULT_LOCATIONS = (
 _UI_SHELL_BUILD = Path("ui") / "src-tauri" / "target" / "release" / "skryb-ui.exe"
 _UI_SHELL_IN_WHEEL = "skryb/ui-bin/skryb-ui.exe"
 
+# The native Qwen3-ASR engine as native/engine/build.sh leaves it, and where
+# skryb.transcription.native_engine_dll looks for it when installed.
+_NATIVE_ENGINE_BUILD = Path("native") / "engine" / "build" / "qasr.dll"
+_NATIVE_ENGINE_IN_WHEEL = "skryb/transcription/qasr.dll"
+
 
 def iss_defines(version: str, payload_dir: Path, wheel_filename: str) -> dict[str, str]:
     """Build the ``/D`` defines the ``.iss`` script reads."""
@@ -185,15 +190,17 @@ def _build_app_wheel(python_dir: Path, repo_root: Path, wheels_dir: Path) -> str
         raise InstallerBuildError(
             f"expected exactly one app wheel in {wheels_dir}, found {len(wheels)}"
         )
-    _require_ui_shell_in_wheel(wheels[0])
+    _require_built_files_in_wheel(wheels[0])
     return wheels[0].name
 
 
-def _require_ui_shell_in_wheel(wheel: Path) -> None:
+def _require_built_files_in_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
-        if _UI_SHELL_IN_WHEEL not in archive.namelist():
+        names = set(archive.namelist())
+    for member in (_UI_SHELL_IN_WHEEL, _NATIVE_ENGINE_IN_WHEEL):
+        if member not in names:
             raise InstallerBuildError(
-                f"{wheel.name} is missing {_UI_SHELL_IN_WHEEL}; check "
+                f"{wheel.name} is missing {member}; check "
                 f"[tool.setuptools.package-data] in pyproject.toml"
             )
 
@@ -214,6 +221,7 @@ def _stage_wheel_source(repo_root: Path, scratch: Path) -> Path:
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     _copy_ui_shell(repo_root, source / "skryb" / "ui-bin")
+    _copy_native_engine(repo_root, source / "skryb" / "transcription")
     return source
 
 
@@ -225,6 +233,16 @@ def _copy_ui_shell(repo_root: Path, destination: Path) -> None:
             f"run scripts\\build_ui.ps1 first"
         )
     destination.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(built, destination / built.name)
+
+
+def _copy_native_engine(repo_root: Path, destination: Path) -> None:
+    built = repo_root / _NATIVE_ENGINE_BUILD
+    if not built.exists():
+        raise InstallerBuildError(
+            f"the native Qwen3-ASR engine is not built ({built} is missing); "
+            f"run native/engine/build.sh first"
+        )
     shutil.copyfile(built, destination / built.name)
 
 

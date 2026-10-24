@@ -102,7 +102,7 @@ class TestRuntimeNotice:
         assert "proprietary" not in notice.lower()
 
 
-def _fake_repo(root: Path, *, ui_built: bool = True) -> Path:
+def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) -> Path:
     repo = root / "repo"
     (repo / "skryb").mkdir(parents=True)
     (repo / "skryb" / "__init__.py").write_text("", encoding="utf-8")
@@ -112,6 +112,11 @@ def _fake_repo(root: Path, *, ui_built: bool = True) -> Path:
         exe = repo / "ui" / "src-tauri" / "target" / "release" / "skryb-ui.exe"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"MZ settings window")
+    if engine_built:
+        dll = repo / "native" / "engine" / "build" / "qasr.dll"
+        dll.parent.mkdir(parents=True)
+        dll.write_bytes(b"MZ native engine")
+    (repo / "skryb" / "transcription").mkdir()
     (root / "scratch").mkdir()
     return repo
 
@@ -136,6 +141,19 @@ class TestStageWheelSource:
 
         shipped = source / "skryb" / "ui-bin" / "skryb-ui.exe"
         assert shipped.read_bytes() == b"MZ settings window"
+
+    def test_puts_the_native_engine_where_the_installed_app_looks(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+
+        source = _stage_wheel_source(repo, tmp_path / "scratch")
+
+        assert (source / "skryb" / "transcription" / "qasr.dll").read_bytes() == b"MZ native engine"
+
+    def test_refuses_to_build_an_installer_without_the_native_engine(self, tmp_path):
+        repo = _fake_repo(tmp_path, engine_built=False)
+
+        with pytest.raises(InstallerBuildError, match=r"native/engine/build\.sh"):
+            _stage_wheel_source(repo, tmp_path / "scratch")
 
     def test_refuses_to_build_an_installer_without_the_settings_window(self, tmp_path):
         repo = _fake_repo(tmp_path, ui_built=False)

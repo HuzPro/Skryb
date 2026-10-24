@@ -3,11 +3,18 @@
 Hand-written HIP kernels behind `qasr.dll`, loaded by
 `skryb/transcription/native_qwen3_asr_adapter.py` for the `qwen3-asr-1.7b` model. No torch.
 
-Build (needs the ROCm 7.2.1 SDK wheels in the global Python 3.12, `rocm-sdk-devel` included):
+Build (needs AMD's `rocm-sdk-core` and `rocm-sdk-devel` 7.2.1 wheels in the Python 3.12 on
+`PATH`, plus Visual Studio's C++ build tools; no GPU needed):
 
 ```bash
+python -m pip install --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 rocm-sdk-devel==7.2.1
 bash native/engine/build.sh
 ```
+
+The Release workflow does the same and ships `qasr.dll` inside the app wheel as
+`skryb/transcription/qasr.dll`. The app loads that copy, then `native/engine/build/qasr.dll` in a
+source checkout; `QASR_DLL` overrides both. The kernels are compiled for gfx1200 only, so the
+`qwen3-asr-1.7b` model is offered only on a gfx1200 GPU with the DLL present.
 
 Run HIP binaries from a short path: the HIP runtime crashes (0xC0000409) when its module path is long.
 
