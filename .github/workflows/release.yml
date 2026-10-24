@@ -199,6 +199,11 @@ jobs:
             launch it from the Start Menu. Speech-to-text models download on
             first run.
 
+            Skryb installs for your Windows account only, so setup never asks
+            for admin rights. Once installed, it checks GitHub for new versions
+            and offers to install each one itself, so this is the only download
+            you do by hand. Turn the checks off in Settings > Updates.
+
             The installer is not code-signed yet, so Windows SmartScreen may
             say it "protected your PC". Click **More info**, then **Run
             anyway**.
