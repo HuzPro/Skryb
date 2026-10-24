@@ -101,6 +101,7 @@ def settings_json(draft: SettingsDraft) -> Json:
         },
         "history_retention_days": draft.history_retention_days,
         "paste_method_overrides": [list(pair) for pair in draft.paste_method_overrides],
+        "check_for_updates": draft.check_for_updates,
     }
 
 
@@ -160,6 +161,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         ),
         history_retention_days=retention,
         paste_method_overrides=_overrides_from_json(settings.items("paste_method_overrides")),
+        check_for_updates=settings.flag("check_for_updates"),
     )
 
 

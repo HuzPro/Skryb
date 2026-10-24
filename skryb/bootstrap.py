@@ -34,6 +34,12 @@ from skryb.core.exceptions import (
 )
 from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.core.paths import AppPaths
+from skryb.core.release_update import (
+    ReleaseUpdater,
+    UpdateStatus,
+    fetch_latest_release,
+    is_installed_copy,
+)
 from skryb.core.self_update import SelfUpdate
 from skryb.core.single_instance import SecondLaunches
 from skryb.core.startup_log import milestone, process_started_at, session_id
@@ -175,10 +181,10 @@ from skryb.transcription.streaming.streaming_engine import (
 from skryb.transcription_use_case import RecordAndTranscribeUseCase
 from skryb.tray.app import SystemTrayApp
 from skryb.tray.win32_tray_adapter import build_win32_tray_adapter
-from skryb.ui.api_handlers import CoreApi, ShortcutCapture
+from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
-from skryb.writing.install import WritingPaths, managed_root, server_files
+from skryb.writing.install import WritingPaths, chunked_downloader, managed_root, server_files
 from skryb.writing.learning import Learner
 from skryb.writing.llama_server import LlamaServer
 from skryb.writing.service import WritingService, warm_up_writing_model
@@ -1351,6 +1357,21 @@ def build_app(
             history_pruner=history_pruner,
         )
 
+    # Bound late: the app, the API and the notice all come after it.
+    updater = _release_updater(
+        config,
+        is_busy=lambda: state_machine.state in _DICTATING,
+        quit_into=lambda start: gui_dispatcher.dispatch(lambda: app.restart(start)),
+        on_change=lambda _status: api.publish_app_info(),
+        offer=lambda version: gui_dispatcher.dispatch(
+            lambda: notice.show(
+                f"Skryb {version} is ready to install.",
+                [("Restart and update", install_update)],
+            ),
+        ),
+    )
+    install_update = updater.install if updater is not None else _no_update
+
     # The shell's requests arrive on the API server's threads; applying
     # settings rebuilds the output chain and the hotkey hook, which the
     # settings window always did on the GUI thread.
@@ -1374,6 +1395,7 @@ def build_app(
         history=HistoryService(
             paths.diagnostics_dir, record_and_transcribe_use_case.retranscribe,
         ),
+        updates=updater,
     )
     launcher = ShellLauncher(api_server, notify=lambda message: app.notify(message))
 
@@ -1421,14 +1443,16 @@ def build_app(
             list_microphones=functools.partial(_microphone_menu, config, microphones),
             on_microphone_chosen=functools.partial(_choose_microphone, config),
             on_devices_changed=hot_plug.devices_changed,
+            update_offer=updater.offered_version if updater is not None else None,
+            on_update_clicked=install_update if updater is not None else None,
         ),
         on_open_settings=functools.partial(show_page, "settings"),
         build_status=RunningBuild(source_checkout()).status,
         start_replacement=functools.partial(start_another_copy, "--restart"),
         download_manager=download_manager,
-        owned_disposables=(
-            (overlay, ducking, history_pruner, writing) if overlay is not None
-            else (ducking, history_pruner, writing)
+        owned_disposables=tuple(
+            item for item in (overlay, ducking, history_pruner, writing, updater)
+            if item is not None
         ),
     )
 
@@ -1456,6 +1480,19 @@ def build_app(
         event_bus=event_bus,
         preload=preload,
     )
+    if updater is not None:
+        check_now = updater.check_now
+
+        # Launching an installed copy again shows its updates, checked afresh.
+        def show_updates() -> None:
+            check_now()
+            show_page("updates")
+
+        if second_launches is not None:
+            second_launches.on_launch = show_updates
+        updater.start()
+        return app
+
     self_update = SelfUpdate(
         pull=functools.partial(pull_main, source_checkout()),
         source_changed=functools.partial(
@@ -1473,6 +1510,35 @@ def build_app(
         self_update.check(asked=False)
 
     return app
+
+
+def _no_update() -> None:
+    return None
+
+
+def _release_updater(
+    config: JsonConfigAdapter,
+    *,
+    is_busy: Callable[[], bool],
+    quit_into: Callable[[Callable[[], None]], None],
+    on_change: Callable[[UpdateStatus], None],
+    offer: Callable[[str], None],
+) -> ReleaseUpdater | None:
+    """The GitHub release updater for a copy Skryb-Setup installed; None for a git checkout."""
+    if not is_installed_copy():
+        return None
+    running = app_version()
+    return ReleaseUpdater(
+        running_version=running,
+        updates_dir=managed_root().parent / "updates",
+        enabled=lambda: config.get("updates.check_automatically", True) is not False,
+        fetch_latest=functools.partial(fetch_latest_release, running),
+        downloader=chunked_downloader(),
+        is_busy=is_busy,
+        quit_into=quit_into,
+        on_change=on_change,
+        offer=offer,
+    )
 
 
 def apply_settings(

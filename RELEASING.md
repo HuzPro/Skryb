@@ -6,13 +6,39 @@ app, detects the user's GPU at install time, and pip-installs the matching
 runtime (NVIDIA CUDA / AMD ROCm / CPU) on their machine. That keeps the
 published download small instead of a multi-GB per-target bundle.
 
+## Pick the version
+
+Versions are `MAJOR.MINOR.PATCH`, decided by the commit types since the last
+release:
+
+| Since the last release | Bump | Example |
+|---|---|---|
+| Only `fix:`, `perf:`, `docs:`, `test:`, `chore:` and the like | PATCH | 0.2.0 -> 0.2.1 |
+| At least one `feat:`: something people can see or turn on | MINOR | 0.2.1 -> 0.3.0 |
+| A breaking change, `feat!:` or a `BREAKING CHANGE:` line: settings that don't carry over, a dropped GPU or Windows version | MAJOR | 1.4.2 -> 2.0.0 |
+
+Before 1.0.0 a breaking change bumps MINOR instead. 1.0.0 is cut by hand
+once Skryb is stable.
+
+The helper applies those rules (run `git fetch --tags` first):
+
+```powershell
+python -m release.next_version           # prints e.g. "0.3.0 (minor: 12 commits since v0.2.1)"
+python -m release.next_version --apply   # also writes it into pyproject.toml
+```
+
 ## Cut a release
 
-Land a commit on `main` whose message starts with `release:` and a version:
+Land a commit on `main` that sets the new version in `pyproject.toml` and
+whose message starts with `release:` and that same version:
 
 ```
 release: v0.2.0
 ```
+
+The release gate fails if the two differ: the installed app reports
+`pyproject.toml`'s version, so a mismatched tag would have its updater offer
+the same update forever.
 
 The [`Release` workflow](.github/workflows/release.yml) then runs the tests,
 builds the installer, tags `v0.2.0`, and publishes a GitHub Release with the
@@ -47,8 +73,10 @@ auto-detected from the default install location when omitted.
    radio page: NVIDIA (CUDA) / AMD (ROCm) / CPU.
 2. `pip install`s the chosen `requirements-*.txt` plus the app wheel into the
    bundled Python (this is the multi-GB download).
-3. Adds `skryb` to the system PATH (runnable from any terminal) and
-   creates Start-Menu / optional desktop shortcuts (windowless).
+3. Adds `skryb` to the user's PATH (runnable from any terminal) and
+   creates Start-Menu / optional desktop shortcuts (windowless). It
+   installs per user, in `%LOCALAPPDATA%\Programs\Skryb`, with no admin
+   prompt.
 4. Writes `THIRD-PARTY-NOTICES.txt` for the installed packages; uninstall
    removes everything, including the pip-installed files.
 
@@ -59,9 +87,32 @@ Skryb-Setup-<version>.exe /VERYSILENT /TARGET=cpu
 ```
 
 `/TARGET=cpu|cuda|rocm` overrides hardware detection (handy for IT
-deployment). The installer's pip runs `--isolated`, so a machine's global
+deployment). Without it, a reinstall keeps the runtime chosen last time. The installer's pip runs `--isolated`, so a machine's global
 `pip.ini` or `PIP_*` environment variables cannot break the dependency
 install.
+
+## In-app updates
+
+An installed copy (one with `unins000.exe` next to its bundled Python) asks
+`GET /repos/HuzPro/Skryb/releases/latest` 15 s after start and then hourly,
+unless Settings > Updates turns that off. A newer `Skryb-Setup-<version>.exe`
+is downloaded to `%LOCALAPPDATA%\Skryb\updates` and checked against the
+SHA-256 GitHub records for the asset; only then is it offered, in a notice,
+the tray menu and Settings > Updates. **Restart and update** waits for any
+dictation to finish, then Skryb starts:
+
+```
+Skryb-Setup-<version>.exe /SILENT /NORESTART /FORCECLOSEAPPLICATIONS /WAITPID=<skryb pid> /LOG=<updates>\install-<version>.log
+```
+
+and quits. Setup waits up to a minute for that process to exit, force-closes
+anything still holding its files after that (a stuck copy), installs over it
+with the same runtime, and its `[Run]` entry starts Skryb again. If
+the new copy doesn't start, the next launch of the old one says the update
+didn't finish and names the log. A copy running from a git checkout keeps
+updating through git instead.
+
+The first release with the updater has to be installed by hand once.
 
 ## Licensing
 

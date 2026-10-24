@@ -22,6 +22,7 @@ from skryb.core.events import (
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
 )
+from skryb.core.release_update import ReleaseUpdater
 from skryb.core.state_machine import AppState
 from skryb.history.entries import HistoryEntry
 from skryb.history.service import HistoryService, RetryOutcome
@@ -248,6 +249,7 @@ class CoreApi:
         first_run: bool = False,
         on_setup_done: Callable[[], None] = _nothing,
         open_path: Callable[[Path], None] = open_with_shell,
+        updates: ReleaseUpdater | None = None,
     ) -> None:
         self._service = service
         self._hub = hub
@@ -261,6 +263,7 @@ class CoreApi:
         self._first_run = first_run
         self._on_setup_done = on_setup_done
         self._open_path = open_path
+        self._updates = updates
         self._lock = threading.Lock()
 
     def serve_on(self, server: ApiServer) -> None:
@@ -317,6 +320,8 @@ class CoreApi:
             ("PUT", "/api/logs/directory", self._set_logs_directory),
             ("POST", "/api/pill/reset-position", self._reset_pill_position),
             ("POST", "/api/setup/done", self._setup_done),
+            ("POST", "/api/updates/check", self._check_for_updates),
+            ("POST", "/api/updates/install", self._install_update),
         ]
         return [
             (method, path, handler if method == "GET" else self._one_at_a_time(handler))
@@ -343,7 +348,12 @@ class CoreApi:
             "diagnostics_directory": str(self._diagnostics_dir),
             "history_directory": str(self._diagnostics_dir),
             "pill_default_position": list(DEFAULT_PILL_POSITION),
+            # None: this copy runs from a git checkout and updates through git.
+            "update": asdict(self._updates.status()) if self._updates is not None else None,
         }
+
+    def publish_app_info(self) -> None:
+        self._hub.publish("app", self.app_info())
 
     def writing_status(self) -> Json | None:
         writing = self._writing
@@ -716,6 +726,24 @@ class CoreApi:
         if not asynchronous:
             self._hub.publish("writing", self.writing_status())
         return _ACCEPTED if asynchronous else _NO_CONTENT
+
+    # -- updates ------------------------------------------------------------------------
+
+    def _require_updates(self) -> ReleaseUpdater:
+        if self._updates is None:
+            raise ApiError(404, "This copy runs from a source folder and updates through git.")
+        return self._updates
+
+    def _check_for_updates(self, _request: ApiRequest) -> ApiResponse:
+        self._require_updates().check_now()
+        return _ACCEPTED
+
+    def _install_update(self, _request: ApiRequest) -> ApiResponse:
+        updates = self._require_updates()
+        if not updates.offered_version():
+            raise ApiError(409, "There is no downloaded update to install.")
+        updates.install()
+        return _ACCEPTED
 
     # -- history ------------------------------------------------------------------------
 

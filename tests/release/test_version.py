@@ -1,10 +1,10 @@
 """Tests for release-version resolution.
 
 The release version comes from the commit message in CI and from a
-``--version`` flag or nothing at all when building locally. When no
-version is supplied explicitly the build falls back to the canonical
-version declared in ``pyproject.toml``. An empty string models "not
-supplied" so no ``None`` ever crosses the boundary.
+``--version`` flag or nothing at all when building locally. Either way it
+must be the version declared in ``pyproject.toml``, which is what the
+installed app reports. An empty string models "not supplied" so no
+``None`` ever crosses the boundary.
 """
 
 from pathlib import Path
@@ -38,10 +38,20 @@ class TestReadingThePyprojectVersion:
 
 
 class TestResolvingTheReleaseVersion:
-    def test_prefers_an_explicit_version_over_pyproject(self, tmp_path: Path):
-        pyproject = _write_pyproject(tmp_path, 'version = "0.1.0"')
+    def test_accepts_an_explicit_version_that_matches_pyproject(self, tmp_path: Path):
+        pyproject = _write_pyproject(tmp_path, 'version = "2.5.0"')
 
         assert resolve_version("2.5.0", pyproject) == "2.5.0"
+        assert resolve_version("v2.5.0", pyproject) == "2.5.0"
+
+    @pytest.mark.parametrize("explicit", ["2.5.0", "0.1.1", "0.1.0-rc1", "1.0.0"])
+    def test_refuses_an_explicit_version_pyproject_does_not_declare(
+        self, tmp_path: Path, explicit: str
+    ):
+        pyproject = _write_pyproject(tmp_path, 'version = "0.1.0"')
+
+        with pytest.raises(VersionResolutionError, match="pyproject.toml"):
+            resolve_version(explicit, pyproject)
 
     def test_falls_back_to_pyproject_when_no_explicit_version(
         self, tmp_path: Path
@@ -60,6 +70,6 @@ class TestResolvingTheReleaseVersion:
     def test_trims_surrounding_whitespace_from_an_explicit_version(
         self, tmp_path: Path
     ):
-        pyproject = _write_pyproject(tmp_path, 'version = "0.1.0"')
+        pyproject = _write_pyproject(tmp_path, 'version = "2.5.0"')
 
         assert resolve_version("  2.5.0  ", pyproject) == "2.5.0"

@@ -22,6 +22,7 @@ const app: AppInfo = {
   diagnostics_directory: "D:\\logs",
   history_directory: "D:\\logs",
   pill_default_position: [0.5, 1],
+  update: null,
 };
 
 const models = [model("parakeet-tdt-0.6b-v3", true), model("crisperwhisper-2.0-turbo"), model("crisperwhisper-2.0-large")];

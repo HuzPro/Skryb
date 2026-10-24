@@ -72,6 +72,9 @@ DEFAULT_CONFIG = {
     "history": {
         "retention_days": 0,
     },
+    "updates": {
+        "check_automatically": True,
+    },
 }
 
 
