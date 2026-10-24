@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { launchPath, rememberPage } from "../app";
-import type { HistoryEntry, Model, Settings, WritingRecord } from "../lib/types";
+import type { HistoryEntry, Model, Settings, UpdateStatus, WritingRecord } from "../lib/types";
 import { duplicateAlias, joinAliases, splitAliases } from "./dictionary";
 import { describeOutcome, finalText, formatDuration, groupByDay, hasVersions, preview } from "./history";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
 import { withMode } from "./transcription";
+import { describeUpdate } from "./updates";
 import { describeTrackRecord, fileName } from "./writing";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -216,5 +217,32 @@ describe("writing model track record", () => {
   it("reads right for one dictation and for none", () => {
     expect(describeTrackRecord({ dictations: 1, outcomes: { skipped: 1 }, rejections: [] })).toEqual(["Last 1 dictation: 1 skipped."]);
     expect(describeTrackRecord({ dictations: 0, outcomes: {}, rejections: [] })).toEqual(["No dictations have gone through the writing model yet."]);
+  });
+});
+
+describe("updates page", () => {
+  const status = (extra: Partial<UpdateStatus>): UpdateStatus => ({ state: "idle", version: "", bytes_done: 0, bytes_total: 0, error: "", ...extra });
+
+  it("tells a git checkout that it updates through git", () => {
+    expect(describeUpdate(null, "0.2.0").description).toMatch(/updates through git/);
+  });
+
+  it("shows whole percents while downloading, never past 100", () => {
+    expect(describeUpdate(status({ state: "downloading", version: "0.3.0", bytes_done: 15_486_480, bytes_total: 30_972_960 }), "0.2.0")).toEqual({
+      title: "Downloading Skryb 0.3.0",
+      description: "50% downloaded. You choose when to install it.",
+    });
+    expect(describeUpdate(status({ state: "downloading", version: "0.3.0", bytes_done: 30_972_959, bytes_total: 30_972_960 }), "0.2.0").description).toMatch(/^99%/);
+    expect(describeUpdate(status({ state: "downloading", version: "0.3.0" }), "0.2.0").description).toMatch(/^0%/);
+  });
+
+  it("names the waiting version once it is ready", () => {
+    expect(describeUpdate(status({ state: "ready", version: "0.3.0" }), "0.2.0").title).toBe("Skryb 0.3.0 is ready");
+  });
+
+  it("keeps naming the running version while checking, up to date, off or failed", () => {
+    for (const state of ["checking", "up_to_date", "off", "failed", "idle"] as const) {
+      expect(describeUpdate(status({ state }), "0.2.0").title).toBe("Skryb 0.2.0");
+    }
   });
 });

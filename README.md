@@ -11,7 +11,12 @@ Get `Skryb-Setup-<version>.exe` from the
 [latest release](https://github.com/HuzPro/Skryb/releases/latest) and
 run it. The installer detects your GPU, lets you pick NVIDIA (CUDA), AMD
 (ROCm) or CPU, and downloads the matching PyTorch build during setup. On a GPU
-machine that download is several GB.
+machine that download is several GB. It installs for your Windows account
+only, so it never asks for admin rights.
+
+Skryb checks GitHub for a new version once an hour and downloads it in the
+background. When one is ready, it asks you; click **Restart and update** and
+it installs and opens again. Turn the checks off in Settings > Updates.
 
 The installer isn't code-signed yet, so Windows SmartScreen may say it
 protected your PC. Click **More info**, then **Run anyway**.

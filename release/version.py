@@ -1,9 +1,11 @@
 """Resolve the version a release is cut as.
 
-Precedence is explicit-over-declared: a version supplied on the command
-line (or, in CI, parsed from the release commit message) wins; otherwise
-the build falls back to the canonical version in ``pyproject.toml``. An
-empty or whitespace-only explicit value means "not supplied".
+``pyproject.toml`` is the one source: the wheel, so the installed app,
+reports that version. A version supplied on the command line (or, in CI,
+parsed from the release commit message) must match it, because an
+installer that reports an older version than its tag would have the app's
+updater offer the same update forever. An empty or whitespace-only
+explicit value means "not supplied".
 """
 
 import tomllib
@@ -13,11 +15,15 @@ from release.errors import VersionResolutionError
 
 
 def resolve_version(explicit: str, pyproject_path: Path) -> str:
-    """Return the release version, preferring ``explicit`` when given."""
-    chosen = explicit.strip()
-    if chosen:
-        return chosen
-    return read_pyproject_version(pyproject_path)
+    """Return the release version, refusing an ``explicit`` one ``pyproject.toml`` doesn't declare."""
+    declared = read_pyproject_version(pyproject_path)
+    chosen = explicit.strip().removeprefix("v")
+    if chosen and chosen != declared:
+        raise VersionResolutionError(
+            f"release version {chosen} doesn't match pyproject.toml's {declared}; "
+            f"set version = \"{chosen}\" in pyproject.toml in the release commit"
+        )
+    return declared
 
 
 def read_pyproject_version(pyproject_path: Path) -> str:

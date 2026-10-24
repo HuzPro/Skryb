@@ -216,13 +216,14 @@ class SystemTrayApp:
             return
         self._on_open_settings()
 
-    def restart(self) -> None:
+    def restart(self, start_replacement: Callable[[], None] | None = None) -> None:
         """Quit, with a fresh copy of the app already starting in its place.
 
         The fresh copy waits for this one to exit, so it starts first and
-        loads its libraries while this one cleans up.
+        loads its libraries while this one cleans up. An update passes the
+        installer as the replacement.
         """
-        self._start_replacement()
+        (start_replacement or self._start_replacement)()
         self._handle_quit()
 
     def _handle_quit(self) -> None:

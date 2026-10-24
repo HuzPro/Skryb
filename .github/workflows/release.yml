@@ -64,6 +64,14 @@ jobs:
             echo "Head commit is not a release request; nothing to do."
           fi
 
+      # The installed app reports pyproject.toml's version. A release tagged
+      # anything else would have the app's updater offer it forever.
+      - name: Check the version matches pyproject.toml
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: python -c "import os, pathlib; from release.version import resolve_version; resolve_version(os.environ['VERSION'], pathlib.Path('pyproject.toml'))"
+
   test:
     name: Tests (Ubuntu, CPU)
     needs: gate

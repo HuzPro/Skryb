@@ -14,6 +14,7 @@ import pytest
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
 from skryb.core.events import DownloadProgressEvent
+from skryb.core.release_update import UpdateStatus
 from skryb.core.state_machine import AppState
 from skryb.output.output_mode import OutputMode
 from skryb.recording.pill import DEFAULT_PILL_POSITION
@@ -27,7 +28,7 @@ _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
     "crisperwhisper_mode", "capture_content", "input_device", "boost_quiet_speech",
     "writing", "hotkey_bindings", "double_tap_locks_hold", "recording",
-    "history_retention_days", "paste_method_overrides",
+    "history_retention_days", "paste_method_overrides", "check_for_updates",
 }
 _WRITING_KEYS = {
     "cleanup", "lists", "deadline_seconds", "context", "learn_words", "learn_style",
@@ -113,6 +114,7 @@ def test_the_app_and_its_settings_answer_in_the_contracts_shapes(rig: Rig) -> No
     assert app["history_directory"] == str(rig.history_dir)
     assert app["pill_default_position"] == list(DEFAULT_PILL_POSITION)
     assert isinstance(app["version"], str) and app["version"]
+    assert app["update"] is None
 
     settings = _settings(rig)
     assert set(settings) == _SETTINGS_KEYS
@@ -748,3 +750,97 @@ def _wait_for(condition, seconds: float = 5.0) -> None:
     while not condition():
         assert time.monotonic() < deadline, "condition never became true"
         time.sleep(0.01)
+
+
+# -- updates -------------------------------------------------------------------------
+
+
+class _Updates:
+    """Stands in for the release updater: a 0.3.0 download that is ready, or nothing yet."""
+
+    def __init__(self, ready: str = "") -> None:
+        self.ready = ready
+        self.checks = 0
+        self.installs = 0
+
+    def status(self) -> UpdateStatus:
+        if self.ready:
+            return UpdateStatus(state="ready", version=self.ready)
+        return UpdateStatus(state="up_to_date")
+
+    def offered_version(self) -> str:
+        return self.ready
+
+    def check_now(self) -> None:
+        self.checks += 1
+
+    def install(self) -> None:
+        self.installs += 1
+
+
+def test_a_git_checkout_says_it_updates_through_git(rig: Rig) -> None:
+    status, body = rig.call("POST", "/api/updates/check")
+
+    assert status == 404
+    assert "updates through git" in body["error"]
+    assert rig.call("POST", "/api/updates/install")[0] == 404
+
+
+def test_an_installed_copy_reports_its_update_in_the_app_info(make_rig) -> None:
+    rig = make_rig(updates=_Updates(ready="0.3.0"))
+
+    update = rig.call("GET", "/api/app")[1]["update"]
+
+    assert update == {"state": "ready", "version": "0.3.0", "bytes_done": 0, "bytes_total": 0, "error": ""}
+
+
+def test_checking_by_hand_asks_the_updater_every_time(make_rig) -> None:
+    updates = _Updates()
+    rig = make_rig(updates=updates)
+
+    statuses = [rig.call("POST", "/api/updates/check")[0] for _ in range(20)]
+
+    assert statuses == [202] * 20
+    assert updates.checks == 20
+
+
+def test_installing_with_nothing_downloaded_is_refused(make_rig) -> None:
+    updates = _Updates()
+    rig = make_rig(updates=updates)
+
+    status, body = rig.call("POST", "/api/updates/install")
+
+    assert status == 409
+    assert body["error"] == "There is no downloaded update to install."
+    assert updates.installs == 0
+
+
+def test_installing_a_downloaded_update_hands_it_to_the_updater(make_rig) -> None:
+    updates = _Updates(ready="0.3.0")
+    rig = make_rig(updates=updates)
+
+    assert rig.call("POST", "/api/updates/install")[0] == 202
+    assert updates.installs == 1
+
+
+def test_turning_automatic_checks_off_is_saved(rig: Rig) -> None:
+    settings = _settings(rig)
+    assert settings["check_for_updates"] is True
+
+    status, _ = rig.call("PUT", "/api/settings", {**settings, "check_for_updates": False})
+
+    assert status == 200
+    assert rig.config.get("updates.check_automatically") is False
+    assert _settings(rig)["check_for_updates"] is False
+
+
+@pytest.mark.parametrize("value", ["false", 0, None, "no"])
+def test_automatic_checks_take_only_true_or_false(rig: Rig, value: object) -> None:
+    settings = _settings(rig)
+
+    status, body = rig.call("PUT", "/api/settings", {**settings, "check_for_updates": value})
+
+    assert status == 400
+    assert body["detail"] == "settings.check_for_updates must be true or false."
+    assert rig.config.get("updates.check_automatically") is None
+
