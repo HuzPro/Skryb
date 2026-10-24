@@ -15,6 +15,7 @@ from tests.fakes.hardware import FakeHardwareDetector
 from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
 from skryb.core.events import DownloadProgressEvent
 from skryb.core.release_update import UpdateStatus
+from skryb.transcription import engine_factory
 from skryb.core.state_machine import AppState
 from skryb.output.output_mode import OutputMode
 from skryb.recording.pill import DEFAULT_PILL_POSITION
@@ -401,7 +402,10 @@ def test_first_run_setup_needs_a_model_and_has_no_history_or_writing_yet(make_ri
 # -- models, engines, hardware ---------------------------------------------------------
 
 
-def test_models_list_the_whole_catalogue_with_what_each_can_do(rig: Rig) -> None:
+def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeypatch, tmp_path) -> None:
+    # The rig's GPU is a gfx1200, so the native engine only needs its DLL.
+    monkeypatch.setattr(engine_factory, "native_engine_dll", lambda: tmp_path / "qasr.dll")
+    rig = make_rig()
     rig.bus.publish(DownloadProgressEvent(job_id=NEMOTRON, bytes_done=512, bytes_total=2048))
 
     status, models = rig.call("GET", "/api/models")
