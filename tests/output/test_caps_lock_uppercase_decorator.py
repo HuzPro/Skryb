@@ -1,7 +1,7 @@
-from voicetotext.output.caps_lock_uppercase_decorator import (
+from skryb.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
-from voicetotext.output.handler import TextOutputHandler
+from skryb.output.handler import TextOutputHandler
 
 
 class _RecordingInner(TextOutputHandler):

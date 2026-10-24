@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from voicetotext.transcription.roman_urdu import romanize
+from skryb.transcription.roman_urdu import romanize
 
 
 @pytest.mark.parametrize("hindi, roman", [

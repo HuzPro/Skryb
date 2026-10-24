@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
+from skryb.hotkeys import keys
+from skryb.hotkeys.toggle_strategy import ToggleStrategy
 
 
 CTRL = keys.HotkeyKey(keys.VK_LCONTROL)

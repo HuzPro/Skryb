@@ -1,6 +1,6 @@
 """Exception hierarchy for the release tooling.
 
-Mirrors the application's own ``VoiceToTextError`` pattern (one base
+Mirrors the application's own ``SkrybError`` pattern (one base
 class so callers can catch every release-tooling failure with a single
 ``except``) but stays in this package to keep the build tooling
 independent of the application domain.

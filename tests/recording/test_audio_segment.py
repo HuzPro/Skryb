@@ -3,7 +3,7 @@ import wave
 import numpy as np
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment, load_wav
+from skryb.recording.audio_segment import AudioSegment, load_wav
 
 
 class TestAudioSegmentCreation:

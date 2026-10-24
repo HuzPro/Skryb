@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
-from voicetotext.edit_capture import win32_foreground as wf
-from voicetotext.edit_capture.win32_foreground import (
+from skryb.edit_capture import win32_foreground as wf
+from skryb.edit_capture.win32_foreground import (
     UNKNOWN_WINDOW,
     ForegroundWindow,
     foreground_window,

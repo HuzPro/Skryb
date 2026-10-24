@@ -3,11 +3,11 @@ from unittest.mock import patch
 
 import pytest
 
-from voicetotext.edit_capture import observer as observer_module
-from voicetotext.edit_capture.observer import Win32EditObserver
-from voicetotext.edit_capture.recorder import EditRecorder
-from voicetotext.edit_capture.window import ForegroundWindow
-from voicetotext.output.win32_key_sender import VOICETOTEXT_INPUT_TAG
+from skryb.edit_capture import observer as observer_module
+from skryb.edit_capture.observer import Win32EditObserver
+from skryb.edit_capture.recorder import EditRecorder
+from skryb.edit_capture.window import ForegroundWindow
+from skryb.output.win32_key_sender import SKRYB_INPUT_TAG
 
 pytestmark = pytest.mark.unit
 
@@ -61,7 +61,7 @@ class _Capture:
 
     def paste(self, text: str) -> None:
         self.observer.observe_delivery(text, "batch", "direct_paste")
-        self.observer.observe_key(True, _VK_V, 0, VOICETOTEXT_INPUT_TAG)
+        self.observer.observe_key(True, _VK_V, 0, SKRYB_INPUT_TAG)
 
     def press(self, vk: int, down: bool = True) -> None:
         self.observer.observe_key(down, vk, 0, _UNTAGGED)
@@ -182,7 +182,7 @@ class TestWin32EditObserver:
     def test_should_not_let_our_injected_control_key_leak_into_the_user_state(self):
         with _Capture() as capture:
             capture.observer.observe_key(
-                True, _VK_CONTROL, 0, VOICETOTEXT_INPUT_TAG,
+                True, _VK_CONTROL, 0, SKRYB_INPUT_TAG,
             )
             capture.paste("hi")
             capture.type_text("a")

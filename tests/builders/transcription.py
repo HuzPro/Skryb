@@ -1,4 +1,4 @@
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.transcription.result import TranscriptionResult
 
 
 class TranscriptionResultBuilder:

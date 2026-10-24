@@ -4,9 +4,9 @@ import math
 import pytest
 
 from tests.fakes.config import FakeConfig
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.recording.pill import DEFAULT_PILL_POSITION
-from voicetotext.recording.preferences import (
+from skryb.core.json_config_adapter import JsonConfigAdapter
+from skryb.recording.pill import DEFAULT_PILL_POSITION
+from skryb.recording.preferences import (
     RecordingPreferences,
     load_pill_position,
     save_pill_position,

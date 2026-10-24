@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.recording.speech_level import boost_quiet_speech
+from skryb.recording.audio_segment import AudioSegment
+from skryb.recording.speech_level import boost_quiet_speech
 
 
 def _speech(peak: float, seconds: float = 2.0, noise: float = 0.0) -> AudioSegment:

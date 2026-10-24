@@ -5,10 +5,10 @@ writer. The model emits a word as subword tokens across chunks; live snapshots
 must hold back the in-progress word so the word-count writer never types it
 half-finished. Verifies the live-TYPED text equals the FINAL transcript.
 """
-from voicetotext.transcription.streaming.cache_aware.streaming_session import (
+from skryb.transcription.streaming.cache_aware.streaming_session import (
     words_committed_text,
 )
-from voicetotext.transcription.streaming.streaming_output_writer import (
+from skryb.transcription.streaming.streaming_output_writer import (
     StreamingOutputWriter,
 )
 

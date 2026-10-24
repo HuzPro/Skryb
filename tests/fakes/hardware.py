@@ -1,7 +1,7 @@
 import threading
 
-from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.hardware_detector import HardwareDetector
+from skryb.transcription.engine_types import HardwareProfile
+from skryb.transcription.hardware_detector import HardwareDetector
 
 _DEFAULT_PROFILE = HardwareProfile(
     kind="amd_rocm", device_name="Fake GPU", gfx_arch="gfx1200",

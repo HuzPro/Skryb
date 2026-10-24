@@ -4,7 +4,7 @@ requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "voicetotext"
+name = "skryb"
 version = "0.1.0"
 description = "Local, offline speech-to-text dictation for Windows on NVIDIA, AMD or CPU"
 readme = "README.md"
@@ -65,10 +65,10 @@ dev = [
 ]
 
 [project.scripts]
-voicetotext = "voicetotext.__main__:main"
+skryb = "skryb.__main__:main"
 
 [project.gui-scripts]
-voicetotext-gui = "voicetotext.__main__:main"
+skryb-gui = "skryb.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -86,7 +86,7 @@ markers = [
     "acceptance: full-use-case scenarios via fakes",
     "integration: touch real filesystem or real third-party libs",
     "slow: tests that take longer than 100ms (deselected by default; opt in via `-m slow`)",
-    "performance: model performance benchmarks (very slow; opt in via `-m performance` and VOICETOTEXT_RUN_PERFORMANCE_TESTS=1)",
+    "performance: model performance benchmarks (very slow; opt in via `-m performance` and SKRYB_RUN_PERFORMANCE_TESTS=1)",
 ]
 filterwarnings = ["error"]
 
@@ -94,7 +94,7 @@ filterwarnings = ["error"]
 # include, find() crawls the whole tree (venv, tests, release) and the
 # wheel build errors on the flat layout.
 [tool.setuptools.packages.find]
-include = ["voicetotext*"]
+include = ["skryb*"]
 
 # The gated-model licence texts are runtime resources: the app displays
 # them and hashes them to record consent. Undeclared, they would be
@@ -102,4 +102,4 @@ include = ["voicetotext*"]
 # show. ui-bin/ holds the settings window exe, which only the installer
 # build puts there.
 [tool.setuptools.package-data]
-voicetotext = ["licenses/*.md", "ui-bin/*.exe"]
+skryb = ["licenses/*.md", "ui-bin/*.exe"]

@@ -8,16 +8,16 @@ Ctrl+Shift+Alt+V and silently drop the paste.
 
 import logging
 
-from voicetotext.output.key_sender import KeySender
-from voicetotext.output.paste_method import PasteMethod
-from voicetotext.output.modifier_release_waiting_key_sender import (
+from skryb.output.key_sender import KeySender
+from skryb.output.paste_method import PasteMethod
+from skryb.output.modifier_release_waiting_key_sender import (
     ModifierReleaseWaitingKeySender,
 )
 
 from tests.fakes.output import InstantSleeper
 
 
-_MODULE = "voicetotext.output.modifier_release_waiting_key_sender"
+_MODULE = "skryb.output.modifier_release_waiting_key_sender"
 
 
 class _FakeKeySender(KeySender):

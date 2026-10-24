@@ -1,4 +1,4 @@
-"""Tests for the ``voicetotext --doctor`` diagnostic probe.
+"""Tests for the ``skryb --doctor`` diagnostic probe.
 
 The doctor exists so a user whose transcription silently fails can run
 one command and get back a multi-line report listing which engine
@@ -14,10 +14,10 @@ from unittest.mock import patch
 
 import pytest
 
-import voicetotext.diagnostics.doctor as doctor
-from voicetotext.diagnostics.doctor import run_doctor
-from voicetotext.writing.install import WritingPaths
-from voicetotext.writing.settings import WritingSettings
+import skryb.diagnostics.doctor as doctor
+from skryb.diagnostics.doctor import run_doctor
+from skryb.writing.install import WritingPaths
+from skryb.writing.settings import WritingSettings
 
 
 @pytest.fixture(autouse=True)

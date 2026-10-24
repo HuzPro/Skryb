@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 
-# Mirror ``voicetotext.__main__._apply_torch_env_overrides``: the ROCm
+# Mirror ``skryb.__main__._apply_torch_env_overrides``: the ROCm
 # AOTriton attention path must be enabled before torch is imported, or
 # loading a real model on an AMD GPU can hard-crash the interpreter
 # during a streaming/warmup pass. Harmless on CPU/CUDA boxes.
@@ -29,8 +29,8 @@ from tests.fakes import (
     InstantSleeper,
     RecordingEventBus,
 )
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.state_machine import AppStateMachine
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.state_machine import AppStateMachine
 
 
 # Test modules dropped from collection off-Windows because they fail to
@@ -40,7 +40,7 @@ from voicetotext.core.state_machine import AppStateMachine
 # Two import-time causes:
 #   * ``ctypes.windll`` / ``ctypes.WINFUNCTYPE`` - the ``win32_*`` modules
 #     and ``recording.overlay`` touch these Windows-only attributes at
-#     module top, as does ``voicetotext.bootstrap`` by importing them.
+#     module top, as does ``skryb.bootstrap`` by importing them.
 #   * ``APPDATA`` - ``tests/performance/conftest.py`` constructs
 #     ``AppPaths``, which reads this Windows-only environment variable,
 #     at import time.
@@ -148,16 +148,16 @@ def tk_root():
 
 @pytest.fixture()
 def app_caplog(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
-    """``caplog`` wired to see the non-propagating ``voicetotext`` logger tree.
+    """``caplog`` wired to see the non-propagating ``skryb`` logger tree.
 
-    :mod:`voicetotext.core.debug_logger` sets ``propagate = False`` on the
-    ``voicetotext`` logger at import, so its records never reach the root
+    :mod:`skryb.core.debug_logger` sets ``propagate = False`` on the
+    ``skryb`` logger at import, so its records never reach the root
     logger pytest captures from. Attaching caplog's handler to that logger and
     lifting its level lets tests assert on the app's own log output.
     """
-    logger = logging.getLogger("voicetotext")
+    logger = logging.getLogger("skryb")
     logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="voicetotext")
+    caplog.set_level(logging.INFO, logger="skryb")
     try:
         yield caplog
     finally:

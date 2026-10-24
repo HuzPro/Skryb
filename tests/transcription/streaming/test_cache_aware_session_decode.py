@@ -15,10 +15,10 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription.streaming.streaming_engine import StreamingUpdate
-from voicetotext.transcription.streaming.cache_aware.model import BLANK_ID
-from voicetotext.transcription.streaming.cache_aware.streaming_session import (
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription.streaming.streaming_engine import StreamingUpdate
+from skryb.transcription.streaming.cache_aware.model import BLANK_ID
+from skryb.transcription.streaming.cache_aware.streaming_session import (
     CacheAwareStreamingSession,
 )
 

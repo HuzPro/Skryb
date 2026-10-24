@@ -5,9 +5,9 @@ from typing import cast
 
 import pytest
 
-from voicetotext.core import json_config_adapter
-from voicetotext.core.config import ConfigurationStore
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
+from skryb.core import json_config_adapter
+from skryb.core.config import ConfigurationStore
+from skryb.core.json_config_adapter import JsonConfigAdapter
 
 
 def _history_entries(config_path: Path) -> list[dict[str, object]]:

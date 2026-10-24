@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys import win32_keyboard_hook as wkh
-from voicetotext.hotkeys import win32_mouse_hook as wmh
-from voicetotext.hotkeys.win32_mouse_hook import Win32MouseHook
+from skryb.hotkeys import keys
+from skryb.hotkeys import win32_keyboard_hook as wkh
+from skryb.hotkeys import win32_mouse_hook as wmh
+from skryb.hotkeys.win32_mouse_hook import Win32MouseHook
 
 _WM_MOUSEMOVE = 0x0200
 _WM_LBUTTONDOWN = 0x0201

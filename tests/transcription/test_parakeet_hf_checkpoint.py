@@ -2,8 +2,8 @@ from pathlib import Path
 
 import torch
 
-from voicetotext.transcription import parakeet_hf_checkpoint
-from voicetotext.transcription.parakeet_hf_checkpoint import (
+from skryb.transcription import parakeet_hf_checkpoint
+from skryb.transcription.parakeet_hf_checkpoint import (
     load_hf_parakeet,
     preprocessor_buffers,
     remap_hf_parakeet_state_dict,

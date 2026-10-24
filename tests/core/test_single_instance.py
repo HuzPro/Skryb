@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from voicetotext.core.single_instance import (
+from skryb.core.single_instance import (
     LaunchSignal,
     RunningCopy,
     SecondLaunches,
@@ -16,7 +16,7 @@ from voicetotext.core.single_instance import (
     Win32KernelMutexApi,
 )
 
-_ASKED, _ANSWERED = "Local\\VoiceToText-launched-again", "Local\\VoiceToText-launch-answered"
+_ASKED, _ANSWERED = "Local\\Skryb-launched-again", "Local\\Skryb-launch-answered"
 
 
 class FakeMutexApi:
@@ -25,7 +25,7 @@ class FakeMutexApi:
         self.closed: list[int] = []
 
     def create_mutex(self, name: str) -> int:
-        assert name == "Local\\VoiceToText"
+        assert name == "Local\\Skryb"
         return 42
 
     def last_error(self) -> int:
@@ -239,14 +239,14 @@ class FakeProcesses:
 
 class TestRunningCopy:
     def test_a_record_names_the_process_and_when_it_started(self, tmp_path: Path) -> None:
-        path = tmp_path / "VoiceToText" / "running.pid"
+        path = tmp_path / "Skryb" / "running.pid"
 
         RunningCopy(path, FakeProcesses({4321: 133_000_000_000_000_000})).record(4321)
 
         assert path.read_text(encoding="ascii") == "4321 133000000000000000"
 
     def test_a_record_that_cannot_be_written_does_not_stop_the_app(self, tmp_path: Path) -> None:
-        blocker = tmp_path / "VoiceToText"
+        blocker = tmp_path / "Skryb"
         blocker.write_text("a file where the folder should be", encoding="utf-8")
 
         RunningCopy(blocker / "running.pid", FakeProcesses({1: 1})).record(1)
@@ -259,13 +259,13 @@ class TestRunningCopy:
         path = tmp_path / "running.pid"
         path.write_text(text, encoding="utf-8")
 
-        with patch("voicetotext.core.single_instance.subprocess.run") as run:
+        with patch("skryb.core.single_instance.subprocess.run") as run:
             assert RunningCopy(path, FakeProcesses({4321: 1})).end() is False
 
         run.assert_not_called()
 
     def test_no_record_at_all_ends_nothing(self, tmp_path: Path) -> None:
-        with patch("voicetotext.core.single_instance.subprocess.run") as run:
+        with patch("skryb.core.single_instance.subprocess.run") as run:
             assert RunningCopy(tmp_path / "running.pid", FakeProcesses({})).end() is False
 
         run.assert_not_called()
@@ -278,7 +278,7 @@ class TestRunningCopy:
 
         processes = FakeProcesses({4321: 133000000099999999})
 
-        with patch("voicetotext.core.single_instance.subprocess.run") as run:
+        with patch("skryb.core.single_instance.subprocess.run") as run:
             ended = RunningCopy(path, processes).end()
 
         assert ended is False
@@ -290,7 +290,7 @@ class TestRunningCopy:
         path.write_text("4321 133000000000000000", encoding="ascii")
         processes = FakeProcesses({4321: 133000000000000000})
 
-        with patch("voicetotext.core.single_instance.subprocess.run") as run:
+        with patch("skryb.core.single_instance.subprocess.run") as run:
             assert RunningCopy(path, processes).end() is True
 
         run.assert_called_once()

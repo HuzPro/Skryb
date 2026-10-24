@@ -12,11 +12,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.core.exceptions import HotkeyError
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys import win32_keyboard_hook as wkh
-from voicetotext.hotkeys import win32_mouse_hook as wmh
-from voicetotext.settings.win32_capture_bridge import Win32CaptureBridge
+from skryb.core.exceptions import HotkeyError
+from skryb.hotkeys import keys
+from skryb.hotkeys import win32_keyboard_hook as wkh
+from skryb.hotkeys import win32_mouse_hook as wmh
+from skryb.settings.win32_capture_bridge import Win32CaptureBridge
 
 
 class TestWin32CaptureBridgeSignal:

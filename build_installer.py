@@ -1,4 +1,4 @@
-"""Build the VoiceToText Windows installer (setup .exe).
+"""Build the Skryb Windows installer (setup .exe).
 
 Usage::
 
@@ -7,7 +7,7 @@ Usage::
 
 Stages the installer payload (a standalone CPython runtime, the app wheel,
 and the requirements files) and compiles it with Inno Setup into
-``dist/VoiceToText-Setup-<version>.exe``. PyTorch is not bundled; the
+``dist/Skryb-Setup-<version>.exe``. PyTorch is not bundled; the
 installer pip-installs the hardware-appropriate wheels on the user's
 machine at setup time, which keeps the published asset small.
 
@@ -27,7 +27,7 @@ from release.version import resolve_version
 
 
 _REPO_ROOT = Path(__file__).resolve().parent
-_ISS_PATH = _REPO_ROOT / "installer" / "VoiceToText.iss"
+_ISS_PATH = _REPO_ROOT / "installer" / "Skryb.iss"
 
 
 def main(argv: list[str]) -> int:
@@ -53,7 +53,7 @@ def _build(args: argparse.Namespace) -> Path:
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build the VoiceToText Windows installer.")
+    parser = argparse.ArgumentParser(description="Build the Skryb Windows installer.")
     parser.add_argument(
         "--python-dir",
         required=True,

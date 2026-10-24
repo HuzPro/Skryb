@@ -10,17 +10,17 @@ import pytest
 
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
-from voicetotext.core.paths import AppPaths
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.history.entries import (
+from skryb.core.paths import AppPaths
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.history.entries import (
     TRACK_RECORD_SPAN,
     filter_entries,
     load_history,
     preview,
     writing_track_record,
 )
-from voicetotext.history.management import delete_entries, export_csv
-from voicetotext.output.dictation_trace import (
+from skryb.history.management import delete_entries, export_csv
+from skryb.output.dictation_trace import (
     APPLIED,
     REJECTED,
     SKIPPED,
@@ -28,10 +28,10 @@ from voicetotext.output.dictation_trace import (
     TRACE_TEXT_FIELDS,
     DictationTrace,
 )
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_types import HardwareProfile
+from skryb.transcription.result import TranscriptionResult
 
 _SESSION = "20260928T134506Z-91220cb9"
 _START = datetime(2026, 9, 28, 13, 45, 6, tzinfo=UTC)

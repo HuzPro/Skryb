@@ -1,12 +1,12 @@
 """Hotkey activation modes - toggle vs hold - and their
 interaction with in-flight transcription."""
 
-from tests.acceptance.app_fixture import VoiceToTextApp
+from tests.acceptance.app_fixture import SkrybApp
 from tests.fakes.hotkeys import FakeClock, FakeTimers
-from voicetotext.core.state_machine import AppState
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
-from voicetotext.hotkeys.hold_strategy import HoldStrategy
+from skryb.core.state_machine import AppState
+from skryb.hotkeys import keys
+from skryb.hotkeys.toggle_strategy import ToggleStrategy
+from skryb.hotkeys.hold_strategy import HoldStrategy
 
 
 _CTRL = keys.HotkeyKey(keys.VK_LCONTROL)
@@ -17,7 +17,7 @@ _MOUSE4 = keys.HotkeyKey(keys.VK_XBUTTON1)
 
 
 class _LockableHold:
-    def __init__(self, app: VoiceToTextApp) -> None:
+    def __init__(self, app: SkrybApp) -> None:
         self.clock = FakeClock()
         self.timers = FakeTimers()
         self.strategy = HoldStrategy(
@@ -39,7 +39,7 @@ class _LockableHold:
 
 class TestDoubleTapLock:
     def test_a_double_tap_keeps_recording_until_the_next_press(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("hands free")
         hold = _LockableHold(voice_to_text_app)
@@ -57,7 +57,7 @@ class TestDoubleTapLock:
         assert voice_to_text_app.state == AppState.IDLE
 
     def test_after_a_locked_recording_is_cancelled_the_next_press_starts_a_new_one(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         hold = _LockableHold(voice_to_text_app)
         hold.tap()
@@ -70,7 +70,7 @@ class TestDoubleTapLock:
         assert voice_to_text_app.state == AppState.RECORDING
 
     def test_a_single_tap_records_only_until_the_window_closes(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         hold = _LockableHold(voice_to_text_app)
 
@@ -83,7 +83,7 @@ class TestDoubleTapLock:
 
 class TestPushToTalk:
     def test_push_to_talk_starts_on_press_and_transcribes_on_release(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("push to talk")
 
@@ -95,7 +95,7 @@ class TestPushToTalk:
         assert voice_to_text_app.state == AppState.IDLE
 
     def test_release_without_prior_press_does_nothing(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.release_hotkey()
 
@@ -105,7 +105,7 @@ class TestPushToTalk:
 
 class TestToggle:
     def test_toggle_requires_two_presses_to_complete_a_recording(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("toggle works")
 
@@ -118,7 +118,7 @@ class TestToggle:
         assert voice_to_text_app.state == AppState.IDLE
 
     def test_toggling_twice_produces_two_independent_transcriptions(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("first")
         voice_to_text_app.press_hotkey()
@@ -133,7 +133,7 @@ class TestToggle:
 
 class TestExactSequenceMatching:
     def test_toggle_activates_when_keys_pressed_in_exact_order(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("exact order")
         strategy = ToggleStrategy(keys=(_CTRL, _ALT, _M))
@@ -148,7 +148,7 @@ class TestExactSequenceMatching:
         assert voice_to_text_app.state == AppState.RECORDING
 
     def test_toggle_does_not_activate_when_extra_key_interleaved(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         strategy = ToggleStrategy(keys=(_CTRL, _ALT, _M))
         strategy.set_callbacks(
@@ -163,7 +163,7 @@ class TestExactSequenceMatching:
         assert voice_to_text_app.state == AppState.IDLE
 
     def test_push_to_talk_activates_and_deactivates_with_exact_sequence(
-        self, voice_to_text_app: VoiceToTextApp
+        self, voice_to_text_app: SkrybApp
     ):
         voice_to_text_app.user_speaks("held sequence")
         strategy = HoldStrategy(keys=(_CTRL, _M))

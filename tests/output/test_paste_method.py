@@ -1,6 +1,6 @@
 import pytest
 
-from voicetotext.output.paste_method import (
+from skryb.output.paste_method import (
     PasteMethod,
     normalized_process_name,
     paste_method_for,

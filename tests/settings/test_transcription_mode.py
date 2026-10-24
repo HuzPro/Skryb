@@ -1,5 +1,5 @@
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.settings.transcription_mode import TranscriptionMode
+from skryb.core.json_config_adapter import JsonConfigAdapter
+from skryb.settings.transcription_mode import TranscriptionMode
 
 
 class TestTranscriptionModeMigrate:

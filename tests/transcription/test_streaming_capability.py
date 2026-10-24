@@ -1,14 +1,14 @@
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.engine_selector import (
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_selector import (
     model_supports_batch,
     model_supports_streaming,
     rank_engines,
 )
-from voicetotext.transcription.engine_types import (
+from skryb.transcription.engine_types import (
     EngineDescriptor,
     HardwareProfile,
 )
-from voicetotext.transcription.model_info import ModelInfo, get_model_info
+from skryb.transcription.model_info import ModelInfo, get_model_info
 
 
 def _descriptors() -> list[EngineDescriptor]:

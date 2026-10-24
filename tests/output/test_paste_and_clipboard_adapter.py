@@ -2,13 +2,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.output.clipboard_write_error import ClipboardWriteError
-from voicetotext.output.clipboard_writer import ClipboardWriter
-from voicetotext.output.handler import TextOutputHandler
-from voicetotext.output.key_sender import KeySender
-from voicetotext.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
-from voicetotext.output.paste_method import PasteMethod
-from voicetotext.output.sleeper import Sleeper
+from skryb.output.clipboard_write_error import ClipboardWriteError
+from skryb.output.clipboard_writer import ClipboardWriter
+from skryb.output.handler import TextOutputHandler
+from skryb.output.key_sender import KeySender
+from skryb.output.paste_and_clipboard_adapter import PasteAndClipboardAdapter
+from skryb.output.paste_method import PasteMethod
+from skryb.output.sleeper import Sleeper
 
 
 def _adapter(

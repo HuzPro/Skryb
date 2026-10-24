@@ -1,6 +1,6 @@
-# Releasing VoiceToText
+# Releasing Skryb
 
-The release artifact is a Windows installer (`VoiceToText-Setup-<version>.exe`).
+The release artifact is a Windows installer (`Skryb-Setup-<version>.exe`).
 It does **not** bundle PyTorch: it ships a standalone CPython 3.12 plus the
 app, detects the user's GPU at install time, and pip-installs the matching
 runtime (NVIDIA CUDA / AMD ROCm / CPU) on their machine. That keeps the
@@ -29,7 +29,7 @@ tab) is an escape hatch for re-runs; leave its version blank to use
 Requires [Inno Setup 6](https://jrsoftware.org/isdl.php), a relocatable
 CPython 3.12 (a [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
 `install_only` build), and the settings window built first. The build stops
-if `ui\src-tauri\target\release\voicetotext-ui.exe` is missing, because it
+if `ui\src-tauri\target\release\skryb-ui.exe` is missing, because it
 ships inside the app wheel:
 
 ```powershell
@@ -38,7 +38,7 @@ python build_installer.py --python-dir C:\path\to\standalone\python
 python build_installer.py --python-dir ... --version 0.2.0 --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ```
 
-Output: `dist/VoiceToText-Setup-<version>.exe`. The `--iscc` path is
+Output: `dist/Skryb-Setup-<version>.exe`. The `--iscc` path is
 auto-detected from the default install location when omitted.
 
 ## What the installer does on the user's machine
@@ -47,7 +47,7 @@ auto-detected from the default install location when omitted.
    radio page: NVIDIA (CUDA) / AMD (ROCm) / CPU.
 2. `pip install`s the chosen `requirements-*.txt` plus the app wheel into the
    bundled Python (this is the multi-GB download).
-3. Adds `voicetotext` to the system PATH (runnable from any terminal) and
+3. Adds `skryb` to the system PATH (runnable from any terminal) and
    creates Start-Menu / optional desktop shortcuts (windowless).
 4. Writes `THIRD-PARTY-NOTICES.txt` for the installed packages; uninstall
    removes everything, including the pip-installed files.
@@ -55,7 +55,7 @@ auto-detected from the default install location when omitted.
 ## Silent / unattended install
 
 ```
-VoiceToText-Setup-<version>.exe /VERYSILENT /TARGET=cpu
+Skryb-Setup-<version>.exe /VERYSILENT /TARGET=cpu
 ```
 
 `/TARGET=cpu|cuda|rocm` overrides hardware detection (handy for IT
@@ -65,7 +65,7 @@ install.
 
 ## Licensing
 
-VoiceToText is open source under the Apache License 2.0 (`LICENSE.txt`,
+Skryb is open source under the Apache License 2.0 (`LICENSE.txt`,
 copyright statement in `NOTICE`). Python packages and downloaded model weights
 have separate licenses. The application's license does not grant rights to
 use a model or its outputs.
@@ -73,13 +73,13 @@ use a model or its outputs.
 CrisperWhisper models and outputs have non-commercial restrictions. The app
 requires acceptance of the bundled terms before downloading or loading these
 models. Commercial or production use requires a separate license from the
-model publisher. See `voicetotext/licenses/crisperwhisper-nc.md`.
+model publisher. See `skryb/licenses/crisperwhisper-nc.md`.
 
 Because PyTorch and the other Python packages are downloaded from their
 official indices at install time, the installer does not redistribute them,
 and model weights are downloaded separately. The installer ships:
 
-- `LICENSE.txt` - the Apache License 2.0 covering VoiceToText itself.
+- `LICENSE.txt` - the Apache License 2.0 covering Skryb itself.
 - `NOTICE.txt` - covers the bundled CPython runtime (PSF license) and
   states the app's own license and copyright.
 - `THIRD-PARTY-NOTICES.txt` - generated post-install from the actual

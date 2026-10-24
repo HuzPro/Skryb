@@ -8,10 +8,10 @@ must fail loudly rather than silently produce empty output.
 
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.placeholder_engine import PlaceholderEngine
+from skryb.core.exceptions import TranscriptionError
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.placeholder_engine import PlaceholderEngine
 
 import numpy as np
 

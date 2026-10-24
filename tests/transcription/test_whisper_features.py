@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.whisper_features import (
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.whisper_features import (
     log_mel_spectrogram,
     transcribe_in_windows,
 )
@@ -301,7 +301,7 @@ class TestFeatureExtractionDependencies:
         """The whole point: the CT2 engine must not pay for either import."""
         probe = (
             "import sys;"
-            "import voicetotext.transcription.whisper_features;"
+            "import skryb.transcription.whisper_features;"
             "print('torch' in sys.modules, 'transformers' in sys.modules)"
         )
 

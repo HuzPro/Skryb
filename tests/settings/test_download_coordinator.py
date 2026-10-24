@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from voicetotext.settings.download_coordinator import DownloadCoordinator
+from skryb.settings.download_coordinator import DownloadCoordinator
 
 
 def _make_coordinator(model_manager=None):

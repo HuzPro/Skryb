@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.crisperwhisper_ct2_adapter import (
+from skryb.core.exceptions import TranscriptionError
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.crisperwhisper_ct2_adapter import (
     CrisperWhisperCt2Adapter,
 )
 
@@ -20,7 +20,7 @@ _MODEL_DIR = Path("/models/ct2")
 @pytest.fixture(autouse=True)
 def fake_storage_view() -> Iterator[None]:
     with patch(
-        "voicetotext.transcription.crisperwhisper_ct2_adapter._storage_view",
+        "skryb.transcription.crisperwhisper_ct2_adapter._storage_view",
         side_effect=lambda features: features,
     ):
         yield
@@ -45,12 +45,12 @@ def _loaded(
     tokens.decode.side_effect = lambda ids: " ".join(str(i) for i in ids)
     with (
         patch(
-            "voicetotext.transcription.crisperwhisper_ct2_adapter"
+            "skryb.transcription.crisperwhisper_ct2_adapter"
             "._import_backend",
             return_value=lambda *a, **k: model,
         ),
         patch(
-            "voicetotext.transcription.crisperwhisper_ct2_adapter."
+            "skryb.transcription.crisperwhisper_ct2_adapter."
             "WhisperTokens",
             return_value=tokens,
         ),
@@ -177,11 +177,11 @@ def tracked_models() -> Iterator[list[tuple[str, bool]]]:
     _ThreadTrackingModel.freed = []
     with (
         patch(
-            "voicetotext.transcription.crisperwhisper_ct2_adapter._import_backend",
+            "skryb.transcription.crisperwhisper_ct2_adapter._import_backend",
             return_value=_ThreadTrackingModel,
         ),
         patch(
-            "voicetotext.transcription.crisperwhisper_ct2_adapter.WhisperTokens",
+            "skryb.transcription.crisperwhisper_ct2_adapter.WhisperTokens",
         ),
     ):
         yield _ThreadTrackingModel.freed
@@ -258,11 +258,11 @@ class TestModelThreadLifetime:
 
         with (
             patch(
-                "voicetotext.transcription.crisperwhisper_ct2_adapter._import_backend",
+                "skryb.transcription.crisperwhisper_ct2_adapter._import_backend",
                 return_value=MagicMock(side_effect=RuntimeError("hipErrorNoDevice")),
             ),
             patch(
-                "voicetotext.transcription.crisperwhisper_ct2_adapter.WhisperTokens",
+                "skryb.transcription.crisperwhisper_ct2_adapter.WhisperTokens",
             ),
             pytest.raises(RuntimeError, match="hipErrorNoDevice"),
         ):

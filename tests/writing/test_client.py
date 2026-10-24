@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from voicetotext.writing.client import Endpoint, WritingClient, WritingUnavailable
+from skryb.writing.client import Endpoint, WritingClient, WritingUnavailable
 
 _KEY = "k3y-for-tests"
 

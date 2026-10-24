@@ -3,20 +3,20 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.output.dictionary_config import (
+from skryb.output.dictionary_config import (
     DictionaryConfig,
     LiteralRule,
     load_dictionary,
     save_dictionary,
 )
-from voicetotext.writing.learning import (
+from skryb.writing.learning import (
     MAX_CANDIDATES,
     Learner,
     WordCorrection,
     style_votes,
     word_corrections,
 )
-from voicetotext.writing.settings import WritingSettings
+from skryb.writing.settings import WritingSettings
 
 
 def _sent(
@@ -267,7 +267,7 @@ def test_a_learned_rule_round_trips_through_the_dictionary_file_and_plain_rules_
     path = tmp_path / "dictionary.json"
     rules = (
         LiteralRule(spoken=("Jon",), replacement="John", learned=True),
-        LiteralRule(spoken=("vtt",), replacement="VoiceToText"),
+        LiteralRule(spoken=("vtt",), replacement="Skryb"),
     )
 
     save_dictionary(path, DictionaryConfig(rules=rules))

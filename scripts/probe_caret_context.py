@@ -18,11 +18,11 @@ import logging
 import sys
 import time
 
-from voicetotext.output.win32_caret_context import (
+from skryb.output.win32_caret_context import (
     read_caret_context,
     read_ui_automation_context,
 )
-from voicetotext.output.win32_edit_control_context import (
+from skryb.output.win32_edit_control_context import (
     read_edit_control_context,
 )
 

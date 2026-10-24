@@ -1,7 +1,7 @@
 import copy
 from typing import cast
 
-from voicetotext.core.config import ConfigurationStore, ConfigValue
+from skryb.core.config import ConfigurationStore, ConfigValue
 
 
 class FakeConfig(ConfigurationStore):

@@ -1,6 +1,6 @@
 """Assemble the installer payload and compile it with Inno Setup.
 
-The installer ships a standalone CPython runtime, the VoiceToText wheel,
+The installer ships a standalone CPython runtime, the Skryb wheel,
 and the three requirements files. It does *not* bundle PyTorch: the
 matching wheel set is pip-installed on the user's machine at setup time
 from its hardware target. That keeps the published asset small enough for
@@ -26,7 +26,7 @@ from release.errors import InstallerBuildError
 
 # The console entry point pip installs from ``[project.scripts]`` (lower
 # case, the name users type), distinct from the display name APP_NAME.
-_CLI_NAME = "voicetotext"
+_CLI_NAME = "skryb"
 
 # Only these modules of the build-time ``release`` package are shipped, so
 # the bundled Python can regenerate THIRD-PARTY-NOTICES.txt post-install.
@@ -41,9 +41,9 @@ _ISCC_DEFAULT_LOCATIONS = (
 )
 
 # The settings window (Tauri) as scripts\build_ui.ps1 leaves it, and where it
-# sits in the wheel: voicetotext.ui.launcher looks in ui-bin/ when installed.
-_UI_SHELL_BUILD = Path("ui") / "src-tauri" / "target" / "release" / "voicetotext-ui.exe"
-_UI_SHELL_IN_WHEEL = "voicetotext/ui-bin/voicetotext-ui.exe"
+# sits in the wheel: skryb.ui.launcher looks in ui-bin/ when installed.
+_UI_SHELL_BUILD = Path("ui") / "src-tauri" / "target" / "release" / "skryb-ui.exe"
+_UI_SHELL_IN_WHEEL = "skryb/ui-bin/skryb-ui.exe"
 
 
 def iss_defines(version: str, payload_dir: Path, wheel_filename: str) -> dict[str, str]:
@@ -73,7 +73,7 @@ def build_iscc_args(
 
 
 def cmd_shim_text() -> str:
-    """Return the ``voicetotext.cmd`` launcher placed on the system PATH."""
+    """Return the ``skryb.cmd`` launcher placed on the system PATH."""
     return "\r\n".join(
         [
             "@echo off",
@@ -126,7 +126,7 @@ def stage_payload(repo_root: Path, payload_dir: Path, python_dir: Path, version:
     _copy_notices_tool(repo_root, payload_dir / "tools" / "release")
     _copy_license(repo_root, payload_dir / "LICENSE.txt")
     _write_text(payload_dir / "NOTICE.txt", notice_text(version))
-    _write_text(payload_dir / "bin" / "voicetotext.cmd", cmd_shim_text())
+    _write_text(payload_dir / "bin" / "skryb.cmd", cmd_shim_text())
     return wheel_filename
 
 
@@ -209,11 +209,11 @@ def _stage_wheel_source(repo_root: Path, scratch: Path) -> Path:
     for metadata_file in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
         shutil.copyfile(repo_root / metadata_file, source / metadata_file)
     shutil.copytree(
-        repo_root / "voicetotext",
-        source / "voicetotext",
+        repo_root / "skryb",
+        source / "skryb",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
-    _copy_ui_shell(repo_root, source / "voicetotext" / "ui-bin")
+    _copy_ui_shell(repo_root, source / "skryb" / "ui-bin")
     return source
 
 

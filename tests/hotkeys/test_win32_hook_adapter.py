@@ -5,13 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.core.exceptions import HotkeyError, OutputError
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys import win32_keyboard_hook as wkh
-from voicetotext.hotkeys.actions import HotkeyActions, strategies_for
-from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
-from voicetotext.hotkeys.listener import HotkeyListener
-from voicetotext.hotkeys.win32_hook_adapter import Win32HookAdapter
+from skryb.core.exceptions import HotkeyError, OutputError
+from skryb.hotkeys import keys
+from skryb.hotkeys import win32_keyboard_hook as wkh
+from skryb.hotkeys.actions import HotkeyActions, strategies_for
+from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode
+from skryb.hotkeys.listener import HotkeyListener
+from skryb.hotkeys.win32_hook_adapter import Win32HookAdapter
 
 _C = 0x43
 _M = 0x4D

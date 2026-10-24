@@ -1,6 +1,6 @@
 import pytest
 
-from voicetotext.downloads.state import (
+from skryb.downloads.state import (
     ChunkState,
     DownloadState,
     DownloadStats,

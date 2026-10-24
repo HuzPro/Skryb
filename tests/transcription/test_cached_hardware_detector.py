@@ -2,11 +2,11 @@ from pathlib import Path
 
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.transcription.cached_hardware_detector import (
+from skryb.core.json_config_adapter import JsonConfigAdapter
+from skryb.transcription.cached_hardware_detector import (
     CachedHardwareDetector,
 )
-from voicetotext.transcription.engine_types import HardwareProfile
+from skryb.transcription.engine_types import HardwareProfile
 
 _RX_9060 = HardwareProfile(
     kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",

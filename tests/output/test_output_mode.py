@@ -1,4 +1,4 @@
-from voicetotext.output.output_mode import OutputMode
+from skryb.output.output_mode import OutputMode
 
 
 class TestOutputModeMigrate:

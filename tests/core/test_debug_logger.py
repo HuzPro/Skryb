@@ -2,15 +2,15 @@ import logging
 
 import pytest
 
-from voicetotext.core.debug_logger import (
-    VoiceToTextConsoleHandler,
-    VoiceToTextFileHandler,
+from skryb.core.debug_logger import (
+    SkrybConsoleHandler,
+    SkrybFileHandler,
     setup_debug_logger,
 )
 
 
-_APP_LOGGER_NAME = "voicetotext"
-_OwnedHandler = (VoiceToTextFileHandler, VoiceToTextConsoleHandler)
+_APP_LOGGER_NAME = "skryb"
+_OwnedHandler = (SkrybFileHandler, SkrybConsoleHandler)
 
 
 @pytest.fixture(autouse=True)
@@ -29,12 +29,12 @@ def _release_debug_handlers():
             handler.close()
 
 
-def _file_handlers(logger: logging.Logger) -> list[VoiceToTextFileHandler]:
-    return [h for h in logger.handlers if isinstance(h, VoiceToTextFileHandler)]
+def _file_handlers(logger: logging.Logger) -> list[SkrybFileHandler]:
+    return [h for h in logger.handlers if isinstance(h, SkrybFileHandler)]
 
 
-def _console_handlers(logger: logging.Logger) -> list[VoiceToTextConsoleHandler]:
-    return [h for h in logger.handlers if isinstance(h, VoiceToTextConsoleHandler)]
+def _console_handlers(logger: logging.Logger) -> list[SkrybConsoleHandler]:
+    return [h for h in logger.handlers if isinstance(h, SkrybConsoleHandler)]
 
 
 class TestSetupDebugLoggerFileHandler:

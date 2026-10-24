@@ -5,17 +5,17 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
     DownloadProgressEvent,
     DownloadStateChangedEvent,
 )
-from voicetotext.downloads.download_manager import DownloadManager
-from voicetotext.downloads.hf_repo_resolver import ResolvedFile
-from voicetotext.downloads.model_download_job import ModelDownloadJob
-from voicetotext.downloads.state import DownloadState
+from skryb.downloads.download_manager import DownloadManager
+from skryb.downloads.hf_repo_resolver import ResolvedFile
+from skryb.downloads.model_download_job import ModelDownloadJob
+from skryb.downloads.state import DownloadState
 
 
 @dataclass

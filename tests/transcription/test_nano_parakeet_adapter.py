@@ -11,13 +11,13 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import (
+from skryb.core.exceptions import (
     EngineDependencyMissingError,
     TranscriptionError,
 )
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.engine import TranscriptionEngine
-from voicetotext.transcription.result import TranscriptionResult
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.result import TranscriptionResult
 
 
 def _make_audio(samples: int = 16000) -> AudioSegment:
@@ -38,7 +38,7 @@ class TestNanoParakeetAdapterLoadModel:
         import torch
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -62,7 +62,7 @@ class TestNanoParakeetAdapterLoadModel:
         import torch
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -94,7 +94,7 @@ class TestNanoParakeetAdapterLoadModel:
         import torch
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -135,7 +135,7 @@ class TestNanoParakeetAdapterLoadModel:
 
         from_pretrained.side_effect = call_hf_download_during_load
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -165,7 +165,7 @@ class TestNanoParakeetAdapterLoadModel:
         original_hf_download = MagicMock()
         nano_parakeet.hf_hub_download = original_hf_download
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -192,7 +192,7 @@ class TestNanoParakeetAdapterLoadModel:
         nano_parakeet.hf_hub_download = original_hf_download
         from_pretrained.side_effect = RuntimeError("kernel compile failed")
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -207,7 +207,7 @@ class TestNanoParakeetAdapterLoadModel:
         assert nano_parakeet.hf_hub_download is original_hf_download
 
     def test_should_report_not_loaded_before_load(self) -> None:
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -225,7 +225,7 @@ class TestNanoParakeetAdapterTranscribe:
     def test_should_return_transcribed_text_in_result(self) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -249,7 +249,7 @@ class TestNanoParakeetAdapterTranscribe:
     def test_should_pass_numpy_audio_data_to_model(self) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -272,7 +272,7 @@ class TestNanoParakeetAdapterTranscribe:
 
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_raise_when_transcribing_before_load(self) -> None:
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -301,7 +301,7 @@ class TestNanoParakeetAdapterChunking:
     ) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -322,7 +322,7 @@ class TestNanoParakeetAdapterChunking:
     def test_should_split_long_audio_into_60_second_chunks(self) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -348,7 +348,7 @@ class TestNanoParakeetAdapterChunking:
     ) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -375,7 +375,7 @@ class TestNanoParakeetAdapterChunking:
     ) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -396,7 +396,7 @@ class TestNanoParakeetAdapterChunking:
     def test_should_skip_empty_chunk_text_when_joining(self) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -423,7 +423,7 @@ class TestNanoParakeetAdapterWarmup:
     def test_should_invoke_model_transcribe_during_warmup(self) -> None:
         from nano_parakeet import from_pretrained
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -444,7 +444,7 @@ class TestNanoParakeetAdapterWarmup:
 class TestNanoParakeetAdapterDispose:
     @patch.dict("sys.modules", _mocked_modules())
     def test_should_clear_model_on_dispose(self) -> None:
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -465,7 +465,7 @@ class TestNanoParakeetAdapterDispose:
         torch_mock = MagicMock()
         sys.modules["torch"] = torch_mock
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -486,7 +486,7 @@ class TestNanoParakeetAdapterDispose:
         torch_mock = MagicMock()
         sys.modules["torch"] = torch_mock
 
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -502,7 +502,7 @@ class TestNanoParakeetAdapterDispose:
         torch_mock.cuda.empty_cache.assert_not_called()
 
     def test_should_not_raise_on_dispose_when_not_loaded(self) -> None:
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -517,7 +517,7 @@ class TestNanoParakeetAdapterDispose:
 
 class TestNanoParakeetAdapterIsATranscriptionEngine:
     def test_should_implement_transcription_engine_interface(self) -> None:
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 
@@ -540,7 +540,7 @@ class TestNanoParakeetAdapterDependencyMissing:
     def test_should_raise_engine_dependency_missing_when_backend_not_installed(
         self,
     ) -> None:
-        from voicetotext.transcription.nano_parakeet_adapter import (
+        from skryb.transcription.nano_parakeet_adapter import (
             NanoParakeetAdapter,
         )
 

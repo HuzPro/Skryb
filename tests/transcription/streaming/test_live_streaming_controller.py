@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 
 from tests.fakes import FakeAudioRecorder, FakeTextOutputHandler
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription.streaming.live_streaming_controller import (
+from skryb.core.exceptions import TranscriptionError
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
 )
-from voicetotext.transcription.streaming.streaming_engine import (
+from skryb.transcription.streaming.streaming_engine import (
     StreamingTranscriptionEngine,
     StreamingUpdate,
 )

@@ -3,12 +3,12 @@ from unittest.mock import patch
 
 import pytest
 
-from voicetotext.downloads.sidecar import (
+from skryb.downloads.sidecar import (
     Sidecar,
     SidecarCorruptError,
     SidecarVersionError,
 )
-from voicetotext.downloads.state import ChunkState
+from skryb.downloads.state import ChunkState
 
 
 class TestSidecarRoundTrip:
@@ -163,7 +163,7 @@ class TestSidecarAtomicSave:
 
         updated = original.with_chunk_progress(index=1, bytes_done=500)
         with patch(
-            "voicetotext.downloads.sidecar.os.replace",
+            "skryb.downloads.sidecar.os.replace",
             side_effect=OSError("disk yanked"),
         ):
             with pytest.raises(OSError):

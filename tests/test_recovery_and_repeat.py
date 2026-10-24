@@ -6,20 +6,20 @@ import numpy as np
 
 from tests.fakes import FakeTextOutputHandler, FakeTranscriptionEngine
 from tests.fakes.dispatcher import InlineActionDispatcher
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     NoLastDictationEvent,
     RecordingCancelledEvent,
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
 )
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.output.last_dictation import LastDictation, LastDictationDecorator
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
-from voicetotext.tray.app import SystemTrayApp
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.output.last_dictation import LastDictation, LastDictationDecorator
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.tray.app import SystemTrayApp
 
 
 def _audio(seconds: float) -> AudioSegment:

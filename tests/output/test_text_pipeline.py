@@ -1,13 +1,13 @@
 import pytest
 
-from voicetotext.output.dictionary_config import (
+from skryb.output.dictionary_config import (
     DictionaryConfig,
     DictionaryOptions,
     LiteralRule,
     RegexRule,
 )
-from voicetotext.output.caret_context import CaretContext
-from voicetotext.output.text_pipeline import (
+from skryb.output.caret_context import CaretContext
+from skryb.output.text_pipeline import (
     PipelineMode,
     TextPipeline,
     TokenKind,
@@ -475,8 +475,8 @@ class TestNumbers:
 class TestStreamingPipeline:
     def test_should_keep_right_glue_between_writer_updates(self) -> None:
         from tests.fakes import FakeTextOutputHandler
-        from voicetotext.output.text_filter_decorator import TextFilterDecorator
-        from voicetotext.transcription.streaming.streaming_output_writer import (
+        from skryb.output.text_filter_decorator import TextFilterDecorator
+        from skryb.transcription.streaming.streaming_output_writer import (
             StreamingOutputWriter,
         )
 

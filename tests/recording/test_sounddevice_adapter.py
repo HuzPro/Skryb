@@ -11,15 +11,15 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from voicetotext.core.exceptions import AudioRecorderError
+from skryb.core.exceptions import AudioRecorderError
 from tests.recording.test_input_devices import crowded_device_query
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.recording.input_devices import (
+from skryb.recording.audio_segment import AudioSegment
+from skryb.recording.input_devices import (
     connected_preferred_microphone,
     input_device_index,
 )
-from voicetotext.recording.recorder import AudioRecorder
-from voicetotext.recording.sounddevice_adapter import SoundDeviceAdapter
+from skryb.recording.recorder import AudioRecorder
+from skryb.recording.sounddevice_adapter import SoundDeviceAdapter
 
 
 def _feed(mock_sd, *chunks: np.ndarray) -> None:
@@ -32,7 +32,7 @@ def _feed(mock_sd, *chunks: np.ndarray) -> None:
 
 
 class TestSoundDeviceAdapterStartRecording:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_open_input_stream_on_start(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
 
@@ -41,7 +41,7 @@ class TestSoundDeviceAdapterStartRecording:
         mock_sd.InputStream.assert_called_once()
         mock_sd.InputStream.return_value.start.assert_called_once()
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_report_is_recording_after_start(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
 
@@ -49,7 +49,7 @@ class TestSoundDeviceAdapterStartRecording:
 
         assert adapter.is_recording() is True
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_raise_when_already_recording(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -59,7 +59,7 @@ class TestSoundDeviceAdapterStartRecording:
 
 
 class TestSoundDeviceAdapterStopRecording:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_return_audio_segment_when_audio_was_captured(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -70,7 +70,7 @@ class TestSoundDeviceAdapterStopRecording:
         assert isinstance(result, AudioSegment)
         assert result.sample_rate == 16000
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_stop_and_close_stream_on_stop(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -80,7 +80,7 @@ class TestSoundDeviceAdapterStopRecording:
         mock_sd.InputStream.return_value.stop.assert_called_once()
         mock_sd.InputStream.return_value.close.assert_called_once()
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_report_not_recording_after_stop(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -89,7 +89,7 @@ class TestSoundDeviceAdapterStopRecording:
 
         assert adapter.is_recording() is False
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_assemble_captured_chunks_into_a_single_segment(
         self, mock_sd
     ):
@@ -106,7 +106,7 @@ class TestSoundDeviceAdapterStopRecording:
         assert result is not None
         assert result.sample_count == 1536
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_preserve_captured_samples_in_result(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -125,7 +125,7 @@ class TestSoundDeviceAdapterStopRecording:
             ),
         )
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_raise_when_not_recording(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
 
@@ -134,7 +134,7 @@ class TestSoundDeviceAdapterStopRecording:
 
 
 class TestSoundDeviceAdapterEmptyRecording:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_return_none_when_no_chunks_were_captured(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -145,7 +145,7 @@ class TestSoundDeviceAdapterEmptyRecording:
 
 
 class TestSoundDeviceAdapterLiveFrames:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_publish_latest_chunk_rms_without_buffering(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -157,7 +157,7 @@ class TestSoundDeviceAdapterLiveFrames:
         adapter.stop_recording()
         assert adapter.current_rms == 0.0
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_forward_mono_one_dimensional_frame_to_on_frame(self, mock_sd):
         # The recorder contract promises "float32, mono" frames. sounddevice
         # delivers (frames, 1); the adapter must flatten to (frames,) so the
@@ -176,7 +176,7 @@ class TestSoundDeviceAdapterLiveFrames:
         assert received[0].shape == (1024,)
         assert received[1].shape == (512,)
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_still_assemble_segment_when_on_frame_set(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
 
@@ -187,7 +187,7 @@ class TestSoundDeviceAdapterLiveFrames:
         assert result is not None
         assert result.sample_count == 1024
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_pass_a_copy_to_on_frame(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         received: list[np.ndarray] = []
@@ -199,7 +199,7 @@ class TestSoundDeviceAdapterLiveFrames:
 
         assert received[0][0] == 1.0  # on_frame got an independent (1-D) copy
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_clear_on_frame_after_stop(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         received: list[np.ndarray] = []
@@ -213,7 +213,7 @@ class TestSoundDeviceAdapterLiveFrames:
 
 
 class TestSoundDeviceAdapterDispose:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_stop_recording_on_dispose_if_active(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
         adapter.start_recording()
@@ -222,7 +222,7 @@ class TestSoundDeviceAdapterDispose:
 
         assert adapter.is_recording() is False
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_should_not_raise_on_dispose_when_idle(self, mock_sd):
         adapter = SoundDeviceAdapter(sample_rate=16000)
 
@@ -231,7 +231,7 @@ class TestSoundDeviceAdapterDispose:
 
 class TestSoundDeviceAdapterIsAnAudioRecorder:
     def test_should_implement_audio_recorder_interface(self):
-        with patch("voicetotext.recording.sounddevice_adapter.sd"):
+        with patch("skryb.recording.sounddevice_adapter.sd"):
             adapter = SoundDeviceAdapter(sample_rate=16000)
             assert isinstance(adapter, AudioRecorder)
 
@@ -264,13 +264,13 @@ def _opened_device(mock_sd) -> object:
 
 
 class TestChoosingTheMicrophone:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_records_from_the_windows_default_unless_told_otherwise(self, mock_sd):
         SoundDeviceAdapter().start_recording()
 
         assert _opened_device(mock_sd) is None
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_records_from_the_chosen_microphone(self, mock_sd):
         name = "Microphone (Maono PD300X Microp"
         mic = ChosenMicrophone(name, {name: 7})
@@ -280,7 +280,7 @@ class TestChoosingTheMicrophone:
         assert _opened_device(mock_sd) == 7
         assert mic.missing == []
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_looks_for_a_newly_plugged_microphone_before_giving_up(self, mock_sd):
         mic = ChosenMicrophone("USB Mic", {})
         mic.plug_in_on_rescan = {"USB Mic": 3}
@@ -290,7 +290,7 @@ class TestChoosingTheMicrophone:
         assert _opened_device(mock_sd) == 3
         assert mic.missing == []
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_falls_back_to_the_default_and_says_so_when_it_is_unplugged(self, mock_sd):
         mic = ChosenMicrophone("USB Mic", {})
 
@@ -300,7 +300,7 @@ class TestChoosingTheMicrophone:
         assert mic.missing == ["USB Mic"]
         assert mic.rescans == 1
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_says_so_once_per_absence_not_once_per_recording(self, mock_sd):
         mic = ChosenMicrophone("USB Mic", {})
         adapter = mic.adapter()
@@ -311,7 +311,7 @@ class TestChoosingTheMicrophone:
 
         assert mic.missing == ["USB Mic"]
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_goes_back_to_the_microphone_once_it_returns_and_warns_again_next_time(
         self, mock_sd,
     ):
@@ -330,7 +330,7 @@ class TestChoosingTheMicrophone:
 
         assert mic.missing == ["USB Mic", "USB Mic"]
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_falls_back_when_the_chosen_microphone_refuses_to_open(self, mock_sd):
         mock_sd.PortAudioError = type("PortAudioError", (Exception,), {})
         opened = []
@@ -351,7 +351,7 @@ class TestChoosingTheMicrophone:
         assert mic.missing == ["Busy Mic"]
         assert adapter.is_recording()
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_a_broken_default_microphone_is_still_an_error(self, mock_sd):
         mock_sd.PortAudioError = type("PortAudioError", (Exception,), {})
         mock_sd.InputStream.side_effect = mock_sd.PortAudioError("No default input")
@@ -359,7 +359,7 @@ class TestChoosingTheMicrophone:
         with pytest.raises(mock_sd.PortAudioError):
             SoundDeviceAdapter().start_recording()
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_a_failing_notice_never_stops_the_recording(self, mock_sd):
         def broken_notice(_name):
             raise RuntimeError("tray gone")
@@ -377,7 +377,7 @@ class TestChoosingTheMicrophone:
 
 
 class TestPausing:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_audio_that_arrives_while_paused_is_dropped(self, mock_sd):
         adapter = SoundDeviceAdapter()
         adapter.start_recording()
@@ -392,7 +392,7 @@ class TestPausing:
         assert audio.sample_count == 2048
         assert float(audio.data.max()) == pytest.approx(0.2)
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_a_new_recording_never_starts_paused(self, mock_sd):
         adapter = SoundDeviceAdapter()
         adapter.start_recording()
@@ -430,7 +430,7 @@ class PreferredMicrophones(ChosenMicrophone):
 
 
 class TestPreferredMicrophonesAtRecordingStart:
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_the_first_connected_preferred_microphone_beats_the_chosen_one(self, mock_sd):
         mics = PreferredMicrophones(
             "Built-in Mic",
@@ -444,7 +444,7 @@ class TestPreferredMicrophonesAtRecordingStart:
         assert _opened_device(mock_sd) == 9
         assert adapter.device_name == "Blue Yeti"
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_with_none_of_them_connected_the_chosen_microphone_is_used(self, mock_sd):
         mics = PreferredMicrophones(
             "Built-in Mic", {"Built-in Mic": 1}, ["Unplugged Rode", "Blue Yeti"],
@@ -457,7 +457,7 @@ class TestPreferredMicrophonesAtRecordingStart:
         assert adapter.device_name == "Built-in Mic"
         assert mics.missing == []
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_with_nothing_connected_it_records_from_the_windows_default(self, mock_sd):
         mics = PreferredMicrophones("USB Mic", {}, ["Blue Yeti"])
         adapter = mics.adapter()
@@ -468,7 +468,7 @@ class TestPreferredMicrophonesAtRecordingStart:
         assert adapter.device_name == ""
         assert mics.missing == ["USB Mic"]
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_the_choice_is_made_again_at_every_start(self, mock_sd):
         mics = PreferredMicrophones("Built-in Mic", {"Built-in Mic": 1}, ["Blue Yeti"])
         adapter = mics.adapter()
@@ -480,7 +480,7 @@ class TestPreferredMicrophonesAtRecordingStart:
 
         assert _opened_device(mock_sd) == 9
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_a_broken_device_list_falls_back_to_the_chosen_microphone(self, mock_sd):
         mics = PreferredMicrophones("Built-in Mic", {"Built-in Mic": 1}, ["Blue Yeti"])
         mics.broken = True
@@ -489,7 +489,7 @@ class TestPreferredMicrophonesAtRecordingStart:
 
         assert _opened_device(mock_sd) == 1
 
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_a_preferred_microphone_that_will_not_open_falls_back_to_the_default(
         self, mock_sd,
     ):
@@ -528,7 +528,7 @@ class TestChoosingAmongAThousandDevices:
             ([], "", ""),
         ],
     )
-    @patch("voicetotext.recording.sounddevice_adapter.sd")
+    @patch("skryb.recording.sounddevice_adapter.sd")
     def test_first_connected_preference_then_the_chosen_one_then_the_default(
         self, mock_sd, preferred, chosen, opened,
     ):

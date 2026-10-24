@@ -8,7 +8,7 @@ risk. This drives that exact path end to end via
 isolation the Parakeet streaming test uses, because loading the
 sentencepiece-backed model alongside pytest's Qt plugin segfaults on Windows.
 
-Opt-in (``VOICETOTEXT_RUN_REAL_MODEL_TESTS``), GPU-only, skipped when the
+Opt-in (``SKRYB_RUN_REAL_MODEL_TESTS``), GPU-only, skipped when the
 ``.nemo`` isn't downloaded. Assertions are lenient -- streaming revises its
 tail, so we pin behaviours any working run satisfies.
 """
@@ -31,7 +31,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = _REPO_ROOT / "scripts" / "bench_cache_aware_streaming.py"
 _REPO_ID = "nvidia/nemotron-speech-streaming-en-0.6b"
 _NEMO_FILENAME = "nemotron-speech-streaming-en-0.6b.nemo"
-_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
+_OPT_IN = "SKRYB_RUN_REAL_MODEL_TESTS"
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 

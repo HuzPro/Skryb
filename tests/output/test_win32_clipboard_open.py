@@ -1,6 +1,6 @@
 from tests.fakes import InstantSleeper
-from voicetotext.output import win32_clipboard_open
-from voicetotext.output.win32_clipboard_open import open_clipboard_with_retry
+from skryb.output import win32_clipboard_open
+from skryb.output.win32_clipboard_open import open_clipboard_with_retry
 
 
 class _FakeUser32:

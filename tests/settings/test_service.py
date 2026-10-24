@@ -10,9 +10,9 @@ from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatc
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.settings.fakes import FakeConfig, FakeModelManager
-from voicetotext.core.config import ConfigurationStore
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.config import ConfigurationStore
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
     DownloadProgressEvent,
@@ -23,31 +23,31 @@ from voicetotext.core.events import (
     ModelDeletedEvent,
     StateChangedEvent,
 )
-from voicetotext.core.exceptions import LicenseNotAcceptedError
-from voicetotext.core.json_config_adapter import JsonConfigAdapter
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
-from voicetotext.output.dictionary_config import (
+from skryb.core.exceptions import LicenseNotAcceptedError
+from skryb.core.json_config_adapter import JsonConfigAdapter
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode
+from skryb.output.dictionary_config import (
     DictionaryConfig,
     DictionaryOptions,
     LiteralRule,
     RegexRule,
 )
-from voicetotext.output.output_mode import OutputMode
-from voicetotext.recording.preferences import RecordingPreferences
-from voicetotext.settings.download_coordinator import DownloadCoordinator
-from voicetotext.settings.engine_hot_swap import EngineHotSwapCoordinator
-from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.settings.service import (
+from skryb.output.output_mode import OutputMode
+from skryb.recording.preferences import RecordingPreferences
+from skryb.settings.download_coordinator import DownloadCoordinator
+from skryb.settings.engine_hot_swap import EngineHotSwapCoordinator
+from skryb.settings.model_installation_cache import ModelInstallationCache
+from skryb.settings.service import (
     DownloadEventListener,
     EngineEventListener,
     SettingsService,
     StateChangeListener,
 )
-from voicetotext.settings.settings_draft import SettingsDraft
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import ALL_MODELS
-from voicetotext.writing.settings import WritingSettings
+from skryb.settings.settings_draft import SettingsDraft
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import ALL_MODELS
+from skryb.writing.settings import WritingSettings
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 
@@ -128,8 +128,8 @@ class TestEngineCandidatesFor:
         assert service.engine_candidates_for(_PARAKEET) == ()
 
     def test_should_return_ranked_candidates_when_registry_wired(self):
-        from voicetotext.transcription.engine_factory import build_engine_registry
-        from voicetotext.transcription.engine_types import HardwareProfile
+        from skryb.transcription.engine_factory import build_engine_registry
+        from skryb.transcription.engine_types import HardwareProfile
 
         registry = build_engine_registry()
         hardware = HardwareProfile(
@@ -144,8 +144,8 @@ class TestEngineCandidatesFor:
         assert candidates[0].engine_id == "nano_parakeet"
 
     def test_should_return_empty_when_model_unknown(self):
-        from voicetotext.transcription.engine_factory import build_engine_registry
-        from voicetotext.transcription.engine_types import HardwareProfile
+        from skryb.transcription.engine_factory import build_engine_registry
+        from skryb.transcription.engine_types import HardwareProfile
 
         registry = build_engine_registry()
         hardware = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)

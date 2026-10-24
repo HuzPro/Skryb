@@ -193,7 +193,7 @@ describe("the page a launch opens", () => {
 
 describe("writing model file", () => {
   it("names the file in use, whether it is the installed one or an override", () => {
-    expect(fileName("C:\\Users\\Zoë\\AppData\\Local\\VoiceToText\\writing\\models\\Spark-X2.5-4B-Q4_K_M.gguf")).toBe("Spark-X2.5-4B-Q4_K_M.gguf");
+    expect(fileName("C:\\Users\\Zoë\\AppData\\Local\\Skryb\\writing\\models\\Spark-X2.5-4B-Q4_K_M.gguf")).toBe("Spark-X2.5-4B-Q4_K_M.gguf");
     expect(fileName("D:/models/Qwen3.5-4B-Q4_K_M.gguf")).toBe("Qwen3.5-4B-Q4_K_M.gguf");
     expect(fileName("")).toBe("");
   });

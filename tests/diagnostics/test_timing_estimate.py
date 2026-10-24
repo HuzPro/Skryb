@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.diagnostics.timing_estimate import (
+from skryb.diagnostics.timing_estimate import (
     TranscriptionTimeEstimate,
     engine_key,
 )

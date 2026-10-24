@@ -4,7 +4,7 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from voicetotext.core.dev_install import (
+from skryb.core.dev_install import (
     _command_target,
     create_shortcut,
     disable_autostart,
@@ -61,10 +61,10 @@ def _fake_winreg(key: FakeRegistryKey) -> SimpleNamespace:
 
 class TestShortcutCreation:
     def test_should_pass_paths_only_through_environment(self, tmp_path) -> None:
-        launcher = tmp_path / "Scripts" / "voicetotext-gui.exe"
+        launcher = tmp_path / "Scripts" / "skryb-gui.exe"
         launcher.parent.mkdir()
         launcher.write_bytes(b"")
-        destination = tmp_path / "Programs" / "VoiceToText (Dev).lnk"
+        destination = tmp_path / "Programs" / "Skryb (Dev).lnk"
         system_root = tmp_path / "Windows"
 
         def run(
@@ -77,13 +77,13 @@ class TestShortcutCreation:
         ) -> subprocess.CompletedProcess[str]:
             destination.write_bytes(b"shortcut")
             assert str(launcher.resolve()) not in command[-1]
-            assert env["VOICETOTEXT_LAUNCHER_PATH"] == str(launcher.resolve())
-            assert env["VOICETOTEXT_SHORTCUT_PATH"] == str(destination)
+            assert env["SKRYB_LAUNCHER_PATH"] == str(launcher.resolve())
+            assert env["SKRYB_SHORTCUT_PATH"] == str(destination)
             return subprocess.CompletedProcess(command, 0, str(launcher.resolve()), "")
 
         with (
             patch.dict(os.environ, {"SystemRoot": str(system_root)}),
-            patch("voicetotext.core.dev_install.subprocess.run", side_effect=run),
+            patch("skryb.core.dev_install.subprocess.run", side_effect=run),
         ):
             succeeded, _message = create_shortcut(launcher, destination)
 
@@ -101,7 +101,7 @@ class TestShortcutCreation:
 
 class TestAutostartOwnership:
     def test_should_round_trip_owned_registry_value(self, tmp_path) -> None:
-        launcher = tmp_path / "voicetotext-gui.exe"
+        launcher = tmp_path / "skryb-gui.exe"
         launcher.write_bytes(b"")
         key = FakeRegistryKey()
         winreg = _fake_winreg(key)
@@ -115,11 +115,11 @@ class TestAutostartOwnership:
         assert key.values == {}
 
     def test_should_refuse_to_overwrite_another_install(self, tmp_path) -> None:
-        launcher = tmp_path / "current" / "voicetotext-gui.exe"
+        launcher = tmp_path / "current" / "skryb-gui.exe"
         launcher.parent.mkdir()
         launcher.write_bytes(b"")
         key = FakeRegistryKey()
-        key.values["VoiceToTextDev"] = '"C:\\other\\voicetotext-gui.exe"'
+        key.values["SkrybDev"] = '"C:\\other\\skryb-gui.exe"'
 
         with patch.dict(sys.modules, {"winreg": _fake_winreg(key)}):
             succeeded, message = enable_autostart(launcher)
@@ -128,6 +128,6 @@ class TestAutostartOwnership:
         assert "other" in message
 
     def test_should_resolve_quoted_command_target(self, tmp_path) -> None:
-        target = tmp_path / "Scripts" / "voicetotext-gui.exe"
+        target = tmp_path / "Scripts" / "skryb-gui.exe"
 
         assert _command_target(f'"{target}" --ignored') == target.resolve()

@@ -1,7 +1,7 @@
 import re
 
-from voicetotext.writing.prompt import cleanup_system_prompt
-from voicetotext.writing.settings import WritingSettings
+from skryb.writing.prompt import cleanup_system_prompt
+from skryb.writing.settings import WritingSettings
 
 # Words a real dictation is full of. An example built from them gets copied
 # into a user's list: "Bread" turned up in a trip packing list.

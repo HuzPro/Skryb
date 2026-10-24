@@ -4,18 +4,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     EngineLoadCompletedEvent,
     EngineLoadFailedEvent,
     EngineLoadStartedEvent,
 )
-from voicetotext.core.exceptions import EngineSwapError
-from voicetotext.settings.engine_hot_swap import (
+from skryb.core.exceptions import EngineSwapError
+from skryb.settings.engine_hot_swap import (
     EngineHotSwapCoordinator,
     NullEngineHotSwap,
 )
-from voicetotext.transcription.engine_install import make_engine_installer
+from skryb.transcription.engine_install import make_engine_installer
 
 
 def _installer_for(engine):

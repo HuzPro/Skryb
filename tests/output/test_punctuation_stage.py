@@ -1,6 +1,6 @@
-from voicetotext.output.dictionary_config import DictionaryConfig, DictionaryOptions
-from voicetotext.output.punctuation_stage import PunctuationStage
-from voicetotext.output.text_pipeline import TextPipeline
+from skryb.output.dictionary_config import DictionaryConfig, DictionaryOptions
+from skryb.output.punctuation_stage import PunctuationStage
+from skryb.output.text_pipeline import TextPipeline
 
 
 class FakePunctuationBackend:

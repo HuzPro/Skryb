@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
-from voicetotext.output.clipboard_adapter import ClipboardAdapter
-from voicetotext.output.clipboard_writer import ClipboardWriter
-from voicetotext.output.handler import TextOutputHandler
+from skryb.output.clipboard_adapter import ClipboardAdapter
+from skryb.output.clipboard_writer import ClipboardWriter
+from skryb.output.handler import TextOutputHandler
 
 
 class TestClipboardAdapterOutput:

@@ -10,13 +10,13 @@ import sys
 
 import pytest
 
-from voicetotext.output import win32_edit_control_context as module
-from voicetotext.output.caret_context import (
+from skryb.output import win32_edit_control_context as module
+from skryb.output.caret_context import (
     CONTEXT_CHARS,
     NO_CONTEXT,
     CaretContext,
 )
-from voicetotext.output.win32_edit_control_context import (
+from skryb.output.win32_edit_control_context import (
     edit_control_context_of,
     read_edit_control_context,
 )
@@ -267,7 +267,7 @@ def test_only_windows_directly_inside_count_and_never_the_whole_desktop(tk_root)
     import ctypes
     import tkinter
 
-    from voicetotext.output.win32_edit_control_context import has_child_window_of_class
+    from skryb.output.win32_edit_control_context import has_child_window_of_class
 
     window = tkinter.Toplevel(tk_root)
     try:

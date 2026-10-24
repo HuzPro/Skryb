@@ -3,7 +3,7 @@
 import threading
 
 from tests.ui.rig import NEMOTRON, TURBO, Rig
-from voicetotext.core.events import (
+from skryb.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
     DownloadProgressEvent,
@@ -14,7 +14,7 @@ from voicetotext.core.events import (
     RecordingCancelledEvent,
     TranscriptionCompletedEvent,
 )
-from voicetotext.core.state_machine import AppState
+from skryb.core.state_machine import AppState
 
 
 def _names_until(stream, last: str) -> list[str]:

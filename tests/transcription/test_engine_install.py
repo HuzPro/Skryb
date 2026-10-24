@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.core.exceptions import EngineSwapError
-from voicetotext.transcription.engine_install import make_engine_installer
+from skryb.core.exceptions import EngineSwapError
+from skryb.transcription.engine_install import make_engine_installer
 
 
 def _set_engine(use_case, engine):

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from voicetotext.core.checkout_update import pull_main
+from skryb.core.checkout_update import pull_main
 
 # Real git against a bare repository standing in for GitHub.
 pytestmark = pytest.mark.integration

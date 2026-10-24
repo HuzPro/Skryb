@@ -1,16 +1,16 @@
 import numpy as np
 import pytest
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     EngineLoadCompletedEvent,
     RecordingCapWarningEvent,
     RecordingStartedEvent,
     RecordingStoppedEvent,
     StateChangedEvent,
 )
-from voicetotext.core.state_machine import AppState
-from voicetotext.recording.recording_cue_player import (
+from skryb.core.state_machine import AppState
+from skryb.recording.recording_cue_player import (
     CueBeeper,
     EngineReadyBeeper,
     ReadyCuePlayer,
@@ -20,7 +20,7 @@ from voicetotext.recording.recording_cue_player import (
     tone_to_samples,
     warning_to_samples,
 )
-from voicetotext.recording.sounddevice_cue_player import SoundDeviceCuePlayer
+from skryb.recording.sounddevice_cue_player import SoundDeviceCuePlayer
 
 
 class _FakeCuePlayer(RecordingCuePlayer):

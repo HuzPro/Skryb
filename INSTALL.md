@@ -1,9 +1,9 @@
-# Install VoiceToText on Windows
+# Install Skryb on Windows
 
 ## Prerequisites
 
 Most people should use the installer from the
-[latest release](https://github.com/HuzPro/VoiceToText/releases/latest). This
+[latest release](https://github.com/HuzPro/Skryb/releases/latest). This
 page is for running from a source checkout.
 
 - **Python 3.12** (required for the AMD Windows path; 3.11+ works for everything else)
@@ -26,8 +26,8 @@ The GPU files use `--find-links` (AMD's index is a flat HTML directory) or `--ex
 ## Steps
 
 ```powershell
-git clone https://github.com/HuzPro/VoiceToText.git
-cd VoiceToText
+git clone https://github.com/HuzPro/Skryb.git
+cd Skryb
 
 py -3.12 -m venv .venv             # Python 3.12 explicitly for AMD Windows
 .\.venv\Scripts\Activate.ps1       # Windows
@@ -35,7 +35,7 @@ py -3.12 -m venv .venv             # Python 3.12 explicitly for AMD Windows
 pip install -r requirements-amd.txt   # or requirements-nvidia.txt / requirements-cpu.txt
 pip install --no-deps -e .
 .\scripts\build_ui.ps1             # builds the settings window, about a minute
-python -m voicetotext
+python -m skryb
 ```
 
 Run `scripts\build_ui.ps1` again after pulling changes under `ui\`.
@@ -43,9 +43,9 @@ Run `scripts\build_ui.ps1` again after pulling changes under `ui\`.
 First run opens a setup window where you pick a model and download it.
 
 The editable install above adds both the
-console command and a console-free `voicetotext-gui.exe`. Run
-`voicetotext --create-shortcut` to add **VoiceToText (Dev)** to the Start
-Menu. `voicetotext --enable-autostart` and `--disable-autostart` manage the
+console command and a console-free `skryb-gui.exe`. Run
+`skryb --create-shortcut` to add **Skryb (Dev)** to the Start
+Menu. `skryb --enable-autostart` and `--disable-autostart` manage the
 development install's per-user startup entry. Installer uninstall cleanup for
 that development entry is intentionally out of scope.
 
@@ -122,7 +122,7 @@ The wheel needs `amdhip64_7.dll` and `hipblas.dll`, which
 ### Check you got the right wheel
 
 ```powershell
-python -m voicetotext --doctor
+python -m skryb --doctor
 ```
 
 The `[ctranslate2]` section must report at least one GPU device on a GPU
@@ -172,7 +172,7 @@ Use matching PyTorch and torchaudio builds, then install `requirements-all.txt` 
 If transcription returns an empty clipboard or the tray icon stays on **Loading**, run:
 
 ```powershell
-python -m voicetotext --doctor
+python -m skryb --doctor
 ```
 
 Output lists Python / PyTorch versions, which engine backends are installed, CUDA / ROCm device availability, and the HuggingFace cache path. Share that output when reporting an issue - most missing-dependency or device-detection problems jump out from one line of the report.
@@ -185,7 +185,7 @@ Check that PyTorch and torchaudio use matching versions and runtimes. Use the ma
 
 A CTranslate2 built for the wrong runtime is installed next to a ROCm
 PyTorch. Run `pip uninstall -y ctranslate2`, then reinstall following the
-CTranslate2 section above. `python -m voicetotext --doctor` tells you
+CTranslate2 section above. `python -m skryb --doctor` tells you
 which build you have.
 
 ### "Could not find a version that satisfies the requirement torch==2.9.1+rocm7.2.1"

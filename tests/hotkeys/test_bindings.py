@@ -3,8 +3,8 @@ import re
 import pytest
 
 from tests.fakes.config import FakeConfig
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.bindings import (
+from skryb.hotkeys import keys
+from skryb.hotkeys.bindings import (
     DEFAULT_BINDINGS,
     Binding,
     BindingAction,
@@ -14,7 +14,7 @@ from voicetotext.hotkeys.bindings import (
     parse_bindings,
     validate_bindings,
 )
-from voicetotext.hotkeys.key_parser import parse_hotkey_combo
+from skryb.hotkeys.key_parser import parse_hotkey_combo
 
 _TOGGLE = BindingMode.TOGGLE
 _HOLD = BindingMode.HOLD

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from voicetotext.core.paths import AppPaths
+from skryb.core.paths import AppPaths
 
 
 def models_dir() -> Path | None:

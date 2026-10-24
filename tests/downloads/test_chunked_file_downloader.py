@@ -5,13 +5,13 @@ from unittest.mock import patch
 
 import pytest
 
-from voicetotext.downloads.chunked_file_downloader import (
+from skryb.downloads.chunked_file_downloader import (
     ChunkedFileDownloader,
     FileDownloadError,
     FileDownloadPlan,
 )
-from voicetotext.downloads.sidecar import Sidecar
-from voicetotext.downloads.state import ChunkState
+from skryb.downloads.sidecar import Sidecar
+from skryb.downloads.state import ChunkState
 
 
 @dataclass
@@ -570,7 +570,7 @@ class TestChunkedFileDownloaderMidStreamError:
             3: (750, 999),
         }
 
-        from voicetotext.downloads import chunked_file_downloader as cfd
+        from skryb.downloads import chunked_file_downloader as cfd
 
         original_update = cfd._SharedDownloadState.update_chunk
 

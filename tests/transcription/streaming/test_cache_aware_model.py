@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import torch
 
-from voicetotext.transcription.streaming.cache_aware.model import (
+from skryb.transcription.streaming.cache_aware.model import (
     BLANK_ID,
     D_MODEL,
     MAX_SYMBOLS_PER_STEP,

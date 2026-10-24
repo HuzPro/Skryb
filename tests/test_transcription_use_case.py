@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 
 from tests.fakes.dispatcher import DeferredActionDispatcher, InlineActionDispatcher
-from voicetotext.core.action_dispatcher import ActionDispatcher
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.action_dispatcher import ActionDispatcher
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     ErrorOccurredEvent,
     RecordingCancelledEvent,
     RecordingCapWarningEvent,
@@ -21,14 +21,14 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
     TranscriptionStartedEvent,
 )
-from voicetotext.core.exceptions import AudioRecorderError, EngineSwapError
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.diagnostics.session import SessionDiagnostics
-from voicetotext.output.clipboard_write_error import ClipboardWriteError
-from voicetotext.output.dictation_trace import current_trace
-from voicetotext.recording.audio_segment import AudioSegment
-from voicetotext.transcription.result import TranscriptionResult
-from voicetotext.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.core.exceptions import AudioRecorderError, EngineSwapError
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.diagnostics.session import SessionDiagnostics
+from skryb.output.clipboard_write_error import ClipboardWriteError
+from skryb.output.dictation_trace import current_trace
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.result import TranscriptionResult
+from skryb.transcription_use_case import RecordAndTranscribeUseCase
 
 
 def _make_audio(samples: int = 16000) -> AudioSegment:
@@ -577,7 +577,7 @@ class TestRecordingDurationCap:
     recording start and cancelled at recording stop.
     """
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_should_schedule_cap_timer_when_recording_starts(self, MockTimer):
         from unittest.mock import ANY
 
@@ -590,7 +590,7 @@ class TestRecordingDurationCap:
         MockTimer.assert_called_once_with(42.0, ANY)
         MockTimer.return_value.start.assert_called_once()
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_should_cancel_cap_timer_when_recording_stops_normally(
         self, MockTimer,
     ):
@@ -603,7 +603,7 @@ class TestRecordingDurationCap:
 
         MockTimer.return_value.cancel.assert_called_once()
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_should_auto_stop_when_cap_timer_fires(self, MockTimer):
         use_case, recorder, engine, _, _, state_machine = _build_use_case()
         recorder.stop_recording.return_value = _make_audio()
@@ -619,7 +619,7 @@ class TestRecordingDurationCap:
         engine.transcribe.assert_called_once()
         assert state_machine.state == AppState.IDLE
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_should_publish_recording_capped_event_on_auto_stop(
         self, MockTimer,
     ):
@@ -638,7 +638,7 @@ class TestRecordingDurationCap:
         assert len(received) == 1
         assert received[0].max_duration_seconds == 600.0
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_should_no_op_when_cap_fires_after_recording_already_stopped(
         self, MockTimer,
     ):
@@ -673,7 +673,7 @@ class TestRecordingLimitWarning:
     def _fire_latest_warning(MockTimer) -> None:
         MockTimer.call_args_list[-1].args[1]()
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_the_warning_is_due_the_chosen_time_before_the_limit(self, MockTimer):
         use_case, *_ = _build_use_case(
             max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
@@ -683,8 +683,8 @@ class TestRecordingLimitWarning:
 
         assert self._timers(MockTimer) == [600.0, 570.0]
 
-    @patch("voicetotext.transcription_use_case.time.monotonic")
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.time.monotonic")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_the_warning_fires_exactly_once_with_the_time_left(
         self, MockTimer, monotonic,
     ):
@@ -702,8 +702,8 @@ class TestRecordingLimitWarning:
 
         assert [event.remaining_seconds for event in warnings] == [30.0]
 
-    @patch("voicetotext.transcription_use_case.time.monotonic")
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.time.monotonic")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_paused_time_pushes_the_warning_back(self, MockTimer, monotonic):
         use_case, *_ = _build_use_case(
             max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
@@ -718,8 +718,8 @@ class TestRecordingLimitWarning:
 
         assert self._timers(MockTimer)[-2:] == [500.0, 470.0]
 
-    @patch("voicetotext.transcription_use_case.time.monotonic")
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.time.monotonic")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_a_warning_due_while_paused_waits_for_the_resume(self, MockTimer, monotonic):
         use_case, _, _, _, event_bus, _ = _build_use_case(
             max_recording_seconds=600.0, warn_before_cap_seconds=30.0,
@@ -740,7 +740,7 @@ class TestRecordingLimitWarning:
         assert self._timers(MockTimer)[-2:] == [25.0, 0.0]
         assert [event.remaining_seconds for event in warnings] == [25.0]
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_a_limit_changed_after_startup_applies_to_the_next_recording(
         self, MockTimer,
     ):
@@ -767,7 +767,7 @@ class TestRecordingLimitWarning:
 
         assert self._timers(MockTimer) == [600.0, 570.0, 120.0, 110.0]
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_the_capped_notice_names_the_limit_that_was_in_force(self, MockTimer):
         use_case, recorder, engine, _, event_bus, _ = _build_use_case(
             max_recording_seconds=90.0, warn_before_cap_seconds=30.0,
@@ -782,7 +782,7 @@ class TestRecordingLimitWarning:
 
         assert [event.max_duration_seconds for event in capped] == [90.0]
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_no_warning_is_scheduled_when_it_is_turned_off(self, MockTimer):
         use_case, *_ = _build_use_case(
             max_recording_seconds=600.0, warn_before_cap_seconds=0.0,
@@ -792,7 +792,7 @@ class TestRecordingLimitWarning:
 
         assert self._timers(MockTimer) == [600.0]
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_a_limit_shorter_than_the_warning_warns_straight_away(self, MockTimer):
         use_case, *_ = _build_use_case(
             max_recording_seconds=20.0, warn_before_cap_seconds=30.0,
@@ -802,7 +802,7 @@ class TestRecordingLimitWarning:
 
         assert self._timers(MockTimer) == [20.0, 0.0]
 
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_stopping_cancels_the_warning_along_with_the_limit(self, MockTimer):
         use_case, recorder, engine, _, event_bus, _ = _build_use_case(
             warn_before_cap_seconds=30.0,
@@ -1022,8 +1022,8 @@ class TestPause:
 
         recorder.set_paused.assert_not_called()
 
-    @patch("voicetotext.transcription_use_case.time.monotonic")
-    @patch("voicetotext.transcription_use_case.threading.Timer")
+    @patch("skryb.transcription_use_case.time.monotonic")
+    @patch("skryb.transcription_use_case.threading.Timer")
     def test_paused_time_does_not_count_towards_the_recording_cap(
         self, MockTimer, monotonic,
     ):
@@ -1218,8 +1218,8 @@ class TestOnePressAlwaysStartsTheNextRecording:
     """The real toggle hotkey wired to the real use case, as bootstrap does."""
 
     def _wired(self):
-        from voicetotext.hotkeys import keys
-        from voicetotext.hotkeys.toggle_strategy import ToggleStrategy
+        from skryb.hotkeys import keys
+        from skryb.hotkeys.toggle_strategy import ToggleStrategy
 
         use_case, recorder, engine, _, _, state_machine = _build_use_case()
         recorder.stop_recording.return_value = _make_audio()

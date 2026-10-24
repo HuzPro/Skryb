@@ -1,6 +1,6 @@
 import pytest
 
-from voicetotext.output.caret_context import (
+from skryb.output.caret_context import (
     NO_CONTEXT,
     CaretContext,
     fit_to_context,

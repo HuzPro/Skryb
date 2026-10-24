@@ -1,19 +1,19 @@
 import json
 from pathlib import Path
 
-from voicetotext.output.dictionary_config import (
+from skryb.output.dictionary_config import (
     DictionaryConfig,
     DictionaryOptions,
     LiteralRule,
     RegexRule,
 )
-from voicetotext.output.handler import TextOutputHandler
-from voicetotext.output.text_filter_decorator import (
+from skryb.output.handler import TextOutputHandler
+from skryb.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
-from voicetotext.output.text_pipeline import TextPipeline
-from voicetotext.transcription.streaming.streaming_output_writer import (
+from skryb.output.text_pipeline import TextPipeline
+from skryb.transcription.streaming.streaming_output_writer import (
     StreamingOutputWriter,
 )
 
@@ -207,7 +207,7 @@ class TestLoadDictionary:
 
 
 def test_the_text_typed_after_every_stage_is_recorded_for_history() -> None:
-    from voicetotext.output.dictation_trace import begin_trace, end_trace
+    from skryb.output.dictation_trace import begin_trace, end_trace
 
     inner = CapturingOutput()
     decorator = TextFilterDecorator(inner, TextPipeline((lambda text: text.replace("um ", "").capitalize() + ".",)))

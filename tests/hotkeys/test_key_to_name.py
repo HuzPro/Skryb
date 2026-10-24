@@ -1,9 +1,9 @@
 """Tests for ``key_to_canonical_name`` - converting a hook key event back
 to the canonical name string used in config (inverse of the parser)."""
 
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.keys import HotkeyKey
-from voicetotext.hotkeys.key_to_name import key_to_canonical_name
+from skryb.hotkeys import keys
+from skryb.hotkeys.keys import HotkeyKey
+from skryb.hotkeys.key_to_name import key_to_canonical_name
 
 
 class TestModifiers:

@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from voicetotext.hotkeys.win32_copilot_key import (
+from skryb.hotkeys.win32_copilot_key import (
     copilot_key_acts_as_right_ctrl,
     copilot_key_setting_is_right_ctrl,
 )

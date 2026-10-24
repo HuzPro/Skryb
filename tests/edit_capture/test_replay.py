@@ -6,7 +6,7 @@ Replay is pure - no Win32, no I/O - so every test drives it through
 
 import pytest
 
-from voicetotext.edit_capture.replay import (
+from skryb.edit_capture.replay import (
     VK_A,
     VK_BACK,
     VK_DELETE,

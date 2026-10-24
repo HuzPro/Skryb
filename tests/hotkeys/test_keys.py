@@ -1,5 +1,5 @@
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.keys import HotkeyKey
+from skryb.hotkeys import keys
+from skryb.hotkeys.keys import HotkeyKey
 
 
 class TestHotkeyKeyEquality:

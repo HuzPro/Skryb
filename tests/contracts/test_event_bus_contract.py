@@ -10,8 +10,8 @@ from collections.abc import Callable
 import pytest
 
 from tests.fakes import RecordingEventBus
-from voicetotext.core.event_bus import EventBus, SimpleEventBus
-from voicetotext.core.events import DomainEvent, RecordingStartedEvent, RecordingStoppedEvent
+from skryb.core.event_bus import EventBus, SimpleEventBus
+from skryb.core.events import DomainEvent, RecordingStartedEvent, RecordingStoppedEvent
 
 
 Factory = Callable[[], EventBus]

@@ -6,9 +6,9 @@ function and assert on the resulting ``HotkeyKey`` tuple (compared by vk).
 
 import pytest
 
-from voicetotext.hotkeys import keys
-from voicetotext.hotkeys.keys import HotkeyKey
-from voicetotext.hotkeys.key_parser import parse_hotkey_combo
+from skryb.hotkeys import keys
+from skryb.hotkeys.keys import HotkeyKey
+from skryb.hotkeys.key_parser import parse_hotkey_combo
 
 
 class TestParseHotkeyCombo:

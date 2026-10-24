@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
-import voicetotext.bootstrap as bootstrap
+import skryb.bootstrap as bootstrap
 from tests.fakes import AllowAllLicensePolicy, FakeConfig
-from voicetotext.diagnostics.session import SessionDiagnostics
+from skryb.diagnostics.session import SessionDiagnostics
 
 
 def _config(mode: str) -> FakeConfig:

@@ -1,10 +1,10 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from voicetotext.transcription.composite_model_manager import CompositeModelManager
-from voicetotext.transcription.engine_types import EngineId
-from voicetotext.transcription.model_info import ModelInfo
-from voicetotext.transcription.model_manager import ModelManager
+from skryb.transcription.composite_model_manager import CompositeModelManager
+from skryb.transcription.engine_types import EngineId
+from skryb.transcription.model_info import ModelInfo
+from skryb.transcription.model_manager import ModelManager
 
 
 def _info(name: str = "parakeet-tdt-0.6b-v3") -> ModelInfo:

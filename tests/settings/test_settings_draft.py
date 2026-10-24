@@ -1,10 +1,10 @@
 import pytest
 
-from voicetotext.hotkeys.bindings import Binding, BindingAction, BindingMode
-from voicetotext.output.output_mode import OutputMode
-from voicetotext.settings.settings_draft import ChangeSet, SettingsDraft
-from voicetotext.settings.transcription_mode import TranscriptionMode
-from voicetotext.writing.settings import WritingSettings
+from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode
+from skryb.output.output_mode import OutputMode
+from skryb.settings.settings_draft import ChangeSet, SettingsDraft
+from skryb.settings.transcription_mode import TranscriptionMode
+from skryb.writing.settings import WritingSettings
 
 
 def _make_draft(**overrides) -> SettingsDraft:

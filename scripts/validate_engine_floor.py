@@ -22,7 +22,7 @@ from xml.etree import ElementTree
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _EXPECTED_TRANSFORMERS = "5.16.0"
-_OPT_IN = "VOICETOTEXT_RUN_REAL_MODEL_TESTS"
+_OPT_IN = "SKRYB_RUN_REAL_MODEL_TESTS"
 _ENGINE_TEST_MODULES: dict[str, str] = {
     "crisperwhisper": (
         "tests.integration.test_crisperwhisper_transcribes_audio_file"

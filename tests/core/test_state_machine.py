@@ -2,9 +2,9 @@ import threading
 
 import pytest
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import StateChangedEvent
-from voicetotext.core.state_machine import AppState, AppStateMachine
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import StateChangedEvent
+from skryb.core.state_machine import AppState, AppStateMachine
 
 
 class TestAppStateMachineInitialState:

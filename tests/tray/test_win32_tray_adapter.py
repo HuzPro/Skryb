@@ -13,9 +13,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.core.state_machine import AppState
-from voicetotext.tray import win32_tray_adapter as mod
-from voicetotext.tray.win32_tray_adapter import (
+from skryb.core.state_machine import AppState
+from skryb.tray import win32_tray_adapter as mod
+from skryb.tray.win32_tray_adapter import (
     Win32TrayAdapter,
     build_win32_tray_adapter,
     create_hicon,
@@ -74,7 +74,7 @@ class TestInitial:
         assert backend.set_icon.call_count == 1
 
     def test_should_set_tooltip_with_title_prefix(self, adapter, backend):
-        backend.set_tooltip.assert_called_with("VoiceToText - Idle - ready")
+        backend.set_tooltip.assert_called_with("Skryb - Idle - ready")
 
 
 class TestVisible:
@@ -101,7 +101,7 @@ class TestUpdateState:
         adapter.update_state(AppState.RECORDING, "Recording...")
 
         backend.set_icon.assert_called_once()
-        backend.set_tooltip.assert_called_with("VoiceToText - Recording...")
+        backend.set_tooltip.assert_called_with("Skryb - Recording...")
 
     def test_should_marshal_state_update_through_dispatcher(self, tk_root, backend):
         dispatcher = RecordingDispatcher()
@@ -119,10 +119,10 @@ class TestUpdateState:
 
 class TestNotify:
     def test_should_forward_notification_to_backend(self, adapter, backend):
-        adapter.notify("VoiceToText", "Clipboard write failed.")
+        adapter.notify("Skryb", "Clipboard write failed.")
 
         backend.notify.assert_called_once_with(
-            "VoiceToText", "Clipboard write failed.",
+            "Skryb", "Clipboard write failed.",
         )
 
 
@@ -133,7 +133,7 @@ class TestElapsedProvider:
 
         adapter._refresh_elapsed_tooltip()
 
-        backend.set_tooltip.assert_called_with("VoiceToText - Recording 0:47")
+        backend.set_tooltip.assert_called_with("Skryb - Recording 0:47")
 
     def test_should_restore_static_tooltip_when_cleared(self, adapter, backend):
         adapter.set_elapsed_provider(lambda: 10.0)
@@ -141,7 +141,7 @@ class TestElapsedProvider:
 
         adapter.set_elapsed_provider(None)
 
-        backend.set_tooltip.assert_called_with("VoiceToText - Idle - ready")
+        backend.set_tooltip.assert_called_with("Skryb - Idle - ready")
 
     def test_should_no_op_refresh_after_provider_cleared(self, adapter, backend):
         adapter.set_elapsed_provider(lambda: 99.0)
@@ -190,7 +190,7 @@ class TestFactory:
             dispatcher=dispatcher,
         )
 
-        assert adapter.current_title() == "VoiceToText - Idle - ready"
+        assert adapter.current_title() == "Skryb - Idle - ready"
 
         adapter.stop()  # tears down the real backend window
 
@@ -268,7 +268,7 @@ class TestDeviceChanges:
 
 class TestMicrophoneMenu:
     def _backend(self, connected, chosen, chosen_log):
-        from voicetotext.tray import win32_tray_adapter as tray
+        from skryb.tray import win32_tray_adapter as tray
 
         backend = tray.Win32TrayBackend.__new__(tray.Win32TrayBackend)
         backend._on_settings_clicked = None
@@ -343,7 +343,7 @@ class TestMicrophoneMenu:
 
 class TestRepeatLastDictationMenu:
     def _backend(self, calls):
-        from voicetotext.tray import win32_tray_adapter as tray
+        from skryb.tray import win32_tray_adapter as tray
 
         backend = tray.Win32TrayBackend.__new__(tray.Win32TrayBackend)
         backend._get_state_label = lambda: "Idle - ready"
@@ -540,8 +540,8 @@ import tkinter
 ctypes.windll.kernel32.WerSetFlags(0x20)
 ctypes.windll.kernel32.SetErrorMode(0x8003)
 
-from voicetotext.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
-from voicetotext.tray.win32_tray_adapter import Win32TrayBackend
+from skryb.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
+from skryb.tray.win32_tray_adapter import Win32TrayBackend
 
 root = tkinter.Tk()
 root.withdraw()

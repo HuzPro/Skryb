@@ -1,13 +1,13 @@
 import threading
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
 )
-from voicetotext.settings.model_installation_cache import ModelInstallationCache
-from voicetotext.transcription.model_info import ModelInfo
-from voicetotext.transcription.model_manager import ModelManager
+from skryb.settings.model_installation_cache import ModelInstallationCache
+from skryb.transcription.model_info import ModelInfo
+from skryb.transcription.model_manager import ModelManager
 
 
 class _FakeModelManager(ModelManager):

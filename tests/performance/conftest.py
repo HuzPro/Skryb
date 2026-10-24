@@ -8,7 +8,7 @@ agree on where weights live.
 
 Gating is two-layered:
 
-* Env var ``VOICETOTEXT_RUN_PERFORMANCE_TESTS`` must be set to a
+* Env var ``SKRYB_RUN_PERFORMANCE_TESTS`` must be set to a
   non-empty value, otherwise every test in this directory is skipped
   with a clear reason during collection.
 * The ``@pytest.mark.performance`` + ``@pytest.mark.slow`` markers on
@@ -17,7 +17,7 @@ Gating is two-layered:
 
 Run with::
 
-    set VOICETOTEXT_RUN_PERFORMANCE_TESTS=1
+    set SKRYB_RUN_PERFORMANCE_TESTS=1
     venv\\Scripts\\pytest -m performance -s tests/performance/
 """
 
@@ -33,7 +33,7 @@ import pytest
 # ``AppPaths`` reads ``%APPDATA%`` and computes the same models dir
 # the production app uses, so the perf suite and the GUI share weights.
 # ──────────────────────────────────────────────────────────────────────
-from voicetotext.core.paths import AppPaths
+from skryb.core.paths import AppPaths
 
 _paths = AppPaths()
 os.environ.setdefault("HF_HUB_CACHE", str(_paths.models_dir))
@@ -51,15 +51,15 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 # Late imports - these go through huggingface_hub / torch under the hood
 # and must see HF_HUB_CACHE.
-from voicetotext.transcription.engine_registry import EngineRegistry  # noqa: E402
-from voicetotext.transcription.engine_types import HardwareProfile  # noqa: E402
-from voicetotext.transcription.license_policy import LicensePolicy  # noqa: E402
+from skryb.transcription.engine_registry import EngineRegistry  # noqa: E402
+from skryb.transcription.engine_types import HardwareProfile  # noqa: E402
+from skryb.transcription.license_policy import LicensePolicy  # noqa: E402
 
 from tests.helpers.license_gate import user_license_policy  # noqa: E402
 from tests.performance._recorder import PerformanceRecorder  # noqa: E402
 
 
-_GATE_ENV_VAR = "VOICETOTEXT_RUN_PERFORMANCE_TESTS"
+_GATE_ENV_VAR = "SKRYB_RUN_PERFORMANCE_TESTS"
 _RESULTS_DIR = Path(__file__).parent / ".results"
 _RESULTS_PATH = _RESULTS_DIR / "benchmark_results.json"
 
@@ -95,8 +95,8 @@ def perf_context(request: pytest.FixtureRequest) -> Iterator[PerformanceContext]
             "VRAM measurements and engine state would corrupt across workers"
         )
 
-    from voicetotext.transcription.engine_factory import build_engine_registry
-    from voicetotext.transcription.torch_hardware_detector import TorchHardwareDetector
+    from skryb.transcription.engine_factory import build_engine_registry
+    from skryb.transcription.torch_hardware_detector import TorchHardwareDetector
 
     from tests.performance._combos import BENCHMARK_COMBOS
     from tests.performance._pre_download import ensure_models_downloaded

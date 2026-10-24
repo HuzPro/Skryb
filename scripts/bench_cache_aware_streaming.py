@@ -43,9 +43,9 @@ def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else "short"
     chunk_seconds = float(sys.argv[2]) if len(sys.argv) > 2 else _CHUNK_SECONDS
 
-    from voicetotext.core.paths import AppPaths
-    from voicetotext.transcription.streaming.audio_chunker import iter_chunks
-    from voicetotext.transcription.streaming.cache_aware.engine import (
+    from skryb.core.paths import AppPaths
+    from skryb.transcription.streaming.audio_chunker import iter_chunks
+    from skryb.transcription.streaming.cache_aware.engine import (
         CacheAwareStreamingEngine,
     )
     from tests.helpers.audio_file_loader import load_audio_file

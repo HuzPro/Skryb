@@ -19,11 +19,11 @@ from types import SimpleNamespace
 import pytest
 
 from tests.fakes import InstantSleeper
-from voicetotext.output.clipboard_preserver import ClipboardPreserver
-from voicetotext.output.win32_clipboard_preserver import Win32ClipboardPreserver
+from skryb.output.clipboard_preserver import ClipboardPreserver
+from skryb.output.win32_clipboard_preserver import Win32ClipboardPreserver
 
 
-_MODULE = "voicetotext.output.win32_clipboard_preserver"
+_MODULE = "skryb.output.win32_clipboard_preserver"
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +372,7 @@ class TestWin32ClipboardPreserverCtypesSignatures:
     def test_user32_function_has_correct_restype(
         self, func_name: str, expected_restype
     ):
-        from voicetotext.output.win32_clipboard_preserver import _user32
+        from skryb.output.win32_clipboard_preserver import _user32
 
         assert getattr(_user32, func_name).restype is expected_restype
 
@@ -387,7 +387,7 @@ class TestWin32ClipboardPreserverCtypesSignatures:
     def test_user32_function_has_correct_argtypes(
         self, func_name: str, expected_argtypes
     ):
-        from voicetotext.output.win32_clipboard_preserver import _user32
+        from skryb.output.win32_clipboard_preserver import _user32
 
         assert getattr(_user32, func_name).argtypes == expected_argtypes
 
@@ -403,7 +403,7 @@ class TestWin32ClipboardPreserverCtypesSignatures:
     def test_kernel32_function_has_correct_restype(
         self, func_name: str, expected_restype
     ):
-        from voicetotext.output.win32_clipboard_preserver import _kernel32
+        from skryb.output.win32_clipboard_preserver import _kernel32
 
         assert getattr(_kernel32, func_name).restype is expected_restype
 
@@ -417,11 +417,11 @@ class TestWin32ClipboardPreserverCtypesSignatures:
     def test_kernel32_function_has_correct_argtypes(
         self, func_name: str, expected_argtypes
     ):
-        from voicetotext.output.win32_clipboard_preserver import _kernel32
+        from skryb.output.win32_clipboard_preserver import _kernel32
 
         assert getattr(_kernel32, func_name).argtypes == expected_argtypes
 
     def test_kernel32_global_alloc_accepts_size_t_for_byte_count(self):
-        from voicetotext.output.win32_clipboard_preserver import _kernel32
+        from skryb.output.win32_clipboard_preserver import _kernel32
 
         assert _kernel32.GlobalAlloc.argtypes[1] is ctypes.c_size_t

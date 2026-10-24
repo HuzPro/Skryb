@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from tokenizers import AddedToken, Tokenizer, decoders, models, pre_tokenizers
 
-from voicetotext.core.exceptions import TranscriptionError
-from voicetotext.transcription.whisper_tokens import (
+from skryb.core.exceptions import TranscriptionError
+from skryb.transcription.whisper_tokens import (
     MODE_TAG_COUNT,
     WhisperTokens,
     strip_prompt_artifacts,

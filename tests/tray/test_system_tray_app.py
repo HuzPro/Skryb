@@ -2,8 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     MicrophoneConnectedEvent,
     MicrophoneMissingEvent,
     MicrophoneSilentEvent,
@@ -15,8 +15,8 @@ from voicetotext.core.events import (
     TranscriptionFailedEvent,
     WritingServerFailedEvent,
 )
-from voicetotext.core.state_machine import AppState, AppStateMachine
-from voicetotext.tray.app import SystemTrayApp, format_duration
+from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.tray.app import SystemTrayApp, format_duration
 
 
 def _build_app(on_open_settings=None, tray_factory=None):
@@ -239,8 +239,8 @@ class TestQuitHandling:
 
     def test_should_end_the_process_after_cleanup_runs(self):
         with (
-            patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app._exit_now") as exit_now,
+            patch("skryb.tray.app.threading.Timer"),
+            patch("skryb.tray.app._exit_now") as exit_now,
         ):
             app, *_ = self._build_app_with_mocks()
 
@@ -250,8 +250,8 @@ class TestQuitHandling:
 
     def test_should_schedule_hard_exit_timer_before_cleanup_starts(self):
         with (
-            patch("voicetotext.tray.app.threading.Timer") as Timer,
-            patch("voicetotext.tray.app._exit_now") as exit_now,
+            patch("skryb.tray.app.threading.Timer") as Timer,
+            patch("skryb.tray.app._exit_now") as exit_now,
         ):
             app, *_ = self._build_app_with_mocks()
 
@@ -270,8 +270,8 @@ class TestQuitHandling:
 
     def test_should_run_cleanup_steps_in_documented_order(self):
         with (
-            patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app._exit_now"),
+            patch("skryb.tray.app.threading.Timer"),
+            patch("skryb.tray.app._exit_now"),
         ):
             app, use_case, listener, download_manager, icon = (
                 self._build_app_with_mocks()
@@ -290,8 +290,8 @@ class TestQuitHandling:
 
     def test_should_continue_remaining_cleanup_when_one_step_raises(self):
         with (
-            patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app._exit_now"),
+            patch("skryb.tray.app.threading.Timer"),
+            patch("skryb.tray.app._exit_now"),
         ):
             app, use_case, listener, download_manager, icon = (
                 self._build_app_with_mocks()
@@ -349,7 +349,7 @@ class TestLiveRecordingTooltip:
         # resolution that would otherwise make a short ``sleep``
         # unreliable in CI.
         with patch(
-            "voicetotext.tray.app.time.monotonic",
+            "skryb.tray.app.time.monotonic",
             side_effect=[100.0, 100.5, 101.0],
         ):
             app, icon = self._build_app_with_icon()
@@ -419,7 +419,7 @@ class TestErrorNotification:
         )
 
         icon.notify.assert_called_once_with(
-            "VoiceToText", "Clipboard write failed."
+            "Skryb", "Clipboard write failed."
         )
 
     def test_should_notify_on_transcription_failed_event(self):
@@ -436,7 +436,7 @@ class TestErrorNotification:
             TranscriptionFailedEvent(error="model crashed")
         )
 
-        icon.notify.assert_called_once_with("VoiceToText", "model crashed")
+        icon.notify.assert_called_once_with("Skryb", "model crashed")
 
     def test_should_notify_user_when_recording_is_auto_capped(self):
         icon = MagicMock()
@@ -454,7 +454,7 @@ class TestErrorNotification:
 
         icon.notify.assert_called_once()
         args = icon.notify.call_args.args
-        assert args[0] == "VoiceToText"
+        assert args[0] == "Skryb"
         assert "10:00" in args[1] or "10 min" in args[1]
 
 
@@ -488,7 +488,7 @@ class TestEngineLoadFailureNotification:
 
         icon.notify.assert_called_once()
         args = icon.notify.call_args.args
-        assert args[0] == "VoiceToText"
+        assert args[0] == "Skryb"
         assert "nano-parakeet not installed" in args[1]
 
     def test_should_flip_icon_to_error_when_engine_load_fails(self):
@@ -518,7 +518,7 @@ class TestEngineLoadFailureNotification:
 
         app.run()
 
-        icon.notify.assert_called_once_with("VoiceToText", "load failed early")
+        icon.notify.assert_called_once_with("Skryb", "load failed early")
         icon.update_state.assert_called_with(AppState.ERROR, "Error")
 
     def test_should_replay_ready_state_that_arrived_before_icon_attachment(self):
@@ -564,7 +564,7 @@ class TestTranscriptionEmptyNotification:
 
         icon.notify.assert_called_once()
         args = icon.notify.call_args.args
-        assert args[0] == "VoiceToText"
+        assert args[0] == "Skryb"
         message = args[1].lower()
         assert "speech" in message or "empty" in message
 
@@ -722,7 +722,7 @@ class TestMicrophoneNotices:
             ))
 
         icon.notify.assert_called_once_with(
-            "VoiceToText",
+            "Skryb",
             "No audio from Microphone (Maono PD300X Microphone). Check it is "
             "unmuted or pick another microphone from the tray menu.",
         )
@@ -746,7 +746,7 @@ class TestMicrophoneNotices:
         ))
 
         icon.notify.assert_called_once_with(
-            "VoiceToText",
+            "Skryb",
             "Using Headset (Jabra Evolve 20 MS Stereo) for the next dictation.",
         )
 
@@ -756,7 +756,7 @@ class TestMicrophoneNotices:
         app._event_bus.publish(MicrophoneConnectedEvent(name="Mikrofon (Gerät für Café ✓)"))
 
         icon.notify.assert_called_once_with(
-            "VoiceToText",
+            "Skryb",
             "New microphone: Mikrofon (Gerät für Café ✓). Choose it from the tray "
             "Microphone menu.",
         )
@@ -771,7 +771,7 @@ class TestMicrophoneNotices:
 
 class TestNoLastDictation:
     def test_asking_for_the_last_dictation_before_any_shows_a_balloon(self):
-        from voicetotext.core.events import NoLastDictationEvent
+        from skryb.core.events import NoLastDictationEvent
 
         icon = MagicMock()
 
@@ -784,7 +784,7 @@ class TestNoLastDictation:
 
         app._event_bus.publish(NoLastDictationEvent())
 
-        icon.notify.assert_called_once_with("VoiceToText", "No dictation yet.")
+        icon.notify.assert_called_once_with("Skryb", "No dictation yet.")
 
 
 class TestWritingServerFailure:
@@ -803,7 +803,7 @@ class TestWritingServerFailure:
         ))
 
         icon.notify.assert_called_once_with(
-            "VoiceToText",
+            "Skryb",
             "The writing model could not start. Dictation works without cleanup.",
         )
         icon.update_state.assert_not_called()
@@ -833,9 +833,9 @@ class TestRestart:
         call_order: list[str] = []
         app = self._app(call_order, lambda: call_order.append("replacement"))
         with (
-            patch("voicetotext.tray.app.threading.Timer"),
+            patch("skryb.tray.app.threading.Timer"),
             patch(
-                "voicetotext.tray.app._exit_now",
+                "skryb.tray.app._exit_now",
                 side_effect=lambda: call_order.append("exit"),
             ),
         ):
@@ -847,12 +847,12 @@ class TestRestart:
         call_order: list[str] = []
 
         def cannot_start():
-            raise FileNotFoundError("voicetotext-gui.exe")
+            raise FileNotFoundError("skryb-gui.exe")
 
         app = self._app(call_order, cannot_start)
         with (
-            patch("voicetotext.tray.app.threading.Timer"),
-            patch("voicetotext.tray.app._exit_now") as exit_now,
+            patch("skryb.tray.app.threading.Timer"),
+            patch("skryb.tray.app._exit_now") as exit_now,
             pytest.raises(FileNotFoundError),
         ):
             app.restart()

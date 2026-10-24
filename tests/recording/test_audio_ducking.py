@@ -4,13 +4,13 @@ import time
 import numpy as np
 import pytest
 
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.core.events import (
+from skryb.core.event_bus import SimpleEventBus
+from skryb.core.events import (
     RecordingPausedEvent,
     RecordingResumedEvent,
     StateChangedEvent,
 )
-from voicetotext.recording.audio_ducking import (
+from skryb.recording.audio_ducking import (
     AudioDucking,
     AudioSession,
     SessionDucker,
@@ -67,7 +67,7 @@ def mixer() -> Mixer:
     mixer.play("chrome-tab-1", 1001, 1.0)
     mixer.play("chrome-tab-2", 1001, 0.33)
     mixer.play("system-sounds", 0, 0.5)
-    mixer.play("voicetotext-cues", _OUR_PID, 1.0)
+    mixer.play("skryb-cues", _OUR_PID, 1.0)
     return mixer
 
 
@@ -87,7 +87,7 @@ class TestSessionDucker:
 
         ducker.duck(0.0)
 
-        assert mixer.volumes["voicetotext-cues"] == 1.0
+        assert mixer.volumes["skryb-cues"] == 1.0
 
     def test_restoring_puts_every_volume_back_exactly(self, mixer):
         before = dict(mixer.volumes)
@@ -220,7 +220,7 @@ class TestDuckingDuringARecording:
         recording.state("idle", "recording")
 
         eventually(lambda: mixer.volumes["spotify"] == 0.0)
-        assert mixer.volumes["voicetotext-cues"] == 1.0
+        assert mixer.volumes["skryb-cues"] == 1.0
         recording.ducking.dispose()
 
     def test_pausing_gives_other_apps_their_volume_back_until_resumed(self, mixer):

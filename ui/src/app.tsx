@@ -109,7 +109,7 @@ function Shell() {
         {setup ? null : <Sidebar items={NAV} />}
         <div className="relative flex min-w-0 flex-1 flex-col">
           <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()}>
-            {setup ? <span className="pointer-events-none text-[13px] font-semibold">VoiceToText</span> : null}
+            {setup ? <span className="pointer-events-none text-[13px] font-semibold">Skryb</span> : null}
           </TopBar>
           <main key={location.pathname} className="min-h-0 flex-1 overflow-y-auto">
             <Outlet />

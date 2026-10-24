@@ -1,6 +1,6 @@
 import numpy as np
 
-from voicetotext.recording.audio_segment import AudioSegment
+from skryb.recording.audio_segment import AudioSegment
 
 
 class AudioSegmentBuilder:

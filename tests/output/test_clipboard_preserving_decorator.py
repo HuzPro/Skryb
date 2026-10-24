@@ -3,15 +3,15 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from voicetotext.output.clipboard_preserver import ClipboardPreserver
-from voicetotext.output.clipboard_preserving_decorator import (
+from skryb.output.clipboard_preserver import ClipboardPreserver
+from skryb.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
 )
-from voicetotext.output.handler import TextOutputHandler
-from voicetotext.output.sleeper import Sleeper
+from skryb.output.handler import TextOutputHandler
+from skryb.output.sleeper import Sleeper
 
 
-_MODULE = "voicetotext.output.clipboard_preserving_decorator"
+_MODULE = "skryb.output.clipboard_preserving_decorator"
 
 
 @pytest.fixture()

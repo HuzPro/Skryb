@@ -46,7 +46,7 @@ export function SetupPage() {
 
   return (
     <div className="mx-auto w-full max-w-[640px] px-8 pt-6 pb-10">
-      <h1 className="text-[22px] font-semibold tracking-tight">Welcome to VoiceToText</h1>
+      <h1 className="text-[22px] font-semibold tracking-tight">Welcome to Skryb</h1>
       <p className="mt-1 text-[13px] text-muted-foreground">
         Three quick choices and you are ready to dictate. Everything runs on this computer; nothing is sent anywhere.
       </p>

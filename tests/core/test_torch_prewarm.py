@@ -2,7 +2,7 @@ import threading
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
-from voicetotext.core.torch_prewarm import (
+from skryb.core.torch_prewarm import (
     _warm_gpu_kernels,
     start_torch_prewarm,
 )
@@ -12,7 +12,7 @@ class TestTorchPrewarm:
     def test_should_import_torch_on_daemon_worker(self) -> None:
         torch_module = ModuleType("torch")
         with patch(
-            "voicetotext.core.torch_prewarm.importlib.import_module",
+            "skryb.core.torch_prewarm.importlib.import_module",
             return_value=torch_module,
         ) as import_module:
             future = start_torch_prewarm()
@@ -23,7 +23,7 @@ class TestTorchPrewarm:
     def test_should_surface_import_failure_through_future(self) -> None:
         failure = ImportError("broken torch")
         with patch(
-            "voicetotext.core.torch_prewarm.importlib.import_module",
+            "skryb.core.torch_prewarm.importlib.import_module",
             side_effect=failure,
         ):
             future = start_torch_prewarm()
@@ -39,7 +39,7 @@ class TestGpuPrewarm:
         torch_module.cuda.synchronize.side_effect = warmed.set
         torch_module.randn.return_value.__gt__.return_value = MagicMock()
         with patch(
-            "voicetotext.core.torch_prewarm.importlib.import_module",
+            "skryb.core.torch_prewarm.importlib.import_module",
             return_value=torch_module,
         ):
             future = start_torch_prewarm()

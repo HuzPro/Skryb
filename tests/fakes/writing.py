@@ -4,8 +4,8 @@ import threading
 from collections.abc import Callable
 from typing import IO
 
-from voicetotext.downloads.chunked_file_downloader import FileDownloadPlan
-from voicetotext.writing.client import WritingUnavailable
+from skryb.downloads.chunked_file_downloader import FileDownloadPlan
+from skryb.writing.client import WritingUnavailable
 
 
 class UnreachableDownloader:

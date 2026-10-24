@@ -13,15 +13,15 @@ import pytest
 
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
-from voicetotext.core.events import DownloadProgressEvent
-from voicetotext.core.state_machine import AppState
-from voicetotext.output.output_mode import OutputMode
-from voicetotext.recording.pill import DEFAULT_PILL_POSITION
-from voicetotext.settings.settings_draft import SettingsDraft
-from voicetotext.transcription.engine_types import HardwareProfile
-from voicetotext.ui.shapes import draft_from_json
-from voicetotext.writing.install import INSTALL_BYTES
-from voicetotext.writing.transforms import BUILTIN_TRANSFORMS
+from skryb.core.events import DownloadProgressEvent
+from skryb.core.state_machine import AppState
+from skryb.output.output_mode import OutputMode
+from skryb.recording.pill import DEFAULT_PILL_POSITION
+from skryb.settings.settings_draft import SettingsDraft
+from skryb.transcription.engine_types import HardwareProfile
+from skryb.ui.shapes import draft_from_json
+from skryb.writing.install import INSTALL_BYTES
+from skryb.writing.transforms import BUILTIN_TRANSFORMS
 
 _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
@@ -65,7 +65,7 @@ def test_a_request_without_the_apps_token_is_refused(rig: Rig) -> None:
 
 
 def test_the_token_never_reaches_the_session_log(rig: Rig, app_caplog) -> None:
-    app_caplog.set_level(logging.DEBUG, logger="voicetotext")
+    app_caplog.set_level(logging.DEBUG, logger="skryb")
 
     stream = rig.events()
     stream.until("app")

@@ -13,12 +13,12 @@ from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
-from voicetotext.__main__ import SETUP_NOT_FINISHED, _run_first_time_setup
-from voicetotext.core.event_bus import SimpleEventBus
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.ui.api_server import ApiServer
-from voicetotext.ui.event_hub import EventHub
-from voicetotext.ui.launcher import SHELL_NOT_BUILT, SHELL_WOULD_NOT_START, ShellLauncher
+from skryb.__main__ import SETUP_NOT_FINISHED, _run_first_time_setup
+from skryb.core.event_bus import SimpleEventBus
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.ui.api_server import ApiServer
+from skryb.ui.event_hub import EventHub
+from skryb.ui.launcher import SHELL_NOT_BUILT, SHELL_WOULD_NOT_START, ShellLauncher
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 # Generous: the point is that setup returns at all, not how fast.
@@ -60,7 +60,7 @@ def _app(server: ApiServer) -> dict[str, object]:
 
 
 def _exe(tmp_path: Path) -> Path:
-    exe = tmp_path / "voicetotext-ui.exe"
+    exe = tmp_path / "skryb-ui.exe"
     exe.write_bytes(b"MZ")
     return exe
 
@@ -126,7 +126,7 @@ def test_closing_the_shell_before_a_model_is_installed_ends_the_wait_and_says_th
     tk_root, tmp_path: Path, server: ApiServer, monkeypatch,
 ) -> None:
     shown: list[str] = []
-    monkeypatch.setattr("voicetotext.__main__._show_setup_problem", shown.append)
+    monkeypatch.setattr("skryb.__main__._show_setup_problem", shown.append)
     shell = _Shell()
     launcher = ShellLauncher(
         server, lambda message: pytest.fail(message),

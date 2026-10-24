@@ -12,14 +12,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.fakes.config import FakeConfig
-from voicetotext.transcription.engine_factory import build_engine_registry
-from voicetotext.transcription.engine_registry import EngineRegistry
-from voicetotext.transcription.license_policy import LicensePolicy
-from voicetotext.transcription.model_info import DEFAULT_MODEL
-from voicetotext.transcription.cached_hardware_detector import (
+from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_registry import EngineRegistry
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import DEFAULT_MODEL
+from skryb.transcription.cached_hardware_detector import (
     CachedHardwareDetector,
 )
-from voicetotext.__main__ import (
+from skryb.__main__ import (
     _Startup,
     _apply_hf_cache_env_overrides,
     _apply_torch_env_overrides,
@@ -85,7 +85,7 @@ class TestStartingTheEnginePreload:
             **settings,
         })
         with patch(
-            "voicetotext.transcription.engine_preload.EnginePreload.start",
+            "skryb.transcription.engine_preload.EnginePreload.start",
         ) as start:
             result = _start_engine_preload(
                 config, SimpleNamespace(models_dir=tmp_path),
@@ -130,7 +130,7 @@ class TestStartingTheEnginePreload:
 
     def test_the_preload_builds_the_engine_for_the_active_model(self, tmp_path) -> None:
         with patch(
-            "voicetotext.transcription.engine_factory.create_engine_for_active_model",
+            "skryb.transcription.engine_factory.create_engine_for_active_model",
         ) as create:
             _result, start = self._start({}, tmp_path)
             build = start.call_args.args[0]
@@ -231,7 +231,7 @@ class TestApplyTorchEnvOverrides:
 
 @windows_startup_only
 class TestDoctorCli:
-    """``voicetotext --doctor`` must print the diagnostic report and
+    """``skryb --doctor`` must print the diagnostic report and
     exit before any Qt or engine code runs, so a user whose engine
     can't load can still get a usable report from the command line.
     """
@@ -239,11 +239,11 @@ class TestDoctorCli:
     def test_should_print_doctor_report_when_doctor_flag_in_argv(self):
         captured = io.StringIO()
         with (
-            patch.object(sys, "argv", ["voicetotext", "--doctor"]),
+            patch.object(sys, "argv", ["skryb", "--doctor"]),
             patch("sys.stdout", captured),
-            patch("voicetotext.__main__._run") as mock_run,
+            patch("skryb.__main__._run") as mock_run,
             patch(
-                "voicetotext.diagnostics.doctor.run_doctor",
+                "skryb.diagnostics.doctor.run_doctor",
                 return_value="[Python]\nok\n[Engine backends]\nok",
             ),
             pytest.raises(SystemExit) as exit_info,
@@ -262,15 +262,15 @@ class TestDoctorCli:
         mutex = MagicMock()
         mutex.acquire.return_value = True
         with (
-            patch.object(sys, "argv", ["voicetotext"]),
+            patch.object(sys, "argv", ["skryb"]),
             patch.dict(os.environ, {"APPDATA": str(tmp_path)}),
-            patch("voicetotext.__main__._run") as mock_run,
+            patch("skryb.__main__._run") as mock_run,
             patch(
-                "voicetotext.core.torch_prewarm.start_torch_prewarm",
+                "skryb.core.torch_prewarm.start_torch_prewarm",
                 return_value=prewarm,
             ),
             patch(
-                "voicetotext.core.single_instance.SingleInstanceMutex",
+                "skryb.core.single_instance.SingleInstanceMutex",
                 return_value=mutex,
             ),
         ):
@@ -299,11 +299,11 @@ class TestMaintenanceStartupIsolation:
         target: str,
     ) -> None:
         with (
-            patch.object(sys, "argv", ["voicetotext", flag]),
-            patch(f"voicetotext.core.dev_install.{target}", return_value=(True, "ok")),
-            patch("voicetotext.__main__._run") as run,
-            patch("voicetotext.core.torch_prewarm.start_torch_prewarm") as prewarm,
-            patch("voicetotext.core.single_instance.SingleInstanceMutex") as mutex,
+            patch.object(sys, "argv", ["skryb", flag]),
+            patch(f"skryb.core.dev_install.{target}", return_value=(True, "ok")),
+            patch("skryb.__main__._run") as run,
+            patch("skryb.core.torch_prewarm.start_torch_prewarm") as prewarm,
+            patch("skryb.core.single_instance.SingleInstanceMutex") as mutex,
             patch("tkinter.Tk") as tk,
             pytest.raises(SystemExit) as exit_info,
         ):
@@ -349,33 +349,33 @@ class TestBindingStartupOrder:
 
         with (
             patch(
-                "voicetotext.__main__._start_engine_preload",
+                "skryb.__main__._start_engine_preload",
                 side_effect=lambda *_args: timeline.append("preload") or preload,
             ),
             patch("tkinter.Tk", side_effect=lambda: timeline.append("tk") or root),
             patch(
-                "voicetotext.__main__._start_api_server",
+                "skryb.__main__._start_api_server",
                 side_effect=lambda _bus: timeline.append("api-server") or api_server,
             ),
             patch(
-                "voicetotext.downloads.download_manager.DownloadManager",
+                "skryb.downloads.download_manager.DownloadManager",
                 side_effect=lambda **_kwargs: timeline.append("downloads")
                 or MagicMock(),
             ),
             patch(
-                "voicetotext.transcription.engine_factory.create_model_manager",
+                "skryb.transcription.engine_factory.create_model_manager",
                 side_effect=lambda *_args: timeline.append("manager") or manager,
             ),
             patch(
-                "voicetotext.transcription.torch_hardware_detector."
+                "skryb.transcription.torch_hardware_detector."
                 "TorchHardwareDetector.detect",
             ) as detect,
             patch(
-                "voicetotext.bootstrap.build_app",
+                "skryb.bootstrap.build_app",
                 side_effect=lambda *_args, **_kwargs: timeline.append("build-app")
                 or app,
             ) as build_app,
-            patch("voicetotext.core.single_instance.LaunchSignal"),
+            patch("skryb.core.single_instance.LaunchSignal"),
         ):
             _run(paths, startup)
 
@@ -420,7 +420,7 @@ class TestTorchPrewarmGate:
         config = FakeConfig({"transcription.model_size": DEFAULT_MODEL})
 
         with patch(
-            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            "skryb.core.torch_prewarm.start_torch_prewarm",
             return_value=_resolved_prewarm(),
         ) as start:
             wait = _start_torch_prewarm_if_needed(
@@ -436,7 +436,7 @@ class TestTorchPrewarmGate:
         config = FakeConfig({"transcription.model_size": DEFAULT_MODEL})
 
         with patch(
-            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            "skryb.core.torch_prewarm.start_torch_prewarm",
         ) as start:
             wait = _start_torch_prewarm_if_needed(
                 config, _torch_free_registry(), _NO_MODELS_DIR,
@@ -456,7 +456,7 @@ class TestTorchPrewarmGate:
         )
 
         with patch(
-            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            "skryb.core.torch_prewarm.start_torch_prewarm",
             return_value=_resolved_prewarm(),
         ) as start:
             _start_torch_prewarm_if_needed(
@@ -471,7 +471,7 @@ class TestTorchPrewarmGate:
         config = FakeConfig({"transcription.model_size": "retired-model"})
 
         with patch(
-            "voicetotext.core.torch_prewarm.start_torch_prewarm",
+            "skryb.core.torch_prewarm.start_torch_prewarm",
             return_value=_resolved_prewarm(),
         ) as start:
             _start_torch_prewarm_if_needed(
@@ -502,15 +502,15 @@ class TestOneLicensePolicyForTheProcess:
 
         with (
             patch("tkinter.Tk", return_value=MagicMock()),
-            patch("voicetotext.__main__._start_api_server"),
-            patch("voicetotext.downloads.download_manager.DownloadManager"),
+            patch("skryb.__main__._start_api_server"),
+            patch("skryb.downloads.download_manager.DownloadManager"),
             patch(
-                "voicetotext.transcription.engine_factory.create_model_manager",
+                "skryb.transcription.engine_factory.create_model_manager",
                 return_value=manager,
             ) as create_model_manager,
-            patch("voicetotext.__main__._run_first_time_setup") as first_run_setup,
-            patch("voicetotext.bootstrap.build_app") as build_app,
-            patch("voicetotext.core.single_instance.LaunchSignal"),
+            patch("skryb.__main__._run_first_time_setup") as first_run_setup,
+            patch("skryb.bootstrap.build_app") as build_app,
+            patch("skryb.core.single_instance.LaunchSignal"),
         ):
             _run(paths, _startup())
 
@@ -548,7 +548,7 @@ class TestShowError:
 
         with (
             patch("sys.stderr", captured),
-            patch("voicetotext.__main__._try_show_error_dialog"),
+            patch("skryb.__main__._try_show_error_dialog"),
         ):
             _show_error("something broke")
 
@@ -558,7 +558,7 @@ class TestShowError:
         # pythonw (GUI launches, the Start Menu shortcut) has no stdio.
         with (
             patch("sys.stderr", None),
-            patch("voicetotext.__main__._try_show_error_dialog") as dialog,
+            patch("skryb.__main__._try_show_error_dialog") as dialog,
         ):
             _show_error("something broke")
 
@@ -584,11 +584,11 @@ class TestLaunchingWhileACopyIsRunning:
     ):
         mutex = MagicMock()
         mutex.acquire.side_effect = [not still_held for still_held in held]
-        paths = SimpleNamespace(config_path=Path("C:/Users/Zoë/AppData/Roaming/VoiceToText/config.json"))
+        paths = SimpleNamespace(config_path=Path("C:/Users/Zoë/AppData/Roaming/Skryb/config.json"))
         with (
-            patch("voicetotext.core.single_instance.LaunchSignal") as signal,
-            patch("voicetotext.core.single_instance.RunningCopy") as copy,
-            patch("voicetotext.__main__._show_instance_conflict") as conflict,
+            patch("skryb.core.single_instance.LaunchSignal") as signal,
+            patch("skryb.core.single_instance.RunningCopy") as copy,
+            patch("skryb.__main__._show_instance_conflict") as conflict,
         ):
             signal.return_value.ask.return_value = answered
             copy.return_value.end.return_value = ended
@@ -600,7 +600,7 @@ class TestLaunchingWhileACopyIsRunning:
 
         assert took_lock is True
         copy.assert_called_once_with(
-            Path("C:/Users/Zoë/AppData/Roaming/VoiceToText/running.pid"),
+            Path("C:/Users/Zoë/AppData/Roaming/Skryb/running.pid"),
         )
         copy.return_value.record.assert_called_once_with()
         signal.ask.assert_not_called()

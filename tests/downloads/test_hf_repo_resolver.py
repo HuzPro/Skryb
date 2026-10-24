@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from voicetotext.downloads.hf_repo_resolver import (
+from skryb.downloads.hf_repo_resolver import (
     HfRepoResolver,
     ResolvedFile,
     RevisionMismatchError,

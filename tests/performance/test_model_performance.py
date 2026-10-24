@@ -9,7 +9,7 @@ runner and persist results.
 
 import pytest
 
-from voicetotext.recording.audio_segment import AudioSegment
+from skryb.recording.audio_segment import AudioSegment
 
 from tests.performance._combos import BENCHMARK_COMBOS, BenchmarkCombo
 from tests.performance._identity import BenchmarkIdentity
