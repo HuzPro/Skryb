@@ -56,8 +56,9 @@ OutputBaseFilename={#AppName}-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\brand\skryb.ico
 UninstallDisplayName={#AppName} {#AppVersion}
-UninstallDisplayIcon={app}\python\pythonw.exe
+UninstallDisplayIcon={app}\skryb.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -73,11 +74,13 @@ Source: "{#PayloadDir}\tools\*"; DestDir: "{app}\tools"; Flags: recursesubdirs c
 Source: "{#PayloadDir}\bin\skryb.cmd"; DestDir: "{app}\bin"
 Source: "{#PayloadDir}\LICENSE.txt"; DestDir: "{app}"
 Source: "{#PayloadDir}\NOTICE.txt"; DestDir: "{app}"
+Source: "..\brand\skryb.ico"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"
+; The shortcuts launch pythonw.exe, so without IconFilename they show Python's icon.
+Name: "{group}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; IconFilename: "{app}\skryb.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; IconFilename: "{app}\skryb.ico"; Tasks: desktopicon
 
 [Run]
 ; No skipifsilent: after a silent in-app update this is what reopens Skryb.

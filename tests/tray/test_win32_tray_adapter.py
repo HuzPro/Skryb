@@ -3,7 +3,7 @@
 The :class:`Win32TrayBackend` (message window, ``Shell_NotifyIcon``, menu)
 needs a live shell and is covered by the manual Windows smoke test. Here
 the orchestration is driven with a fake backend and a fake dispatcher;
-``create_hicon`` is exercised against real GDI (this module is win32-only).
+``create_hicons`` is exercised against real GDI (this module is win32-only).
 """
 
 import subprocess
@@ -18,7 +18,7 @@ from skryb.tray import win32_tray_adapter as mod
 from skryb.tray.win32_tray_adapter import (
     Win32TrayAdapter,
     build_win32_tray_adapter,
-    create_hicon,
+    create_hicons,
 )
 
 
@@ -60,13 +60,14 @@ def adapter(tk_root, backend):
     a.set_elapsed_provider(None)  # cancel any pending after-timer
 
 
-class TestCreateHicon:
-    def test_should_build_a_non_null_icon_handle(self):
-        hicon = create_hicon(AppState.RECORDING)
+class TestCreateHicons:
+    def test_should_build_a_non_null_handle_for_every_frame(self):
+        hicons = create_hicons(AppState.RECORDING)
 
-        assert hicon != 0
+        assert len(hicons) > 1 and all(hicons)
 
-        mod._user32.DestroyIcon(hicon)
+        for hicon in hicons:
+            mod._user32.DestroyIcon(hicon)
 
 
 class TestInitial:
@@ -115,6 +116,38 @@ class TestUpdateState:
         backend.set_icon.assert_not_called()  # deferred
         dispatcher.actions[0]()
         backend.set_icon.assert_called_once()
+
+
+class TestAnimation:
+    def _adapter(self, backend):
+        root = MagicMock()
+        root.after.return_value = "after-id"
+        adapter = _make_adapter(root=root, dispatcher=SyncDispatcher(), backend=backend)
+        return adapter, root
+
+    def test_an_idle_icon_stands_still(self, backend):
+        _adapter, root = self._adapter(backend)
+
+        root.after.assert_not_called()
+
+    def test_a_recording_icon_steps_to_its_next_frame_on_each_tick(self, backend):
+        adapter, root = self._adapter(backend)
+        adapter.update_state(AppState.RECORDING, "Recording...")
+        first = backend.set_icon.call_args.args[0]
+
+        root.after.call_args.args[1]()
+
+        assert backend.set_icon.call_args.args[0] != first
+        assert root.after.call_count == 2
+
+    def test_going_back_to_idle_stops_the_animation(self, backend):
+        adapter, root = self._adapter(backend)
+        adapter.update_state(AppState.TRANSCRIBING, "Transcribing...")
+
+        adapter.update_state(AppState.IDLE, "Idle - ready")
+
+        root.after_cancel.assert_called_once_with("after-id")
+        assert root.after.call_count == 1
 
 
 class TestNotify:

@@ -1,4 +1,9 @@
-# Skryb
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/skryb-wordmark-dark.svg">
+    <img alt="Skryb" src="brand/skryb-wordmark-light.svg" height="72">
+  </picture>
+</h1>
 
 *Said like "scribe".* Local, offline speech-to-text dictation for Windows. Press a hotkey, speak,
 and the transcription is typed straight into whatever window has focus. All

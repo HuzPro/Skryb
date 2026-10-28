@@ -1,5 +1,9 @@
-from PIL import Image, ImageDraw
+from collections.abc import Callable
+from functools import lru_cache
 
+from PIL import Image, ImageColor
+
+from skryb.core.brand_mark import Pose, loading_pose, recording_pose, render_mark, transcribing_pose
 from skryb.core.color_scheme import (
     ColorScheme,
     color_scheme_from_registry,
@@ -13,12 +17,13 @@ __all__ = [
     "ColorScheme",
     "color_scheme_from_registry",
     "detect_color_scheme",
-    "create_icon_image",
-    "render_image_for_scheme",
+    "FRAME_MS",
+    "create_icon_frames",
+    "render_frames_for_scheme",
 ]
 
 
-# Per-scheme palettes. The light palette uses darker hues so the circle
+# Per-scheme palettes. The light palette uses darker hues so the mark
 # stays visible on a white/grey Windows taskbar; the dark palette uses
 # lighter hues for the inverse case. Both were picked for ~4.5:1 contrast
 # against their target background (WCAG AA).
@@ -37,28 +42,39 @@ _DARK_PALETTE: dict[AppState, str] = {
     AppState.ERROR: "#FF8A3D",
 }
 
-_SUPERSAMPLE = 4  # draw large then downscale: PIL's ellipse is not anti-aliased
+# How long each frame of a moving tray icon shows, and how many frames make
+# one loop of each state's motion. Idle and error stand still.
+FRAME_MS = 80
+_MOTION: dict[AppState, tuple[Callable[[float], Pose], int]] = {
+    AppState.RECORDING: (recording_pose, 15),
+    AppState.TRANSCRIBING: (transcribing_pose, 16),
+    AppState.LOADING: (loading_pose, 16),
+}
+# No tile in the tray, so the mark is drawn larger to fill the small square.
+_TRAY_ZOOM = 1.6
 
 
-def create_icon_image(state: AppState, size: int = 64) -> Image.Image:
-    """A filled circle in the colour matching ``state`` and the detected
-    system colour scheme."""
-    return render_image_for_scheme(state, detect_color_scheme(), size)
+def create_icon_frames(state: AppState, size: int = 64) -> tuple[Image.Image, ...]:
+    """The tray mark for ``state`` in the detected system colour scheme:
+    one image when it stands still, one loop of frames when it moves."""
+    return render_frames_for_scheme(state, detect_color_scheme(), size)
 
 
-def render_image_for_scheme(
+@lru_cache(maxsize=32)
+def render_frames_for_scheme(
     state: AppState, scheme: ColorScheme, size: int = 64,
-) -> Image.Image:
-    """Render the state icon for an explicit colour scheme.
+) -> tuple[Image.Image, ...]:
+    """Render the state's frames for an explicit colour scheme.
 
-    Separated from :func:`create_icon_image` so tests can verify palette
+    Separated from :func:`create_icon_frames` so tests can verify palette
     routing without depending on the host's OS theme.
     """
     palette = _DARK_PALETTE if scheme == ColorScheme.DARK else _LIGHT_PALETTE
-    color = palette.get(state, palette[AppState.IDLE])
-    large = size * _SUPERSAMPLE
-    image = Image.new("RGBA", (large, large), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    margin = large / 8.0
-    draw.ellipse((margin, margin, large - margin, large - margin), fill=color)
-    return image.resize((size, size), Image.LANCZOS)
+    ink = ImageColor.getrgb(palette.get(state, palette[AppState.IDLE]))[:3]
+    if state not in _MOTION:
+        return (render_mark(size, ink, tile=False, zoom=_TRAY_ZOOM),)
+    pose, count = _MOTION[state]
+    return tuple(
+        render_mark(size, ink, tile=False, pose=pose(index / count), zoom=_TRAY_ZOOM)
+        for index in range(count)
+    )

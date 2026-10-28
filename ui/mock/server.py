@@ -293,6 +293,22 @@ class Core:
                 level = max(0.0, 0.45 + 0.4 * math.sin(t * 2.3) * math.sin(t * 7.1))
                 self.emit("meter", {"level": round(level, 3)})
 
+    def cycle_states(self) -> None:
+        """Dictate on a loop, so the logo can be watched recording, transcribing and loading."""
+        steps = (("recording", 5.0), ("transcribing", 2.5), ("idle", 2.0), ("loading", 3.0), ("idle", 2.0))
+        while True:
+            for state, seconds in steps:
+                with self.lock:
+                    self.app["state"] = state
+                self.emit("app", self.app)
+                ends = time.time() + seconds
+                while time.time() < ends:
+                    time.sleep(0.05)
+                    if state == "recording":
+                        t = time.time()
+                        level = max(0.0, 0.5 + 0.5 * math.sin(t * 3.1) * math.sin(t * 8.3))
+                        self.emit("voice", {"level": round(level, 3)})
+
     def hot_plug(self) -> None:
         time.sleep(HOT_PLUG_AFTER_SECONDS)
         with self.lock:
@@ -663,10 +679,13 @@ def main() -> None:
     parser.add_argument("--token", default="dev")
     parser.add_argument("--first-run", action="store_true", help="no model installed, as on a fresh install")
     parser.add_argument("--gpu", action="store_true", help="the hardware probe finds a GPU, so Live is available")
+    parser.add_argument("--cycle-states", action="store_true", help="loop through recording, transcribing and loading")
     args = parser.parse_args()
     core = Core(first_run=args.first_run, gpu=args.gpu)
     for work in (core.tick, core.meter, core.heartbeat, core.hot_plug):
         threading.Thread(target=work, daemon=True).start()
+    if args.cycle_states:
+        threading.Thread(target=core.cycle_states, daemon=True).start()
     Handler.core, Handler.token = core, args.token
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.daemon_threads = True

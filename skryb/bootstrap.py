@@ -184,6 +184,7 @@ from skryb.tray.win32_tray_adapter import build_win32_tray_adapter
 from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
+from skryb.ui.voice_feed import VoiceFeed
 from skryb.writing.install import WritingPaths, chunked_downloader, managed_root, server_files
 from skryb.writing.learning import Learner
 from skryb.writing.llama_server import LlamaServer
@@ -1371,6 +1372,7 @@ def build_app(
         ),
     )
     install_update = updater.install if updater is not None else _no_update
+    VoiceFeed(event_bus, api_server.hub.publish, level=lambda: recorder.current_rms)
 
     # The shell's requests arrive on the API server's threads; applying
     # settings rebuilds the output chain and the hotkey hook, which the

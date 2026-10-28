@@ -10,7 +10,7 @@ from typing import Protocol
 from skryb.core.state_machine import AppState
 from skryb.output.gui_thread_dispatcher import GuiThreadDispatcher
 from skryb.tray.duration_format import format_duration
-from skryb.tray.win32_icons import create_icon_image
+from skryb.tray.win32_icons import FRAME_MS, create_icon_frames
 
 _logger = logging.getLogger(__name__)
 
@@ -287,12 +287,12 @@ def _paste_when_in_front(target: int, paste: Callable[[], None]) -> None:
     paste()
 
 
-def create_hicon(state: AppState, size: int = _ICON_SIZE) -> int:
-    """Render the state circle and convert it to a Win32 ``HICON``.
+def create_hicons(state: AppState, size: int = _ICON_SIZE) -> list[int]:
+    """Render the state's tray frames and convert each to a Win32 ``HICON``.
 
-    The caller owns the returned handle and must ``DestroyIcon`` it.
+    The caller owns the returned handles and must ``DestroyIcon`` them.
     """
-    return image_to_hicon(create_icon_image(state, size))
+    return [image_to_hicon(frame) for frame in create_icon_frames(state, size)]
 
 
 def image_to_hicon(image: object) -> int:
@@ -640,7 +640,9 @@ class Win32TrayAdapter:
         self._get_state_label = get_state_label
         self._visible = False
         self._title = _TITLE_PREFIX + initial_label
-        self._hicon = 0
+        self._hicons: list[int] = []
+        self._frame = 0
+        self._frame_after_id: str | None = None
         self._elapsed_provider: Callable[[], float] | None = None
         self._elapsed_after_id: str | None = None
         self._backend: TrayBackend = backend or Win32TrayBackend(
@@ -687,8 +689,9 @@ class Win32TrayAdapter:
         self._root.mainloop()
 
     def stop(self) -> None:
+        self._stop_animation()
         self._backend.destroy()
-        self._destroy_icon()
+        self._destroy_icons()
         self._root.quit()
 
     def current_title(self) -> str:
@@ -704,15 +707,29 @@ class Win32TrayAdapter:
         self._backend.set_tooltip(self._title)
 
     def _apply_icon(self, state: AppState) -> None:
-        new_hicon = create_hicon(state)
-        self._backend.set_icon(new_hicon)
-        self._destroy_icon()
-        self._hicon = new_hicon
+        self._stop_animation()
+        new_hicons = create_hicons(state)
+        self._backend.set_icon(new_hicons[0])
+        self._destroy_icons()
+        self._hicons = new_hicons
+        self._frame = 0
+        if len(new_hicons) > 1:
+            self._frame_after_id = self._root.after(FRAME_MS, self._next_frame)
 
-    def _destroy_icon(self) -> None:
-        if self._hicon:
-            _user32.DestroyIcon(self._hicon)
-            self._hicon = 0
+    def _next_frame(self) -> None:
+        self._frame = (self._frame + 1) % len(self._hicons)
+        self._backend.set_icon(self._hicons[self._frame])
+        self._frame_after_id = self._root.after(FRAME_MS, self._next_frame)
+
+    def _stop_animation(self) -> None:
+        if self._frame_after_id is not None:
+            self._root.after_cancel(self._frame_after_id)
+            self._frame_after_id = None
+
+    def _destroy_icons(self) -> None:
+        for hicon in self._hicons:
+            _user32.DestroyIcon(hicon)
+        self._hicons = []
 
     def _apply_elapsed_provider(
         self, provider: Callable[[], float] | None,

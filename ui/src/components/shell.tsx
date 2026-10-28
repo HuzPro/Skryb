@@ -8,6 +8,7 @@ import { chooseOpenPath, chooseSavePath, windowControls } from "../lib/platform"
 import { useStore } from "../lib/store";
 import type { AppInfo } from "../lib/types";
 import { cn } from "../lib/utils";
+import { Mark } from "./mark";
 import { StatusDot } from "./parts";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
@@ -132,7 +133,9 @@ export function Sidebar({ items }: { items: NavItem[] }) {
   return (
     <aside className="flex w-[212px] shrink-0 flex-col border-r bg-sidebar">
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 px-4">
-        <span className="pointer-events-none size-3 rounded-full bg-primary shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_20%,transparent)]" />
+        <span className="pointer-events-none flex">
+          <Mark app={app} />
+        </span>
         <span className="pointer-events-none text-[13px] font-semibold">Skryb</span>
       </div>
       <nav className="flex flex-col gap-0.5 px-2 pt-2">

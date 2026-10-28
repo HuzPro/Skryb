@@ -14,6 +14,8 @@ from functools import cache, lru_cache
 import numpy
 from PIL import Image, ImageDraw, ImageFont
 
+from skryb.core.brand_mark import EMERALD_DEEP, EMERALD_LIGHT
+
 CANVAS_WIDTH = 248
 CANVAS_HEIGHT = 72
 # The pill's bottom edge stays put and it grows upward, so the canvas keeps
@@ -47,8 +49,9 @@ _BAR_MIN_HEIGHT = 3.0
 
 _PILL_FILL = (12, 12, 14)
 _BADGE_FILL = (38, 38, 42)
-# The dark theme accent: the colour the transcribing shimmer lifts the fill towards.
-_SHIMMER_FILL = (76, 96, 138)
+# The brand emerald: the voice bars, and the colour the transcribing shimmer lifts the fill towards.
+_WAVE = EMERALD_LIGHT
+_SHIMMER_FILL = EMERALD_DEEP
 _BORDER = (255, 255, 255, 26)
 _BUTTON_FILL = (58, 58, 62)
 _BUTTON_HOVER_FILL = (82, 82, 88)
@@ -593,7 +596,7 @@ def _draw_waveform(
         draw.rounded_rectangle(
             (left * scale, top * scale, (left + _BAR_WIDTH) * scale, (top + height) * scale),
             radius=_BAR_WIDTH * scale / 2,
-            fill=(*_GLYPH, round(strength * fade)),
+            fill=(*_WAVE, round(strength * fade)),
         )
 
 

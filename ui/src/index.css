@@ -69,6 +69,54 @@
   }
 }
 
+/* The logo's motion, matching the tray icon's: see components/mark.tsx. */
+.mark .mark-bar,
+.mark .mark-caret {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mark[data-motion="voice"] .mark-bar {
+  transition: transform 90ms ease-out;
+}
+.mark[data-motion="feed"] .mark-bar {
+  animation: mark-feed 1.3s ease-in infinite;
+}
+.mark[data-motion="sweep"] .mark-bar {
+  animation: mark-sweep 1.25s ease-in-out infinite;
+}
+.mark[data-motion="sweep"] .mark-caret {
+  animation: mark-sweep 1.25s ease-in-out 0.45s infinite;
+}
+@keyframes mark-feed {
+  0% {
+    transform: translateX(-20px) scaleY(1);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(50px) scaleY(0.4);
+    opacity: 0;
+  }
+}
+@keyframes mark-sweep {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  45% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark .mark-bar,
+  .mark .mark-caret {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--border);

@@ -11,26 +11,39 @@ from unittest.mock import MagicMock
 
 from skryb.core.state_machine import AppState
 from skryb.tray import win32_icons
-from skryb.tray.win32_icons import ColorScheme, render_image_for_scheme
+from skryb.tray.win32_icons import ColorScheme, render_frames_for_scheme
+
+# Middle of the cursor's stem in a 64 px tray frame: always fully drawn.
+_STEM = (51, 32)
 
 
 def _center_pixel(state: AppState, scheme: ColorScheme) -> tuple[int, int, int]:
-    image = render_image_for_scheme(state, scheme, size=64)
-    r, g, b, _ = image.getpixel((32, 32))
+    image = render_frames_for_scheme(state, scheme, size=64)[0]
+    r, g, b, _ = image.getpixel(_STEM)
     return (r, g, b)
 
 
-class TestRenderImageForScheme:
-    def test_should_produce_an_rgba_image_of_the_requested_size(self):
-        image = render_image_for_scheme(AppState.IDLE, ColorScheme.LIGHT, size=48)
+class TestRenderFramesForScheme:
+    def test_should_produce_rgba_frames_of_the_requested_size(self):
+        frames = render_frames_for_scheme(AppState.RECORDING, ColorScheme.LIGHT, size=48)
 
-        assert image.size == (48, 48)
-        assert image.mode == "RGBA"
+        assert all(frame.size == (48, 48) and frame.mode == "RGBA" for frame in frames)
 
     def test_should_leave_the_corner_transparent(self):
-        image = render_image_for_scheme(AppState.IDLE, ColorScheme.LIGHT)
+        image = render_frames_for_scheme(AppState.IDLE, ColorScheme.LIGHT)[0]
 
         assert image.getpixel((0, 0))[3] == 0
+
+    def test_should_stand_still_when_idle_or_failed(self):
+        for state in (AppState.IDLE, AppState.ERROR):
+            assert len(render_frames_for_scheme(state, ColorScheme.DARK)) == 1
+
+    def test_should_move_while_recording_transcribing_or_loading(self):
+        for state in (AppState.RECORDING, AppState.TRANSCRIBING, AppState.LOADING):
+            frames = render_frames_for_scheme(state, ColorScheme.DARK)
+
+            assert len(frames) > 1
+            assert len({frame.tobytes() for frame in frames}) > len(frames) // 2
 
     def test_should_use_a_visibly_different_colour_per_scheme(self):
         light = _center_pixel(AppState.RECORDING, ColorScheme.LIGHT)
