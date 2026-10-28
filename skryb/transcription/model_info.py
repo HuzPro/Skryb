@@ -42,9 +42,20 @@ class ModelInfo:
 
     @property
     def display_size(self) -> str:
-        if self.size_mb >= 1000:
-            return f"{self.size_mb / 1000:.1f} GB"
-        return f"{self.size_mb} MB"
+        return format_size_mb(self.size_mb)
+
+
+def format_size_mb(size_mb: int) -> str:
+    if size_mb >= 1000:
+        return f"{size_mb / 1000:.1f} GB"
+    return f"{size_mb} MB"
+
+
+# Plus and Clean show as one model in Settings, so both carry its description.
+_BARK_PLUS_DESCRIPTION = (
+    "Underdog Bark 3.0 Plus: fewer errors than Bark 3.0. Downloads two versions: "
+    "Clean drops ums, false starts and repeats (Intended), Plus keeps them (Verbatim). English only"
+)
 
 
 _PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
@@ -96,7 +107,7 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
     "underdog-bark-3.0-plus": ModelInfo(
         name="underdog-bark-3.0-plus",
         size_mb=180,
-        description="Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Verbatim keeps every um, 180 MB, English only",
+        description=_BARK_PLUS_DESCRIPTION,
         repo_id="ConwayResearch/Underdog-Bark-3.0-Plus",
         revision="d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
         compatible_engines=_NPU_PARAKEET_ENGINES,
@@ -105,7 +116,7 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
     "underdog-bark-3.0-clean": ModelInfo(
         name="underdog-bark-3.0-clean",
         size_mb=180,
-        description="Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Intended drops ums, false starts and repeats, 180 MB, English only",
+        description=_BARK_PLUS_DESCRIPTION,
         repo_id="ConwayResearch/Underdog-Bark-3.0-Clean",
         revision="6d34ed8639b2b9a33e764acf06748519bbb950cf",
         compatible_engines=_NPU_PARAKEET_ENGINES,
@@ -265,6 +276,11 @@ def speech_style_of(name: str) -> tuple[str, str] | None:
             if member == name:
                 return family, style
     return None
+
+
+def family_display_size(family: str) -> str:
+    """Both styles download together, so the family's size is theirs added up."""
+    return format_size_mb(sum(ALL_MODELS[member].size_mb for member in SPEECH_STYLE_FAMILIES[family].values()))
 
 
 def has_speech_styles(name: str) -> bool:

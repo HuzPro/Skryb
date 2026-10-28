@@ -6,7 +6,8 @@ import { finalText, formatDuration, groupByDay, preview } from "./history";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
-import { styleInUse, visibleModels, withMode, withStyle } from "./transcription";
+import { combinedDownload, modelEntries } from "../components/models";
+import { memberFor, styleInUse, withMode, withStyle } from "./transcription";
 import { describeUpdate } from "./updates";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -164,21 +165,47 @@ describe("settings helpers", () => {
 
 describe("Bark Plus speech styles", () => {
   const family = "underdog-bark-3.0-plus";
+  const bark = { display_size: "180 MB", style_family: family, style_family_size: "360 MB", description: "Bark Plus", download: null };
   const models = [
-    { name: "phonon-2", installed: true, style_family: null, speech_style: null },
-    { name: "underdog-bark-3.0-plus", installed: false, style_family: family, speech_style: "verbatim" },
-    { name: "underdog-bark-3.0-clean", installed: true, style_family: family, speech_style: "intended" },
-    { name: "crisperwhisper-2.0-turbo", installed: true, has_speech_styles: true },
-  ] as Model[];
-  const names = (shown: Model[]) => shown.map((model) => model.name);
+    { name: "phonon-2", installed: true, style_family: null, speech_style: null, display_size: "164 MB", download: null },
+    { ...bark, name: "underdog-bark-3.0-plus", installed: false, speech_style: "verbatim" },
+    { ...bark, name: "underdog-bark-3.0-clean", installed: true, speech_style: "intended" },
+    { name: "crisperwhisper-2.0-turbo", installed: true, has_speech_styles: true, download: null },
+  ] as unknown as Model[];
 
-  it("shows Plus and Clean as one card, the one for the style in use, in Plus's place", () => {
-    expect(names(visibleModels(models, "phonon-2", "intended"))).toEqual(["phonon-2", "underdog-bark-3.0-clean", "crisperwhisper-2.0-turbo"]);
-    expect(names(visibleModels(models, "phonon-2", "verbatim"))).toEqual(["phonon-2", "underdog-bark-3.0-plus", "crisperwhisper-2.0-turbo"]);
+  it("shows Plus and Clean as one card named Plus, with both downloads' size, in Plus's place", () => {
+    const entries = modelEntries(models);
+    expect(entries.map((entry) => entry.model.name)).toEqual(["phonon-2", family, "crisperwhisper-2.0-turbo"]);
+    expect(entries[1]?.model.display_size).toBe("360 MB");
+    expect(entries[1]?.members.map((member) => member.name)).toEqual(["underdog-bark-3.0-plus", "underdog-bark-3.0-clean"]);
+    expect(entries[0]?.members).toEqual([models[0]]);
   });
 
-  it("shows the selected member even when the style setting says otherwise", () => {
-    expect(names(visibleModels(models, "underdog-bark-3.0-plus", "intended"))[1]).toBe("underdog-bark-3.0-plus");
+  it("counts the card as installed only once both versions are downloaded", () => {
+    expect(modelEntries(models)[1]?.model.installed).toBe(false);
+    const both = models.map((model) => ({ ...model, installed: true }));
+    expect(modelEntries(both)[1]?.model.installed).toBe(true);
+  });
+
+  it("picks Clean for Intended and Plus for Verbatim when the card is chosen", () => {
+    const members = modelEntries(models)[1]?.members ?? [];
+    expect(memberFor(members, "intended")?.name).toBe("underdog-bark-3.0-clean");
+    expect(memberFor(members, "verbatim")?.name).toBe("underdog-bark-3.0-plus");
+    expect(memberFor([models[0] as Model], "verbatim")?.name).toBe("phonon-2");
+  });
+
+  it("shows the two downloads as one, busiest state first, bytes added up", () => {
+    const downloading = (state: "queued" | "downloading" | "paused" | "failed", done: number, error = "") => ({ state, bytes_done: done, bytes_total: 180_000_000, error });
+    const members = [
+      { ...models[1], download: downloading("downloading", 90_000_000) },
+      { ...models[2], download: downloading("queued", 0) },
+    ] as Model[];
+    expect(combinedDownload(members)).toEqual({ state: "downloading", bytes_done: 90_000_000, bytes_total: 360_000_000, error: "" });
+    expect(combinedDownload([{ ...members[0], download: downloading("paused", 5) }, members[1]] as Model[])?.state).toBe("queued");
+    expect(combinedDownload([{ ...members[0], download: downloading("failed", 0, "HTTP 503") }, { ...members[1], download: null }] as Model[])).toMatchObject({
+      state: "failed", error: "HTTP 503",
+    });
+    expect(combinedDownload(models.slice(1, 3))).toBeNull();
   });
 
   it("reads the style from the selected member, and from the setting for anything else", () => {

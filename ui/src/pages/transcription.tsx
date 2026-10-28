@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { ModelCard, useModels } from "../components/models";
+import { ModelCard, modelEntries, useModels } from "../components/models";
 import { ChoiceCards, Disclosure, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
 import { Select } from "../components/ui/select";
 import { api } from "../lib/api";
@@ -40,22 +40,9 @@ export function withMode(settings: Settings, mode: TranscriptionMode, models: Mo
 
 type Style = Settings["crisperwhisper_mode"];
 
-/** One card per style family: the selected member, else the member for the style in use. */
-export function visibleModels(models: Model[], selected: string, style: Style): Model[] {
-  const shown: Model[] = [];
-  const families = new Set<string>();
-  for (const model of models) {
-    const family = model.style_family;
-    if (!family) {
-      shown.push(model);
-      continue;
-    }
-    if (families.has(family)) continue;
-    families.add(family);
-    const members = models.filter((member) => member.style_family === family);
-    shown.push(members.find((member) => member.name === selected) ?? members.find((member) => member.speech_style === style) ?? model);
-  }
-  return shown;
+/** Picking a family card picks its member for the style in use. */
+export function memberFor(members: Model[], style: Style): Model | undefined {
+  return members.length > 1 ? members.find((member) => member.speech_style === style) : members[0];
 }
 
 /** A family member is its own style; any other model reads the setting. */
@@ -100,11 +87,7 @@ export function TranscriptionPage() {
     : hardware.streaming_supported
       ? ""
       : "Needs a CUDA or ROCm GPU, and none was detected.";
-  const shown = visibleModels(
-    models.filter((model) => fitsMode(model, draft.transcription_mode)),
-    draft.model_size,
-    draft.crisperwhisper_mode,
-  );
+  const shown = modelEntries(models.filter((model) => fitsMode(model, draft.transcription_mode)));
   const selectedModel = models.find((model) => model.name === draft.model_size);
   const hasStyles = selectedModel?.has_speech_styles ?? false;
   const candidates = engines?.candidates ?? [];
@@ -135,12 +118,15 @@ export function TranscriptionPage() {
       </Section>
       <Section title="Models">
         <div role="radiogroup" aria-label="Model" className="flex flex-col gap-2">
-          {shown.map((model) => (
+          {shown.map(({ model, members }) => (
             <ModelCard
               key={model.name}
               model={model}
-              selected={model.name === draft.model_size}
-              onSelect={() => editSettings((current) => ({ ...current, model_size: model.name, engine: "auto" }))}
+              members={members}
+              selected={members.some((member) => member.name === draft.model_size)}
+              onSelect={() =>
+                editSettings((current) => ({ ...current, model_size: memberFor(members, current.crisperwhisper_mode)?.name ?? model.name, engine: "auto" }))
+              }
             />
           ))}
           {models.length && !shown.length ? <p className="text-[12.5px] text-muted-foreground">No models for this mode.</p> : null}

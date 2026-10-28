@@ -419,7 +419,8 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
     assert by_name[PARAKEET]["download"] is None
     assert set(by_name[PARAKEET]) == {
         "name", "display_size", "description", "installed", "supports_batch",
-        "supports_streaming", "has_speech_styles", "style_family", "speech_style", "license_id", "download",
+        "supports_streaming", "has_speech_styles", "style_family", "speech_style", "style_family_size",
+        "license_id", "download",
     }
     assert (by_name[PARAKEET]["style_family"], by_name[PARAKEET]["speech_style"]) == (None, None)
     assert (by_name[TURBO]["style_family"], by_name[TURBO]["speech_style"]) == (None, None)
@@ -427,6 +428,9 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
         "underdog-bark-3.0-plus", "intended",
     )
     assert by_name["underdog-bark-3.0-plus"]["speech_style"] == "verbatim"
+    assert by_name["underdog-bark-3.0-plus"]["style_family_size"] == "360 MB"
+    assert by_name["underdog-bark-3.0-clean"]["style_family_size"] == "360 MB"
+    assert by_name[PARAKEET]["style_family_size"] is None
     assert by_name["underdog-bark-3.0-plus"]["has_speech_styles"] is True
 
 

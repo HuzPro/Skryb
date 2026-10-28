@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ModelCard, useModels } from "../components/models";
+import { ModelCard, modelEntries, useModels } from "../components/models";
 import { InlineError, Section } from "../components/parts";
 import { Button } from "../components/ui/button";
 import { api, errorText } from "../lib/api";
@@ -51,14 +51,22 @@ export function SetupPage() {
         Three quick choices and you are ready to dictate. Everything runs on this computer; nothing is sent anywhere.
       </p>
 
-      <Section title="1. Speech model" note="Download one to start. You can add or change models later in Transcription.">
+      <Section title="1. Speech model" note="Download one to start. You can add or change models later on the Model page.">
         <div role="radiogroup" aria-label="Speech model" className="flex flex-col gap-2">
-          {models.map((model) => (
+          {modelEntries(models).map(({ model, members }) => (
             <ModelCard
               key={model.name}
               model={model}
-              selected={model.name === draft.model_size && model.installed}
-              onSelect={() => editSettings((current) => ({ ...current, model_size: model.name, transcription_mode: "batch", engine: "auto" }))}
+              members={members}
+              selected={model.installed && members.some((member) => member.name === draft.model_size)}
+              onSelect={() =>
+                editSettings((current) => ({
+                  ...current,
+                  model_size: (members.find((member) => member.speech_style === current.crisperwhisper_mode) ?? members[0] ?? model).name,
+                  transcription_mode: "batch",
+                  engine: "auto",
+                }))
+              }
             />
           ))}
         </div>

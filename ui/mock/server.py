@@ -59,11 +59,11 @@ MODELS = [
     {"name": "underdog-bark-3.0-plus", "display_size": "180 MB", "size": 180_000_000,
      "description": "Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Verbatim keeps every um, 180 MB, English only",
      "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
-     "style_family": "underdog-bark-3.0-plus", "speech_style": "verbatim", "license_id": None},
+     "style_family": "underdog-bark-3.0-plus", "speech_style": "verbatim", "style_family_size": "360 MB", "license_id": None},
     {"name": "underdog-bark-3.0-clean", "display_size": "180 MB", "size": 180_000_000,
      "description": "Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Intended drops ums, false starts and repeats, 180 MB, English only",
      "installed": True, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
-     "style_family": "underdog-bark-3.0-plus", "speech_style": "intended", "license_id": None},
+     "style_family": "underdog-bark-3.0-plus", "speech_style": "intended", "style_family_size": "360 MB", "license_id": None},
 ]
 
 BROKEN_MICROPHONE = "Microphone Array (Realtek(R) A"

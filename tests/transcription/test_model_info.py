@@ -316,3 +316,24 @@ class TestWhichModelsTranscribeVerbatim:
 
         for name in ("phonon-2", "parakeet-ultra", "underdog-bark-3.0", "qwen3-asr-1.7b", "", "not-a-model"):
             assert not transcribes_verbatim(name, "verbatim")
+
+
+class TestBarkPlusDownloadsAsOneModel:
+    def test_the_family_size_is_both_downloads_added_up(self) -> None:
+        from skryb.transcription.model_info import family_display_size
+
+        assert family_display_size("underdog-bark-3.0-plus") == "360 MB"
+
+    def test_both_versions_describe_the_one_model_settings_shows(self) -> None:
+        from skryb.transcription.model_info import get_model_info
+
+        plus = get_model_info("underdog-bark-3.0-plus").description
+        assert plus == get_model_info("underdog-bark-3.0-clean").description
+        assert "Clean" in plus and "Intended" in plus and "Verbatim" in plus
+
+    def test_sizes_round_to_gigabytes_from_a_thousand_megabytes(self) -> None:
+        from skryb.transcription.model_info import format_size_mb
+
+        assert [format_size_mb(size) for size in (0, 164, 999, 1000, 1254, 4100)] == [
+            "0 MB", "164 MB", "999 MB", "1.0 GB", "1.3 GB", "4.1 GB",
+        ]

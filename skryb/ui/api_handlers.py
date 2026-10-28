@@ -35,7 +35,7 @@ from skryb.settings.service import EngineEventListener, SettingsService
 from skryb.settings.settings_draft import ChangeSet
 from skryb.settings.signal import Signal
 from skryb.settings.transcription_mode import TranscriptionMode
-from skryb.transcription.model_info import ALL_MODELS
+from skryb.transcription.model_info import ALL_MODELS, family_display_size
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, ApiServer, Route
 from skryb.ui.event_hub import EventHub, Json
 from skryb.ui.shapes import (
@@ -825,8 +825,10 @@ def _flag_field(key: str) -> Callable[[object], bool]:
 
 def _speech_style_fields(family_style: tuple[str, str] | None) -> dict[str, str | None]:
     """Members of one family show as a single model; the shell picks the member by style."""
-    family, style = family_style or (None, None)
-    return {"style_family": family, "speech_style": style}
+    if family_style is None:
+        return {"style_family": None, "speech_style": None, "style_family_size": None}
+    family, style = family_style
+    return {"style_family": family, "speech_style": style, "style_family_size": family_display_size(family)}
 
 
 def _cue_request(body: object) -> tuple[str, float]:
