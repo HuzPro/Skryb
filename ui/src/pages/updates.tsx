@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
+import { installDescription, installTitle, useInstall } from "../components/install";
+import { PageBody, PageTitle, ProgressBar, Row, Rows, Section } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
@@ -24,6 +25,8 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
       return { title: `Skryb ${update.version} is ready`, description: "Skryb closes, installs the update and opens again. It waits for a dictation to finish first." };
     case "installing":
       return { title: `Installing Skryb ${update.version}`, description: "Skryb will close and open again in a minute." };
+    case "updated":
+      return { title: `Skryb ${running}`, description: "Updated just now. You have the latest version." };
     case "failed":
       return { title: `Skryb ${running}`, description: "The last check didn't work." };
     case "off":
@@ -35,9 +38,25 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
 
 export function UpdatesPage() {
   const app = useAppInfo();
-  const { settings, editSettings } = useStore();
+  const install = useInstall();
+  const { settings, editSettings, anyDirty, askUnsaved, saveAll } = useStore();
   const [requestError, setRequestError] = useState("");
   const draft = settings?.draft;
+  // Skryb is closed while setup runs, so this shows without it.
+  if (install) {
+    return (
+      <PageBody>
+        <PageTitle title="Updates" />
+        <Section title="Version">
+          <Rows>
+            <Row title={installTitle(install)} description={<span className="selectable">{installDescription(install)}</span>} stacked>
+              {install.progress.step === "failed" ? null : <ProgressBar value={install.estimate.fraction} className="w-full" />}
+            </Row>
+          </Rows>
+        </Section>
+      </PageBody>
+    );
+  }
   if (!app || !draft) return <PageBody><PageTitle title="Updates" /></PageBody>;
 
   const update = app.update;
@@ -51,15 +70,30 @@ export function UpdatesPage() {
       setRequestError(errorText(error));
     }
   };
+  // The window closes for the new version's, so unsaved changes are settled first, as on closing it.
+  const restartAndUpdate = async () => {
+    if (anyDirty()) {
+      const choice = await askUnsaved();
+      if (choice === "cancel" || (choice !== "discard" && !(await saveAll()))) return;
+    }
+    await send("/api/updates/install");
+  };
 
   return (
     <PageBody>
       <PageTitle title="Updates" />
       <Section title="Version">
         <Rows>
-          <Row title={title} description={description} error={requestError || (update?.state === "failed" ? update.error : "")}>
-            {update === null ? null : update.state === "ready" ? (
-              <Button onClick={() => void send("/api/updates/install")}>Restart and update</Button>
+          <Row
+            title={title}
+            description={description}
+            error={requestError || (update?.state === "failed" ? update.error : "")}
+            stacked={update?.state === "downloading"}
+          >
+            {update === null ? null : update.state === "downloading" ? (
+              <ProgressBar value={update.bytes_total > 0 ? update.bytes_done / update.bytes_total : 0} className="w-full" />
+            ) : update.state === "ready" ? (
+              <Button onClick={() => void restartAndUpdate()}>Restart and update</Button>
             ) : (
               <Button variant="outline" disabled={busy} onClick={() => void send("/api/updates/check")}>
                 Check for updates

@@ -1,6 +1,8 @@
 import hashlib
 import json
+import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -69,7 +71,7 @@ class _Rig:
         self.statuses: list[UpdateStatus] = []
         self.offers: list[str] = []
         self.busy_for_sleeps = 0
-        self.started: list[tuple[Path, Path]] = []
+        self.started: list[tuple[Path, Path, Path]] = []
         self.quits = 0
         self.enabled = True
         self.updater = ReleaseUpdater(
@@ -80,7 +82,7 @@ class _Rig:
             downloader=self.downloader,
             is_busy=lambda: self.busy_for_sleeps > 0,
             quit_into=self._quit_into,
-            start_installer=lambda installer, log: self.started.append((installer, log)),
+            start_installer=lambda installer, log, progress: self.started.append((installer, log, progress)),
             on_change=self.statuses.append,
             offer=self.offers.append,
             sleep=self._sleep,
@@ -302,9 +304,28 @@ class TestInstalling:
         rig.updater._install_when_idle(release_from_github(rig.latest))
 
         assert rig.quits == 1
-        assert rig.started == [(rig.updates_dir / "Skryb-Setup-0.2.0.exe", rig.updates_dir / "install-0.2.0.log")]
+        assert rig.started == [(
+            rig.updates_dir / "Skryb-Setup-0.2.0.exe",
+            rig.updates_dir / "install-0.2.0.log",
+            rig.updates_dir / "install-progress.json",
+        )]
         pending = json.loads((rig.updates_dir / "pending.json").read_text(encoding="utf-8"))
         assert pending == {"version": "0.2.0", "log": str(rig.updates_dir / "install-0.2.0.log")}
+
+    def test_leaves_the_first_step_for_a_settings_window_that_opens_after_skryb_has_quit(self, tmp_path):
+        rig = _Rig(tmp_path)
+        rig.updater.check_once()
+        progress_when_quitting: list[object] = []
+
+        def quit_into(start) -> None:
+            progress_when_quitting.append(json.loads((rig.updates_dir / "install-progress.json").read_text(encoding="utf-8")))
+            start()
+
+        rig.updater._quit_into = quit_into
+
+        rig.updater._install_when_idle(release_from_github(rig.latest))
+
+        assert progress_when_quitting == [{"step": "closing", "percent": 0, "version": "0.2.0"}]
 
     def test_runs_install_off_the_calling_thread(self, tmp_path):
         rig = _Rig(tmp_path)
@@ -348,7 +369,7 @@ class TestInstalling:
         rig = _Rig(tmp_path)
         rig.updater.check_once()
 
-        def blocked(_installer: Path, _log: Path) -> None:
+        def blocked(_installer: Path, _log: Path, _progress: Path) -> None:
             raise PermissionError("Access is denied")
 
         rig.updater._start_installer = blocked
@@ -358,6 +379,7 @@ class TestInstalling:
 
         assert rig.quits == 0
         assert not (rig.updates_dir / "pending.json").exists()
+        assert not (rig.updates_dir / "install-progress.json").exists()
         assert rig.updater.status().error == "Couldn't start the installer. Access is denied."
 
 
@@ -366,14 +388,24 @@ class TestAfterAnUpdate:
         rig.updates_dir.mkdir(parents=True, exist_ok=True)
         (rig.updates_dir / "pending.json").write_text(text, encoding="utf-8")
 
-    def test_the_new_version_forgets_the_finished_update_quietly(self, tmp_path):
+    def test_the_new_version_says_it_was_just_updated_and_forgets_the_marker(self, tmp_path):
         rig = _Rig(tmp_path, running="0.2.0")
         self._pending(rig, json.dumps({"version": "0.2.0", "log": "C:\\Users\\Hüz\\install-0.2.0.log"}))
 
         rig.updater._report_unfinished_update()
 
-        assert rig.statuses == []
+        assert rig.statuses == [UpdateStatus(state="updated", version="0.2.0")]
         assert not (rig.updates_dir / "pending.json").exists()
+
+    def test_starting_clears_the_progress_the_installer_left_behind(self, tmp_path):
+        rig = _Rig(tmp_path, running="0.2.0")
+        self._pending(rig, json.dumps({"version": "0.2.0", "log": "install-0.2.0.log"}))
+        (rig.updates_dir / "install-progress.json").write_text('{"step":"starting","percent":100}', encoding="utf-8")
+
+        rig.updater.start(first_check_after=3600)
+        rig.updater.dispose()
+
+        assert not (rig.updates_dir / "install-progress.json").exists()
 
     def test_the_old_version_says_the_update_did_not_finish_and_names_the_log(self, tmp_path):
         rig = _Rig(tmp_path, running="0.1.0")
@@ -395,6 +427,37 @@ class TestAfterAnUpdate:
 
         assert rig.statuses == []
         assert not (rig.updates_dir / "pending.json").exists()
+
+
+class TestReopeningTheWindowAfterAnUpdate:
+    def _saved_window(self, rig: _Rig, age_seconds: float) -> Path:
+        rig.updates_dir.mkdir(parents=True, exist_ok=True)
+        saved = rig.updates_dir / "window.json"
+        saved.write_text(
+            '{"route":"/updates","scroll":0,"x":-1910,"y":40,"width":1040,"height":720,"maximized":false}',
+            encoding="utf-8",
+        )
+        modified = time.time() - age_seconds
+        os.utime(saved, (modified, modified))
+        return saved
+
+    def test_reopens_a_window_the_last_version_handed_over_a_moment_ago(self, tmp_path):
+        rig = _Rig(tmp_path, running="0.2.0")
+        saved = self._saved_window(rig, age_seconds=4)
+
+        assert rig.updater.window_to_restore() is True
+        assert saved.exists(), "the window reads and deletes it itself"
+
+    @pytest.mark.parametrize("age_seconds", [601, 86_400 * 30, -3600])
+    def test_throws_away_a_window_saved_too_long_ago_or_in_the_future(self, tmp_path, age_seconds):
+        rig = _Rig(tmp_path, running="0.2.0")
+        saved = self._saved_window(rig, age_seconds)
+
+        assert rig.updater.window_to_restore() is False
+        assert not saved.exists()
+
+    def test_reopens_nothing_when_no_window_was_handed_over(self, tmp_path):
+        assert _Rig(tmp_path, running="0.2.0").updater.window_to_restore() is False
 
 
 class TestTheHourlyLoop:
@@ -435,12 +498,14 @@ class TestStartingTheInstaller:
         monkeypatch.setattr(release_update.subprocess, "Popen", lambda command, **kwargs: calls.append((command, kwargs)))
         monkeypatch.setattr("os.getpid", lambda: 4242)
         installer, log = tmp_path / "Skryb Setup 0.2.0.exe", tmp_path / "logs ü" / "install.log"
+        progress = tmp_path / "logs ü" / "install-progress.json"
 
-        run_installer(installer, log)
+        run_installer(installer, log, progress)
 
         command, kwargs = calls[0]
         assert command == [
-            str(installer), "/SILENT", "/NORESTART", "/FORCECLOSEAPPLICATIONS", "/WAITPID=4242", f"/LOG={log}",
+            str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/FORCECLOSEAPPLICATIONS",
+            "/WAITPID=4242", f"/LOG={log}", f"/PROGRESSFILE={progress}",
         ]
         assert kwargs["creationflags"] & 0x00000008  # detached
         assert kwargs["creationflags"] & 0x01000000  # out of any job Skryb is in
@@ -455,7 +520,7 @@ class TestStartingTheInstaller:
 
         monkeypatch.setattr(release_update.subprocess, "Popen", popen)
 
-        run_installer(tmp_path / "Skryb-Setup-0.2.0.exe", tmp_path / "install.log")
+        run_installer(tmp_path / "Skryb-Setup-0.2.0.exe", tmp_path / "install.log", tmp_path / "progress.json")
 
         assert len(calls) == 2 and not calls[1] & 0x01000000
 

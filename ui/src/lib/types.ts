@@ -200,7 +200,7 @@ export interface AppInfo {
 }
 
 export interface UpdateStatus {
-  state: "off" | "idle" | "checking" | "up_to_date" | "downloading" | "ready" | "installing" | "failed";
+  state: "off" | "idle" | "checking" | "up_to_date" | "downloading" | "ready" | "installing" | "updated" | "failed";
   version: string;
   bytes_done: number;
   bytes_total: number;

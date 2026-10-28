@@ -4,7 +4,10 @@ Only a copy Skryb-Setup installed updates this way; a copy running from a
 git checkout keeps updating through git (``self_update``). The installer is
 downloaded in the background and checked against the SHA-256 GitHub records
 for it before it is offered. Installing runs it silently: it waits for this
-process to exit, installs over it and starts Skryb again.
+process to exit, installs over it and starts Skryb again. Setup shows no
+window of its own: it writes how far it has got to ``install-progress.json``
+for the Settings window to show, and that window hands its place over to
+the new version's through ``window.json``.
 """
 
 import hashlib
@@ -31,6 +34,10 @@ CHECK_EVERY_SECONDS = 3600.0
 _MAX_INSTALLER_BYTES = 500 * 1024 * 1024
 _IDLE_POLL_SECONDS = 0.5
 _PENDING_FILE = "pending.json"
+PROGRESS_FILE = "install-progress.json"
+WINDOW_FILE = "window.json"
+# Older than this, a saved window is from an update that never finished, not one to reopen.
+_RESTORE_WITHIN_SECONDS = 600.0
 # [0-9], not \d: \d also matches digits such as Arabic-Indic ones.
 _VERSION = re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)$")
 _DETACHED_PROCESS = 0x00000008
@@ -50,7 +57,7 @@ class Release:
 @dataclass(frozen=True)
 class UpdateStatus:
     """What the tray and Settings show. ``state`` is one of
-    off, idle, checking, up_to_date, downloading, ready, installing, failed."""
+    off, idle, checking, up_to_date, downloading, ready, installing, updated, failed."""
 
     state: str = "idle"
     version: str = ""
@@ -134,15 +141,16 @@ def fetch_latest_release(running_version: str) -> object:
     return response.json()
 
 
-def run_installer(installer: Path, log: Path) -> None:
+def run_installer(installer: Path, log: Path, progress: Path) -> None:
     """Start the installer on its own, so it outlives this process and can replace it."""
     import os
 
+    # No setup window or message box: the Settings window shows the progress.
     # Setup waits a minute for this process; anything still holding Skryb's
     # files after that is stuck, so it is closed rather than asked about.
     command = [
-        str(installer), "/SILENT", "/NORESTART", "/FORCECLOSEAPPLICATIONS",
-        f"/WAITPID={os.getpid()}", f"/LOG={log}",
+        str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/FORCECLOSEAPPLICATIONS",
+        f"/WAITPID={os.getpid()}", f"/LOG={log}", f"/PROGRESSFILE={progress}",
     ]
     flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
     try:
@@ -172,7 +180,7 @@ class ReleaseUpdater:
         downloader: InstallerDownloader,
         is_busy: Callable[[], bool],
         quit_into: Callable[[Callable[[], None]], None],
-        start_installer: Callable[[Path, Path], None] = run_installer,
+        start_installer: Callable[[Path, Path, Path], None] = run_installer,
         on_change: Callable[[UpdateStatus], None] = lambda _status: None,
         offer: Callable[[str], None] = lambda _version: None,
         sleep: Callable[[float], None] = time.sleep,
@@ -197,6 +205,10 @@ class ReleaseUpdater:
         self._offered = ""
         self._thread: threading.Thread | None = None
 
+    @property
+    def updates_dir(self) -> Path:
+        return self._updates_dir
+
     def status(self) -> UpdateStatus:
         with self._lock:
             return self._status
@@ -206,7 +218,24 @@ class ReleaseUpdater:
         with self._lock:
             return self._ready.version if self._ready is not None else ""
 
+    def window_to_restore(self) -> bool:
+        """Whether the last version's Settings window handed its place over to this one.
+
+        A saved window too old to be from an update that just finished is
+        thrown away instead.
+        """
+        saved = self._updates_dir / WINDOW_FILE
+        try:
+            age = time.time() - saved.stat().st_mtime
+        except OSError:
+            return False
+        if 0 <= age <= _RESTORE_WITHIN_SECONDS:
+            return True
+        saved.unlink(missing_ok=True)
+        return False
+
     def start(self, first_check_after: float = FIRST_CHECK_SECONDS) -> None:
+        (self._updates_dir / PROGRESS_FILE).unlink(missing_ok=True)
         self._report_unfinished_update()
         self._thread = threading.Thread(
             target=self._run, args=(first_check_after,), name="release-updater", daemon=True,
@@ -352,13 +381,18 @@ class ReleaseUpdater:
     def _remember_pending(self, version: str, log: Path) -> None:
         pending = {"version": version, "log": str(log)}
         (self._updates_dir / _PENDING_FILE).write_text(json.dumps(pending), encoding="utf-8")
+        # Written before Skryb quits, so a Settings window that opens after
+        # this process is gone still finds the install under way.
+        first_step = {"step": "closing", "percent": 0, "version": version}
+        (self._updates_dir / PROGRESS_FILE).write_text(json.dumps(first_step), encoding="utf-8")
 
     def _launch_installer(self, installer: Path, log: Path) -> None:
         """Start the installer; raising stops the quit, so Skryb keeps running when it can't."""
         try:
-            self._start_installer(installer, log)
+            self._start_installer(installer, log, self._updates_dir / PROGRESS_FILE)
         except OSError as exc:
-            (self._updates_dir / _PENDING_FILE).unlink(missing_ok=True)
+            for marker in (_PENDING_FILE, PROGRESS_FILE):
+                (self._updates_dir / marker).unlink(missing_ok=True)
             self._report_failure("Couldn't start the installer", exc)
             raise
 
@@ -372,7 +406,9 @@ class ReleaseUpdater:
             pending = {}
         marker.unlink(missing_ok=True)
         version = str(pending.get("version", "")) if isinstance(pending, dict) else ""
-        if version and is_newer(version, self._running_version):
+        if version and version == self._running_version:
+            self._set(UpdateStatus(state="updated", version=version))
+        elif version and is_newer(version, self._running_version):
             log = pending.get("log", "") if isinstance(pending, dict) else ""
             self._set(UpdateStatus(
                 state="failed", version=version,

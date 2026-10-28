@@ -10,6 +10,8 @@ export interface LaunchArgs {
   token: string;
   page: Page;
   native_titlebar: boolean;
+  /** The page and scroll the last version's window showed when it handed over on updating. */
+  restored?: { route: string; scroll: number } | null;
 }
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -25,6 +27,17 @@ export async function readLaunchArgs(): Promise<LaunchArgs> {
     page: (query.get("page") ?? "settings") as Page,
     native_titlebar: true,
   };
+}
+
+/** Setup's progress file while an update installs, as written; null outside the app or with none. */
+export async function readUpdateProgress(): Promise<string | null> {
+  if (!inTauri) return null;
+  return invoke<string | null>("update_progress");
+}
+
+/** Saves where this window is and what it shows for the new version, then closes it. */
+export async function handOver(route: string, scroll: number): Promise<void> {
+  if (inTauri) await invoke("hand_over", { route, scroll });
 }
 
 /** A second launch focuses this window and forwards its arguments. */

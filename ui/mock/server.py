@@ -3,7 +3,11 @@
 Run `python mock/server.py [--port 8765] [--token dev] [--first-run] [--gpu]`
 and point the shell at it: `skryb-ui.exe --port 8765 --token dev`.
 State lives in memory; downloads, installs, the meter and shortcut capture
-are simulated on timers. Nothing is written to disk.
+are simulated on timers. Nothing is written to disk, except with
+`--updates-dir`: then "Restart and update" plays a whole in-app update, the
+core going away, setup's progress file, the window handing over and the new
+version reopening it (start the shell with the same `--updates-dir`, and
+pass `--shell-exe` so the mock can reopen it).
 """
 
 import argparse
@@ -11,10 +15,12 @@ import json
 import math
 import queue
 import random
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 GB = 1_000_000_000
@@ -212,6 +218,12 @@ class Core:
         self.history = _history()
         self.meter_on = False
         self.capturing = False
+        # The in-app update rehearsal (--updates-dir): while down, the core answers nothing.
+        self.down = False
+        self.updates_dir: Path | None = None
+        self.shell_exe = ""
+        self.port = 8765
+        self.token = "dev"
 
     # -- events -----------------------------------------------------------
     def emit(self, name: str, data: object) -> None:
@@ -309,6 +321,45 @@ class Core:
                         level = max(0.0, 0.5 + 0.5 * math.sin(t * 3.1) * math.sin(t * 8.3))
                         self.emit("voice", {"level": round(level, 3)})
 
+    def rehearse_update(self) -> None:
+        """Quit, play setup's steps into the progress file, then come back as 9.9.9 and reopen the window."""
+        assert self.updates_dir is not None
+        progress = self.updates_dir / "install-progress.json"
+        saved_window = self.updates_dir / "window.json"
+        saved_window.unlink(missing_ok=True)
+
+        def step(name: str, percent: int = 0) -> None:
+            progress.write_text(json.dumps({"step": name, "percent": percent, "version": "9.9.9"}), encoding="utf-8")
+
+        step("closing")
+        time.sleep(1.0)
+        with self.lock:
+            self.down = True
+            for client in list(self.clients):
+                client.put(None)
+        time.sleep(2.0)
+        for percent in range(0, 101, 4):
+            step("copying", percent)
+            time.sleep(0.12)
+        for name, seconds in (("runtime", 12.0), ("app", 6.0), ("notices", 2.0)):
+            step(name)
+            time.sleep(seconds)
+        step("starting", 100)
+        handed_over = time.time() + 5.0
+        while not saved_window.exists() and time.time() < handed_over:
+            time.sleep(0.1)
+        print(f"window handed over: {saved_window.exists()}", flush=True)
+        progress.unlink(missing_ok=True)
+        with self.lock:
+            self.app["version"] = "9.9.9"
+            self.app["update"] = {"state": "updated", "version": "9.9.9", "bytes_done": 0, "bytes_total": 0, "error": ""}
+            self.down = False
+        if self.shell_exe and saved_window.exists():
+            subprocess.Popen([
+                self.shell_exe, "--port", str(self.port), "--token", self.token, "--page", "settings",
+                "--updates-dir", str(self.updates_dir), "--restore",
+            ])
+
     def hot_plug(self) -> None:
         time.sleep(HOT_PLUG_AFTER_SECONDS)
         with self.lock:
@@ -371,6 +422,9 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("DELETE")
 
     def _dispatch(self, method: str) -> None:
+        if self.core.down:
+            self.close_connection = True
+            return
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
         self.body = json.loads(raw) if raw else None
@@ -407,8 +461,8 @@ class Handler(BaseHTTPRequestHandler):
             self.core.clients.append(client)
             client.put(f"event: app\ndata: {json.dumps(self.core.app)}\n\n".encode())
         try:
-            while True:
-                self.wfile.write(client.get())
+            while (chunk := client.get()) is not None:
+                self.wfile.write(chunk)
                 self.wfile.flush()
         except OSError:
             pass
@@ -670,6 +724,8 @@ class Handler(BaseHTTPRequestHandler):
             core.later(3.6, lambda: show(state="ready", version="9.9.9"))
         elif rest == ["install"]:
             show(state="installing", version="9.9.9")
+            if core.updates_dir is not None:
+                threading.Thread(target=core.rehearse_update, daemon=True).start()
         self._send(202)
 
 
@@ -680,8 +736,13 @@ def main() -> None:
     parser.add_argument("--first-run", action="store_true", help="no model installed, as on a fresh install")
     parser.add_argument("--gpu", action="store_true", help="the hardware probe finds a GPU, so Live is available")
     parser.add_argument("--cycle-states", action="store_true", help="loop through recording, transcribing and loading")
+    parser.add_argument("--updates-dir", type=Path, help="rehearse a whole in-app update through this folder")
+    parser.add_argument("--shell-exe", default="", help="the skryb-ui.exe to reopen after the rehearsed update")
     args = parser.parse_args()
     core = Core(first_run=args.first_run, gpu=args.gpu)
+    core.updates_dir, core.shell_exe, core.port, core.token = args.updates_dir, args.shell_exe, args.port, args.token
+    if core.updates_dir is not None:
+        core.updates_dir.mkdir(parents=True, exist_ok=True)
     for work in (core.tick, core.meter, core.heartbeat, core.hot_plug):
         threading.Thread(target=work, daemon=True).start()
     if args.cycle_states:

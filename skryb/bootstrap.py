@@ -1371,7 +1371,13 @@ def build_app(
             ),
         ),
     )
-    install_update = updater.install if updater is not None else _no_update
+
+    def install_update() -> None:
+        # The install's progress shows in Settings > Updates, opened if it's closed.
+        if updater is not None:
+            show_page("updates")
+            updater.install()
+
     VoiceFeed(event_bus, api_server.hub.publish, level=lambda: recorder.current_rms)
 
     # The shell's requests arrive on the API server's threads; applying
@@ -1399,7 +1405,11 @@ def build_app(
         ),
         updates=updater,
     )
-    launcher = ShellLauncher(api_server, notify=lambda message: app.notify(message))
+    launcher = ShellLauncher(
+        api_server,
+        notify=lambda message: app.notify(message),
+        updates_dir=updater.updates_dir if updater is not None else None,
+    )
 
     def show_page(page: str) -> None:
         # Looking for the exe and starting it stay off the GUI thread, which
@@ -1493,6 +1503,9 @@ def build_app(
         if second_launches is not None:
             second_launches.on_launch = show_updates
         updater.start()
+        # After start(), which clears setup's progress file the reopened window would otherwise read.
+        if updater.window_to_restore():
+            action_dispatcher.dispatch(functools.partial(launcher.open, "settings", restore=True))
         return app
 
     self_update = SelfUpdate(
@@ -1512,10 +1525,6 @@ def build_app(
         self_update.check(asked=False)
 
     return app
-
-
-def _no_update() -> None:
-    return None
 
 
 def _release_updater(

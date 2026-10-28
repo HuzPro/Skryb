@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AudioLines, BookA, ClipboardPaste, Download, History, Keyboard, Mic, PenLine } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
-import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, type NavItem } from "./components/shell";
+import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
+import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type NavItem } from "./components/shell";
 import { guardClose, onRelaunch, runBeforeClose, windowControls, type LaunchArgs, type Page } from "./lib/platform";
 import { useServerEvents } from "./lib/sse";
 import { StoreProvider, useStore } from "./lib/store";
@@ -66,6 +67,11 @@ export function rememberPage(pathname: string, memory: PageMemory | null = brows
   }
 }
 
+/** The page the last version's window showed when it handed over, if it is one this version has. */
+export function restoredPath(route: string | null | undefined): string | null {
+  return route && PAGES.some((page) => `/${page.path}` === route) ? route : null;
+}
+
 const LaunchContext = createContext<LaunchArgs | null>(null);
 
 function Shell() {
@@ -78,6 +84,9 @@ function Shell() {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const location = useLocation();
+  const main = useRef<HTMLElement>(null);
+  const install = useInstallWatch(useAppInfo(), lost, () => ({ route: location.pathname, scroll: main.current?.scrollTop ?? 0 }));
+  useRestoredScroll(main, launch?.restored?.scroll);
   const setup = location.pathname === "/setup";
   useEffect(() => rememberPage(location.pathname), [location.pathname]);
 
@@ -107,20 +116,26 @@ function Shell() {
 
   return (
     <LostContext.Provider value={lost}>
-      <div className="relative flex h-full">
-        {setup ? null : <Sidebar items={NAV} />}
-        <div className="relative flex min-w-0 flex-1 flex-col">
-          <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()}>
-            {setup ? <span className="pointer-events-none text-[13px] font-semibold">Skryb</span> : null}
-          </TopBar>
-          <main key={location.pathname} className="min-h-0 flex-1 overflow-y-auto">
-            <Outlet />
-          </main>
-          {setup ? null : <SaveBar />}
-          {lost ? <ConnectionBanner onQuit={windowControls.close} /> : null}
+      <InstallContext.Provider value={install}>
+        <div className="relative flex h-full">
+          {setup ? null : <Sidebar items={NAV} />}
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()}>
+              {setup ? <span className="pointer-events-none text-[13px] font-semibold">Skryb</span> : null}
+            </TopBar>
+            <main ref={main} key={location.pathname} className="min-h-0 flex-1 overflow-y-auto">
+              <Outlet />
+            </main>
+            {setup ? null : <SaveBar />}
+            {install ? (
+              location.pathname === "/updates" ? null : <InstallBanner view={install} />
+            ) : lost ? (
+              <ConnectionBanner onQuit={windowControls.close} />
+            ) : null}
+          </div>
+          <Prompts />
         </div>
-        <Prompts />
-      </div>
+      </InstallContext.Provider>
     </LostContext.Provider>
   );
 }
@@ -139,7 +154,7 @@ const PAGES = [
 
 export function App({ launch }: { launch: LaunchArgs }) {
   const router = useMemo(
-    () => createMemoryRouter([{ path: "/", element: <Shell />, children: PAGES }], { initialEntries: [launchPath(launch.page)] }),
+    () => createMemoryRouter([{ path: "/", element: <Shell />, children: PAGES }], { initialEntries: [restoredPath(launch.restored?.route) ?? launchPath(launch.page)] }),
     [launch],
   );
   return (

@@ -92,6 +92,31 @@ def test_asking_again_while_the_shell_runs_hands_it_the_new_page(tmp_path: Path)
     assert [command[-1] for command in spawn.commands] == ["settings", "history"]
 
 
+def test_an_installed_copy_tells_the_shell_where_updates_report_and_hands_over(tmp_path: Path) -> None:
+    spawn = _Spawner()
+    exe = _exe(tmp_path)
+    updates = tmp_path / "Hüz's AppData" / "Skryb" / "updates"
+    launcher = ShellLauncher(_Address(), MagicMock(), spawn=spawn, candidates=lambda: [exe], updates_dir=updates)
+
+    launcher.open("updates")
+    launcher.open("settings", restore=True)
+
+    assert spawn.commands == [
+        [str(exe), "--port", "51234", "--token", "tok-_3n", "--page", "updates", "--updates-dir", str(updates)],
+        [str(exe), "--port", "51234", "--token", "tok-_3n", "--page", "settings", "--updates-dir", str(updates), "--restore"],
+    ]
+
+
+def test_a_source_checkout_has_no_window_to_restore(tmp_path: Path) -> None:
+    spawn = _Spawner()
+    exe = _exe(tmp_path)
+    launcher = ShellLauncher(_Address(), MagicMock(), spawn=spawn, candidates=lambda: [exe])
+
+    launcher.open("settings", restore=True)
+
+    assert spawn.commands == [[str(exe), "--port", "51234", "--token", "tok-_3n", "--page", "settings"]]
+
+
 def test_with_no_shell_built_the_tray_says_how_to_build_it_and_nothing_starts(tmp_path: Path) -> None:
     icon = MagicMock()
     icon.run.side_effect = lambda setup: setup(icon)

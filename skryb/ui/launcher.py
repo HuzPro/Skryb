@@ -83,15 +83,21 @@ class ShellLauncher:
         *,
         spawn: Spawn = spawn_shell,
         candidates: Callable[[], list[Path]] = shell_candidates,
+        updates_dir: Path | None = None,
     ) -> None:
         self._address = address
         self._notify = notify
         self._spawn = spawn
         self._candidates = candidates
+        self._updates_dir = updates_dir
         self._child: ShellProcess | None = None
 
-    def open(self, page: str) -> bool:
-        """Show *page*; ``False``, after telling the user why, when it cannot."""
+    def open(self, page: str, *, restore: bool = False) -> bool:
+        """Show *page*; ``False``, after telling the user why, when it cannot.
+
+        ``restore`` reopens the window the last version handed over on
+        updating, where it was and on the page it showed.
+        """
         candidates = self._candidates()
         exe = next((path for path in candidates if path.is_file()), None)
         if exe is None:
@@ -106,6 +112,11 @@ class ShellLauncher:
             "--token", self._address.token,
             "--page", page,
         ]
+        # Where the installer reports its progress and the window is handed over.
+        if self._updates_dir is not None:
+            command += ["--updates-dir", str(self._updates_dir)]
+            if restore:
+                command.append("--restore")
         try:
             self._child = self._spawn(command)
         except (OSError, ValueError):

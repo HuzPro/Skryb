@@ -13,9 +13,11 @@
 ; `skryb` runnable from any terminal.
 ;
 ; It installs per user, so neither a first install nor an in-app update
-; asks for admin rights. An in-app update runs this silently with
+; asks for admin rights. An in-app update runs this very silently with
 ; /WAITPID=<pid>: setup waits for that Skryb to exit, installs over it
-; with the runtime chosen last time, and starts Skryb again.
+; with the runtime chosen last time, and starts Skryb again. With
+; /PROGRESSFILE=<path> it writes each step there as JSON, for the Settings
+; window to show in place of setup's own window.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -101,6 +103,45 @@ var
   TargetPage: TInputOptionWizardPage;
   DetectedTarget: Integer;   { 0 = CUDA, 1 = ROCm, 2 = CPU }
   DetectedGpuText: String;
+  ProgressFile: String;
+  ShownPercent: Integer;
+  InstallFinished: Boolean;
+  InstallFailed: Boolean;
+
+{ --- progress for the Settings window ----------------------------------- }
+
+{ One small JSON object, rewritten at each step. The reader ignores a file
+  it catches half written and keeps showing the step before. }
+procedure WriteProgress(const Step: String; Percent: Integer; const Extra: String);
+begin
+  if ProgressFile = '' then
+    Exit;
+  SaveStringToFile(ProgressFile, '{"step":"' + Step + '","percent":' + IntToStr(Percent)
+    + ',"version":"{#AppVersion}"' + Extra + '}', False);
+end;
+
+procedure WriteFailure();
+var
+  Log: String;
+begin
+  InstallFailed := True;
+  Log := ExpandConstant('{log}');
+  StringChangeEx(Log, '\', '\\', True);
+  WriteProgress('failed', 0, ',"log":"' + Log + '"');
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+var
+  Percent: Integer;
+begin
+  if MaxProgress <= 0 then
+    Exit;
+  Percent := Trunc(CurProgress * 100.0 / MaxProgress);
+  if Percent = ShownPercent then
+    Exit;
+  ShownPercent := Percent;
+  WriteProgress('copying', Percent, '');
+end;
 
 { --- hardware detection ------------------------------------------------- }
 
@@ -214,11 +255,12 @@ end;
 
 { --- dependency installation ------------------------------------------- }
 
-function RunPython(const Args, WorkingDir, StatusText: String): Integer;
+function RunPython(const Args, WorkingDir, StatusText, Step: String): Integer;
 var
   ResultCode, ShowCmd: Integer;
 begin
   WizardForm.StatusLabel.Caption := StatusText;
+  WriteProgress(Step, 0, '');
   { A silent in-app update keeps pip's console out of the way. }
   if WizardSilent() then
     ShowCmd := SW_HIDE
@@ -243,7 +285,7 @@ begin
   Code := RunPython(
     '-m pip install --isolated --no-warn-script-location -r "' + ReqPath + '"',
     '', 'Installing transcription runtime. This downloads the PyTorch build'
-        + ' for your hardware and can take several minutes...');
+        + ' for your hardware and can take several minutes...', 'runtime');
   if Code <> 0 then
   begin
     Result := False;
@@ -253,7 +295,7 @@ begin
   WheelPath := ExpandConstant('{app}\wheels\{#WheelFile}');
   Code := RunPython(
     '-m pip install --isolated --no-deps --no-warn-script-location "' + WheelPath + '"',
-    '', 'Installing Skryb...');
+    '', 'Installing Skryb...', 'app');
   if Code <> 0 then
   begin
     Result := False;
@@ -264,7 +306,7 @@ begin
   ToolsDir := ExpandConstant('{app}\tools');
   { Best effort: a failed notices pass must not fail the whole install. }
   RunPython('-m release.notices "' + NoticesPath + '"', ToolsDir,
-            'Writing third-party license notices...');
+            'Writing third-party license notices...', 'notices');
   Result := True;
 end;
 
@@ -316,6 +358,11 @@ function WaitForSingleObject(Handle: THandle; Milliseconds: DWORD): DWORD;
 function CloseHandle(Handle: THandle): BOOL;
   external 'CloseHandle@kernel32.dll stdcall';
 
+function UpdatingCopyPid(): Integer;
+begin
+  Result := StrToIntDef(ExpandConstant('{param:WaitPid|0}'), 0);
+end;
+
 { Skryb starts this and quits; its files are locked until that process is
   gone. Past the minute, Restart Manager closes whatever is left. }
 procedure WaitForUpdatingCopy();
@@ -323,7 +370,7 @@ var
   Pid: Integer;
   Process: THandle;
 begin
-  Pid := StrToIntDef(ExpandConstant('{param:WaitPid|0}'), 0);
+  Pid := UpdatingCopyPid();
   if Pid <= 0 then
     Exit;
   Process := OpenProcess(SYNCHRONIZE, False, Pid);
@@ -333,10 +380,41 @@ begin
   CloseHandle(Process);
 end;
 
+{ The old version's Settings window saves where it was and closes itself
+  once it reads the "starting" step; the new version reopens it there. A
+  window that doesn't (one from before this handover existed) would keep
+  showing the old version, so after three seconds it is closed. }
+procedure CloseOldSettingsWindows();
+var
+  AppDir, Command: String;
+  ResultCode: Integer;
+begin
+  AppDir := ExpandConstant('{app}') + '\';
+  { PowerShell's single-quoted string doubles a quote inside it. }
+  StringChangeEx(AppDir, #39, #39#39, True);
+  Command := '-NoProfile -ExecutionPolicy Bypass -Command "$app = ' + #39 + AppDir + #39 + ';'
+    + ' $old = @(Get-Process skryb-ui -ErrorAction SilentlyContinue | Where-Object'
+    + ' { $_.Path -and $_.Path.StartsWith($app, [StringComparison]::OrdinalIgnoreCase) });'
+    + ' $old | Wait-Process -Timeout 3 -ErrorAction SilentlyContinue;'
+    + ' $old | Where-Object { -not $_.HasExited } | Stop-Process -Force -ErrorAction SilentlyContinue"';
+  Exec('powershell.exe', Command, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 function InitializeSetup(): Boolean;
 begin
+  ProgressFile := ExpandConstant('{param:ProgressFile|}');
+  ShownPercent := -1;
+  WriteProgress('closing', 0, '');
   WaitForUpdatingCopy();
   Result := True;
+end;
+
+{ Setup ending any other way than a finished install, cancelled or failed,
+  still tells the Settings window, which would otherwise wait forever. }
+procedure DeinitializeSetup();
+begin
+  if not InstallFinished and not InstallFailed then
+    WriteFailure();
 end;
 
 { --- step hooks --------------------------------------------------------- }
@@ -347,13 +425,24 @@ begin
   begin
     AddBinToPath();
     if not InstallDependencies() then
+    begin
+      WriteFailure();
       MsgBox('Skryb was installed, but downloading its dependencies'
         + ' failed (check your internet connection). You can finish the'
         + ' install later by running, from this folder:' + #13#10#13#10
         + ExpandConstant('{app}') + '\python\python.exe -m pip install -r '
         + ExpandConstant('{app}') + '\requirements\' + ChosenRequirements(),
         mbError, MB_OK);
+    end
+    else
+    begin
+      WriteProgress('starting', 100, '');
+      if UpdatingCopyPid() > 0 then
+        CloseOldSettingsWindows();
+    end;
   end;
+  if CurStep = ssDone then
+    InstallFinished := True;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

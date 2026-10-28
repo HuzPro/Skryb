@@ -8,6 +8,7 @@ import { chooseOpenPath, chooseSavePath, windowControls } from "../lib/platform"
 import { useStore } from "../lib/store";
 import type { AppInfo } from "../lib/types";
 import { cn } from "../lib/utils";
+import { useInstall } from "./install";
 import { Mark } from "./mark";
 import { StatusDot } from "./parts";
 import { Button } from "./ui/button";
@@ -30,10 +31,13 @@ export const LostContext = createContext(false);
 
 export function useEngineStatus(): { tone: Tone; label: string; app: AppInfo | undefined } {
   const app = useAppInfo();
-  return { ...engineStatus(app, useContext(LostContext)), app };
+  const install = useInstall();
+  const updating = install !== null && install.progress.step !== "failed";
+  return { ...engineStatus(app, useContext(LostContext), updating), app };
 }
 
-export function engineStatus(app: AppInfo | undefined, lost: boolean): { tone: Tone; label: string } {
+export function engineStatus(app: AppInfo | undefined, lost: boolean, updating = false): { tone: Tone; label: string } {
+  if (updating) return { tone: "primary", label: "Updating" };
   if (lost) return { tone: "destructive", label: "Not running" };
   if (!app) return { tone: "muted", label: "Connecting" };
   if (app.state === "recording") return { tone: "destructive", label: "Recording" };
