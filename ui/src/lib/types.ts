@@ -1,29 +1,15 @@
 export type AppState = "loading" | "idle" | "recording" | "transcribing" | "error";
 export type OutputMode = "direct_paste" | "paste_and_clipboard" | "clipboard_only";
 export type TranscriptionMode = "batch" | "streaming";
-export type Cleanup = "off" | "light" | "polished";
 export type Duck = "off" | "lower" | "mute";
 export type PasteMethod = "ctrl_v" | "ctrl_shift_v" | "shift_insert" | "type";
 export type BindingMode = "toggle" | "hold" | "press";
-export type BindingAction = "dictate" | "edit_selection" | "paste_last" | "copy_last";
+export type BindingAction = "dictate" | "paste_last" | "copy_last";
 
 export interface Binding {
   keys: string;
   mode: BindingMode;
   action: BindingAction;
-}
-
-export interface WritingSettings {
-  cleanup: Cleanup;
-  lists: boolean;
-  deadline_seconds: number;
-  context: boolean;
-  learn_words: boolean;
-  learn_style: boolean;
-  style_notes: string;
-  after_dictation_transform: string;
-  runtime_path: string;
-  model_path: string;
 }
 
 export interface RecordingSettings {
@@ -48,7 +34,7 @@ export interface Settings {
   capture_content: boolean;
   input_device: string;
   boost_quiet_speech: boolean;
-  writing: WritingSettings;
+  learn_words: boolean;
   hotkey_bindings: Binding[];
   double_tap_locks_hold: boolean;
   recording: RecordingSettings;
@@ -63,12 +49,11 @@ export interface ChangeSet {
   output_changed: boolean;
   mode_changed: boolean;
   diagnostics_changed: boolean;
-  writing_server_changed: boolean;
   learning_turned_on: boolean;
   history_retention_changed: boolean;
 }
 
-export type DownloadState = "downloading" | "paused" | "failed";
+export type DownloadState = "queued" | "downloading" | "paused" | "failed";
 
 export interface Model {
   name: string;
@@ -78,6 +63,9 @@ export interface Model {
   supports_batch: boolean;
   supports_streaming: boolean;
   has_speech_styles: boolean;
+  /** Set for one speech style of a model that ships each style as its own download (Bark Plus). */
+  style_family?: string | null;
+  speech_style?: "intended" | "verbatim" | null;
   license_id: string | null;
   download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
 }
@@ -128,26 +116,6 @@ export interface Dictionary {
   rules: DictionaryRule[];
 }
 
-export type WritingState = "not_installed" | "installing" | "starting" | "ready" | "failed" | "stopped" | "off";
-
-export interface WritingStatus {
-  state: WritingState;
-  detail: string;
-  bytes_done: number;
-  bytes_total: number;
-  install_bytes: number;
-  runtime_path: string;
-  model_path: string;
-  last_cleanup_seconds: number | null;
-  learned_style_summary: string;
-}
-
-export interface Transform {
-  name: string;
-  instruction: string;
-  builtin: boolean;
-}
-
 export type HistoryStatus = "" | "Cancelled" | "Failed" | "Empty" | "Not saved";
 
 export interface HistoryEntry {
@@ -158,27 +126,8 @@ export interface HistoryEntry {
   status: HistoryStatus;
   error: string | null;
   has_audio: boolean;
-  kind: "dictation" | "edit";
-  writing: WritingRecord | null;
-}
-
-export type CleanupOutcome = "" | "applied" | "rejected" | "too_slow" | "skipped";
-
-/** What the writing model made of a dictation. Text fields are empty when history was off. */
-export interface WritingRecord {
-  outcome: CleanupOutcome;
-  reason: string;
-  seconds: number | null;
-  answer: string;
+  /** What was typed after the dictionary and formatting; empty with history off and in older entries. */
   typed: string;
-  context_before: string;
-  window: string;
-}
-
-export interface TrackRecord {
-  dictations: number;
-  outcomes: Partial<Record<Exclude<CleanupOutcome, "">, number>>;
-  rejections: { reason: string; count: number }[];
 }
 
 export interface EngineInfo {

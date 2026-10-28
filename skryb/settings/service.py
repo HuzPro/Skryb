@@ -37,6 +37,7 @@ from skryb.output.dictionary_config import (
 from skryb.output.output_mode import OutputMode
 from skryb.output.paste_method import paste_method_overrides
 from skryb.output.text_filter_decorator import load_dictionary
+from skryb.output.word_learning import LEARN_WORDS_KEY, learns_words
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.recording.preferences import (
     RecordingPreferences,
@@ -67,14 +68,10 @@ from skryb.transcription.model_info import (
     get_model_info,
     is_catalog_model as _is_catalog_model,
 )
-from skryb.transcription.model_info import has_crisperwhisper_modes
+from skryb.transcription.model_info import has_speech_styles, speech_style_of
 
 CRISPERWHISPER_MODES: tuple[str, ...] = ("intended", "verbatim")
 from skryb.transcription.model_manager import ModelManager
-from skryb.writing.settings import (
-    read_writing_settings,
-    write_writing_settings,
-)
 
 
 class DownloadEventListener(ABC):
@@ -293,7 +290,7 @@ class SettingsService:
             boost_quiet_speech=(
                 self._config.get("audio.boost_quiet_speech", True) is not False
             ),
-            writing=read_writing_settings(self._config),
+            learn_words=learns_words(self._config),
             hotkey_bindings=parse_bindings(self._config),
             double_tap_locks_hold=(
                 self._config.get("hotkey.double_tap_locks_hold", True) is not False
@@ -319,8 +316,12 @@ class SettingsService:
         return configured if configured in CRISPERWHISPER_MODES else "intended"
 
     @staticmethod
-    def model_has_crisperwhisper_modes(name: str) -> bool:
-        return has_crisperwhisper_modes(name)
+    def model_has_speech_styles(name: str) -> bool:
+        return has_speech_styles(name)
+
+    @staticmethod
+    def model_speech_style(name: str) -> tuple[str, str] | None:
+        return speech_style_of(name)
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
         original = self.current_draft()
@@ -341,7 +342,7 @@ class SettingsService:
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
         )
-        write_writing_settings(self._config, draft.writing)
+        self._config.set(LEARN_WORDS_KEY, draft.learn_words)
         self._config.set("history.retention_days", draft.history_retention_days)
         self._config.set("updates.check_automatically", draft.check_for_updates)
         # A process name holds a dot, so the map is stored whole rather

@@ -1,22 +1,23 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.output.dictionary_config import (
     DictionaryConfig,
     LiteralRule,
     load_dictionary,
     save_dictionary,
 )
-from skryb.writing.learning import (
+from skryb.output.word_learning import (
     MAX_CANDIDATES,
-    Learner,
     WordCorrection,
-    style_votes,
+    WordLearner,
+    learns_words,
     word_corrections,
 )
-from skryb.writing.settings import WritingSettings
 
 
 def _sent(
@@ -40,16 +41,16 @@ def _sent(
 
 
 class Setup:
-    def __init__(self, tmp_path: Path, settings: WritingSettings | None = None) -> None:
+    def __init__(self, tmp_path: Path, enabled: bool = True) -> None:
         self.tmp_path = tmp_path
         self.dictionary = tmp_path / "dictionary.json"
         self.store = tmp_path / "learning.json"
-        self.settings = settings or WritingSettings()
+        self.enabled = enabled
         self.rebuilds = 0
 
-    def learner(self, session: str = "session-a") -> Learner:
-        return Learner(
-            self.store, self.dictionary, lambda: self.settings, self._rebuilt, session,
+    def learner(self, session: str = "session-a") -> WordLearner:
+        return WordLearner(
+            self.store, self.dictionary, lambda: self.enabled, self._rebuilt, session,
         )
 
     def _rebuilt(self) -> None:
@@ -80,7 +81,7 @@ class TestLearningWords:
 
         assert setup.learned() == [(("Jon",), "John")]
         assert setup.rebuilds == 1
-        assert setup.learner("session-b").style_summary() == "nothing yet"
+        setup.learner("session-b").observe(_sent("Hi Jon", "Hi John", seq=3))
         assert setup.learned() == [(("Jon",), "John")]
 
     def test_one_correction_is_remembered_across_a_restart(self, setup):
@@ -158,16 +159,6 @@ class TestLearningWords:
 
         assert setup.learned() == []
 
-    def test_reset_learning_lifts_the_block(self, setup):
-        learner = setup.learner()
-        learner.block([("Jon", "John")])
-
-        learner.reset()
-        learner.observe(_sent("Hi Jon", "Hi John", seq=1))
-        learner.observe(_sent("Bye Jon", "Bye John", seq=2))
-
-        assert setup.learned() == [(("Jon",), "John")]
-
     def test_2000_candidate_corrections_keep_the_store_bounded(self, setup):
         learner = setup.learner()
         for batch in range(20):
@@ -186,15 +177,15 @@ class TestLearningWords:
         assert setup.store.stat().st_size < 150_000
         assert setup.learned() == []
 
-    def test_nothing_is_learned_while_both_switches_are_off(self, tmp_path):
-        setup = Setup(tmp_path, WritingSettings(learn_words=False, learn_style=False))
+    def test_nothing_is_learned_while_the_switch_is_off(self, tmp_path):
+        setup = Setup(tmp_path, enabled=False)
         learner = setup.learner()
 
         for seq in range(5):
             learner.observe(_sent("Hi Jon.", "hi John", seq=seq))
 
         assert setup.learned() == []
-        assert learner.style_summary() == "nothing yet"
+        assert not setup.store.exists()
 
     def test_a_corrupt_store_is_ignored_and_rebuilt(self, setup):
         setup.store.write_text("{not json", encoding="utf-8")
@@ -204,6 +195,22 @@ class TestLearningWords:
         learner.observe(_sent("Bye Jon", "Bye John", seq=2))
 
         assert setup.learned() == [(("Jon",), "John")]
+
+    def test_a_store_with_old_style_tallies_still_loads_and_keeps_its_blocks(self, setup):
+        setup.store.write_text(json.dumps({
+            "version": 1,
+            "candidates": [{"spoken": "Jon", "written": "John", "sources": ["old:1"], "seen": 3}],
+            "blocked": [["siobhan", "Siobhán"]],
+            "style": {"final_stop": 4, "contractions": -2},
+        }), encoding="utf-8")
+        learner = setup.learner()
+
+        learner.observe(_sent("Hi Jon", "Hi John", seq=1))
+        learner.observe(_sent("Hi Siobhan", "Hi Siobhán", seq=2))
+        learner.observe(_sent("Bye Siobhan", "Bye Siobhán", seq=3))
+
+        assert setup.learned() == [(("Jon",), "John")]
+        assert "style" not in json.loads(setup.store.read_text(encoding="utf-8"))
 
     def test_an_unreadable_dictionary_is_never_overwritten_by_learning(self, setup):
         setup.dictionary.write_text("{ broken", encoding="utf-8")
@@ -215,31 +222,31 @@ class TestLearningWords:
         assert setup.dictionary.read_text(encoding="utf-8") == "{ broken"
 
 
-class TestLearningStyle:
-    def test_style_signals_need_three_observations(self, setup):
-        learner = setup.learner()
-        for seq in range(2):
-            learner.observe(_sent("Sounds good to me.", "Sounds good to me", seq=seq))
-        assert learner.style_sentences() == ()
+class TestTheLearningSwitch:
+    @pytest.mark.parametrize(
+        ("saved", "expected"),
+        [
+            ({}, True),
+            ({"dictionary": {"learn_words": False}}, False),
+            ({"dictionary": {"learn_words": True}}, True),
+            ({"writing": {"cleanup": "light", "learn_words": False, "learn_style": True}}, False),
+            ({"writing": {"learn_words": True}}, True),
+            ({"writing": {"learn_words": False}, "dictionary": {"learn_words": True}}, True),
+        ],
+        ids=[
+            "fresh-config", "turned-off", "turned-on", "off-in-an-old-config",
+            "on-in-an-old-config", "the-new-switch-wins",
+        ],
+    )
+    def test_the_switch_is_read_from_the_dictionary_settings_or_an_older_config(
+        self, tmp_path, saved, expected,
+    ):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(saved), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
 
-        learner.observe(_sent("Works for me.", "Works for me", seq=3))
-
-        assert learner.style_sentences() == ("Do not end the message with a full stop.",)
-        assert learner.style_summary() == "drops the final full stop"
-
-    def test_forget_learned_style_resets_the_counts(self, setup):
-        learner = setup.learner()
-        for seq in range(3):
-            learner.observe(_sent("I do not know.", "i don't know.", seq=seq))
-        assert learner.style_summary() == "prefers contractions; starts in lowercase"
-
-        learner.forget_style()
-
-        assert learner.style_sentences() == ()
-        assert setup.learner("session-b").style_summary() == "nothing yet"
-
-    def test_adding_text_after_the_paste_is_not_read_as_dropping_the_full_stop(self):
-        assert "final_stop" not in style_votes("Hello there.", "Hello there. How are you")
+        assert learns_words(config) is expected
 
 
 class TestWordCorrections:

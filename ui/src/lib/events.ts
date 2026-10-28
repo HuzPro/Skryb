@@ -1,14 +1,13 @@
-import type { AppInfo, EngineInfo, Model, Settings, WritingStatus } from "./types";
+import type { AppInfo, EngineInfo, Model, Settings } from "./types";
 
 /** The server data the event stream keeps current. */
 export interface Snapshot {
   app?: AppInfo | undefined;
   models?: Model[] | undefined;
-  writing?: WritingStatus | undefined;
   settings?: Settings | undefined;
 }
 
-export type QueryName = "app" | "models" | "writing" | "settings" | "engines" | "history" | "microphones";
+export type QueryName = "app" | "models" | "settings" | "engines" | "history" | "microphones";
 
 export interface Reduction {
   snapshot: Snapshot;
@@ -28,7 +27,7 @@ interface EngineEvent {
 
 interface DownloadEvent {
   name: string;
-  state: "downloading" | "paused" | "completed" | "failed" | "cancelled" | "deleted";
+  state: "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled" | "deleted";
   bytes_done: number;
   bytes_total: number;
   error: string;
@@ -84,8 +83,6 @@ export function reduceEvent(snapshot: Snapshot, name: string, data: unknown): Re
       const finished = event.state === "completed" || event.state === "cancelled" || event.state === "deleted";
       return { snapshot: { ...snapshot, models }, refetch: finished ? ["models"] : [] };
     }
-    case "writing":
-      return { snapshot: { ...snapshot, writing: data as WritingStatus }, refetch: [] };
     case "settings":
       return { snapshot: { ...snapshot, settings: data as Settings }, refetch: [] };
     case "hardware":

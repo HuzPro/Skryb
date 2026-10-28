@@ -29,6 +29,12 @@ def move_voicetotext_folders(environ: Mapping[str, str] = os.environ) -> None:
         _logger.info("Moved %s to %s", old, new)
 
 
+def local_data_dir() -> Path:
+    """The Skryb folder under ``%LOCALAPPDATA%``, for files that stay on this machine."""
+    local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(local) / "Skryb"
+
+
 class AppPaths:
 
     def __init__(self, base: Path | None = None) -> None:

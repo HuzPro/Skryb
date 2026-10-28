@@ -1,8 +1,8 @@
-"""Learns spellings and style from the edits made to pasted dictations.
+"""Learns spellings from the edits made to pasted dictations.
 
 Fed by edit capture's ``sent`` events. Only reliable, unflagged edits count,
 and only word-level facts are kept: which spoken word became which written
-one, and three style tallies. No dictated or typed text is stored.
+one. No dictated or typed text is stored.
 """
 
 import json
@@ -15,25 +15,26 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import cast
 
+from skryb.core.config import ConfigurationStore
 from skryb.output.dictionary_config import (
     DictionaryConfig,
     LiteralRule,
     update_dictionary,
 )
-from skryb.writing.settings import WritingSettings
 
 _logger = logging.getLogger(__name__)
 
+LEARN_WORDS_KEY = "dictionary.learn_words"
+# Where the switch lived before the Dictionary page had it.
+_OLD_LEARN_WORDS_KEY = "writing.learn_words"
+
 _WORD = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*")
-_CONTRACTION = re.compile(r"\b\w+['’](?:t|s|re|ve|ll|d|m)\b", re.IGNORECASE)
 _MAX_PHRASE_WORDS = 3
 _MIN_SIMILARITY = 0.5
 DICTATIONS_TO_TEACH = 2
 MAX_CANDIDATES = 500
 MAX_BLOCKED = 1000
 _MAX_SOURCES = 4
-STYLE_THRESHOLD = 3
-_STYLE_LIMIT = 6
 
 FUNCTION_WORDS = frozenset("""
 a about above after again against all am an and any are aren't as at be because
@@ -50,28 +51,11 @@ what's when when's where where's which while who who's whom why why's with won't
 would wouldn't you you'd you'll you're you've your yours yourself yourselves
 """.split())
 
-# signal: (sentence when positive, sentence when negative,
-#          summary when positive, summary when negative)
-_STYLE_SIGNALS: dict[str, tuple[str, str, str, str]] = {
-    "final_stop": (
-        "Do not end the message with a full stop.",
-        "End the message with a full stop.",
-        "drops the final full stop",
-        "ends with a full stop",
-    ),
-    "contractions": (
-        "Use contractions (don't, it's).",
-        "Do not use contractions (write do not, it is).",
-        "prefers contractions",
-        "avoids contractions",
-    ),
-    "lowercase_start": (
-        "Start the message with a lowercase letter.",
-        "Start the message with a capital letter.",
-        "starts in lowercase",
-        "starts with a capital",
-    ),
-}
+
+def learns_words(config: ConfigurationStore) -> bool:
+    """The Dictionary page's "Learn words I correct" switch, on unless turned off."""
+    value = config.get(LEARN_WORDS_KEY, config.get(_OLD_LEARN_WORDS_KEY, True))
+    return value is not False
 
 
 @dataclass(frozen=True)
@@ -127,122 +111,46 @@ def _is_word(text: str) -> bool:
     )
 
 
-def style_votes(pasted: str, final: str) -> dict[str, int]:
-    """+1 or -1 for each style signal this one edit shows."""
-    votes: dict[str, int] = {}
-    before, after = pasted.strip(), final.strip()
-    before_words, after_words = _WORD.findall(before), _WORD.findall(after)
-    if not before_words or not after_words:
-        return votes
-    if before_words[-1] == after_words[-1]:
-        if before.endswith(".") and not after.endswith("."):
-            votes["final_stop"] = 1
-        elif after.endswith(".") and not before.endswith("."):
-            votes["final_stop"] = -1
-    contracted = len(_CONTRACTION.findall(after)) - len(_CONTRACTION.findall(before))
-    if contracted:
-        votes["contractions"] = 1 if contracted > 0 else -1
-    first, first_after = before_words[0], after_words[0]
-    if first.casefold() == first_after.casefold() and first != first_after:
-        if first[0].isupper() and first_after[0].islower():
-            votes["lowercase_start"] = 1
-        elif first[0].islower() and first_after[0].isupper():
-            votes["lowercase_start"] = -1
-    return votes
-
-
-class Learner:
-    """Turns repeated corrections into dictionary words and style notes."""
+class WordLearner:
+    """Turns repeated corrections into learned dictionary words."""
 
     def __init__(
         self,
         path: Path,
         dictionary_path: Path,
-        settings: Callable[[], WritingSettings],
+        enabled: Callable[[], bool],
         on_dictionary_changed: Callable[[], None],
         dictation_prefix: str,
     ) -> None:
         self._path = path
         self._dictionary_path = dictionary_path
-        self._settings = settings
+        self._enabled = enabled
         self._on_dictionary_changed = on_dictionary_changed
         self._prefix = dictation_prefix
         self._lock = threading.Lock()
         self._loaded = False
         self._candidates: dict[tuple[str, str], _Candidate] = {}
         self._blocked: dict[tuple[str, str], None] = {}
-        self._style: dict[str, int] = {}
         self._tick = 0
 
     def observe(self, event: dict[str, object]) -> None:
         """An edit-capture event; only reliable, unflagged ``sent`` ones count."""
         if event.get("event") != "sent" or event.get("reliable") is not True:
             return
-        if event.get("flags"):
-            return
-        settings = self._settings()
-        if not settings.learns:
+        if event.get("flags") or not self._enabled():
             return
         spans = event.get("spans")
         if not isinstance(spans, list):
             return
         with self._lock:
             self._ensure_loaded()
-            ready = self._count(cast(list[object], spans), settings)
+            ready = self._count(cast(list[object], spans))
             self._save()
         if ready:
             self._teach(ready)
-
-    def observe_correction(self, pasted: str, final: str, dictation: str) -> None:
-        """One fix seen outside edit capture: a dictation's words as pasted and as they ended up.
-
-        ``dictation`` names the fix, so the same pair counts once per fix and
-        is taught only when a second, separate fix agrees.
-        """
-        if not self._settings().learn_words:
-            return
-        with self._lock:
-            self._ensure_loaded()
-            ready = self._count_corrections(pasted, final, f"{self._prefix}:{dictation}")
-            self._save()
-        if ready:
-            self._teach(ready)
-
-    def style_sentences(self) -> tuple[str, ...]:
-        with self._lock:
-            self._ensure_loaded()
-            return tuple(
-                sentences[0] if self._style[name] > 0 else sentences[1]
-                for name, sentences in _STYLE_SIGNALS.items()
-                if abs(self._style.get(name, 0)) >= STYLE_THRESHOLD
-            )
-
-    def style_summary(self) -> str:
-        with self._lock:
-            self._ensure_loaded()
-            learned = [
-                labels[2] if self._style[name] > 0 else labels[3]
-                for name, labels in _STYLE_SIGNALS.items()
-                if abs(self._style.get(name, 0)) >= STYLE_THRESHOLD
-            ]
-        return "; ".join(learned) if learned else "nothing yet"
-
-    def forget_style(self) -> None:
-        with self._lock:
-            self._ensure_loaded()
-            self._style = {}
-            self._save()
-
-    def reset(self) -> None:
-        with self._lock:
-            self._loaded = True
-            self._candidates = {}
-            self._blocked = {}
-            self._style = {}
-            self._save()
 
     def block(self, pairs: Iterable[tuple[str, str]]) -> None:
-        """Never teach these ``(spoken, written)`` pairs again, until a reset."""
+        """Never teach these ``(spoken, written)`` pairs again."""
         with self._lock:
             self._ensure_loaded()
             for spoken, written in pairs:
@@ -254,9 +162,7 @@ class Learner:
                 del self._blocked[next(iter(self._blocked))]
             self._save()
 
-    def _count(
-        self, spans: list[object], settings: WritingSettings,
-    ) -> list[WordCorrection]:
+    def _count(self, spans: list[object]) -> list[WordCorrection]:
         ready: list[WordCorrection] = []
         for span in spans:
             if not isinstance(span, dict):
@@ -265,10 +171,7 @@ class Learner:
             pasted, final, seq = fields.get("pasted_text"), fields.get("final_text"), fields.get("seq")
             if not isinstance(pasted, str) or not isinstance(final, str) or pasted == final:
                 continue
-            if settings.learn_words:
-                ready.extend(self._count_corrections(pasted, final, f"{self._prefix}:{seq}"))
-            if settings.learn_style:
-                self._count_style(pasted, final)
+            ready.extend(self._count_corrections(pasted, final, f"{self._prefix}:{seq}"))
         return ready
 
     def _count_corrections(
@@ -298,11 +201,6 @@ class Learner:
         stale = sorted(self._candidates, key=lambda key: self._candidates[key].seen)
         for key in stale[:excess]:
             del self._candidates[key]
-
-    def _count_style(self, pasted: str, final: str) -> None:
-        for name, vote in style_votes(pasted, final).items():
-            tally = self._style.get(name, 0) + vote
-            self._style[name] = max(-_STYLE_LIMIT, min(_STYLE_LIMIT, tally))
 
     def _teach(self, corrections: list[WordCorrection]) -> None:
         def add_learned_words(dictionary: DictionaryConfig) -> DictionaryConfig:
@@ -336,7 +234,7 @@ class Learner:
             self._load()
         except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError) as exc:
             _logger.warning("Learning data ignored: %s", exc)
-            self._candidates, self._blocked, self._style = {}, {}, {}
+            self._candidates, self._blocked = {}, {}
 
     def _load(self) -> None:
         if not self._path.exists():
@@ -357,10 +255,6 @@ class Learner:
             self._candidates[(candidate.spoken.casefold(), candidate.written)] = candidate
         for pair in cast(list[list[str]], document.get("blocked", [])):
             self._blocked[(str(pair[0]), str(pair[1]))] = None
-        style = cast(dict[str, object], document.get("style", {}))
-        self._style = {
-            name: int(cast(int, style[name])) for name in _STYLE_SIGNALS if name in style
-        }
         self._tick = max((c.seen for c in self._candidates.values()), default=0)
 
     def _save(self) -> None:
@@ -377,7 +271,6 @@ class Learner:
                 for c in self._candidates.values()
             ],
             "blocked": [list(key) for key in self._blocked],
-            "style": self._style,
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
         staged = self._path.with_suffix(".tmp")

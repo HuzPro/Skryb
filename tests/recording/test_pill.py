@@ -364,15 +364,6 @@ class TestVoiceHistory:
         assert history.levels()[-1] > 0.4
 
 
-def test_a_caption_is_drawn_above_the_controls_without_moving_them():
-    plain = _recording_frame()
-    captioned = _recording_frame(caption="Editing selection")
-
-    assert render(plain).tobytes() != render(captioned).tobytes()
-    assert button_centres(plain) == button_centres(captioned)
-    assert hit_test(captioned, *button_centres(captioned)[Button.FINISH][:2]) is Button.FINISH
-
-
 # Work areas as Windows reports them: (left, top, right, bottom), taskbar
 # already taken off, some monitors left of or above the primary one.
 _WORK_AREAS = [

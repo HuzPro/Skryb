@@ -66,10 +66,16 @@ class SoundDeviceCuePlayer(RecordingCuePlayer, ReadyCuePlayer):
     def play_warning(self) -> None:
         self._play(self._warning)
 
+    def preview(self, cue: str, volume: float) -> None:
+        """The start or stop tone at *volume*, so the Settings slider can be heard before saving."""
+        self._play_at(self._stop if cue == "stop" else self._start, volume)
+
     def _play(self, samples: np.ndarray) -> None:
-        if not self._enabled():
-            return
-        gain = min(max(self._volume(), 0.0), 1.0) / _UNCHANGED_VOLUME
+        if self._enabled():
+            self._play_at(samples, self._volume())
+
+    def _play_at(self, samples: np.ndarray, volume: float) -> None:
+        gain = min(max(volume, 0.0), 1.0) / _UNCHANGED_VOLUME
         if not math.isfinite(gain) or gain <= 0:
             return
         try:

@@ -121,7 +121,7 @@ class TestValidation:
             _dictate("ctrl+mouse4", _HOLD),
             Binding("ctrl+alt+v", BindingMode.PRESS, BindingAction.PASTE_LAST),
             Binding("ctrl+alt+c", BindingMode.PRESS, BindingAction.COPY_LAST),
-            Binding("ctrl+alt+e", _HOLD, BindingAction.EDIT_SELECTION),
+            _dictate("ctrl+alt+e", _HOLD),
             _dictate("f13"),
         ])
 
@@ -141,7 +141,6 @@ class TestParsingSavedBindings:
         bindings = (
             _dictate("ctrl+shift+alt+m"),
             _dictate("mouse4", _HOLD),
-            Binding("ctrl+alt+e", _HOLD, BindingAction.EDIT_SELECTION),
             Binding("f13", BindingMode.PRESS, BindingAction.PASTE_LAST),
             Binding("mouse5", BindingMode.PRESS, BindingAction.COPY_LAST),
         )
@@ -155,6 +154,7 @@ class TestParsingSavedBindings:
     def test_broken_entries_are_skipped_and_the_rest_kept(self):
         rows: list[object] = [
             {"keys": "ctrl+ü", "mode": "toggle", "action": "dictate"},
+            {"keys": "ctrl+alt+e", "mode": "hold", "action": "edit_selection"},
             {"keys": "", "mode": "toggle", "action": "paste_last"},
             {"keys": "   ", "mode": "hold", "action": "copy_last"},
             {"keys": "f12", "mode": "toggle", "action": "summon_demons"},
@@ -172,7 +172,7 @@ class TestParsingSavedBindings:
         rows: list[object] = [
             {"keys": "f13", "mode": "hold", "action": "paste_last"},
             {"keys": "f14", "mode": "press", "action": "dictate"},
-            {"keys": "f15", "mode": "push_to_talk", "action": "edit_selection"},
+            {"keys": "f15", "mode": "push_to_talk", "action": "dictate"},
             {"keys": "f16", "action": "dictate"},
         ]
 

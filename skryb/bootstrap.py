@@ -25,15 +25,13 @@ from skryb.core.events import (
     MicrophoneMissingEvent,
     StateChangedEvent,
     TextPastedEvent,
-    WritingNoticeEvent,
-    WritingServerFailedEvent,
 )
 from skryb.core.exceptions import (
     EngineDependencyMissingError,
     EngineWarmupError,
 )
 from skryb.core.json_config_adapter import JsonConfigAdapter
-from skryb.core.paths import AppPaths
+from skryb.core.paths import AppPaths, local_data_dir
 from skryb.core.release_update import (
     ReleaseUpdater,
     UpdateStatus,
@@ -48,6 +46,7 @@ from skryb.core.state_machine import AppState, AppStateMachine
 from skryb.diagnostics.session import SessionDiagnostics, content_recording_enabled
 from skryb.diagnostics.jsonl import JsonlWriter
 from skryb.downloads.download_manager import DownloadManager
+from skryb.downloads.requests_http_client import chunked_downloader
 from skryb.edit_capture.delivery_recording_decorator import (
     DeliveryRecordingDecorator,
 )
@@ -76,7 +75,7 @@ from skryb.output.app_aware_delivery import (
 from skryb.output.caps_lock_uppercase_decorator import (
     CapsLockUppercaseDecorator,
 )
-from skryb.output.caret_context import CaretContext, log_caret_text_when
+from skryb.output.caret_context import log_caret_text_when
 from skryb.output.clipboard_adapter import ClipboardAdapter
 from skryb.output.clipboard_preserving_decorator import (
     ClipboardPreservingDecorator,
@@ -103,7 +102,6 @@ from skryb.output.text_filter_decorator import (
 from skryb.output.text_pipeline import PipelineMode, build_pipeline
 from skryb.output.win32_caret_context import (
     read_caret_context,
-    read_focused_text,
     text_field_focused,
 )
 from skryb.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
@@ -117,6 +115,7 @@ from skryb.output.win32_key_sender import (
 from skryb.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
+from skryb.output.word_learning import WordLearner, learns_words
 from skryb.history.retention import HistoryPruner, history_retention_days
 from skryb.history.service import HistoryService
 from skryb.recording.audio_ducking import AudioDucking, core_audio_sessions
@@ -168,7 +167,7 @@ from skryb.transcription.model_info import (
     DEFAULT_MODEL,
     ModelInfo,
     get_model_info,
-    has_crisperwhisper_modes,
+    transcribes_verbatim,
 )
 from skryb.transcription.model_manager import ModelManager
 from skryb.transcription.placeholder_engine import PlaceholderEngine
@@ -185,14 +184,6 @@ from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
 from skryb.ui.voice_feed import VoiceFeed
-from skryb.writing.install import WritingPaths, chunked_downloader, managed_root, server_files
-from skryb.writing.learning import Learner
-from skryb.writing.llama_server import LlamaServer
-from skryb.writing.service import WritingService, warm_up_writing_model
-from skryb.writing.redictation import RedictationTracker
-from skryb.writing.settings import read_writing_settings
-from skryb.writing.transforms import TransformStore
-from skryb.writing.voice_edit import VoiceEditor
 
 _logger = logging.getLogger(__name__)
 
@@ -224,11 +215,7 @@ def migrate_language(config: JsonConfigAdapter) -> None:
 
 
 def migrate_stale_batch_block(config: JsonConfigAdapter) -> None:
-    """Drop the ``batch`` block an abandoned writing feature left behind.
-
-    Its values mean nothing to the ``writing`` settings that replaced it, so
-    they are removed rather than carried over.
-    """
+    """Drop the ``batch`` block an abandoned feature left behind; its values mean nothing now."""
     document = config.get_all()
     if "batch" not in document:
         return
@@ -267,7 +254,7 @@ def _warn_if_synced_folder(directory: Path) -> None:
     if not any(marker in lowered for marker in _SYNCED_FOLDER_MARKERS):
         return
     _logger.warning(
-        "Edit capture is writing keystrokes to '%s', which looks like a "
+        "Edit capture is saving keystrokes to '%s', which looks like a "
         "synced folder. Move diagnostics.directory somewhere local.",
         directory,
     )
@@ -280,19 +267,19 @@ def _edit_capture_enabled(config: JsonConfigAdapter) -> bool:
     )
 
 
-def _learning_enabled(config: JsonConfigAdapter, learner: Learner | None) -> bool:
-    return learner is not None and read_writing_settings(config).learns
+def _learning_enabled(config: JsonConfigAdapter, learner: WordLearner | None) -> bool:
+    return learner is not None and learns_words(config)
 
 
 def _build_edit_capture(
-    config: JsonConfigAdapter, paths: AppPaths, learner: Learner | None = None,
+    config: JsonConfigAdapter, paths: AppPaths, learner: WordLearner | None = None,
 ) -> Win32EditObserver | None:
     """The keystroke watcher, or nothing unless something needs it.
 
     It feeds two sinks. ``edits.jsonl`` records what the user types into
     the window a transcription was pasted into, so it stays off by default
-    and config-only. The learner keeps only word corrections and style
-    tallies, and follows the Writing page's learning checkboxes.
+    and config-only. The learner keeps only word corrections, and follows
+    the Dictionary page's learning switch.
     """
     capture = _edit_capture_enabled(config)
     if not capture and not _learning_enabled(config, learner):
@@ -301,7 +288,7 @@ def _build_edit_capture(
     if capture:
         _warn_if_synced_folder(paths.diagnostics_dir)
         write_jsonl = JsonlWriter(paths.session_dir / "edits.jsonl").append
-        _logger.info("Edit capture is on; writing to %s", paths.session_dir)
+        _logger.info("Edit capture is on; saving to %s", paths.session_dir)
 
     def write(event: dict[str, object]) -> None:
         if write_jsonl is not None and _edit_capture_enabled(config):
@@ -339,23 +326,9 @@ def _key_observer(capture: Win32EditObserver | None) -> KeyObserver:
     return observe
 
 
-def _remember_then_report(
-    on_delivered: Callable[[str], None], on_pasting: Callable[[str], None], text: str,
-) -> None:
+def _remember_then_report(on_delivered: Callable[[str], None], text: str) -> None:
     _paste_memory.remember(text)
-    on_pasting(text)
     on_delivered(text)
-
-
-def _reporting_reads(
-    read: Callable[[], CaretContext], report: Callable[[CaretContext], None],
-) -> Callable[[], CaretContext]:
-    def read_and_report() -> CaretContext:
-        context = read()
-        report(context)
-        return context
-
-    return read_and_report
 
 
 def _build_output(
@@ -365,7 +338,6 @@ def _build_output(
     pipeline_mode: PipelineMode = PipelineMode.BATCH,
     models_dir: Path | None = None,
     on_delivered: Callable[[str], None] = _ignore_delivery,
-    writing: WritingService | None = None,
     hooks: DeliveryHooks | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
@@ -392,10 +364,7 @@ def _build_output(
                 paste_method=hooks.paste_method if hooks is not None else None,
                 on_pasted=hooks.on_pasted if hooks is not None else _no_paste_report,
             ),
-            record=functools.partial(
-                _remember_then_report, on_delivered,
-                hooks.on_pasting if hooks is not None else _ignore_delivery,
-            ),
+            record=functools.partial(_remember_then_report, on_delivered),
         )
 
     builders: dict[OutputMode, Callable[[], TextOutputHandler]] = {
@@ -438,73 +407,17 @@ def _build_output(
             dictionary,
             pipeline_mode,
             models_dir=models_dir,
-            caret_context=_reporting_reads(
-                read_or_remember(
-                    read_caret_context,
-                    _paste_memory,
-                    functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
-                ),
-                hooks.on_caret_read if hooks is not None else _ignore_caret_read,
+            caret_context=read_or_remember(
+                read_caret_context,
+                _paste_memory,
+                functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
             ),
-            cleanup=writing.cleanup_stage(dictionary) if writing is not None else None,
         ),
-    )
-
-
-def _build_writing(
-    config: JsonConfigAdapter,
-    paths: AppPaths,
-    event_bus: EventBus,
-    on_dictionary_changed: Callable[[], None],
-    show_notice: Callable[[str], None],
-) -> WritingService:
-    """The local writing model: nothing runs until ``start``, and no file is read.
-
-    This is the one place writing notices are routed. Anything about a
-    dictation or a voice edit shows in the notice beside it; the server
-    giving up for good is a tray balloon, once, since no dictation is on
-    screen when it happens.
-    """
-    event_bus.subscribe(WritingNoticeEvent, lambda event: show_notice(event.message))
-    settings = functools.partial(read_writing_settings, config)
-    writing_paths = WritingPaths(managed_root())
-    server = LlamaServer(
-        locate=lambda: server_files(writing_paths, settings()),
-        log_path=paths.session_dir / "writing-server.log",
-        warm_up=functools.partial(warm_up_writing_model, settings),
-    )
-    return WritingService(
-        settings,
-        writing_paths,
-        server,
-        Learner(
-            paths.base / "learning.json",
-            paths.dictionary_path,
-            settings,
-            on_dictionary_changed,
-            session_id(),
-        ),
-        TransformStore(paths.base / "transforms.json"),
-        notify=lambda message: event_bus.publish(WritingServerFailedEvent(message=message)),
-        run_in_background=ThreadedActionDispatcher().dispatch,
-        read_window=foreground_window,
-        needed=functools.partial(_writing_needed, config),
-    )
-
-
-def _writing_needed(config: JsonConfigAdapter) -> bool:
-    """Cleanup and the voice-edit shortcut are the only users of the writing model."""
-    return read_writing_settings(config).cleanup != "off" or any(
-        binding.action is BindingAction.EDIT_SELECTION for binding in parse_bindings(config)
     )
 
 
 def _start_once_idle(event_bus: EventBus, *starters: Callable[[], None]) -> None:
-    """Start background work the first time dictation is ready, never before.
-
-    Only once: after a writing server that gave up, later dictations must
-    not keep relaunching it; Retry on the Writing page does that.
-    """
+    """Start background work the first time dictation is ready, never before."""
     def start(event: StateChangedEvent) -> None:
         if event.new_state != AppState.IDLE.value:
             return
@@ -513,14 +426,6 @@ def _start_once_idle(event_bus: EventBus, *starters: Callable[[], None]) -> None
             starter()
 
     event_bus.subscribe(StateChangedEvent, start)
-
-
-def _writing_seconds(
-    config: JsonConfigAdapter, writing: WritingService, audio_seconds: float,
-) -> float:
-    if _resolve_pipeline_mode(config) is not PipelineMode.BATCH:
-        return 0.0
-    return writing.estimated_seconds(audio_seconds)
 
 
 def _deliver_with_hooks(
@@ -562,10 +467,6 @@ def _no_paste_report() -> None:
     return None
 
 
-def _ignore_caret_read(_context: CaretContext) -> None:
-    return None
-
-
 def _publish_delivery_failure(
     event_bus: EventBus, failure: DeliveryFailure, text: str,
 ) -> None:
@@ -585,25 +486,17 @@ def _resolve_pipeline_mode(config: JsonConfigAdapter) -> PipelineMode:
 
 
 def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
-    """Whether the active model is decoding in verbatim mode.
-
-    The mode key is engine-specific, so it only suppresses cleanup while
-    a CrisperWhisper model is selected. A value left behind from an
-    earlier model must not silently disable the pipeline for engines
-    that never had modes.
-    """
+    """Whether the active model is decoding in verbatim mode."""
     model = config.get("transcription.model_size", DEFAULT_MODEL)
-    if not isinstance(model, str) or not has_crisperwhisper_modes(model):
+    if not isinstance(model, str):
         return False
-    return config.get("transcription.crisperwhisper_mode", "intended") == "verbatim"
+    return transcribes_verbatim(model, config.get("transcription.crisperwhisper_mode", "intended"))
 
 
 def _hotkey_actions(use_case: RecordAndTranscribeUseCase) -> HotkeyActions:
     return HotkeyActions(
         dictate_activate=use_case.on_hotkey_activated,
         dictate_deactivate=use_case.on_hotkey_deactivated,
-        edit_activate=use_case.on_edit_hotkey_activated,
-        edit_deactivate=use_case.on_edit_hotkey_deactivated,
         paste_last=use_case.paste_last,
         copy_last=use_case.copy_last,
     )
@@ -1175,19 +1068,16 @@ def build_app(
     atexit.register(diagnostics.dispose)
     log_caret_text_when(functools.partial(content_recording_enabled, config))
     # The learner adds words to dictionary.json from the edit-capture thread;
-    # the rebuilt output chain is what puts them to use. Both callbacks are
-    # bound late: they only run once the app is up.
-    writing = _build_writing(
-        config, paths, event_bus, lambda: _use_learned_words(),
-        lambda message: gui_dispatcher.dispatch(lambda: notice.show(message)),
+    # the rebuilt output chain is what puts them to use. The callback is
+    # bound late: it only runs once the app is up.
+    learner = WordLearner(
+        paths.base / "learning.json",
+        paths.dictionary_path,
+        functools.partial(learns_words, config),
+        lambda: _use_learned_words(),
+        session_id(),
     )
-    edit_capture = _build_edit_capture(config, paths, writing.learner)
-    redictations = RedictationTracker(
-        learn=writing.learner.observe_correction,
-        foreground=foreground_hwnd,
-        read_text=read_focused_text,
-        enabled=lambda: read_writing_settings(config).learn_words,
-    )
+    edit_capture = _build_edit_capture(config, paths, learner)
     if edit_capture is not None:
         atexit.register(edit_capture.stop)
 
@@ -1231,14 +1121,11 @@ def build_app(
         paste_method=functools.partial(_foreground_paste_method, config),
         on_failed=functools.partial(_publish_delivery_failure, event_bus),
         on_pasted=lambda: event_bus.publish(TextPastedEvent()),
-        on_caret_read=redictations.caret_read,
-        on_pasting=redictations.pasting,
     )
     output = _build_output(
         output_mode, gui_dispatcher, paths.dictionary_path,
         pipeline_mode, paths.models_dir,
         _delivery_reporter(edit_capture, pipeline_mode, output_mode),
-        writing=writing,
         hooks=delivery_hooks,
     )
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
@@ -1264,13 +1151,6 @@ def build_app(
             config.get("transcription.mode", "batch") == "streaming"
         ),
         prepare_audio=functools.partial(_prepare_audio, config),
-        voice_edit=VoiceEditor(
-            writing.client,
-            deadline=lambda: read_writing_settings(config).deadline_seconds,
-            read_context=read_caret_context,
-            read_window=foreground_window,
-        ),
-        writing_seconds=functools.partial(_writing_seconds, config, writing),
         last_dictation=last_dictation,
         wake_after_idle_seconds=functools.partial(
             _wake_after_idle_seconds, config, diagnostics,
@@ -1285,7 +1165,6 @@ def build_app(
                 output_mode, gui_dispatcher, paths.dictionary_path,
                 pipeline_mode, paths.models_dir,
                 _delivery_reporter(edit_capture, pipeline_mode, output_mode),
-                writing=writing,
                 hooks=delivery_hooks,
             )
         )
@@ -1294,7 +1173,7 @@ def build_app(
         """The edit watcher, started now if learning was just switched on."""
         nonlocal edit_capture
         if edit_capture is None and changes.learning_turned_on:
-            edit_capture = _build_edit_capture(config, paths, writing.learner)
+            edit_capture = _build_edit_capture(config, paths, learner)
             if edit_capture is not None:
                 edit_capture.start()
                 atexit.register(edit_capture.stop)
@@ -1352,7 +1231,6 @@ def build_app(
             dictionary_path=paths.dictionary_path,
             models_dir=paths.models_dir,
             edit_capture=_edit_watcher(changes),
-            writing=writing,
             hotkey_actions=hotkey_actions,
             delivery_hooks=delivery_hooks,
             history_pruner=history_pruner,
@@ -1399,11 +1277,12 @@ def build_app(
         on_save=lambda changes: gui_dispatcher.dispatch(
             lambda: apply_saved_settings(changes),
         ),
-        writing=writing,
+        learner=learner,
         history=HistoryService(
             paths.diagnostics_dir, record_and_transcribe_use_case.retranscribe,
         ),
         updates=updater,
+        preview_sound=cue_player.preview,
     )
     launcher = ShellLauncher(
         api_server,
@@ -1463,7 +1342,7 @@ def build_app(
         start_replacement=functools.partial(start_another_copy, "--restart"),
         download_manager=download_manager,
         owned_disposables=tuple(
-            item for item in (overlay, ducking, history_pruner, writing, updater)
+            item for item in (overlay, ducking, history_pruner, updater)
             if item is not None
         ),
     )
@@ -1480,11 +1359,8 @@ def build_app(
     )
 
     # Keys observed before this only queue up; the observer catches up.
-    _start_once_idle(
-        event_bus,
-        writing.start,
-        *((edit_capture.start,) if edit_capture is not None else ()),
-    )
+    if edit_capture is not None:
+        _start_once_idle(event_bus, edit_capture.start)
     _spawn_engine_load_thread(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,
@@ -1541,7 +1417,7 @@ def _release_updater(
     running = app_version()
     return ReleaseUpdater(
         running_version=running,
-        updates_dir=managed_root().parent / "updates",
+        updates_dir=local_data_dir() / "updates",
         enabled=lambda: config.get("updates.check_automatically", True) is not False,
         fetch_latest=functools.partial(fetch_latest_release, running),
         downloader=chunked_downloader(),
@@ -1561,7 +1437,6 @@ def apply_settings(
     dictionary_path: Path | None = None,
     models_dir: Path | None = None,
     edit_capture: Win32EditObserver | None = None,
-    writing: WritingService | None = None,
     hotkey_actions: HotkeyActions | None = None,
     delivery_hooks: DeliveryHooks | None = None,
     history_pruner: HistoryPruner | None = None,
@@ -1580,16 +1455,9 @@ def apply_settings(
                 output_mode, gui_dispatcher, dictionary_path,
                 pipeline_mode, models_dir,
                 _delivery_reporter(edit_capture, pipeline_mode, output_mode),
-                writing=writing,
                 hooks=delivery_hooks,
             )
         )
-
-    if writing is not None:
-        if changes.writing_server_changed:
-            writing.restart_server()
-        else:
-            writing.follow_settings()
 
     if changes.history_retention_changed and history_pruner is not None:
         history_pruner.prune_now()

@@ -21,16 +21,7 @@ from skryb.core.startup_log import (
     process_uptime_seconds,
 )
 from skryb.diagnostics.jsonl import JsonlWriter
-from skryb.output.dictation_trace import (
-    ANSWER_FIELD,
-    CONTEXT_FIELD,
-    OUTCOME_FIELD,
-    REASON_FIELD,
-    SECONDS_FIELD,
-    TYPED_FIELD,
-    WINDOW_FIELD,
-    DictationTrace,
-)
+from skryb.output.dictation_trace import TYPED_FIELD, DictationTrace
 from skryb.diagnostics.timing_estimate import (
     TranscriptionTimeEstimate,
     engine_key,
@@ -71,21 +62,9 @@ class _AudioLevels:
 
 
 def _trace_fields(trace: DictationTrace | None, capture_content: bool) -> dict[str, object]:
-    if trace is None:
+    if trace is None or not capture_content:
         return {}
-    fields: dict[str, object] = {
-        OUTCOME_FIELD: trace.cleanup,
-        REASON_FIELD: trace.cleanup_reason,
-        SECONDS_FIELD: trace.cleanup_seconds,
-    }
-    if capture_content:
-        fields.update({
-            TYPED_FIELD: trace.typed or "",
-            ANSWER_FIELD: trace.cleanup_answer or "",
-            CONTEXT_FIELD: trace.context_before,
-            WINDOW_FIELD: trace.window,
-        })
-    return fields
+    return {TYPED_FIELD: trace.typed or ""}
 
 
 def _audio_levels(audio: AudioSegment) -> _AudioLevels:
@@ -219,17 +198,15 @@ class SessionDiagnostics:
         audio: AudioSegment | None,
         outcome: TranscriptionResult | Exception,
         requested_at: datetime,
-        kind: str = "dictation",
         output_seconds: float = 0.0,
         trace: DictationTrace | None = None,
     ) -> None:
-        """Log one transcription; a voice edit's ``text`` is its instruction.
+        """Log one transcription.
 
         ``output_seconds`` is the part of the wall time spent after the
-        engine, in the text pipeline and the writing model; the timing
-        estimate leaves it out. ``trace`` adds what the writing model made
-        of it and what was typed: its outcome always, its text only while
-        content capture is on, like the transcript itself.
+        engine, in the text pipeline; the timing estimate leaves it out.
+        ``trace`` adds what was typed, only while content capture is on,
+        like the transcript itself.
         """
         index = self._next_transcription_index()
         finished_at = utc_now()
@@ -273,7 +250,6 @@ class SessionDiagnostics:
             self._write_event(
                 {
                     "event": "transcription",
-                    "kind": kind,
                     "index": index,
                     "requested_at": utc_iso(requested_at),
                     "finished_at": utc_iso(finished_at),

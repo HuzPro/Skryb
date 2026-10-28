@@ -56,6 +56,14 @@ MODELS = [
      "description": "Accurate 1.55B intended/verbatim Whisper; weights/outputs under non-commercial research license",
      "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
      "license_id": "crisperwhisper-nc"},
+    {"name": "underdog-bark-3.0-plus", "display_size": "180 MB", "size": 180_000_000,
+     "description": "Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Verbatim keeps every um, 180 MB, English only",
+     "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
+     "style_family": "underdog-bark-3.0-plus", "speech_style": "verbatim", "license_id": None},
+    {"name": "underdog-bark-3.0-clean", "display_size": "180 MB", "size": 180_000_000,
+     "description": "Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Intended drops ums, false starts and repeats, 180 MB, English only",
+     "installed": True, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
+     "style_family": "underdog-bark-3.0-plus", "speech_style": "intended", "license_id": None},
 ]
 
 BROKEN_MICROPHONE = "Microphone Array (Realtek(R) A"
@@ -72,13 +80,6 @@ ENGINES = {
     ],
     "crisperwhisper-2.0-large": [("crisperwhisper", "CrisperWhisper (Transformers)", "Uses torch; the only engine for this model.")],
 }
-
-BUILTIN_TRANSFORMS = [
-    ("Concise", "Make it concise. Keep every fact, name and number."),
-    ("Bullet points", 'Turn it into short bullet points, one idea per line, each starting with "- ".'),
-    ("Professional", "Make the tone clear and professional, without adding greetings or new information."),
-    ("Casual", "Make the tone relaxed and friendly, like a message to a colleague."),
-]
 
 SAMPLE_TEXTS = [
     "Email Sarah about the quarterly report and ask whether the numbers for March are final.",
@@ -102,15 +103,11 @@ def _default_settings():
     return {
         "model_size": "parakeet-tdt-0.6b-v3", "language": "en", "device": "auto", "engine": "auto",
         "output_mode": "direct_paste", "transcription_mode": "batch", "crisperwhisper_mode": "intended",
-        "capture_content": True, "input_device": "", "boost_quiet_speech": True,
-        "writing": {"cleanup": "light", "lists": True, "deadline_seconds": 4.0, "context": True,
-                    "learn_words": True, "learn_style": True, "style_notes": "",
-                    "after_dictation_transform": "", "runtime_path": "", "model_path": ""},
+        "capture_content": True, "input_device": "", "boost_quiet_speech": True, "learn_words": True,
         "hotkey_bindings": [
             {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
             {"keys": "ctrl+shift+f9", "mode": "hold", "action": "dictate"},
             {"keys": "mouse4", "mode": "toggle", "action": "dictate"},
-            {"keys": "ctrl+alt+e", "mode": "toggle", "action": "edit_selection"},
             {"keys": "ctrl+alt+v", "mode": "press", "action": "paste_last"},
         ],
         "double_tap_locks_hold": True,
@@ -141,34 +138,16 @@ def _history():
         elif roll < 0.07:
             status, has_audio = "Not saved", False
         text = f"#{HISTORY_SIZE - index} {text}" if text.strip() else text
-        kind = "edit" if index % 23 == 5 else "dictation"
-        heard, writing = text, None
-        if text.strip() and not status and kind == "dictation":
-            heard, writing = _writing_record(text, rng)
+        heard, typed = text, ""
+        if text.strip() and not status and rng.random() < 0.75:
+            heard, typed = "um " + text[:1].lower() + text[1:].rstrip("."), text
         entries.append({
             "id": f"{at:%Y%m%dT%H%M%SZ}-{index * 2654435761 % 16**8:08x}.{index % 40 + 3}", "at": at.isoformat(timespec="seconds"),
             "text": heard,
             "audio_seconds": round(1.5 + rng.random() * 40, 1), "status": status, "error": error,
-            "has_audio": has_audio, "kind": kind, "writing": writing,
+            "has_audio": has_audio, "typed": typed,
         })
     return entries
-
-
-def _writing_record(clean: str, rng: random.Random):
-    """What the engine heard for *clean*, and what the writing model made of it."""
-    heard = "um so " + clean[:1].lower() + clean[1:].rstrip(".")
-    roll = rng.random()
-    record = {"outcome": "applied", "reason": "", "seconds": round(0.2 + rng.random() * 0.8, 2), "answer": clean,
-              "typed": clean, "context_before": "Hi Sarah, " if roll < 0.3 else "", "window": "Outlook (outlook.exe)"}
-    if roll < 0.12:
-        record.update(outcome="rejected", reason="a number changed", answer=clean.replace("#", "No. ") + " Thanks!", typed=heard)
-    elif roll < 0.17:
-        record.update(outcome="too_slow", reason="it took 4.62s, over the 4.0s limit", seconds=4.62, typed=heard)
-    elif roll < 0.22:
-        record.update(outcome="skipped", reason="the writing model is busy", seconds=None, answer="", typed=heard)
-    elif roll < 0.27:
-        return clean, None  # from before versions were saved
-    return heard, record
 
 
 class Core:
@@ -208,13 +187,6 @@ class Core:
                 {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True},
             ],
         }
-        self.writing = {"state": "not_installed", "detail": "", "bytes_done": 0, "bytes_total": 0,
-                        "install_bytes": 2_633_286_430,
-                        "runtime_path": r"C:\Users\you\AppData\Local\Skryb\writing\llama-b11200\llama-server.exe",
-                        "model_path": r"C:\Users\you\AppData\Local\Skryb\writing\models\Spark-X2.5-4B-Q4_K_M.gguf",
-                        "last_cleanup_seconds": None,
-                        "learned_style_summary": "short sentences, British spelling, no sign-off"}
-        self.transforms = [{"name": n, "instruction": i, "builtin": True} for n, i in BUILTIN_TRANSFORMS]
         self.history = _history()
         self.meter_on = False
         self.capturing = False
@@ -265,7 +237,6 @@ class Core:
             time.sleep(TICK_SECONDS)
             with self.lock:
                 self._advance_downloads()
-                self._advance_writing()
 
     def _advance_downloads(self) -> None:
         for model in self.models:
@@ -280,21 +251,6 @@ class Core:
                                        "bytes_total": download["bytes_total"], "error": ""})
             else:
                 self.emit("download", {"name": model["name"], **download})
-
-    def _advance_writing(self) -> None:
-        status = self.writing
-        if status["state"] != "installing":
-            return
-        status["bytes_done"] = min(status["bytes_total"], status["bytes_done"] + status["bytes_total"] // 50)
-        if status["bytes_done"] >= status["bytes_total"]:
-            status["state"] = "starting"
-            self.later(1.5, self._writing_ready)
-        self.emit("writing", status)
-
-    def _writing_ready(self) -> None:
-        with self.lock:
-            self.writing.update(state="ready", last_cleanup_seconds=0.84)
-        self.emit("writing", self.writing)
 
     def meter(self) -> None:
         started = time.time()
@@ -502,7 +458,7 @@ class Handler(BaseHTTPRequestHandler):
             "engine_reload_required": reload, "hotkey_changed": before["hotkey_bindings"] != draft["hotkey_bindings"],
             "output_changed": before["output_mode"] != draft["output_mode"], "mode_changed": before["transcription_mode"] != draft["transcription_mode"],
             "diagnostics_changed": before["capture_content"] != draft["capture_content"],
-            "writing_server_changed": before["writing"] != draft["writing"], "learning_turned_on": False,
+            "learning_turned_on": not before["learn_words"] and draft["learn_words"],
             "history_retention_changed": before["history_retention_days"] != draft["history_retention_days"],
         }
         core.settings = draft
@@ -609,59 +565,12 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(200, core.dictionary)
 
-    def _writing(self, method, rest, query) -> None:
-        core = self.core
-        status = core.writing
-        action = rest[0] if rest else ""
-        if action == "install":
-            status.update(state="installing", bytes_done=0, bytes_total=status["install_bytes"], detail="")
-        elif action == "cancel":
-            status.update(state="not_installed", bytes_done=0, bytes_total=0)
-        elif action in ("retry", "restart"):
-            status.update(state="starting")
-            core.later(1.5, core._writing_ready)
-        elif action == "forget-style":
-            status["learned_style_summary"] = ""
-        elif action == "reset-learning":
-            status["learned_style_summary"] = ""
-            core.dictionary["rules"] = [r for r in core.dictionary["rules"] if not (r["kind"] == "literal" and r["learned"])]
-        elif action == "open-log":
-            pass
-        elif action == "track-record":
-            asked = [entry["writing"] for entry in core.history if entry.get("writing") and entry["writing"]["outcome"]][:50]
-            outcomes: dict[str, int] = {}
-            reasons: dict[str, int] = {}
-            for record in asked:
-                outcomes[record["outcome"]] = outcomes.get(record["outcome"], 0) + 1
-                if record["outcome"] == "rejected":
-                    reasons[record["reason"]] = reasons.get(record["reason"], 0) + 1
-            rejections = [{"reason": reason, "count": count} for reason, count in sorted(reasons.items(), key=lambda item: -item[1])]
-            self._send(200, {"dictations": len(asked), "outcomes": outcomes, "rejections": rejections})
-            return
-        else:
-            self._send(200, status)
-            return
-        self._send(202 if action in ("install", "cancel", "retry", "restart") else 204)
-        core.emit("writing", status)
-
-    def _transforms(self, method, rest, query) -> None:
-        core = self.core
-        if rest == ["restore-builtins"]:
-            custom = [t for t in core.transforms if t["name"] not in dict(BUILTIN_TRANSFORMS)]
-            core.transforms = [{"name": n, "instruction": i, "builtin": True} for n, i in BUILTIN_TRANSFORMS] + custom
-            self._send(204)
-        elif method == "PUT":
-            core.transforms = self._body()
-            self._send(204)
-        else:
-            self._send(200, core.transforms)
-
     def _history(self, method, rest, query) -> None:
         core = self.core
         needle = query.get("query", [""])[0].strip().casefold()
         found = [
             entry for entry in core.history
-            if any(needle in text.casefold() for text in (entry["text"], *((entry["writing"] or {}).get(key, "") for key in ("typed", "answer"))))
+            if any(needle in text.casefold() for text in (entry["text"], entry["typed"]))
         ]
         if method == "GET":
             limit = query.get("limit", [""])[0]
@@ -701,6 +610,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(204)
 
     def _pill(self, method, rest, query) -> None:
+        self._send(204)
+
+    def _sounds(self, method, rest, query) -> None:
         self._send(204)
 
     def _setup(self, method, rest, query) -> None:

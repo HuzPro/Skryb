@@ -116,7 +116,7 @@ class DownloadManager:
     def __init__(
         self,
         event_bus: EventBus,
-        max_concurrent_downloads: int = 3,
+        max_concurrent_downloads: int = 5,
     ) -> None:
         self._event_bus = event_bus
         self._pool = ThreadPoolExecutor(max_workers=max_concurrent_downloads)
@@ -139,6 +139,11 @@ class DownloadManager:
             # orphan worker can only mutate the object we just dropped.
             active = _ActiveJob(job=job, bytes_total=job.total_bytes)
             self._jobs[job.job_id] = active
+        # Announced before the job is submitted, so it can't land after the
+        # worker's "downloading". Past the pool's limit the job waits its
+        # turn, and saying so keeps the click from looking ignored.
+        self._publish_state(active, DownloadState.QUEUED)
+        with self._lock:
             active.future = self._pool.submit(self._run_job, active)
         return DownloadHandle(job.job_id, self)
 
@@ -200,6 +205,9 @@ class DownloadManager:
     # ------------------------------------------------------------------
 
     def _run_job(self, active: _ActiveJob) -> None:
+        if active.cancel_event.is_set():
+            self._transition(active, DownloadState.CANCELLED)
+            return
         self._transition(active, DownloadState.DOWNLOADING)
         try:
             active.job.run(
@@ -256,6 +264,9 @@ class DownloadManager:
     def _transition(self, active: _ActiveJob, new_state: DownloadState) -> None:
         with self._lock:
             active.state = new_state
+        self._publish_state(active, new_state)
+
+    def _publish_state(self, active: _ActiveJob, new_state: DownloadState) -> None:
         self._event_bus.publish(
             DownloadStateChangedEvent(
                 job_id=active.job.job_id,

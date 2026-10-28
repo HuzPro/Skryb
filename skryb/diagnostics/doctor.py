@@ -11,22 +11,8 @@ and share the output without needing extra diagnostic skill.
 import importlib
 import os
 import sys
-import tempfile
-import time
-from pathlib import Path
 
-from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.core.paths import AppPaths
-from skryb.writing.client import post_completion
-from skryb.writing.install import WRITING_MODEL, WritingPaths, managed_root, server_files
-from skryb.writing.llama_server import (
-    LlamaServer,
-    ServerFiles,
-    ServerState,
-    last_line,
-)
-from skryb.writing.prompt import cleanup_system_prompt, cleanup_user_message
-from skryb.writing.settings import WritingSettings, read_writing_settings
 
 _CTRANSLATE2_INSTALL_HINT = "see INSTALL.md - the wheel differs per GPU vendor"
 
@@ -47,7 +33,6 @@ def run_doctor() -> str:
         _probe_audio(),
         _probe_hf_cache(),
         _probe_diagnostics_path(),
-        _probe_writing_model(),
     ]
     return "\n".join(_join_sections(sections))
 
@@ -188,81 +173,4 @@ def _probe_diagnostics_path() -> list[str]:
     return [
         "[Session diagnostics]",
         f"  directory: {paths.diagnostics_dir}",
-    ]
-
-
-_WRITING_READY_SECONDS = 90.0
-_WRITING_SAMPLE = "um so let's meet on friday actually no monday at four"
-
-
-def _probe_writing_model() -> list[str]:
-    try:
-        return ["[Writing model]", *_read_writing_model_info()]
-    except Exception as exc:
-        return ["[Writing model]", f"  ERROR: {exc}"]
-
-
-def _read_writing_model_info() -> list[str]:
-    config = JsonConfigAdapter(AppPaths().config_path)
-    config.load()
-    return writing_model_report(
-        read_writing_settings(config),
-        WritingPaths(managed_root()),
-        Path(tempfile.gettempdir()) / "skryb-doctor-writing-server.log",
-    )
-
-
-def writing_model_report(
-    settings: WritingSettings, paths: WritingPaths, log_path: Path,
-) -> list[str]:
-    """Install state, paths, and one timed cleanup if the model is installed."""
-    lines = [
-        f"  cleanup: {settings.cleanup}",
-        f"  runtime: {settings.runtime_path or paths.runtime_exe}",
-        f"  pinned model: {WRITING_MODEL.id} ({WRITING_MODEL.gguf.file_name})",
-        f"  model: {settings.model_path or paths.model_file}",
-    ]
-    files = server_files(paths, settings)
-    if files is None:
-        return [*lines, "  installed: no (Settings > Writing > Install)"]
-    return [*lines, "  installed: yes", *_writing_round_trip(files, settings, log_path)]
-
-
-def _writing_round_trip(
-    files: ServerFiles, settings: WritingSettings, log_path: Path,
-) -> list[str]:
-    server = LlamaServer(lambda: files, log_path, warm_up=lambda _endpoint: None)
-    server.start()
-    try:
-        return _time_one_cleanup(server, settings, log_path)
-    finally:
-        server.stop()
-
-
-def _time_one_cleanup(
-    server: LlamaServer, settings: WritingSettings, log_path: Path,
-) -> list[str]:
-    started = time.monotonic()
-    while time.monotonic() - started < _WRITING_READY_SECONDS:
-        if server.endpoint() is not None or server.status.state in (
-            ServerState.FAILED, ServerState.NOT_INSTALLED,
-        ):
-            break
-        time.sleep(0.2)
-    endpoint = server.endpoint()
-    if endpoint is None:
-        reason = last_line(server.status.detail) or server.status.state.value
-        return [f"  server: did not start ({reason}); log: {log_path}"]
-    loaded = time.monotonic() - started
-    asked = time.monotonic()
-    answer = post_completion(
-        endpoint,
-        cleanup_system_prompt(settings),
-        cleanup_user_message(_WRITING_SAMPLE),
-        64,
-        30.0,
-    )
-    return [
-        f"  server start: {loaded:.1f} s",
-        f"  round trip: {time.monotonic() - asked:.2f} s -> {answer!r}",
     ]

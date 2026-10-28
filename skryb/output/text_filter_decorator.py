@@ -16,8 +16,5 @@ class TextFilterDecorator(TextOutputHandler):
             trace.typed = processed
         self._inner.output(processed)
 
-    def output_verbatim(self, text: str) -> None:
-        self._inner.output(text)
-
 
 __all__ = ["TextFilterDecorator", "load_dictionary"]

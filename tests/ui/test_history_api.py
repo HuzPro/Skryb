@@ -100,10 +100,9 @@ def test_thousands_of_dictations_list_newest_first_and_filter_ignoring_case(seed
     assert len(entries) == _SESSIONS * _PER_SESSION
     assert listed_in < 5.0
     assert entries == sorted(entries, key=lambda entry: entry["at"], reverse=True)
-    assert set(entries[0]) == {"id", "at", "text", "audio_seconds", "status", "error", "has_audio", "kind", "writing"}
+    assert set(entries[0]) == {"id", "at", "text", "audio_seconds", "status", "error", "has_audio", "typed"}
     assert datetime.fromisoformat(entries[0]["at"]).utcoffset() is not None
     assert {entry["status"] for entry in entries} == {"", "Cancelled", "Failed", "Empty"}
-    assert {entry["kind"] for entry in entries} == {"dictation", "edit"}
     assert sum(entry["has_audio"] for entry in entries) == 12
     failed = next(entry for entry in entries if entry["status"] == "Failed")
     assert failed["error"] == "CUDA out of memory"
@@ -267,28 +266,3 @@ def test_exporting_to_a_folder_that_does_not_exist_says_so(seeded: Rig, tmp_path
 
     assert status == 400
     assert "Could not save the history" in str(body)
-
-
-def test_the_writing_track_record_counts_what_the_model_did_with_recent_dictations(
-    make_rig: Callable[..., Rig],
-) -> None:
-    rig = make_rig()
-    session = rig.history_dir / f"{_START:%Y%m%dT%H%M%SZ}-0000abcd"
-    session.mkdir(parents=True)
-    log = JsonlWriter(session / "session.jsonl")
-    outcomes = ["applied"] * 6 + ["rejected"] * 3 + ["too_slow", ""]
-    for index, outcome in enumerate(outcomes, start=1):
-        log.append({
-            "event": "transcription", "index": index, "requested_at": _iso(_START + timedelta(seconds=index)),
-            "text": f"dictation {index}", "is_empty": False, "error": None,
-            "cleanup": outcome, "cleanup_reason": "a number changed" if outcome == "rejected" else "",
-        })
-
-    status, record = rig.call("GET", "/api/writing/track-record")
-
-    assert status == 200
-    assert record == {
-        "dictations": 10,
-        "outcomes": {"applied": 6, "rejected": 3, "too_slow": 1},
-        "rejections": [{"reason": "a number changed", "count": 3}],
-    }

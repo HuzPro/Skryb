@@ -5,7 +5,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from skryb.output.caret_context import CaretContext
 from skryb.output.gui_thread_dispatcher import GuiThreadDispatcher
 from skryb.output.handler import TextOutputHandler
 from skryb.output.last_dictation import LastDictation
@@ -29,10 +28,6 @@ class DeliveryHooks:
     paste_method: Callable[[], PasteMethod]
     on_failed: OnDeliveryFailed
     on_pasted: Callable[[], None] = lambda: None
-    # Each dictation's caret reading, then its text just before it is pasted:
-    # how fixes made by dictating over a selection are followed.
-    on_caret_read: Callable[[CaretContext], None] = lambda _context: None
-    on_pasting: Callable[[str], None] = lambda _text: None
 
 
 class AppAwareDelivery(TextOutputHandler):

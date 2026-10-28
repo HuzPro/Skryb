@@ -56,7 +56,7 @@ describe("key caps", () => {
 
 describe("shortcut validation mirrors the core", () => {
   it("accepts the default shortcuts", () => {
-    expect(validateBindings([bind("ctrl+alt+m"), bind("ctrl+alt+e", "edit_selection"), bind("ctrl+alt+v", "paste_last", "press")])).toBeNull();
+    expect(validateBindings([bind("ctrl+alt+m"), bind("ctrl+alt+c", "copy_last", "press"), bind("ctrl+alt+v", "paste_last", "press")])).toBeNull();
   });
 
   it("needs at least one dictation shortcut", () => {
@@ -81,12 +81,12 @@ describe("shortcut validation mirrors the core", () => {
   });
 
   it("accepts punctuation keys by name and refuses the character they print, like the core", () => {
-    expect(validateBindings([bind("cmd+shift+f23+quote"), bind("ctrl+alt+bracket_left", "edit_selection")])).toBeNull();
+    expect(validateBindings([bind("cmd+shift+f23+quote"), bind("ctrl+alt+bracket_left", "copy_last", "press")])).toBeNull();
     expect(validateBindings([bind("ctrl+'")])).toEqual({ message: "Shortcut 'ctrl+'' is not valid: Unknown key: '.", index: 0 });
   });
 
   it("refuses the same keys used twice in any order", () => {
-    expect(validateBindings([bind("ctrl+alt+m"), bind("alt+ctrl+m", "edit_selection")])).toEqual({
+    expect(validateBindings([bind("ctrl+alt+m"), bind("alt+ctrl+m", "copy_last", "press")])).toEqual({
       message: "Shortcut alt+ctrl+m is used twice. Give each shortcut its own keys.",
       index: 1,
     });
@@ -100,11 +100,11 @@ describe("shortcut validation mirrors the core", () => {
   });
 
   it("lets a longer shortcut share a modifier when the shorter one is not inside it", () => {
-    expect(validateBindings([bind("ctrl+a"), bind("ctrl+alt+a", "edit_selection")])).toBeNull();
+    expect(validateBindings([bind("ctrl+a"), bind("ctrl+alt+a", "copy_last", "press")])).toBeNull();
   });
 
   it("refuses a longer shortcut that ends with a shorter one", () => {
-    expect(validateBindings([bind("alt+a"), bind("ctrl+alt+a", "edit_selection")])?.message).toBe(
+    expect(validateBindings([bind("alt+a"), bind("ctrl+alt+a", "copy_last", "press")])?.message).toBe(
       "Pressing ctrl+alt+a would also trigger alt+a. Change one of them.",
     );
   });

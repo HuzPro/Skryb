@@ -22,7 +22,6 @@ class BindingMode(StrEnum):
 
 class BindingAction(StrEnum):
     DICTATE = "dictate"
-    EDIT_SELECTION = "edit_selection"
     PASTE_LAST = "paste_last"
     COPY_LAST = "copy_last"
 

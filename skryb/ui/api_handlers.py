@@ -28,6 +28,7 @@ from skryb.history.entries import HistoryEntry
 from skryb.history.service import HistoryService, RetryOutcome
 from skryb.hotkeys.bindings import Binding, BindingError, validate_bindings
 from skryb.output.dictionary_config import LiteralRule
+from skryb.output.word_learning import WordLearner
 from skryb.recording.input_devices import SYSTEM_DEFAULT, Microphones
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.settings.service import EngineEventListener, SettingsService
@@ -48,11 +49,7 @@ from skryb.ui.shapes import (
     learned_pairs,
     settings_json,
     shown_combination,
-    track_record_json,
-    writing_status_json,
 )
-from skryb.writing.service import WritingService
-from skryb.writing.transforms import BUILTIN_TRANSFORMS
 
 _logger = logging.getLogger(__name__)
 
@@ -97,6 +94,10 @@ def _ignore_changes(_changes: ChangeSet) -> None:
 
 def _idle() -> AppState:
     return AppState.IDLE
+
+
+def _silent(_cue: str, _volume: float) -> None:
+    return None
 
 
 def _never() -> bool:
@@ -244,12 +245,13 @@ class CoreApi:
         diagnostics_dir: Path,
         state: Callable[[], AppState] = _idle,
         on_save: Callable[[ChangeSet], None] = _ignore_changes,
-        writing: WritingService | None = None,
+        learner: WordLearner | None = None,
         history: HistoryService | None = None,
         first_run: bool = False,
         on_setup_done: Callable[[], None] = _nothing,
         open_path: Callable[[Path], None] = open_with_shell,
         updates: ReleaseUpdater | None = None,
+        preview_sound: Callable[[str, float], None] = _silent,
     ) -> None:
         self._service = service
         self._hub = hub
@@ -258,12 +260,13 @@ class CoreApi:
         self._diagnostics_dir = diagnostics_dir
         self._state = state
         self._on_save = on_save
-        self._writing = writing
+        self._learner = learner
         self._history = history
         self._first_run = first_run
         self._on_setup_done = on_setup_done
         self._open_path = open_path
         self._updates = updates
+        self._preview_sound = preview_sound
         self._lock = threading.Lock()
 
     def serve_on(self, server: ApiServer) -> None:
@@ -291,21 +294,13 @@ class CoreApi:
             ("POST", "/api/hardware/probe", self._probe_hardware),
             ("GET", "/api/microphones", self._list_microphones),
             ("POST", "/api/microphones/meter", self._meter),
+            ("POST", "/api/sounds/preview", self._preview_cue),
             ("POST", "/api/shortcuts/capture", self._capture_shortcut),
             ("POST", "/api/shortcuts/validate", self._validate_shortcuts),
             ("GET", "/api/dictionary", self._get_dictionary),
             ("PUT", "/api/dictionary", self._put_dictionary),
             ("POST", "/api/dictionary/forget-learned", self._forget_learned_words),
             ("DELETE", "/api/dictionary/learned/{spoken}", self._forget_learned_word),
-            ("GET", "/api/writing", self._writing_status),
-            ("GET", "/api/writing/track-record", self._writing_track_record),
-            *(
-                ("POST", f"/api/writing/{action}", functools.partial(self._writing_action, action))
-                for action in _WRITING_ACTIONS
-            ),
-            ("GET", "/api/transforms", self._list_transforms),
-            ("PUT", "/api/transforms", self._put_transforms),
-            ("POST", "/api/transforms/restore-builtins", self._restore_builtin_transforms),
             ("GET", "/api/history", self._list_history),
             ("DELETE", "/api/history", self._delete_all_history),
             ("POST", "/api/history/export", self._export_history_csv),
@@ -354,23 +349,6 @@ class CoreApi:
 
     def publish_app_info(self) -> None:
         self._hub.publish("app", self.app_info())
-
-    def writing_status(self) -> Json | None:
-        writing = self._writing
-        if writing is None:
-            return None
-        runtime, model = writing.server_paths()
-        return writing_status_json(
-            writing.status(), runtime=runtime, model=model,
-            learned_style=writing.learned_style_summary(),
-        )
-
-    def watch_writing(self, listener: Callable[[], None]) -> Callable[[], None]:
-        writing = self._writing
-        if writing is None:
-            return _nothing
-        writing.subscribe(listener)
-        return lambda: writing.unsubscribe(listener)
 
     def release_devices(self) -> None:
         self._microphones.stop_meter()
@@ -522,7 +500,8 @@ class CoreApi:
                 "installed": view.installed,
                 "supports_batch": self._service.model_supports_batch(view.name),
                 "supports_streaming": self._service.model_supports_streaming(view.name),
-                "has_speech_styles": self._service.model_has_crisperwhisper_modes(view.name),
+                "has_speech_styles": self._service.model_has_speech_styles(view.name),
+                **_speech_style_fields(self._service.model_speech_style(view.name)),
                 "license_id": ALL_MODELS[view.name].license_id or None,
                 "download": self._hub.download_of(view.name),
             }
@@ -625,6 +604,11 @@ class CoreApi:
             raise ApiError(400, "This microphone could not be opened.")
         return _NO_CONTENT
 
+    def _preview_cue(self, request: ApiRequest) -> ApiResponse:
+        cue, volume = _read(_cue_request, request.body, "Say which sound to play, start or stop, and how loud.")
+        self._preview_sound(cue, volume)
+        return _NO_CONTENT
+
     def _capture_shortcut(self, request: ApiRequest) -> ApiResponse:
         on = _read(_flag_field("on"), request.body, "Say whether to record a shortcut.")
         if not on:
@@ -645,7 +629,7 @@ class CoreApi:
         _check_shortcuts(bindings)
         return ApiResponse(200, {"ok": True})
 
-    # -- dictionary and transforms -------------------------------------------------
+    # -- dictionary -----------------------------------------------------------------
 
     def _put_dictionary(self, request: ApiRequest) -> ApiResponse:
         dictionary = _read(
@@ -683,49 +667,8 @@ class CoreApi:
         return True
 
     def _forget(self, pairs: set[tuple[str, str]]) -> None:
-        if self._writing is not None:
-            self._writing.forget_learned_words(tuple(sorted(pairs)))
-
-    def _list_transforms(self, _request: ApiRequest) -> ApiResponse:
-        writing = self._require_writing()
-        return ApiResponse(200, [
-            {"name": name, "instruction": instruction, "builtin": name in BUILTIN_TRANSFORMS}
-            for name, instruction in writing.transforms().items()
-        ])
-
-    def _put_transforms(self, request: ApiRequest) -> ApiResponse:
-        writing = self._require_writing()
-        transforms = _read(
-            _transforms_from_json, request.body, "Those transformations could not be read.",
-        )
-        writing.save_transforms(transforms)
-        self._on_save(_OUTPUT_ONLY)
-        return _NO_CONTENT
-
-    def _restore_builtin_transforms(self, _request: ApiRequest) -> ApiResponse:
-        writing = self._require_writing()
-        writing.save_transforms({**writing.transforms(), **BUILTIN_TRANSFORMS})
-        self._on_save(_OUTPUT_ONLY)
-        return _NO_CONTENT
-
-    # -- writing model ----------------------------------------------------------------
-
-    def _require_writing(self) -> WritingService:
-        if self._writing is None:
-            raise ApiError(404, "The writing model is not available until setup has finished.")
-        return self._writing
-
-    def _writing_status(self, _request: ApiRequest) -> ApiResponse:
-        self._require_writing()
-        return ApiResponse(200, self.writing_status())
-
-    def _writing_action(self, action: str, _request: ApiRequest) -> ApiResponse:
-        writing = self._require_writing()
-        run, asynchronous = _WRITING_ACTIONS[action]
-        run(writing)
-        if not asynchronous:
-            self._hub.publish("writing", self.writing_status())
-        return _ACCEPTED if asynchronous else _NO_CONTENT
+        if self._learner is not None and pairs:
+            self._learner.block(sorted(pairs))
 
     # -- updates ------------------------------------------------------------------------
 
@@ -826,9 +769,6 @@ class CoreApi:
             raise ApiError(400, f"Could not save the history: {exc}") from exc
         return ApiResponse(200, {"rows": rows})
 
-    def _writing_track_record(self, _request: ApiRequest) -> ApiResponse:
-        return ApiResponse(200, track_record_json(self._require_history().track_record()))
-
     def _report_retry(self, entry: str, outcome: RetryOutcome) -> None:
         if isinstance(outcome, Exception):
             self._hub.publish(
@@ -836,19 +776,6 @@ class CoreApi:
             )
         else:
             self._hub.publish("history", {"event": "retry_done", "id": entry, "text": outcome})
-
-
-# Each writing action, and whether it only starts something the status
-# reports on later (202) or is done when it returns (204).
-_WRITING_ACTIONS: dict[str, tuple[Callable[[WritingService], None], bool]] = {
-    "install": (WritingService.install, True),
-    "cancel": (WritingService.cancel_install, True),
-    "retry": (WritingService.retry, True),
-    "restart": (WritingService.restart_server, True),
-    "open-log": (WritingService.open_log, False),
-    "forget-style": (WritingService.forget_learned_style, False),
-    "reset-learning": (WritingService.reset_learning, False),
-}
 
 
 def _read(parse: Callable[[object], _T], body: object, problem: str) -> _T:
@@ -896,6 +823,21 @@ def _flag_field(key: str) -> Callable[[object], bool]:
     return lambda body: Fields(body, "body").flag(key)
 
 
+def _speech_style_fields(family_style: tuple[str, str] | None) -> dict[str, str | None]:
+    """Members of one family show as a single model; the shell picks the member by style."""
+    family, style = family_style or (None, None)
+    return {"style_family": family, "speech_style": style}
+
+
+def _cue_request(body: object) -> tuple[str, float]:
+    fields = Fields(body, "body")
+    cue = fields.one_of("cue", ("start", "stop"))
+    volume = fields.number("volume")
+    if not 0.0 <= volume <= 1.0:
+        raise ValueError("body.volume must be between 0 and 1.")
+    return cue, volume
+
+
 def _meter_request(body: object) -> tuple[str, bool]:
     fields = Fields(body, "body")
     return fields.text("device"), fields.flag("on")
@@ -906,14 +848,3 @@ def _ignoring_missing_download(command: Callable[[str], None], name: str) -> Non
         command(name)
     except LookupError:
         _logger.info("No download of '%s' to change.", name)
-
-
-def _transforms_from_json(document: object) -> dict[str, str]:
-    if not isinstance(document, list):
-        raise ValueError("Transformations must be a list.")
-    transforms: dict[str, str] = {}
-    for index, row in enumerate(document):
-        fields = Fields(row, f"transforms[{index}]")
-        transforms[fields.text("name")] = fields.text("instruction")
-    return transforms
-

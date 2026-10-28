@@ -409,7 +409,7 @@ class TestWhileThePillIsUp:
     def test_a_notice_raised_while_the_pill_is_up_starts_tucked(self, setup) -> None:
         setup.pill_up = True
 
-        setup.notice.show("Writing model is not ready.", [])
+        setup.notice.show("No dictation yet.", [])
 
         _x, y, _width, height = setup.window.shown[-1]
         _left, top, _right, _bottom = setup.pill_box_on_screen()

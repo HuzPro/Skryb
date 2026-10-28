@@ -4,7 +4,6 @@ from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode
 from skryb.output.output_mode import OutputMode
 from skryb.settings.settings_draft import ChangeSet, SettingsDraft
 from skryb.settings.transcription_mode import TranscriptionMode
-from skryb.writing.settings import WritingSettings
 
 
 def _make_draft(**overrides) -> SettingsDraft:
@@ -200,22 +199,16 @@ class TestLeavingVerbatimTranscription:
         assert changes.output_changed is True
 
 
-class TestWritingChanges:
-    def test_any_writing_change_rebuilds_output_so_it_applies_live(self):
-        before = _make_draft()
-        after = _make_draft(writing=WritingSettings(cleanup="polished"))
+class TestLearningChanges:
+    def test_turning_learning_on_asks_for_the_edit_watcher_and_nothing_else(self):
+        changes = ChangeSet.between(_make_draft(learn_words=False), _make_draft(learn_words=True))
 
-        changes = ChangeSet.between(before, after)
-
-        assert changes.output_changed
-        assert not changes.writing_server_changed
+        assert changes.learning_turned_on
+        assert not changes.output_changed
         assert not changes.engine_reload_required
 
-    def test_a_new_runtime_or_model_path_restarts_the_writing_server(self):
-        before = _make_draft()
-        runtime = _make_draft(writing=WritingSettings(runtime_path="C:/llama/llama-server.exe"))
-        model = _make_draft(writing=WritingSettings(model_path="D:/models/mine.gguf"))
+    def test_turning_learning_off_needs_nothing_rebuilt(self):
+        changes = ChangeSet.between(_make_draft(learn_words=True), _make_draft(learn_words=False))
 
-        assert ChangeSet.between(before, runtime).writing_server_changed
-        assert ChangeSet.between(before, model).writing_server_changed
-        assert not ChangeSet.between(before, before).writing_server_changed
+        assert not changes.learning_turned_on
+        assert not changes.output_changed

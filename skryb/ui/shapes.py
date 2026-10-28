@@ -8,10 +8,9 @@ which the server answers with a 400.
 import math
 from collections.abc import Iterable
 from dataclasses import asdict, replace
-from pathlib import Path
 from typing import TypeVar, cast
 
-from skryb.history.entries import HistoryEntry, TrackRecord
+from skryb.history.entries import HistoryEntry
 from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode, binding_for
 from skryb.output.dictionary_config import (
     DictionaryConfig,
@@ -25,15 +24,9 @@ from skryb.recording.preferences import DUCK_MODES
 from skryb.settings.service import CRISPERWHISPER_MODES
 from skryb.settings.settings_draft import SettingsDraft
 from skryb.settings.transcription_mode import TranscriptionMode
-from skryb.writing.install import INSTALL_BYTES
-from skryb.writing.llama_server import last_line
-from skryb.writing.service import WritingStatus
-from skryb.writing.settings import CLEANUP_LEVELS, clamp_deadline
 
 Json = dict[str, object]
 _T = TypeVar("_T")
-
-_WRITING_STATES = {"downloading": "installing", "install_failed": "failed"}
 
 
 def shown_combination(combo: str) -> str:
@@ -63,16 +56,7 @@ def history_entry_json(entry: HistoryEntry) -> Json:
         "status": entry.status,
         "error": entry.error,
         "has_audio": has_audio(entry),
-        "kind": entry.kind,
-        "writing": asdict(entry.writing) if entry.writing is not None else None,
-    }
-
-
-def track_record_json(record: TrackRecord) -> Json:
-    return {
-        "dictations": record.dictations,
-        "outcomes": record.outcomes,
-        "rejections": [{"reason": reason, "count": count} for reason, count in record.rejections],
+        "typed": entry.typed,
     }
 
 
@@ -92,7 +76,7 @@ def settings_json(draft: SettingsDraft) -> Json:
         "capture_content": draft.capture_content,
         "input_device": draft.input_device,
         "boost_quiet_speech": draft.boost_quiet_speech,
-        "writing": asdict(draft.writing),
+        "learn_words": draft.learn_words,
         "hotkey_bindings": [binding_json(binding) for binding in draft.hotkey_bindings],
         "double_tap_locks_hold": draft.double_tap_locks_hold,
         "recording": {
@@ -112,7 +96,6 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
     carry yet as it is, rather than resetting it to its default.
     """
     settings = Fields(document, "settings")
-    writing = settings.section("writing")
     recording = settings.section("recording")
     retention = settings.whole("history_retention_days")
     if retention < 0:
@@ -131,19 +114,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         capture_content=settings.flag("capture_content"),
         input_device=settings.text("input_device"),
         boost_quiet_speech=settings.flag("boost_quiet_speech"),
-        writing=replace(
-            saved.writing,
-            cleanup=writing.one_of("cleanup", CLEANUP_LEVELS),
-            lists=writing.flag("lists"),
-            deadline_seconds=clamp_deadline(writing.number("deadline_seconds")),
-            context=writing.flag("context"),
-            learn_words=writing.flag("learn_words"),
-            learn_style=writing.flag("learn_style"),
-            style_notes=writing.text("style_notes").strip(),
-            after_dictation_transform=writing.text("after_dictation_transform"),
-            runtime_path=writing.text("runtime_path").strip(),
-            model_path=writing.text("model_path").strip(),
-        ),
+        learn_words=settings.flag("learn_words"),
         hotkey_bindings=bindings_from_json(settings.items("hotkey_bindings")),
         double_tap_locks_hold=settings.flag("double_tap_locks_hold"),
         recording=replace(
@@ -193,22 +164,6 @@ def dictionary_from_contract(document: object) -> DictionaryConfig:
         raw = Fields(rule, f"rules[{index}]").raw()
         rules.append({**raw, "type": raw.get("kind")})
     return dictionary_from_json({"options": fields.section("options").raw(), "rules": rules})
-
-
-def writing_status_json(
-    status: WritingStatus, *, runtime: Path, model: Path, learned_style: str,
-) -> Json:
-    return {
-        "state": _WRITING_STATES.get(status.state, status.state),
-        "detail": last_line(status.detail) if status.state == "failed" else status.detail,
-        "bytes_done": status.bytes_done,
-        "bytes_total": status.bytes_total,
-        "install_bytes": INSTALL_BYTES,
-        "runtime_path": str(runtime),
-        "model_path": str(model),
-        "last_cleanup_seconds": status.last_cleanup_seconds,
-        "learned_style_summary": learned_style,
-    }
 
 
 def learned_pairs(dictionary: DictionaryConfig) -> set[tuple[str, str]]:

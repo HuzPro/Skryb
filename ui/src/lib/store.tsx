@@ -5,7 +5,7 @@ import { draftReducer, isDirty, type Draft, type DraftAction } from "./draft";
 import { engineState } from "./events";
 import { validateBindings } from "./keys";
 import { onServerEvent } from "./sse";
-import type { Dictionary, License, SaveResult, Settings, Transform } from "./types";
+import type { Dictionary, License, SaveResult, Settings } from "./types";
 
 export type UnsavedChoice = "save" | "discard" | "cancel";
 
@@ -30,9 +30,6 @@ interface Store {
   dictionary: Draft<Dictionary> | null;
   dispatchDictionary: (action: DraftAction<Dictionary>) => void;
   saveDictionary: () => Promise<string>;
-  transforms: Draft<Transform[]> | null;
-  dispatchTransforms: (action: DraftAction<Transform[]>) => void;
-  saveTransforms: () => Promise<string>;
   anyDirty: () => boolean;
   prompt: Prompt | null;
   closePrompt: () => void;
@@ -59,7 +56,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
   const [settings, dispatchSettings] = useReducer(draftReducer as Reducer<Settings>, null);
   const [dictionary, dispatchDictionary] = useReducer(draftReducer as Reducer<Dictionary>, null);
-  const [transforms, dispatchTransforms] = useReducer(draftReducer as Reducer<Transform[]>, null);
   const [savePhase, setSavePhase] = useState<SavePhase>("idle");
   const [saveNote, setSaveNote] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -151,31 +147,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [dictionary, client]);
 
-  const saveTransforms = useCallback(async (): Promise<string> => {
-    if (!transforms || !isDirty(transforms)) return "";
-    try {
-      await api.put("/api/transforms", transforms.draft);
-      dispatchTransforms({ type: "committed", value: transforms.draft });
-      client.setQueryData(["transforms"], transforms.draft);
-      return "";
-    } catch (error) {
-      return errorText(error);
-    }
-  }, [transforms, client]);
-
   const saveAll = useCallback(async (): Promise<boolean> => {
     const settingsSaved = !isDirty(settings) || (await saveSettings());
-    const problems = [await saveDictionary(), await saveTransforms()].filter(Boolean);
-    if (problems.length) setSaveError(problems.join(" "));
-    return settingsSaved && problems.length === 0;
-  }, [settings, saveSettings, saveDictionary, saveTransforms]);
+    const problem = await saveDictionary();
+    if (problem) setSaveError(problem);
+    return settingsSaved && !problem;
+  }, [settings, saveSettings, saveDictionary]);
 
-  const latest = useRef({ settings, dictionary, transforms });
-  latest.current = { settings, dictionary, transforms };
-  const anyDirty = useCallback(
-    () => isDirty(latest.current.settings) || isDirty(latest.current.dictionary) || isDirty(latest.current.transforms),
-    [],
-  );
+  const latest = useRef({ settings, dictionary });
+  latest.current = { settings, dictionary };
+  const anyDirty = useCallback(() => isDirty(latest.current.settings) || isDirty(latest.current.dictionary), []);
 
   const store = useMemo<Store>(
     () => ({
@@ -193,9 +174,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dictionary,
       dispatchDictionary,
       saveDictionary,
-      transforms,
-      dispatchTransforms,
-      saveTransforms,
       anyDirty,
       prompt,
       closePrompt: () => setPrompt(null),
@@ -204,14 +182,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       withLicense,
       saveAll,
     }),
-    [settings, saveSettings, savePhase, saveNote, saveError, dictionary, saveDictionary, transforms, saveTransforms, anyDirty, prompt, confirm, askUnsaved, withLicense, saveAll],
+    [settings, saveSettings, savePhase, saveNote, saveError, dictionary, saveDictionary, anyDirty, prompt, confirm, askUnsaved, withLicense, saveAll],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 
-/** Loads a page-level document (dictionary, transforms) into its draft once, and again after the core changes it. */
-export function useSyncedDraft<T>(key: "dictionary" | "transforms", path: string, dispatch: (action: DraftAction<T>) => void): boolean {
+/** Loads a page-level document (the dictionary) into its draft once, and again after the core changes it. */
+export function useSyncedDraft<T>(key: "dictionary", path: string, dispatch: (action: DraftAction<T>) => void): boolean {
   const query = useQuery({ queryKey: [key], queryFn: () => api.get<T>(path) });
   useEffect(() => {
     if (query.data) dispatch({ type: "loaded", value: query.data });

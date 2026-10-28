@@ -904,7 +904,7 @@ class TestApplySettings:
 
         mock_build_output.assert_called_once_with(
             OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None,
-            _ignore_delivery, writing=None, hooks=None,
+            _ignore_delivery, hooks=None,
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
@@ -1155,11 +1155,7 @@ class TestMicrophoneWiring:
         assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"
 
 
-_DICTATE = {"keys": "ctrl+shift+alt+m", "mode": "toggle", "action": "dictate"}
-_EDIT = {"keys": "ctrl+alt+bracket_left", "mode": "hold", "action": "edit_selection"}
-
-
-class TestWritingWiring:
+class TestLearningWiring:
     def _paths(self, tmp_path: Path) -> AppPaths:
         paths = AppPaths(base=tmp_path)
         paths.ensure_dirs()
@@ -1183,7 +1179,6 @@ class TestWritingWiring:
         saved = json.loads(path.read_text(encoding="utf-8"))
         assert "batch" not in saved
         assert saved["history"]["keep_days"] == 30
-        assert config.get("writing.cleanup") == "light"
         assert config.get("hotkey.combination") == "ctrl+shift+alt+m"
 
     def test_a_config_without_a_batch_block_is_not_rewritten(self):
@@ -1204,10 +1199,16 @@ class TestWritingWiring:
         learner.observe.assert_called_once()
         assert not (paths.session_dir / "edits.jsonl").exists()
 
-    def test_learning_switched_off_in_settings_leaves_the_watcher_off(self, tmp_path):
-        config = FakeConfig({"writing.learn_words": False, "writing.learn_style": False})
-
-        assert _build_edit_capture(config, self._paths(tmp_path), MagicMock()) is None
+    @pytest.mark.parametrize(
+        "saved",
+        [
+            {"dictionary.learn_words": False},
+            {"writing.learn_words": False, "writing.learn_style": True, "writing.cleanup": "light"},
+        ],
+        ids=["switched-off", "switched-off-in-an-old-config"],
+    )
+    def test_learning_switched_off_in_settings_leaves_the_watcher_off(self, tmp_path, saved):
+        assert _build_edit_capture(FakeConfig(saved), self._paths(tmp_path), MagicMock()) is None
 
     def test_the_edits_log_and_the_learner_both_receive_events_when_both_are_on(self, tmp_path):
         paths = self._paths(tmp_path)
@@ -1227,35 +1228,20 @@ class TestWritingWiring:
     def test_background_work_starts_on_the_first_idle_and_only_once(self):
         bus = SimpleEventBus()
         started: list[str] = []
-        bootstrap._start_once_idle(bus, lambda: started.append("server"), lambda: started.append("edits"))
+        bootstrap._start_once_idle(bus, lambda: started.append("edits"), lambda: started.append("other"))
 
         bus.publish(StateChangedEvent(old_state="loading", new_state="error"))
         assert started == []
         bus.publish(StateChangedEvent(old_state="error", new_state="idle"))
         bus.publish(StateChangedEvent(old_state="recording", new_state="idle"))
 
-        assert started == ["server", "edits"]
-
-    def test_writing_notices_show_beside_the_dictation_not_in_the_tray(self, tmp_path):
-        from skryb.core.events import WritingNoticeEvent
-
-        bus = SimpleEventBus()
-        shown: list[str] = []
-        bootstrap._build_writing(
-            FakeConfig(), self._paths(tmp_path), bus, lambda: None, shown.append,
-        )
-
-        bus.publish(WritingNoticeEvent(message="Selection too long to edit"))
-
-        assert shown == ["Selection too long to edit"]
+        assert started == ["edits", "other"]
 
     def test_every_shortcut_action_reaches_the_use_case(self):
         use_case = MagicMock()
 
         actions = bootstrap._hotkey_actions(use_case)
 
-        assert actions.edit_activate is use_case.on_edit_hotkey_activated
-        assert actions.edit_deactivate is use_case.on_edit_hotkey_deactivated
         assert actions.paste_last is use_case.paste_last
         assert actions.copy_last is use_case.copy_last
         assert actions.dictate_activate is use_case.on_hotkey_activated
@@ -1264,14 +1250,9 @@ class TestWritingWiring:
     def test_switching_learning_on_hands_the_new_edit_watcher_to_a_new_listener(
         self, build_listener,
     ):
-        from skryb.writing.settings import WritingSettings
-
         app = MagicMock()
         watcher = MagicMock()
-        changes = ChangeSet.between(
-            _draft(writing=WritingSettings(learn_words=False, learn_style=False)),
-            _draft(writing=WritingSettings()),
-        )
+        changes = ChangeSet.between(_draft(learn_words=False), _draft(learn_words=True))
 
         with patch("skryb.bootstrap._build_output"):
             apply_settings(
@@ -1282,82 +1263,6 @@ class TestWritingWiring:
         assert changes.learning_turned_on
         build_listener.assert_called_once()
         app.set_hotkey_listener.assert_called_once_with(build_listener.return_value)
-
-    @pytest.mark.parametrize(
-        ("cleanup", "bindings", "needed"),
-        [
-            ("off", [_DICTATE], False),
-            ("off", None, False),
-            ("off", [_DICTATE, _DICTATE, {"keys": "ctrl+alt+v", "mode": "press", "action": "paste_last"}], False),
-            ("off", [_DICTATE, {"keys": "   ", "mode": "toggle", "action": "edit_selection"}], False),
-            ("off", [_DICTATE, {"keys": "ctrl+alt+e", "mode": "toggle", "action": "edit_selection"}], True),
-            ("off", [_DICTATE, _EDIT], True),
-            ("light", [_DICTATE], True),
-            ("polished", [], True),
-            ("", [_DICTATE], True),
-        ],
-        ids=[
-            "cleanup-off", "cleanup-off-default-shortcuts", "cleanup-off-duplicate-shortcuts",
-            "cleanup-off-blank-edit-shortcut", "cleanup-off-edit-shortcut",
-            "cleanup-off-punctuation-edit-shortcut", "light", "polished-no-shortcuts",
-            "blank-cleanup-reads-as-light",
-        ],
-    )
-    def test_the_writing_model_is_needed_only_for_cleanup_or_a_voice_edit_shortcut(
-        self, cleanup, bindings, needed,
-    ):
-        values = {"writing.cleanup": cleanup}
-        if bindings is not None:
-            values["hotkey.bindings"] = bindings
-
-        assert bootstrap._writing_needed(FakeConfig(values)) is needed
-
-    def test_turning_cleanup_off_in_settings_lets_the_writing_model_unload(self):
-        from skryb.writing.settings import WritingSettings
-
-        writing = MagicMock()
-        changes = ChangeSet.between(
-            _draft(writing=WritingSettings()), _draft(writing=WritingSettings(cleanup="off")),
-        )
-
-        with patch("skryb.bootstrap._build_output"):
-            apply_settings(
-                changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
-                writing=writing,
-            )
-
-        writing.follow_settings.assert_called_once_with()
-        writing.restart_server.assert_not_called()
-
-    def test_a_new_writing_model_file_restarts_the_writing_model(self):
-        from skryb.writing.settings import WritingSettings
-
-        writing = MagicMock()
-        changes = ChangeSet.between(
-            _draft(writing=WritingSettings()),
-            _draft(writing=WritingSettings(model_path="D:/models/qwen-é.gguf")),
-        )
-
-        with patch("skryb.bootstrap._build_output"):
-            apply_settings(
-                changes, FakeConfig(), MagicMock(), MagicMock(), gui_dispatcher=MagicMock(),
-                writing=writing,
-            )
-
-        writing.restart_server.assert_called_once_with()
-        writing.follow_settings.assert_not_called()
-
-    def test_streaming_and_verbatim_dictation_add_no_writing_time(self):
-        writing = MagicMock()
-        writing.estimated_seconds.return_value = 1.25
-
-        batch = bootstrap._writing_seconds(FakeConfig(), writing, 30.0)
-        streaming = bootstrap._writing_seconds(
-            FakeConfig({"transcription.mode": "streaming"}), writing, 30.0,
-        )
-
-        assert batch == 1.25
-        assert streaming == 0.0
 
 
 class TestAppAwareOutputChain:

@@ -22,18 +22,12 @@ from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.settings.settings_draft import SettingsDraft
 from skryb.transcription.engine_types import HardwareProfile
 from skryb.ui.shapes import draft_from_json
-from skryb.writing.install import INSTALL_BYTES
-from skryb.writing.transforms import BUILTIN_TRANSFORMS
 
 _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
     "crisperwhisper_mode", "capture_content", "input_device", "boost_quiet_speech",
-    "writing", "hotkey_bindings", "double_tap_locks_hold", "recording",
+    "learn_words", "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates",
-}
-_WRITING_KEYS = {
-    "cleanup", "lists", "deadline_seconds", "context", "learn_words", "learn_style",
-    "style_notes", "after_dictation_transform", "runtime_path", "model_path",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",
@@ -41,7 +35,7 @@ _RECORDING_KEYS = {
 }
 _CHANGE_KEYS = {
     "engine_reload_required", "hotkey_changed", "output_changed", "mode_changed",
-    "diagnostics_changed", "writing_server_changed", "learning_turned_on",
+    "diagnostics_changed", "learning_turned_on",
     "history_retention_changed",
 }
 
@@ -119,7 +113,7 @@ def test_the_app_and_its_settings_answer_in_the_contracts_shapes(rig: Rig) -> No
 
     settings = _settings(rig)
     assert set(settings) == _SETTINGS_KEYS
-    assert set(settings["writing"]) == _WRITING_KEYS
+    assert settings["learn_words"] is True
     assert set(settings["recording"]) == _RECORDING_KEYS
     assert settings["model_size"] == PARAKEET
     assert settings["output_mode"] == "direct_paste"
@@ -136,7 +130,7 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
         {"keys": "", "mode": "toggle", "action": "paste_last"},
         {"keys": "ctrl+alt+c", "mode": "hold", "action": "copy_last"},
     ]
-    settings["writing"]["style_notes"] = "  British spelling, café, 東京  "
+    settings["learn_words"] = False
     settings["recording"]["preferred_devices"] = ["Maono PD300X", " ", "Maono PD300X", "Jabra"]
     settings["paste_method_overrides"] = [["Mintty", "shift_insert"], ["code.exe", "ctrl_v"]]
 
@@ -151,10 +145,11 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
     assert len(rig.saved) == 1 and rig.saved[0].hotkey_changed and rig.saved[0].output_changed
     assert rig.config.get("output.mode") == "clipboard_only"
     assert rig.config.get("audio.preferred_devices") == ["Maono PD300X", "Jabra"]
+    assert rig.config.get("dictionary.learn_words") is False
     pushed = stream.until("settings")
     stream.close()
     assert pushed["output_mode"] == "clipboard_only"
-    assert pushed["writing"]["style_notes"] == "British spelling, café, 東京"
+    assert pushed["learn_words"] is False
     assert pushed["hotkey_bindings"] == [
         {"keys": "ctrl+alt+space", "mode": "hold", "action": "dictate"},
         {"keys": "f13", "mode": "toggle", "action": "dictate"},
@@ -245,7 +240,7 @@ def test_shortcuts_that_work_together_validate(rig: Rig) -> None:
     bindings = [
         {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
         {"keys": "mouse4", "mode": "hold", "action": "dictate"},
-        {"keys": "ctrl+alt+e", "mode": "hold", "action": "edit_selection"},
+        {"keys": "ctrl+alt+v", "mode": "press", "action": "paste_last"},
     ]
     assert rig.call("POST", "/api/shortcuts/validate", {"bindings": bindings}) == (200, {"ok": True})
 
@@ -384,7 +379,7 @@ def test_a_new_logs_folder_is_kept_for_the_next_start_and_one_that_is_not_there_
     assert rig.call("GET", "/api/app")[1]["diagnostics_directory"] == running_in
 
 
-def test_first_run_setup_needs_a_model_and_has_no_history_or_writing_yet(make_rig) -> None:
+def test_first_run_setup_needs_a_model_and_has_no_history_yet(make_rig) -> None:
     rig = make_rig(first_run=True, installed=())
     settings = _settings(rig)
 
@@ -393,8 +388,6 @@ def test_first_run_setup_needs_a_model_and_has_no_history_or_writing_yet(make_ri
         400, {"error": "Please download at least one model before saving."},
     )
     assert rig.call("GET", "/api/history")[0] == 404
-    assert rig.call("GET", "/api/writing")[0] == 404
-    assert rig.call("GET", "/api/transforms")[0] == 404
     assert rig.call("POST", "/api/setup/done")[0] == 204
     assert rig.setup_done.is_set()
 
@@ -426,8 +419,15 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
     assert by_name[PARAKEET]["download"] is None
     assert set(by_name[PARAKEET]) == {
         "name", "display_size", "description", "installed", "supports_batch",
-        "supports_streaming", "has_speech_styles", "license_id", "download",
+        "supports_streaming", "has_speech_styles", "style_family", "speech_style", "license_id", "download",
     }
+    assert (by_name[PARAKEET]["style_family"], by_name[PARAKEET]["speech_style"]) == (None, None)
+    assert (by_name[TURBO]["style_family"], by_name[TURBO]["speech_style"]) == (None, None)
+    assert (by_name["underdog-bark-3.0-clean"]["style_family"], by_name["underdog-bark-3.0-clean"]["speech_style"]) == (
+        "underdog-bark-3.0-plus", "intended",
+    )
+    assert by_name["underdog-bark-3.0-plus"]["speech_style"] == "verbatim"
+    assert by_name["underdog-bark-3.0-plus"]["has_speech_styles"] is True
 
 
 def test_first_run_setup_lists_this_computers_default_model_first(make_rig) -> None:
@@ -527,6 +527,25 @@ def _microphone(name: str, label: str, *, connected: bool) -> dict[str, Any]:
     return {"name": name, "label": label, "connected": connected, "is_default": False}
 
 
+def test_the_volume_slider_plays_the_tone_it_asks_for_at_its_unsaved_volume(rig: Rig) -> None:
+    assert rig.call("POST", "/api/sounds/preview", {"cue": "start", "volume": 0.35})[0] == 204
+    assert rig.call("POST", "/api/sounds/preview", {"cue": "stop", "volume": 1})[0] == 204
+    assert rig.call("POST", "/api/sounds/preview", {"cue": "start", "volume": 0})[0] == 204
+
+    assert rig.previewed == [("start", 0.35), ("stop", 1.0), ("start", 0.0)]
+
+
+def test_a_sound_preview_with_a_bad_tone_or_volume_is_refused(rig: Rig) -> None:
+    for body in (
+        {"cue": "ready", "volume": 0.5}, {"cue": "START", "volume": 0.5}, {"cue": "start", "volume": 1.01},
+        {"cue": "start", "volume": -0.1}, {"cue": "start", "volume": True}, {"cue": "start"}, {"volume": 0.5},
+        {"cue": "start", "volume": "0.5"}, [],
+    ):
+        assert rig.call("POST", "/api/sounds/preview", body)[0] == 400
+
+    assert rig.previewed == []
+
+
 def test_the_level_meter_streams_the_loudest_level_and_stops_when_asked(rig: Rig) -> None:
     stream = rig.events()
     maono = {"device": "Microphone (Maono PD300X)", "on": True}
@@ -592,7 +611,7 @@ def test_a_shell_that_goes_away_mid_recording_leaves_no_hook_or_meter_behind(mak
     assert rig.listener.resume_calls == 1
 
 
-# -- dictionary, transforms, writing ------------------------------------------------------------
+# -- dictionary ------------------------------------------------------------------------------
 
 _DICTIONARY: dict[str, Any] = {
     "options": {
@@ -629,7 +648,7 @@ def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
 
 def test_removing_learned_words_stops_them_being_learned_again(rig: Rig, monkeypatch) -> None:
     forgotten: list[tuple[tuple[str, str], ...]] = []
-    monkeypatch.setattr(rig.writing, "forget_learned_words", forgotten.append)
+    monkeypatch.setattr(rig.learner, "block", lambda pairs: forgotten.append(tuple(pairs)))
     rig.call("PUT", "/api/dictionary", _DICTIONARY)
     kept = [rule for rule in _DICTIONARY["rules"] if rule.get("spoken") != ["farhan"]]
     without_farhan = {**_DICTIONARY, "rules": kept}
@@ -637,7 +656,7 @@ def test_removing_learned_words_stops_them_being_learned_again(rig: Rig, monkeyp
     rig.call("PUT", "/api/dictionary", without_farhan)
     assert rig.call("POST", "/api/dictionary/forget-learned")[0] == 204
 
-    assert forgotten == [(), (("farhan", "Farhān"),), (("tokyo", "東京"),)]
+    assert forgotten == [(("farhan", "Farhān"),), (("tokyo", "東京"),)]
     kinds = [(rule["kind"], rule.get("learned")) for rule in rig.call("GET", "/api/dictionary")[1]["rules"]]
     assert kinds == [("literal", False), ("regex", None)]
 
@@ -646,7 +665,7 @@ def test_forgetting_one_learned_word_removes_only_it_and_stops_it_being_learned_
     rig: Rig, monkeypatch,
 ) -> None:
     forgotten: list[tuple[tuple[str, str], ...]] = []
-    monkeypatch.setattr(rig.writing, "forget_learned_words", forgotten.append)
+    monkeypatch.setattr(rig.learner, "block", lambda pairs: forgotten.append(tuple(pairs)))
     slashed = {
         "kind": "literal", "spoken": ["ümit / o'neil"], "replacement": "Ümit O'Neil",
         "case_sensitive": False, "whole_words": True, "phonetic": False, "enabled": True,
@@ -658,7 +677,7 @@ def test_forgetting_one_learned_word_removes_only_it_and_stops_it_being_learned_
     assert rig.call("DELETE", "/api/dictionary/learned/%C3%BCmit%20%2F%20o'neil")[0] == 204
     assert rig.call("DELETE", "/api/dictionary/learned/tokyo")[0] == 204
 
-    assert forgotten[1:] == [(("ümit / o'neil", "Ümit O'Neil"),), (("tokyo", "東京"),)]
+    assert forgotten == [(("ümit / o'neil", "Ümit O'Neil"),), (("tokyo", "東京"),)]
     rules = rig.call("GET", "/api/dictionary")[1]["rules"]
     assert [rule.get("spoken", rule.get("pattern")) for rule in rules] == [
         ["aisha", "ayesha"], ["farhan"], r"\bteh\b",
@@ -687,64 +706,6 @@ def test_a_dictionary_with_a_broken_rule_is_refused_and_the_saved_one_is_kept(ri
     assert status == 400
     assert body["detail"] == "Dictionary rule 5 is not valid."
     assert rig.call("GET", "/api/dictionary") == (200, _DICTIONARY)
-
-
-def test_transformations_can_be_edited_and_the_built_ins_restored(rig: Rig) -> None:
-    status, transforms = rig.call("GET", "/api/transforms")
-    assert status == 200
-    assert transforms == [
-        {"name": name, "instruction": instruction, "builtin": True}
-        for name, instruction in BUILTIN_TRANSFORMS.items()
-    ]
-
-    edited = [
-        {"name": "Concise", "instruction": "Shorter, keep every name like Aïsha."},
-        {"name": "Emoji ✨", "instruction": "Add one fitting emoji."},
-        {"name": "   ", "instruction": "Dropped: it has no name."},
-    ]
-    assert rig.call("PUT", "/api/transforms", edited)[0] == 204
-    assert rig.call("GET", "/api/transforms")[1] == [
-        {"name": "Concise", "instruction": "Shorter, keep every name like Aïsha.", "builtin": True},
-        {"name": "Emoji ✨", "instruction": "Add one fitting emoji.", "builtin": False},
-    ]
-
-    assert rig.call("POST", "/api/transforms/restore-builtins")[0] == 204
-    names = [transform["name"] for transform in rig.call("GET", "/api/transforms")[1]]
-    assert names == ["Concise", "Emoji ✨", "Bullet points", "Professional", "Casual"]
-    assert rig.call("GET", "/api/transforms")[1][0]["instruction"] == BUILTIN_TRANSFORMS["Concise"]
-    assert [changes.output_changed for changes in rig.saved] == [True, True]
-    assert rig.call("PUT", "/api/transforms", {"Concise": "not a list"})[0] == 400
-
-
-def test_the_writing_model_reports_its_status_and_acts_on_request(rig: Rig) -> None:
-    status, writing = rig.call("GET", "/api/writing")
-
-    assert status == 200
-    assert writing["state"] == "not_installed"
-    assert writing["install_bytes"] == INSTALL_BYTES
-    assert writing["runtime_path"].endswith("llama-server.exe")
-    assert writing["learned_style_summary"] == "nothing yet"
-    assert set(writing) == {
-        "state", "detail", "bytes_done", "bytes_total", "install_bytes", "runtime_path",
-        "model_path", "last_cleanup_seconds", "learned_style_summary",
-    }
-
-    stream = rig.events()
-    assert rig.call("POST", "/api/writing/forget-style")[0] == 204
-    assert stream.until("writing")["state"] == "not_installed"
-    assert rig.call("POST", "/api/writing/install")[0] == 202
-    failed = _next_writing_state(stream, "failed")
-    stream.close()
-    assert "internet connection" in failed["detail"]
-    assert rig.call("POST", "/api/writing/reset-learning")[0] == 204
-    assert rig.call("POST", "/api/writing/levitate")[0] == 404
-
-
-def _next_writing_state(stream, state: str) -> dict[str, Any]:
-    while True:
-        status = stream.until("writing")
-        if status["state"] == state:
-            return status
 
 
 def _wait_for(condition, seconds: float = 5.0) -> None:

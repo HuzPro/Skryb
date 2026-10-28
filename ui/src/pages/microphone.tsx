@@ -160,6 +160,39 @@ export function MicrophonePicker({ settings, onChoose }: { settings: Settings; o
   );
 }
 
+type Cue = "start" | "stop";
+const SLIDER_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+
+/** Each preview plays the other tone, start then stop, the way a recording sounds. */
+export function nextCue(last: Cue | null): Cue {
+  return last === "start" ? "stop" : "start";
+}
+
+/** Letting go of the slider, or moving it with the keys, plays a tone at the new volume, like Windows does. */
+function VolumeSlider({ value, disabled, onChange }: { value: number; disabled: boolean; onChange: (volume: number) => void }) {
+  const last = useRef<Cue | null>(null);
+  const preview = (volume: number) => {
+    const cue = nextCue(last.current);
+    last.current = cue;
+    void api.post("/api/sounds/preview", { cue, volume }).catch(() => undefined);
+  };
+  return (
+    <input
+      aria-label="Sound volume"
+      type="range"
+      min={0}
+      max={1}
+      step={0.05}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(Number(event.target.value))}
+      onPointerUp={(event) => preview(Number(event.currentTarget.value))}
+      onKeyUp={(event) => SLIDER_KEYS.has(event.key) && preview(Number(event.currentTarget.value))}
+      className="w-28 disabled:opacity-50"
+    />
+  );
+}
+
 export function MicrophonePage() {
   const { settings, editSettings } = useStore();
   const { microphones } = useMicrophones();
@@ -241,16 +274,10 @@ export function MicrophonePage() {
       <Section title="Sounds">
         <Rows>
           <Row title="Play sounds" description="A short tone when recording starts and stops, and when the app is ready.">
-            <input
-              aria-label="Sound volume"
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
+            <VolumeSlider
               value={recording.cue_volume}
               disabled={!recording.cues_enabled}
-              onChange={(event) => editRecording({ cue_volume: Number(event.target.value) })}
-              className="w-28 disabled:opacity-50"
+              onChange={(cue_volume) => editRecording({ cue_volume })}
             />
             <Switch aria-label="Play sounds" checked={recording.cues_enabled} onCheckedChange={(on) => editRecording({ cues_enabled: on })} />
           </Row>

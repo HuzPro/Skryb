@@ -128,8 +128,13 @@ function RuleEditor({ editor, onChange, children }: { editor: Editor; onChange: 
   );
 }
 
+/** The list shows the newest rule first; the saved order, which rules apply in, stays oldest first. */
+export function newestFirst<T>(rules: T[]): { rule: T; index: number }[] {
+  return rules.map((rule, index) => ({ rule, index })).reverse();
+}
+
 export function DictionaryPage() {
-  const { dictionary, dispatchDictionary, saveDictionary, confirm } = useStore();
+  const { dictionary, dispatchDictionary, saveDictionary, confirm, settings, editSettings } = useStore();
   const client = useQueryClient();
   const failed = useSyncedDraft<Dictionary>("dictionary", "/api/dictionary", dispatchDictionary);
   const [adding, setAdding] = useState<Editor>(EMPTY_EDITOR);
@@ -187,6 +192,20 @@ export function DictionaryPage() {
         </Rows>
       </Section>
 
+      {settings ? (
+        <Section title="Learning" note="Learning watches edits you make to text this app pasted, for up to 15 minutes after each dictation. Everything stays on this device.">
+          <Rows>
+            <Row title="Learn words I correct" description="Names and terms you fix after pasting are spelled right next time.">
+              <Switch
+                aria-label="Learn words I correct"
+                checked={settings.draft.learn_words}
+                onCheckedChange={(learn_words) => editSettings((current) => ({ ...current, learn_words }))}
+              />
+            </Row>
+          </Rows>
+        </Section>
+      ) : null}
+
       <Section
         title="Words and replacements"
         note="Replace spoken words or phrases with typed text. Separate aliases with commas; regex rules use one pattern. A space at the start or end of the box glues every alias to the neighbouring text."
@@ -207,7 +226,7 @@ export function DictionaryPage() {
             </RuleEditor>
           </form>
           {draft.rules.length ? (
-            draft.rules.map((rule, index) =>
+            newestFirst(draft.rules).map(({ rule, index }) =>
               editing?.index === index ? (
                 <div key={index} className="bg-muted/40 px-4 py-3">
                   <RuleEditor editor={editing.editor} onChange={(editor) => setEditing({ index, editor })}>

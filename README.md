@@ -62,12 +62,8 @@ first thing to include in a bug report.
   at roughly 15 to 30 times faster than real time. Underdog Bark 3.0
   (163 MB, English only) is more accurate at the same size, and on a laptop
   with an Intel NPU it runs on the NPU.
-- **Optional writing model.** A small local language model, run by llama.cpp,
-  drops your self-corrections, so "dock 7, actually no, dock 9" comes out as
-  "dock 9". It can also rewrite selected text when you say something like
-  "make this shorter". If it fails, your dictation goes through unchanged.
-- **Learns your spellings.** Select a word it got wrong and dictate over it.
-  Once two separate fixes agree, it uses your spelling from then on.
+- **Learns your spellings.** Fix a word it got wrong after it pastes. Once two
+  separate fixes agree, it uses your spelling from then on.
 - **Small footprint.** A tray icon, plus a pill on screen while you dictate.
   Settings and History open in a separate 3.5 MB window only when you ask for
   them, and it closes completely when you close it.

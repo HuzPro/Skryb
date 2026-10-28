@@ -13,7 +13,6 @@ from skryb.core.events import (
     StateChangedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
-    WritingServerFailedEvent,
 )
 from skryb.core.state_machine import AppState, AppStateMachine
 from skryb.tray.app import SystemTrayApp, format_duration
@@ -785,33 +784,6 @@ class TestNoLastDictation:
         app._event_bus.publish(NoLastDictationEvent())
 
         icon.notify.assert_called_once_with("Skryb", "No dictation yet.")
-
-
-class TestWritingServerFailure:
-    def test_the_writing_server_giving_up_becomes_one_tray_balloon(self):
-        icon = MagicMock()
-
-        def factory(**kwargs):
-            icon.run.side_effect = lambda setup: setup(icon)
-            return icon
-
-        app = _build_app(tray_factory=factory)
-        app.run()
-
-        app._event_bus.publish(WritingServerFailedEvent(
-            message="The writing model could not start. Dictation works without cleanup.",
-        ))
-
-        icon.notify.assert_called_once_with(
-            "Skryb",
-            "The writing model could not start. Dictation works without cleanup.",
-        )
-        icon.update_state.assert_not_called()
-
-    def test_a_failure_before_the_icon_exists_is_ignored(self):
-        app = _build_app()
-
-        app._event_bus.publish(WritingServerFailedEvent(message="The writing model could not start."))
 
 
 class TestRestart:

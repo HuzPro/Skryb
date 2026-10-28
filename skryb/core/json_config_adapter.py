@@ -57,18 +57,6 @@ DEFAULT_CONFIG = {
         "retain_sessions": 50,
         "directory": "",
     },
-    "writing": {
-        "cleanup": "light",
-        "lists": True,
-        "deadline_seconds": 4.0,
-        "context": True,
-        "learn_words": True,
-        "learn_style": True,
-        "style_notes": "",
-        "after_dictation_transform": "",
-        "runtime_path": "",
-        "model_path": "",
-    },
     "history": {
         "retention_days": 0,
     },

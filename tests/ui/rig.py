@@ -18,10 +18,10 @@ from tests.fakes.dispatcher import InlineActionDispatcher
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.hotkeys import FakeHotkeyListener
 from tests.fakes.model_manager import FakeModelManager
-from tests.writing.test_service import Rig as WritingRig
 from skryb.core.event_bus import SimpleEventBus
 from skryb.core.state_machine import AppStateMachine
 from skryb.history.service import HistoryService, RetryOutcome
+from skryb.output.word_learning import WordLearner
 from skryb.recording.input_devices import Microphones
 from skryb.settings.download_coordinator import DownloadCoordinator
 from skryb.settings.engine_hot_swap import EngineHotSwapCoordinator
@@ -139,9 +139,12 @@ class Rig:
         self.history_dir = tmp_path / "diagnostics"
         self.history_dir.mkdir(parents=True)
         self.played: list[Path] = []
+        self.previewed: list[tuple[str, float]] = []
         self.stopped = 0
-        self.writing_rig = WritingRig(tmp_path / "writing", [], locate_files=False)
-        self.writing = self.writing_rig.service
+        self.learner = WordLearner(
+            tmp_path / "learning.json", tmp_path / "dictionary.json",
+            lambda: True, lambda: None, "rig",
+        )
         self.hub = EventHub(self.bus, heartbeat_seconds=heartbeat_seconds)
         self.server = ApiServer(self.hub, poll_seconds=0.02)
         self.server.start()
@@ -159,7 +162,7 @@ class Rig:
             diagnostics_dir=self.history_dir,
             state=lambda: self.state_machine.state,
             on_save=on_save or self.saved.append,
-            writing=None if first_run else self.writing,
+            learner=None if first_run else self.learner,
             history=None if first_run else HistoryService(
                 self.history_dir,
                 retranscribe or _never_retranscribes,
@@ -170,6 +173,7 @@ class Rig:
             on_setup_done=self.setup_done.set,
             open_path=self.opened.append,
             updates=updates,
+            preview_sound=lambda cue, volume: self.previewed.append((cue, volume)),
         ).serve_on(self.server)
 
     def _count_stop(self) -> None:
@@ -203,7 +207,6 @@ class Rig:
 
     def close(self) -> None:
         self.server.stop()
-        self.writing.dispose()
 
 
 class EventStream:

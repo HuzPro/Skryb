@@ -176,8 +176,8 @@ class TestMoveVoiceToTextFolders:
         roaming_old = Path(environ["APPDATA"]) / "VoiceToText"
         local_old = Path(environ["LOCALAPPDATA"]) / "VoiceToText"
         _fill(roaming_old, 2500)
-        (local_old / "writing" / "models").mkdir(parents=True)
-        (local_old / "writing" / "models" / "model.gguf").write_bytes(b"\x00" * 4096)
+        (local_old / "updates").mkdir(parents=True)
+        (local_old / "updates" / "Skryb-Setup-0.2.0.exe").write_bytes(b"\x00" * 4096)
 
         move_voicetotext_folders(environ)
 
@@ -185,7 +185,7 @@ class TestMoveVoiceToTextFolders:
         assert not roaming_old.exists() and not local_old.exists()
         assert len(list((roaming_new / "diagnostics").rglob("*.json"))) == 2500
         assert (roaming_new / "config.json").read_text(encoding="utf-8") == '{"hotkey": "ctrl+shift+alt+m"}'
-        assert (Path(environ["LOCALAPPDATA"]) / "Skryb" / "writing" / "models" / "model.gguf").stat().st_size == 4096
+        assert (Path(environ["LOCALAPPDATA"]) / "Skryb" / "updates" / "Skryb-Setup-0.2.0.exe").stat().st_size == 4096
 
     def test_leaves_both_folders_alone_when_skryb_already_has_one(
         self, tmp_path: Path,

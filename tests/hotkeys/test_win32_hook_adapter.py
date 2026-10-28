@@ -78,11 +78,9 @@ class TestSeveralShortcutsInOneAdapter:
             calls,
             Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
             Binding("mouse5", BindingMode.PRESS, BindingAction.COPY_LAST),
-            Binding("ctrl+alt+e", BindingMode.HOLD, BindingAction.EDIT_SELECTION),
         )
 
         assert _tap(adapter, keys.VK_XBUTTON2) == [False, False]
-        _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, 0x45)
 
         assert calls.log == []
 

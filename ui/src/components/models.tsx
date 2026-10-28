@@ -32,6 +32,7 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
   const path = `/api/models/${encodeURIComponent(model.name)}`;
   const download = model.download;
   const active = download?.state === "downloading" || download?.state === "paused";
+  const queued = download?.state === "queued";
 
   const act = (verb: string) => async (event: MouseEvent) => {
     event.stopPropagation();
@@ -91,6 +92,10 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
                 Cancel
               </Button>
             </>
+          ) : queued ? (
+            <Button variant="outline" size="sm" onClick={act("cancel")}>
+              Cancel
+            </Button>
           ) : model.installed ? (
             <Button variant="outline" size="sm" onClick={act("delete")}>
               Delete
@@ -110,6 +115,9 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
             {downloadLine(download.bytes_done, download.bytes_total)}
           </div>
         </div>
+      ) : null}
+      {queued ? (
+        <div className="mt-3 text-[12px] text-muted-foreground">Queued: starts when another download finishes.</div>
       ) : null}
       {download?.state === "failed" ? <InlineError>Download failed: {download.error || "no reason was given"}</InlineError> : null}
       {error ? <InlineError>{error}</InlineError> : null}

@@ -1,16 +1,44 @@
 import { describe, expect, it } from "vitest";
 import { launchPath, rememberPage } from "../app";
-import type { HistoryEntry, Model, Settings, UpdateStatus, WritingRecord } from "../lib/types";
-import { duplicateAlias, joinAliases, splitAliases } from "./dictionary";
-import { describeOutcome, finalText, formatDuration, groupByDay, hasVersions, preview } from "./history";
+import type { HistoryEntry, Model, Settings, UpdateStatus } from "../lib/types";
+import { duplicateAlias, joinAliases, newestFirst, splitAliases } from "./dictionary";
+import { finalText, formatDuration, groupByDay, preview } from "./history";
+import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
-import { withMode } from "./transcription";
+import { styleInUse, visibleModels, withMode, withStyle } from "./transcription";
 import { describeUpdate } from "./updates";
-import { describeTrackRecord, fileName } from "./writing";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
-  id: at, at, text, audio_seconds: 3, status: "", error: null, has_audio: true, kind: "dictation", writing: null, ...extra,
+  id: at, at, text, audio_seconds: 3, status: "", error: null, has_audio: true, typed: "", ...extra,
+});
+
+describe("the volume slider's preview", () => {
+  it("plays the start tone first, then alternates with the stop tone", () => {
+    const played: ("start" | "stop")[] = [];
+    let last: "start" | "stop" | null = null;
+    for (let at = 0; at < 1000; at += 1) played.push((last = nextCue(last)));
+    expect(played.slice(0, 4)).toEqual(["start", "stop", "start", "stop"]);
+    expect(played.filter((cue) => cue === "start")).toHaveLength(500);
+  });
+});
+
+describe("dictionary list order", () => {
+  it("shows the word added last at the top and keeps each rule's saved position", () => {
+    const rules = Array.from({ length: 1500 }, (_, at) => `word-${at}`);
+    const shown = newestFirst(rules);
+    expect(shown[0]).toEqual({ rule: "word-1499", index: 1499 });
+    expect(shown.at(-1)).toEqual({ rule: "word-0", index: 0 });
+    expect(shown.every(({ rule, index }) => rules[index] === rule)).toBe(true);
+    expect(rules[0]).toBe("word-0");
+  });
+
+  it("keeps duplicates and blanks apart by position", () => {
+    expect(newestFirst(["café", "", "café"])).toEqual([
+      { rule: "café", index: 2 }, { rule: "", index: 1 }, { rule: "café", index: 0 },
+    ]);
+    expect(newestFirst([])).toEqual([]);
+  });
 });
 
 describe("dictionary aliases", () => {
@@ -60,34 +88,14 @@ describe("dictionary aliases", () => {
   });
 });
 
-const writing = (extra: Partial<WritingRecord> = {}): WritingRecord => ({
-  outcome: "applied", reason: "", seconds: 0.42, answer: "", typed: "", context_before: "", window: "", ...extra,
-});
-
 describe("history versions", () => {
   it("lists what was typed, and falls back to what was heard for older entries", () => {
-    const typed = entry("2026-09-28T18:48:37", "four five", { writing: writing({ typed: "Testing 1, 2, 3, 4, 5." }) });
+    const typed = entry("2026-09-28T18:48:37", "four five", { typed: "Testing 1, 2, 3, 4, 5." });
     const older = entry("2026-09-20T09:00:00", "An old dictation café");
 
     expect(finalText(typed)).toBe("Testing 1, 2, 3, 4, 5.");
     expect(preview(typed)).toBe("Testing 1, 2, 3, 4, 5.");
     expect(preview(older)).toBe("An old dictation café");
-  });
-
-  it("only offers a comparison when there is more than one version to compare", () => {
-    expect(hasVersions(entry("2026-09-28T10:00:00", "hello", { writing: writing({ answer: "Hello." }) }))).toBe(true);
-    expect(hasVersions(entry("2026-09-28T10:00:00", "hello", { writing: writing({ typed: "Hello there." }) }))).toBe(true);
-    expect(hasVersions(entry("2026-09-28T10:00:00", "hello ", { writing: writing({ typed: "hello" }) }))).toBe(false);
-    expect(hasVersions(entry("2026-09-28T10:00:00", "hello", { writing: writing({ outcome: "skipped" }) }))).toBe(false);
-    expect(hasVersions(entry("2026-09-28T10:00:00", "hello"))).toBe(false);
-  });
-
-  it("says what the writing model did in plain words", () => {
-    expect(describeOutcome(writing())).toEqual({ text: "Writing model applied in 0.42 s.", bad: false });
-    expect(describeOutcome(writing({ outcome: "rejected", reason: "a number changed" }))).toEqual({ text: "Writing model answer not used: a number changed.", bad: true });
-    expect(describeOutcome(writing({ outcome: "too_slow", reason: "it took 4.50s, over the 4.0s limit" })).text).toBe("Writing model too slow: it took 4.50s, over the 4.0s limit.");
-    expect(describeOutcome(writing({ outcome: "skipped", reason: "the writing model is busy" })).bad).toBe(true);
-    expect(describeOutcome(writing({ outcome: "", seconds: null })).text).toBe("Writing model not asked (cleanup was off).");
   });
 });
 
@@ -154,13 +162,55 @@ describe("settings helpers", () => {
   });
 });
 
+describe("Bark Plus speech styles", () => {
+  const family = "underdog-bark-3.0-plus";
+  const models = [
+    { name: "phonon-2", installed: true, style_family: null, speech_style: null },
+    { name: "underdog-bark-3.0-plus", installed: false, style_family: family, speech_style: "verbatim" },
+    { name: "underdog-bark-3.0-clean", installed: true, style_family: family, speech_style: "intended" },
+    { name: "crisperwhisper-2.0-turbo", installed: true, has_speech_styles: true },
+  ] as Model[];
+  const names = (shown: Model[]) => shown.map((model) => model.name);
+
+  it("shows Plus and Clean as one card, the one for the style in use, in Plus's place", () => {
+    expect(names(visibleModels(models, "phonon-2", "intended"))).toEqual(["phonon-2", "underdog-bark-3.0-clean", "crisperwhisper-2.0-turbo"]);
+    expect(names(visibleModels(models, "phonon-2", "verbatim"))).toEqual(["phonon-2", "underdog-bark-3.0-plus", "crisperwhisper-2.0-turbo"]);
+  });
+
+  it("shows the selected member even when the style setting says otherwise", () => {
+    expect(names(visibleModels(models, "underdog-bark-3.0-plus", "intended"))[1]).toBe("underdog-bark-3.0-plus");
+  });
+
+  it("reads the style from the selected member, and from the setting for anything else", () => {
+    const settings = { model_size: "underdog-bark-3.0-plus", crisperwhisper_mode: "intended" } as Settings;
+    expect(styleInUse(settings, models)).toBe("verbatim");
+    expect(styleInUse({ ...settings, model_size: "crisperwhisper-2.0-turbo" }, models)).toBe("intended");
+    expect(styleInUse({ ...settings, model_size: "not-listed" }, models)).toBe("intended");
+  });
+
+  it("swaps Clean for Plus when the style changes, keeping the chosen engine", () => {
+    const settings = { model_size: "underdog-bark-3.0-clean", crisperwhisper_mode: "intended", engine: "openvino_parakeet" } as Settings;
+    expect(withStyle(settings, "verbatim", models)).toMatchObject({
+      model_size: "underdog-bark-3.0-plus", crisperwhisper_mode: "verbatim", engine: "openvino_parakeet",
+    });
+    expect(withStyle(withStyle(settings, "verbatim", models), "intended", models)).toMatchObject({ model_size: "underdog-bark-3.0-clean" });
+  });
+
+  it("changes only the setting for CrisperWhisper and models without styles", () => {
+    const crisper = { model_size: "crisperwhisper-2.0-turbo", crisperwhisper_mode: "intended" } as Settings;
+    expect(withStyle(crisper, "verbatim", models)).toEqual({ ...crisper, crisperwhisper_mode: "verbatim" });
+    const phonon = { model_size: "phonon-2", crisperwhisper_mode: "intended" } as Settings;
+    expect(withStyle(phonon, "verbatim", models)).toEqual({ ...phonon, crisperwhisper_mode: "verbatim" });
+  });
+});
+
 describe("the page a launch opens", () => {
   const memory = () => {
     const saved = new Map<string, string>();
     return { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value) };
   };
 
-  it("opens settings on Transcription the first time, and History and setup on themselves", () => {
+  it("opens settings on the Model page the first time, and History and setup on themselves", () => {
     const fresh = memory();
     expect(launchPath("settings", fresh)).toBe("/transcription");
     expect(launchPath("history", fresh)).toBe("/history");
@@ -170,12 +220,12 @@ describe("the page a launch opens", () => {
 
   it("reopens settings on the settings page shown last, never on History or setup", () => {
     const used = memory();
-    for (const path of ["/writing", "/shortcuts", "/history", "/setup", "/nowhere", "/"]) rememberPage(path, used);
+    for (const path of ["/dictionary", "/shortcuts", "/history", "/setup", "/nowhere", "/"]) rememberPage(path, used);
     expect(launchPath("settings", used)).toBe("/shortcuts");
     expect(launchPath("history", used)).toBe("/history");
   });
 
-  it("falls back to Transcription when the stored page is unknown or storage is blocked", () => {
+  it("falls back to the Model page when the stored page is unknown or storage is blocked", () => {
     const tampered = memory();
     tampered.setItem("last-settings-page", "../../etc");
     expect(launchPath("settings", tampered)).toBe("/transcription");
@@ -189,34 +239,6 @@ describe("the page a launch opens", () => {
     };
     expect(() => rememberPage("/output", blocked)).not.toThrow();
     expect(launchPath("settings", blocked)).toBe("/transcription");
-  });
-});
-
-describe("writing model file", () => {
-  it("names the file in use, whether it is the installed one or an override", () => {
-    expect(fileName("C:\\Users\\Zoë\\AppData\\Local\\Skryb\\writing\\models\\Spark-X2.5-4B-Q4_K_M.gguf")).toBe("Spark-X2.5-4B-Q4_K_M.gguf");
-    expect(fileName("D:/models/Qwen3.5-4B-Q4_K_M.gguf")).toBe("Qwen3.5-4B-Q4_K_M.gguf");
-    expect(fileName("")).toBe("");
-  });
-});
-
-describe("writing model track record", () => {
-  it("counts the outcomes in plain words and lists why answers were not used", () => {
-    const lines = describeTrackRecord({
-      dictations: 50,
-      outcomes: { applied: 38, rejected: 7, too_slow: 5 },
-      rejections: [{ reason: "a number changed", count: 4 }, { reason: "a hedge was dropped", count: 3 }],
-    });
-
-    expect(lines).toEqual([
-      "Last 50 dictations: 38 applied, 7 not used, 5 too slow.",
-      "Not used because a number changed (4), a hedge was dropped (3).",
-    ]);
-  });
-
-  it("reads right for one dictation and for none", () => {
-    expect(describeTrackRecord({ dictations: 1, outcomes: { skipped: 1 }, rejections: [] })).toEqual(["Last 1 dictation: 1 skipped."]);
-    expect(describeTrackRecord({ dictations: 0, outcomes: {}, rejections: [] })).toEqual(["No dictations have gone through the writing model yet."]);
   });
 });
 

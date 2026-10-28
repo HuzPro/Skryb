@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Protocol
 
-from skryb.downloads.chunked_file_downloader import HeadResult
+from skryb.downloads.chunked_file_downloader import ChunkedFileDownloader, HeadResult
 
 
 _REQUEST_TIMEOUT_SECONDS = 60
@@ -65,6 +65,13 @@ class RequestsHttpClient:
         )
         response.raise_for_status()
         return response.content
+
+
+def chunked_downloader() -> ChunkedFileDownloader:
+    """A file downloader on a ``requests`` session of its own."""
+    import requests
+
+    return ChunkedFileDownloader(http=RequestsHttpClient(session=requests.Session()))
 
 
 class _StreamingBody:

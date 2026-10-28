@@ -96,7 +96,7 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
     "underdog-bark-3.0-plus": ModelInfo(
         name="underdog-bark-3.0-plus",
         size_mb=180,
-        description="Underdog Bark 3.0 Plus: fewer errors than Bark 3.0, 180 MB, English only",
+        description="Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Verbatim keeps every um, 180 MB, English only",
         repo_id="ConwayResearch/Underdog-Bark-3.0-Plus",
         revision="d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
         compatible_engines=_NPU_PARAKEET_ENGINES,
@@ -105,7 +105,7 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
     "underdog-bark-3.0-clean": ModelInfo(
         name="underdog-bark-3.0-clean",
         size_mb=180,
-        description="Underdog Bark 3.0 Clean: Plus that drops ums, false starts and repeats",
+        description="Underdog Bark 3.0 Plus: fewer errors than Bark 3.0; Intended drops ums, false starts and repeats, 180 MB, English only",
         repo_id="ConwayResearch/Underdog-Bark-3.0-Clean",
         revision="6d34ed8639b2b9a33e764acf06748519bbb950cf",
         compatible_engines=_NPU_PARAKEET_ENGINES,
@@ -245,6 +245,43 @@ ALL_MODELS: dict[str, ModelInfo] = {
 def has_crisperwhisper_modes(name: str) -> bool:
     """Whether *name* is decoded with an intended/verbatim prefix."""
     return name in CRISPERWHISPER_MODELS
+
+
+# Bark Plus comes as two downloads that differ only in what they do with
+# ums, false starts and repeats, so Settings shows them as one model and
+# the speech style picks the download.
+SPEECH_STYLE_FAMILIES: dict[str, dict[str, str]] = {
+    "underdog-bark-3.0-plus": {
+        "intended": "underdog-bark-3.0-clean",
+        "verbatim": "underdog-bark-3.0-plus",
+    },
+}
+
+
+def speech_style_of(name: str) -> tuple[str, str] | None:
+    """``(family, style)`` for a model that is one speech style of a family."""
+    for family, styles in SPEECH_STYLE_FAMILIES.items():
+        for style, member in styles.items():
+            if member == name:
+                return family, style
+    return None
+
+
+def has_speech_styles(name: str) -> bool:
+    return has_crisperwhisper_modes(name) or speech_style_of(name) is not None
+
+
+def transcribes_verbatim(name: str, crisperwhisper_mode: str) -> bool:
+    """Whether *name* hands over the words as spoken, so cleanup must stay off.
+
+    A family member is its style; a CrisperWhisper model follows the mode
+    setting. A mode left behind from an earlier model never applies to a
+    model without styles.
+    """
+    family_style = speech_style_of(name)
+    if family_style is not None:
+        return family_style[1] == "verbatim"
+    return has_crisperwhisper_modes(name) and crisperwhisper_mode == "verbatim"
 
 
 def is_catalog_model(name: str) -> bool:

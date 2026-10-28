@@ -472,6 +472,49 @@ class TestNumbers:
         assert _batch("twenty percent") == "twenty percent"
 
 
+class TestSpokenVersionNumbers:
+    @pytest.mark.parametrize(("spoken", "typed"), [
+        ("Version zero point three point one or something.", "Version 0.3.1 or something. "),
+        ("Zero dot three dot one.", "0.3.1. "),
+        ("Update to version twenty one point four point zero", "Update to version 21.4.0"),
+        ("It needs Python three dot twelve", "It needs Python 3.12"),
+        ("Seventeen dot two came out", "17.2 came out"),
+        ("Ship 0.3 point one today", "Ship 0.3.1 today"),
+        ("zero point three point one, then zero dot four.", "0.3.1, then 0.4. "),
+    ])
+    def test_spoken_versions_are_typed_as_numbers(self, spoken: str, typed: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == typed
+
+    @pytest.mark.parametrize(("spoken", "typed"), [
+        ("two point five", "2.5"),
+        ("Pi is three point one four one five", "Pi is 3.1415"),
+    ])
+    def test_a_single_point_is_still_a_decimal(self, spoken: str, typed: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == typed
+
+    @pytest.mark.parametrize("spoken", [
+        "Go to one dot com",
+        "I have one dot on my screen",
+        "Dot the i's and cross the t's",
+        "What's the point",
+        "Café dot crème, naïve point",
+    ])
+    def test_dots_and_points_that_are_not_numbers_stay_words(self, spoken: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == spoken
+
+    def test_versions_stay_words_when_number_formatting_is_off(self) -> None:
+        assert _batch("zero point three point one") == "zero point three point one"
+
+    def test_a_long_dictation_full_of_versions_formats_every_one(self) -> None:
+        spoken = " ".join(f"version {word} dot {word} dot zero" for word in ("one", "two", "three", "nine") * 500)
+
+        typed = _batch(spoken, options=DictionaryOptions(numbers=True))
+
+        assert typed.count("version 1.1.0") == 500
+        assert typed.count("version 9.9.0") == 500
+        assert " dot " not in typed
+
+
 class TestStreamingPipeline:
     def test_should_keep_right_glue_between_writer_updates(self) -> None:
         from tests.fakes import FakeTextOutputHandler

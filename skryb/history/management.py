@@ -1,8 +1,7 @@
 """Deleting and exporting history entries.
 
 A deletion removes the entry's recording and transcript, blanks every text
-its log line kept, the writing model's answer and the typed text included
-(marking the line ``"history_deleted": true``), and adds a
+its log line kept, the typed text included (marking the line ``"history_deleted": true``), and adds a
 ``history_deleted`` line naming its ``seq``, so
 :func:`~skryb.history.entries.load_history` stops listing it. The log
 is rewritten in one atomic swap; every other line stays byte for byte, and
@@ -23,7 +22,7 @@ from pathlib import Path
 from skryb.core.timestamps import utc_iso, utc_now
 from skryb.diagnostics.jsonl import JsonlWriter, encode_line
 from skryb.history.entries import HistoryEntry, load_history
-from skryb.output.dictation_trace import TRACE_TEXT_FIELDS
+from skryb.output.dictation_trace import TYPED_FIELD
 
 _logger = logging.getLogger(__name__)
 
@@ -32,7 +31,10 @@ _logger = logging.getLogger(__name__)
 _ENTRY_FOLDERS = frozenset({"audio", "transcripts"})
 _NEWLINE = os.linesep.encode()
 # Every field of a dictation's log line that holds text someone said or saw.
-_TEXT_FIELDS = ("text", *TRACE_TEXT_FIELDS)
+# Older logs also kept the text a cleanup model was given and gave back.
+_TEXT_FIELDS = (
+    "text", TYPED_FIELD, "cleanup_answer", "cleanup_context_before", "cleanup_window",
+)
 
 
 def delete_entries(
@@ -96,11 +98,7 @@ def default_export_name(entry: HistoryEntry) -> str:
     return f"dictation-{entry.at.astimezone():%Y%m%d-%H%M%S}.wav"
 
 
-_CSV_HEADER = (
-    "Time", "Kind", "Status", "Audio seconds", "Transcription", "Writing model",
-    "Why not used", "Writing model answer", "Model seconds", "Typed",
-    "Text before the cursor", "Window",
-)
+_CSV_HEADER = ("Time", "Status", "Audio seconds", "Transcription", "Typed")
 # A cell starting with one of these runs as a formula when a spreadsheet opens it.
 _FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
@@ -119,20 +117,12 @@ def export_csv(entries: Iterable[HistoryEntry], destination: Path) -> int:
 
 
 def _csv_row(entry: HistoryEntry) -> list[str]:
-    writing = entry.writing
     cells = [
         entry.at.astimezone().isoformat(timespec="seconds"),
-        entry.kind,
         entry.status or "Done",
         f"{entry.audio_seconds:.1f}",
         entry.text,
-        writing.outcome if writing else "",
-        writing.reason if writing else "",
-        writing.answer if writing else "",
-        f"{writing.seconds:.2f}" if writing and writing.seconds is not None else "",
-        writing.typed if writing else "",
-        writing.context_before if writing else "",
-        writing.window if writing else "",
+        entry.typed,
     ]
     return [_inert(cell) for cell in cells]
 

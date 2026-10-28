@@ -43,9 +43,9 @@ pnpm tauri build --features native-titlebar
 ## Develop without the core
 
 `mock/server.py` is a stdlib-only stand-in for the whole contract: in-memory
-state, downloads and the writing-model install that tick, a sine-wave level
-meter, shortcut capture that answers `ctrl+shift+alt+m` after a second,
-2,500 history entries with unicode, blanks and duplicates, and the licence 409.
+state, downloads that tick, a sine-wave level meter, shortcut capture that
+answers `ctrl+shift+alt+m` after a second, 2,500 history entries with unicode,
+blanks and duplicates, and the licence 409.
 
 ```
 pnpm mock                          # python mock/server.py --port 8765 --token dev

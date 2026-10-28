@@ -11,11 +11,9 @@ from pathlib import Path
 from skryb.core.timestamps import utc_now
 from skryb.history.entries import (
     HistoryEntry,
-    TrackRecord,
     filter_entries,
     find_entry,
     load_history,
-    writing_track_record,
 )
 from skryb.history.management import (
     delete_all_in_background,
@@ -90,11 +88,8 @@ class HistoryService:
         export_audio(self._dir, entry, destination)
 
     def export_csv(self, query: str, destination: Path) -> int:
-        """Every entry *query* keeps, all its versions, as one spreadsheet row each."""
+        """Every entry *query* keeps, as one spreadsheet row each."""
         return export_csv(self.entries(query), destination)
-
-    def track_record(self) -> TrackRecord:
-        return writing_track_record(load_history(self._dir))
 
     def play(self, entry: HistoryEntry) -> None:
         if entry.audio_path is None or not entry.audio_path.is_file():

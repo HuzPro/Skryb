@@ -260,3 +260,59 @@ class TestDefaultModelForHardware:
         assert "English only" in info.description
         assert info.compatible_engines == ("phonon2_cpu",)
         assert info.display_size == "164 MB"
+
+
+class TestBarkPlusSpeechStyles:
+    def test_clean_is_the_intended_style_and_plus_the_verbatim_one(self) -> None:
+        from skryb.transcription.model_info import speech_style_of
+
+        assert speech_style_of("underdog-bark-3.0-clean") == ("underdog-bark-3.0-plus", "intended")
+        assert speech_style_of("underdog-bark-3.0-plus") == ("underdog-bark-3.0-plus", "verbatim")
+
+    def test_other_models_belong_to_no_family(self) -> None:
+        from skryb.transcription.model_info import ALL_MODELS, speech_style_of
+
+        others = set(ALL_MODELS) - {"underdog-bark-3.0-clean", "underdog-bark-3.0-plus"}
+        assert all(speech_style_of(name) is None for name in others)
+        assert speech_style_of("") is None
+        assert speech_style_of("UNDERDOG-BARK-3.0-PLUS") is None
+
+    def test_both_styles_and_crisperwhisper_offer_the_style_choice(self) -> None:
+        from skryb.transcription.model_info import has_speech_styles
+
+        assert has_speech_styles("underdog-bark-3.0-clean")
+        assert has_speech_styles("underdog-bark-3.0-plus")
+        assert has_speech_styles("crisperwhisper-2.0-turbo")
+        assert not has_speech_styles("underdog-bark-3.0")
+        assert not has_speech_styles("underdog-bark-3.0-pro")
+        assert not has_speech_styles("phonon-2")
+
+    def test_every_family_member_is_a_real_catalog_model(self) -> None:
+        from skryb.transcription.model_info import ALL_MODELS, SPEECH_STYLE_FAMILIES
+
+        for family, styles in SPEECH_STYLE_FAMILIES.items():
+            assert family in ALL_MODELS
+            assert set(styles) == {"intended", "verbatim"}
+            assert all(member in ALL_MODELS for member in styles.values())
+
+
+class TestWhichModelsTranscribeVerbatim:
+    def test_bark_plus_is_verbatim_whatever_the_crisperwhisper_setting_says(self) -> None:
+        from skryb.transcription.model_info import transcribes_verbatim
+
+        assert transcribes_verbatim("underdog-bark-3.0-plus", "intended")
+        assert transcribes_verbatim("underdog-bark-3.0-plus", "verbatim")
+        assert not transcribes_verbatim("underdog-bark-3.0-clean", "verbatim")
+        assert not transcribes_verbatim("underdog-bark-3.0-clean", "intended")
+
+    def test_crisperwhisper_follows_its_mode_setting(self) -> None:
+        from skryb.transcription.model_info import transcribes_verbatim
+
+        assert transcribes_verbatim("crisperwhisper-2.0-large", "verbatim")
+        assert not transcribes_verbatim("crisperwhisper-2.0-large", "intended")
+
+    def test_a_leftover_verbatim_setting_never_turns_cleanup_off_for_other_models(self) -> None:
+        from skryb.transcription.model_info import transcribes_verbatim
+
+        for name in ("phonon-2", "parakeet-ultra", "underdog-bark-3.0", "qwen3-asr-1.7b", "", "not-a-model"):
+            assert not transcribes_verbatim(name, "verbatim")

@@ -37,10 +37,9 @@ def test_two_windows_see_the_same_events_in_the_order_they_happened(rig: Rig) ->
     rig.state_machine.transition_to(AppState.RECORDING)
     rig.state_machine.transition_to(AppState.TRANSCRIBING)
     rig.bus.publish(TranscriptionCompletedEvent(text="Café at 9 with 東京 team"))
-    rig.call("POST", "/api/writing/forget-style")
 
-    expected = ["download", "engine", "app", "app", "app", "history", "writing"]
-    seen = [_names_until(first, "writing"), _names_until(second, "writing")]
+    expected = ["download", "engine", "app", "app", "app", "history"]
+    seen = [_names_until(first, "history"), _names_until(second, "history")]
     first.close()
     second.close()
     assert seen == [expected, expected]
@@ -69,12 +68,12 @@ def test_a_download_is_followed_from_progress_to_its_end(rig: Rig) -> None:
     rig.bus.publish(DownloadStateChangedEvent(job_id=NEMOTRON, state="completed"))
     rig.bus.publish(DownloadCompletedEvent(job_id=NEMOTRON))
 
-    states = [stream.until("download") for _ in range(4)]
+    states = [stream.until("download") for _ in range(5)]
     stream.close()
     assert [(state["name"], state["state"]) for state in states] == [
-        (TURBO, "downloading"), (TURBO, "paused"), (TURBO, "failed"), (NEMOTRON, "completed"),
+        (TURBO, "queued"), (TURBO, "downloading"), (TURBO, "paused"), (TURBO, "failed"), (NEMOTRON, "completed"),
     ]
-    assert states[2] == {
+    assert states[3] == {
         "name": TURBO, "state": "failed", "bytes_done": 10, "bytes_total": 100,
         "error": "HTTP 503 from huggingface.co",
     }

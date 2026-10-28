@@ -48,7 +48,6 @@ _BAR_GAP = 4.0
 _BAR_MIN_HEIGHT = 3.0
 
 _PILL_FILL = (12, 12, 14)
-_BADGE_FILL = (38, 38, 42)
 # The brand emerald: the voice bars, and the colour the transcribing shimmer lifts the fill towards.
 _WAVE = EMERALD_LIGHT
 _SHIMMER_FILL = EMERALD_DEEP
@@ -62,11 +61,6 @@ _FINISH_GLYPH = (10, 10, 12)
 _LABEL = (236, 236, 240)
 _LABEL_TEXT = "Transcribing"
 _LABEL_SIZE = 12
-# The caption sits on the pill's top edge like a badge: half above it, half
-# over the empty padding, so it never covers a button or the waveform.
-_CAPTION_SIZE = 9
-_CAPTION_HEIGHT = 12.0
-_CAPTION_PADDING = 7.0
 # The dark theme warning colour (#fbbf24).
 _AMBER = (251, 191, 36)
 _NOTICE_TEXT = "No audio from"
@@ -212,7 +206,6 @@ class Frame:
     # Where the transcribing shimmer is across the pill, 0 to 1; below 0 for none.
     shimmer: float = -1.0
     hovered: Button | None = None
-    caption: str = ""
     # Shown in amber in place of the waveform while the microphone is silent.
     silent_microphone: str = ""
     # Time left before the recording limit, in amber beside the waveform.
@@ -390,10 +383,6 @@ def _draw_pill(image: Image.Image, frame: Frame) -> None:
         controls = _blank(image)
         _draw_controls(ImageDraw.Draw(controls), frame)
         _blend(layer, controls, frame.controls)
-        if frame.caption:
-            caption = _blank(image)
-            _draw_caption(ImageDraw.Draw(caption), box, frame.caption)
-            _blend(layer, caption, frame.controls)
     _fade(layer, frame.opacity)
     image.alpha_composite(layer)
 
@@ -421,24 +410,6 @@ def _draw_label(draw: ImageDraw.ImageDraw, box: tuple[float, ...]) -> None:
         fill=(*_LABEL, 255),
         anchor="mm",
     )
-
-
-def _draw_caption(draw: ImageDraw.ImageDraw, box: tuple[float, ...], caption: str) -> None:
-    scale = _SUPERSAMPLE
-    left, top, right, _bottom = box
-    font = _font(_CAPTION_SIZE * scale)
-    text_left, _, text_right, _ = draw.textbbox((0, 0), caption, font=font)
-    half_width = (text_right - text_left) / 2 + _CAPTION_PADDING * scale
-    half_height = _CAPTION_HEIGHT * scale / 2
-    centre = (left + right) / 2
-    draw.rounded_rectangle(
-        (centre - half_width, top - half_height, centre + half_width, top + half_height),
-        radius=half_height,
-        fill=(*_BADGE_FILL, 255),
-        outline=_BORDER,
-        width=scale,
-    )
-    draw.text((centre, top), caption, font=font, fill=(*_LABEL, 255), anchor="mm")
 
 
 def _draw_controls(draw: ImageDraw.ImageDraw, frame: Frame) -> None:

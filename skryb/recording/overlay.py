@@ -21,7 +21,6 @@ from skryb.core.events import (
     RecordingCapWarningEvent,
     RecordingPausedEvent,
     RecordingResumedEvent,
-    RecordingStartedEvent,
     StateChangedEvent,
     TextPastedEvent,
 )
@@ -646,7 +645,6 @@ class RecordingOverlay:
         self._settled_label = premultiplied_array(render(settled_label_frame()))
         self._switch_interval: float | None = None
         self._pressed: Button | None = None
-        self._caption = ""
         self._work_area = (0, 0, 0, 0)
         self._origin = (0, 0)
         # Where on the pill a press that may become a drag landed.
@@ -670,7 +668,6 @@ class RecordingOverlay:
             (MicrophoneSilentEvent, self._on_microphone_silent),
             (MicrophoneAudioResumedEvent, self._on_microphone_back),
             (RecordingCapWarningEvent, self._on_cap_warning),
-            (RecordingStartedEvent, self._on_recording_started),
         )
         for event_type, handler in self._subscriptions:
             self._event_bus.subscribe(event_type, handler)
@@ -741,9 +738,6 @@ class RecordingOverlay:
     def _set_paused(self, paused: bool) -> None:
         self._paused = paused
 
-    def _set_caption(self, caption: str) -> None:
-        self._caption = caption
-
     def _set_silent_microphone(self, name: str) -> None:
         self._silent_microphone = name
 
@@ -787,11 +781,6 @@ class RecordingOverlay:
             self._finish_on_paste()
         else:
             self._dispatcher.dispatch(self._finish_on_paste)
-
-    def _on_recording_started(self, event: DomainEvent) -> None:
-        if isinstance(event, RecordingStartedEvent):
-            caption = event.caption
-            self._dispatcher.dispatch(lambda: self._set_caption(caption))
 
     def _on_microphone_silent(self, event: DomainEvent) -> None:
         if isinstance(event, MicrophoneSilentEvent):
@@ -945,7 +934,6 @@ class RecordingOverlay:
                 if self._mode is Mode.TRANSCRIBING else -1.0
             ),
             hovered=hovered,
-            caption=self._caption,
             silent_microphone=self._silent_microphone,
             countdown=(
                 countdown_text(self._countdown) if self._countdown is not None else ""

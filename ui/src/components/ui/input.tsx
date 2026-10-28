@@ -7,7 +7,3 @@ const fieldClass =
 export function Input({ className, ...props }: React.ComponentProps<"input">) {
   return <input className={cn(fieldClass, "h-8", className)} spellCheck={false} {...props} />;
 }
-
-export function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
-  return <textarea className={cn(fieldClass, "min-h-20 resize-y py-2", className)} {...props} />;
-}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { reduceEvent, type Snapshot } from "./events";
-import type { AppInfo, Model } from "./types";
+import type { AppInfo, Model, Settings } from "./types";
 
 const model = (name: string, installed = false): Model => ({
   name,
@@ -101,11 +101,11 @@ describe("server events", () => {
     expect(reduceEvent({}, "engine", { state: "ready" })).toEqual({ snapshot: {}, refetch: ["app"] });
   });
 
-  it("replaces app, settings and writing status wholesale", () => {
+  it("replaces app and settings wholesale", () => {
     const next = { ...app, state: "recording" as const };
     expect(reduceEvent({ app }, "app", next).snapshot.app).toBe(next);
-    const writing = { state: "ready", detail: "" };
-    expect(reduceEvent({}, "writing", writing).snapshot.writing).toBe(writing);
+    const settings = { model_size: "parakeet-tdt-0.6b-v3", learn_words: false } as Settings;
+    expect(reduceEvent({}, "settings", settings).snapshot.settings).toBe(settings);
   });
 
   it("refetches history after a new dictation or a wipe, not after a retry", () => {

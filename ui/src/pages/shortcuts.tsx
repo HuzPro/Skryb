@@ -17,13 +17,10 @@ const MODE_CHOICES = [
   { value: "hold", label: "Hold" },
 ];
 
-const OPTIONAL: { action: BindingAction; title: string; description: string; withMode: boolean }[] = [
-  { action: "edit_selection", title: "Edit selected text by voice", description: "Select text, press this and say how to change it.", withMode: true },
-  { action: "paste_last", title: "Paste last dictation", description: "Paste it again where the cursor is.", withMode: false },
-  { action: "copy_last", title: "Copy last dictation", description: "Put it on the clipboard.", withMode: false },
+const OPTIONAL: { action: BindingAction; title: string; description: string }[] = [
+  { action: "paste_last", title: "Paste last dictation", description: "Paste it again where the cursor is." },
+  { action: "copy_last", title: "Copy last dictation", description: "Put it on the clipboard." },
 ];
-
-const PRESS_ACTIONS: BindingAction[] = ["paste_last", "copy_last"];
 
 export function setBindingKeys(bindings: Binding[], index: number, keys: string): Binding[] {
   return bindings.map((binding, at) => (at === index ? { ...binding, keys } : binding));
@@ -34,7 +31,7 @@ export function setOptionalKeys(bindings: Binding[], action: BindingAction, keys
   const index = bindings.findIndex((binding) => binding.action === action);
   if (!keys) return bindings.filter((binding) => binding.action !== action);
   if (index >= 0) return setBindingKeys(bindings, index, keys);
-  return [...bindings, { keys, mode: PRESS_ACTIONS.includes(action) ? "press" : "toggle", action }];
+  return [...bindings, { keys, mode: "press", action }];
 }
 
 interface Capture {
@@ -216,7 +213,7 @@ export function ShortcutsPage() {
 
       <Section title="More shortcuts">
         <Rows>
-          {OPTIONAL.map(({ action, title, description, withMode }) => {
+          {OPTIONAL.map(({ action, title, description }) => {
             const index = bindings.findIndex((binding) => binding.action === action);
             const binding = bindings[index];
             const row = `optional:${action}`;
@@ -229,17 +226,6 @@ export function ShortcutsPage() {
                     recording={capture.recordingRow === row}
                     onRecord={() => capture.start(row, (keys) => editBindings((current) => setOptionalKeys(current, action, keys)))}
                     onStop={capture.stop}
-                    {...(withMode
-                      ? {
-                          mode: binding?.mode === "hold" ? "hold" : "toggle",
-                          onMode: (mode: BindingMode) =>
-                            editBindings((current) =>
-                              current.some((other) => other.action === action)
-                                ? current.map((other) => (other.action === action ? { ...other, mode } : other))
-                                : current,
-                            ),
-                        }
-                      : {})}
                     onClear={() => {
                       capture.stop();
                       editBindings((current) => setOptionalKeys(current, action, ""));

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AudioLines, BookA, ClipboardPaste, Download, History, Keyboard, Mic, PenLine } from "lucide-react";
+import { AudioLines, BookA, ClipboardPaste, Download, History, Keyboard, Mic } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
@@ -15,7 +15,6 @@ import { SetupPage } from "./pages/setup";
 import { ShortcutsPage } from "./pages/shortcuts";
 import { TranscriptionPage } from "./pages/transcription";
 import { UpdatesPage } from "./pages/updates";
-import { WritingPage } from "./pages/writing";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: Infinity, retry: 1, refetchOnWindowFocus: false } },
@@ -24,11 +23,10 @@ const queryClient = new QueryClient({
 const NAV: NavItem[] = [
   { path: "history", label: "History", icon: History },
   { path: "dictionary", label: "Dictionary", icon: BookA },
-  { path: "writing", label: "Writing", icon: PenLine },
   { path: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { path: "microphone", label: "Microphone & sounds", icon: Mic },
   { path: "output", label: "Output", icon: ClipboardPaste },
-  { path: "transcription", label: "Transcription", icon: AudioLines },
+  { path: "transcription", label: "Model", icon: AudioLines },
   { path: "updates", label: "Updates", icon: Download },
 ];
 
@@ -143,7 +141,6 @@ function Shell() {
 const PAGES = [
   { path: "history", element: <HistoryPage /> },
   { path: "dictionary", element: <DictionaryPage /> },
-  { path: "writing", element: <WritingPage /> },
   { path: "shortcuts", element: <ShortcutsPage /> },
   { path: "microphone", element: <MicrophonePage /> },
   { path: "output", element: <OutputPage /> },

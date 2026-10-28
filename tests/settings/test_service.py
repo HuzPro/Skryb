@@ -47,7 +47,6 @@ from skryb.settings.service import (
 from skryb.settings.settings_draft import SettingsDraft
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import ALL_MODELS
-from skryb.writing.settings import WritingSettings
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
 _BARK = ("underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro")
@@ -866,42 +865,38 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert service.current_draft().boost_quiet_speech is False
 
 
-class TestWritingSettings:
-    def test_every_writing_field_round_trips_through_the_config(self):
+class TestTheWordLearningSwitch:
+    def test_learning_is_on_unless_it_was_turned_off(self):
+        service, *_ = _build_service()
+
+        assert service.current_draft().learn_words is True
+
+    def test_turning_it_off_is_saved_with_the_dictionary_settings(self):
         service, config, *_ = _build_service()
-        writing = WritingSettings(
-            cleanup="polished",
-            lists=False,
-            deadline_seconds=12.5,
-            context=False,
-            learn_words=False,
-            learn_style=False,
-            style_notes="British spelling ✓\nno exclamation marks",
-            after_dictation_transform="Casual",
-            runtime_path="C:/tools/llama café/llama-server.exe",
-            model_path="D:/models/Qwen3.5-4B-Q4_K_M.gguf",
-        )
 
-        service.apply_draft(replace(service.current_draft(), writing=writing))
+        changes = service.apply_draft(replace(service.current_draft(), learn_words=False))
 
-        assert service.current_draft().writing == writing
-        assert config.get("writing.cleanup") == "polished"
-        assert config.get("writing.deadline_seconds") == 12.5
+        assert config.get("dictionary.learn_words") is False
+        assert service.current_draft().learn_words is False
+        assert not changes.learning_turned_on
 
-    def test_missing_or_nonsense_writing_values_read_as_the_defaults(self):
+    def test_a_config_from_before_the_switch_moved_keeps_learning_off(self):
         service, *_ = _build_service(config_overrides={
-            "writing.cleanup": "aggressive",
-            "writing.deadline_seconds": "soon",
-            "writing.lists": "yes",
-            "writing.style_notes": 42,
+            "writing.cleanup": "polished",
+            "writing.learn_words": False,
+            "writing.learn_style": True,
+            "writing.model_path": "D:/models/Qwen3.5-4B-Q4_K_M.gguf",
         })
 
-        assert service.current_draft().writing == WritingSettings()
+        assert service.current_draft().learn_words is False
 
-    def test_the_deadline_is_kept_between_half_a_second_and_thirty(self):
-        service, *_ = _build_service(config_overrides={"writing.deadline_seconds": 90})
+    def test_turning_it_back_on_asks_for_the_edit_watcher(self):
+        service, *_ = _build_service(config_overrides={"writing.learn_words": False})
 
-        assert service.current_draft().writing.deadline_seconds == 30.0
+        changes = service.apply_draft(replace(service.current_draft(), learn_words=True))
+
+        assert changes.learning_turned_on
+        assert service.current_draft().learn_words is True
 
 
 def test_recording_preferences_round_trip_through_saved_settings_without_a_rebuild() -> None:

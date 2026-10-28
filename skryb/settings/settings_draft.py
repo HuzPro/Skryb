@@ -4,7 +4,6 @@ from skryb.hotkeys.bindings import DEFAULT_BINDINGS, Binding
 from skryb.output.output_mode import OutputMode
 from skryb.recording.preferences import RecordingPreferences
 from skryb.settings.transcription_mode import TranscriptionMode
-from skryb.writing.settings import WritingSettings
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,9 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
-    writing: WritingSettings = WritingSettings()
+    # The Dictionary page's switch; read at each edit, but it needs the
+    # edit watcher, which only runs while something uses it.
+    learn_words: bool = True
     hotkey_bindings: tuple[Binding, ...] = DEFAULT_BINDINGS
     double_tap_locks_hold: bool = True
     # Read where it is used, at each recording or sound, so none of it
@@ -57,8 +58,6 @@ class ChangeSet:
     output_changed: bool
     mode_changed: bool = False
     diagnostics_changed: bool = False
-    # The writing server has to be relaunched for a new runtime or model.
-    writing_server_changed: bool = False
     # Learning needs the edit watcher, which only runs while something uses it.
     learning_turned_on: bool = False
     history_retention_changed: bool = False
@@ -84,8 +83,8 @@ class ChangeSet:
             or original.double_tap_locks_hold != updated.double_tap_locks_hold
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
-        # The pipeline runs in passthrough only while a CrisperWhisper model
-        # is selected AND its mode is verbatim, so changing the model alone
+        # The pipeline runs in passthrough only while the selected model
+        # transcribes verbatim (see transcribes_verbatim), so changing the model alone
         # can turn the dictionary, filler removal and number formatting back
         # on or off. That resolution lives in the composition root; rebuilding
         # output for any model change is what keeps this from having to hold a
@@ -95,7 +94,6 @@ class ChangeSet:
             or mode_changed
             or crisperwhisper_mode_changed
             or original.model_size != updated.model_size
-            or original.writing != updated.writing
         )
         return cls(
             engine_reload_required=engine_reload_required,
@@ -103,14 +101,10 @@ class ChangeSet:
             output_changed=output_changed,
             mode_changed=mode_changed,
             diagnostics_changed=original.capture_content != updated.capture_content,
-            writing_server_changed=(
-                original.writing.runtime_path != updated.writing.runtime_path
-                or original.writing.model_path != updated.writing.model_path
-            ),
             history_retention_changed=(
                 original.history_retention_days != updated.history_retention_days
             ),
-            learning_turned_on=not original.writing.learns and updated.writing.learns,
+            learning_turned_on=not original.learn_words and updated.learn_words,
         )
 
     @property

@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 
 import jellyfish
-from text_to_num import alpha2digit
+from text_to_num import alpha2digit, text2num
 
 from skryb.output.caret_context import (
     NO_CONTEXT,
@@ -124,6 +124,20 @@ _DOLLARS_AND_CENTS_PATTERN = re.compile(
 _DOLLARS_PATTERN = re.compile(
     rf"\b({_NUMBER})\s+dollars\b", re.IGNORECASE,
 )
+_UNIT_WORDS = "one|two|three|four|five|six|seven|eight|nine"
+_PART = (
+    r"(?:\d+(?:\.\d+)*"
+    rf"|(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:{_UNIT_WORDS}))?"
+    r"|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+    rf"|zero|{_UNIT_WORDS})"
+)
+_SEPARATOR_PATTERN = re.compile(r"\s+(point|dot)\s+", re.IGNORECASE)
+# Spoken version numbers: "zero point three point one", "Python three dot
+# twelve". alpha2digit reads a lone "point" as a decimal, with the digits
+# after it one by one ("three point one four" is 3.14), so that is left to it.
+_DOTTED_NUMBER_PATTERN = re.compile(
+    rf"(?<![\w.]){_PART}(?:\s+(?:point|dot)\s+{_PART})+(?!\w|\.\d)", re.IGNORECASE,
+)
 # Words a sentence never ends on. A full stop or question mark after one is
 # the transcriber hearing a pause to think, as in "Make a plan and. Do
 # adversarial reviews", so the sentence carries on through it.
@@ -147,11 +161,6 @@ _FUNCTION_WORD_STOPLIST = frozenset({
 })
 
 
-# The writing model's stage: the dictation so far, and the caret reading it
-# may use for context, give the cleaned dictation.
-CleanupStep = Callable[[str, Callable[[], CaretContext]], str]
-
-
 def _no_caret_context() -> CaretContext:
     return NO_CONTEXT
 
@@ -161,36 +170,6 @@ def _caret_stage(caret_context: Callable[[], CaretContext]) -> Callable[[str], s
         return fit_to_context(text, caret_context())
 
     return fit
-
-
-class _CaretReading:
-    """One caret reading per dictation, shared by every stage that needs it.
-
-    Reading the caret goes through UI Automation and can retry, so the
-    cleanup stage and the caret fit must not each pay for their own read.
-    """
-
-    def __init__(self, read: Callable[[], CaretContext]) -> None:
-        self._read = read
-        self._context: CaretContext | None = None
-
-    def forget(self, text: str) -> str:
-        self._context = None
-        return text
-
-    def __call__(self) -> CaretContext:
-        if self._context is None:
-            self._context = self._read()
-        return self._context
-
-
-def _cleanup_stage(
-    cleanup: CleanupStep, caret_context: Callable[[], CaretContext],
-) -> Callable[[str], str]:
-    def clean(text: str) -> str:
-        return cleanup(text, caret_context)
-
-    return clean
 
 
 class TextPipeline:
@@ -204,10 +183,8 @@ class TextPipeline:
         punctuation_backend: PunctuationBackend | None = None,
         models_dir: Path | None = None,
         caret_context: Callable[[], CaretContext] = _no_caret_context,
-        cleanup: CleanupStep | None = None,
     ) -> "TextPipeline":
-        caret = _CaretReading(caret_context)
-        stages: list[Callable[[str], str]] = [caret.forget]
+        stages: list[Callable[[str], str]] = []
         if config.options.punctuation_model:
             backend = punctuation_backend
             if backend is None:
@@ -224,10 +201,8 @@ class TextPipeline:
         stages.append(join_pause_breaks)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
-        if cleanup is not None:
-            stages.append(_cleanup_stage(cleanup, caret))
         stages.append(add_trailing_sentence_space)
-        stages.append(_caret_stage(caret))
+        stages.append(_caret_stage(caret_context))
         stages.append(_RuleStage(config.rules).apply)
         if config.options.numbers:
             stages.append(format_numbers)
@@ -263,14 +238,13 @@ def build_pipeline(
     punctuation_backend: PunctuationBackend | None = None,
     models_dir: Path | None = None,
     caret_context: Callable[[], CaretContext] = _no_caret_context,
-    cleanup: CleanupStep | None = None,
 ) -> TextPipeline:
     if mode is PipelineMode.VERBATIM:
         return TextPipeline.passthrough()
     if mode is PipelineMode.STREAMING:
         return TextPipeline.for_streaming(config)
     return TextPipeline.for_batch(
-        config, punctuation_backend, models_dir, caret_context, cleanup,
+        config, punctuation_backend, models_dir, caret_context,
     )
 
 
@@ -372,10 +346,23 @@ def add_trailing_sentence_space(text: str) -> str:
 
 
 def format_numbers(text: str) -> str:
-    converted = alpha2digit(text, "en")
+    converted = _DOTTED_NUMBER_PATTERN.sub(_format_dotted_number, text)
+    converted = alpha2digit(converted, "en")
     converted = _PERCENT_PATTERN.sub(r"\1%", converted)
     converted = _DOLLARS_AND_CENTS_PATTERN.sub(_format_dollars_and_cents, converted)
     return _DOLLARS_PATTERN.sub(r"$\1", converted)
+
+
+def _format_dotted_number(match: re.Match[str]) -> str:
+    pieces = _SEPARATOR_PATTERN.split(match.group(0))
+    parts, separators = pieces[::2], [piece.casefold() for piece in pieces[1::2]]
+    if separators == ["point"] and not any("." in part for part in parts):
+        return match.group(0)
+    return ".".join(_digits_of(part) for part in parts)
+
+
+def _digits_of(part: str) -> str:
+    return part if part[0].isdigit() else str(text2num(part.casefold().replace("-", " "), "en"))
 
 
 class _RuleStage:

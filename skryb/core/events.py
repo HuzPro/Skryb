@@ -9,8 +9,7 @@ class DomainEvent:
 
 @dataclass(frozen=True)
 class RecordingStartedEvent(DomainEvent):
-    # A few words the pill shows above itself, such as "Editing selection".
-    caption: str = ""
+    pass
 
 
 @dataclass(frozen=True)
@@ -173,20 +172,6 @@ class ModelDeletedEvent(DomainEvent):
     flips from "Delete" back to "Download" without a manual refresh.
     """
     name: str = ""
-
-
-@dataclass(frozen=True)
-class WritingNoticeEvent(DomainEvent):
-    """Why a voice edit or cleanup did not happen, shown beside the dictation."""
-
-    message: str = ""
-
-
-@dataclass(frozen=True)
-class WritingServerFailedEvent(DomainEvent):
-    """The writing model gave up after its restarts; said once per session."""
-
-    message: str = ""
 
 
 @dataclass(frozen=True)

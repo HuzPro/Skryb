@@ -77,7 +77,7 @@ export interface Choice<T extends string> {
   disabled?: boolean;
 }
 
-/** Mutually exclusive options as cards with a radio dot: Mode, Cleanup, Output mode. */
+/** Mutually exclusive options as cards with a radio dot: Mode, Output mode. */
 export function ChoiceCards<T extends string>({ value, choices, onChange, label }: { value: T; choices: Choice<T>[]; onChange: (value: T) => void; label: string }) {
   return (
     <div role="radiogroup" aria-label={label} className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${choices.length}, minmax(0, 1fr))` }}>

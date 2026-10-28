@@ -122,7 +122,7 @@ class TestNumberListsGoOnWithCommas:
 
         assert context.before + result + context.after == "Testing 1, 2, 3, 4, 5, 6, 7, 8, 9, 10."
 
-    def test_numbers_the_writing_model_already_separated_are_joined_the_same_way(self) -> None:
+    def test_numbers_already_separated_by_commas_are_joined_the_same_way(self) -> None:
         context = CaretContext("Testing 1, 2, 3", "", "")
 
         assert fit_to_context("Four, five, six.", context) == ", 4, 5, 6."

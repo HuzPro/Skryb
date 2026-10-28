@@ -18,7 +18,6 @@ from skryb.core.events import (
     StateChangedEvent,
     TranscriptionEmptyEvent,
     TranscriptionFailedEvent,
-    WritingServerFailedEvent,
 )
 from skryb.core.state_machine import AppState, AppStateMachine
 from skryb.downloads.download_manager import DownloadManager
@@ -145,9 +144,6 @@ class SystemTrayApp:
         )
         self._event_bus.subscribe(
             MicrophoneMissingEvent, self._handle_microphone_missing,
-        )
-        self._event_bus.subscribe(
-            WritingServerFailedEvent, self._handle_writing_server_failed,
         )
         self._event_bus.subscribe(
             MicrophoneSilentEvent, self._handle_microphone_silent,
@@ -296,11 +292,6 @@ class SystemTrayApp:
             f"Can't find the microphone \"{event.name}\". Using the Windows "
             "default until it's back.",
         )
-
-    def _handle_writing_server_failed(self, event: WritingServerFailedEvent) -> None:
-        if self._icon is None:
-            return
-        self._icon.notify("Skryb", event.message)
 
     def _handle_microphone_silent(self, event: MicrophoneSilentEvent) -> None:
         # Once per recording: a microphone that cuts in and out would

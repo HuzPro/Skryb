@@ -26,15 +26,12 @@ class HotkeyActions:
 
     dictate_activate: Action | None = None
     dictate_deactivate: Action | None = None
-    edit_activate: Action | None = None
-    edit_deactivate: Action | None = None
     paste_last: Action | None = None
     copy_last: Action | None = None
 
     def for_action(self, action: BindingAction) -> tuple[Action | None, Action | None]:
         return {
             BindingAction.DICTATE: (self.dictate_activate, self.dictate_deactivate),
-            BindingAction.EDIT_SELECTION: (self.edit_activate, self.edit_deactivate),
             BindingAction.PASTE_LAST: (self.paste_last, None),
             BindingAction.COPY_LAST: (self.copy_last, None),
         }[action]

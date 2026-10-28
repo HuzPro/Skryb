@@ -28,7 +28,6 @@ from skryb.core.events import (
     StateChangedEvent,
     TranscriptionCompletedEvent,
     TranscriptionFailedEvent,
-    WritingServerFailedEvent,
 )
 from skryb.core.state_machine import AppState
 
@@ -51,8 +50,6 @@ class Snapshots(Protocol):
     """What the hub asks the API for when an event needs the whole picture."""
 
     def app_info(self) -> Json: ...
-    def writing_status(self) -> Json | None: ...
-    def watch_writing(self, listener: Callable[[], None]) -> Callable[[], None]: ...
     def release_devices(self) -> None: ...
 
 
@@ -70,7 +67,6 @@ class EventHub:
         self._lock = threading.RLock()
         self._clients: list[queue.Queue[SseEvent]] = []
         self._api: Snapshots | None = None
-        self._stop_watching_writing: Callable[[], None] = _nothing
         self._engine: Json = {"loading": False, "ready": False, "error": None, "model": ""}
         self._downloads: dict[str, Json] = {}
         self._last_progress: dict[str, tuple[str, float]] = {}
@@ -85,7 +81,6 @@ class EventHub:
             DownloadFailedEvent: self._on_download_event,
             ModelDeletedEvent: self._on_model_deleted,
             MicrophoneConnectedEvent: self._on_microphone_connected,
-            WritingServerFailedEvent: lambda _event: self._publish_writing(),
             **{kind: self._on_history_changed for kind in _HISTORY_EVENTS},
         }
         for kind, handler in handlers.items():
@@ -95,11 +90,9 @@ class EventHub:
 
     def use(self, api: Snapshots, *, model: str, loading: bool) -> None:
         """Answer from *api* from now on; first-run setup hands over to the app this way."""
-        self._stop_watching_writing()
         with self._lock:
             self._api = api
             self._engine = {"loading": loading, "ready": False, "error": None, "model": model}
-        self._stop_watching_writing = api.watch_writing(self._publish_writing)
         self.publish("app", api.app_info())
 
     # -- clients -----------------------------------------------------------
@@ -184,8 +177,7 @@ class EventHub:
             # Completed and failed are announced by their own events, the
             # failure with its reason.
             if event.state not in ("completed", "failed"):
-                state = "downloading" if event.state == "queued" else event.state
-                self._record_download(event.job_id, state)
+                self._record_download(event.job_id, event.state)
         elif isinstance(event, DownloadCompletedEvent):
             self._record_download(event.job_id, "completed")
         elif isinstance(event, DownloadFailedEvent):
@@ -211,7 +203,7 @@ class EventHub:
                 "bytes_total": previous["bytes_total"] if bytes_total is None else bytes_total,
                 "error": error,
             }
-            if state in ("downloading", "paused", "failed"):
+            if state in ("queued", "downloading", "paused", "failed"):
                 self._downloads[name] = download
             else:
                 self._downloads.pop(name, None)
@@ -243,22 +235,6 @@ class EventHub:
         api = self._api
         if api is not None:
             self.publish("app", api.app_info())
-
-    def _publish_writing(self) -> None:
-        api = self._api
-        status = None if api is None else api.writing_status()
-        if status is None:
-            return
-        state = str(status["state"])
-        if state == "installing" and self._too_soon("writing", state):
-            return
-        with self._lock:
-            self._last_progress["writing"] = (state, self._clock())
-        self.publish("writing", status)
-
-
-def _nothing() -> None:
-    return None
 
 
 def _release_logging_failures(api: Snapshots) -> None:

@@ -6,8 +6,8 @@ import { reduceEvent, type Snapshot } from "./events";
 type Listener = (name: string, data: unknown) => void;
 
 const listeners = new Set<Listener>();
-const EVENT_NAMES = ["app", "engine", "download", "meter", "voice", "capture", "hardware", "writing", "history", "settings", "microphones", "heartbeat"];
-const SNAPSHOT_KEYS = ["app", "models", "writing", "settings"] as const;
+const EVENT_NAMES = ["app", "engine", "download", "meter", "voice", "capture", "hardware", "history", "settings", "microphones", "heartbeat"];
+const SNAPSHOT_KEYS = ["app", "models", "settings"] as const;
 const LOST_AFTER_MS = 5000;
 const MAX_RETRY_MS = 5000;
 

@@ -338,3 +338,86 @@ class TestDownloadManagerConcurrency:
         assert peak <= 3
         assert peak >= 2  # at least 2 ran in parallel
         manager.shutdown()
+
+
+class _GatedJob:
+    """A job that holds its slot until the test opens the gate."""
+
+    def __init__(self, job_id: str, gate: threading.Event, started: list[str]) -> None:
+        self.job_id = job_id
+        self.total_bytes = 100
+        self._gate = gate
+        self._started = started
+
+    def run(self, on_progress, cancel_event, pause_event) -> None:
+        self._started.append(self.job_id)
+        self._gate.wait(5)
+        on_progress(100, 100)
+
+
+class TestDownloadsPastTheLimitWaitTheirTurn:
+    def test_five_downloads_run_at_once_by_default(self):
+        gate, started = threading.Event(), []
+        manager = DownloadManager(event_bus=SimpleEventBus())
+        try:
+            for index in range(7):
+                manager.enqueue(_GatedJob(f"model-{index}", gate, started))
+            _wait_for(lambda: len(started) == 5)
+            time.sleep(0.05)
+            assert len(started) == 5
+        finally:
+            gate.set()
+            manager.shutdown()
+
+    def test_every_click_is_announced_as_queued_at_once(self):
+        bus = SimpleEventBus()
+        states: list[tuple[str, str]] = []
+        bus.subscribe(DownloadStateChangedEvent, lambda event: states.append((event.job_id, event.state)))
+        gate, started = threading.Event(), []
+        manager = DownloadManager(event_bus=bus, max_concurrent_downloads=5)
+        names = ["parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
+                 "underdog-bark-3.0-pro", "phonon-2", "crisperwhisper-2.0-turbo"]
+        try:
+            for name in names:
+                manager.enqueue(_GatedJob(name, gate, started))
+            assert [job for job, state in states if state == "queued"] == names
+            _wait_for(lambda: len(started) == 5)
+            assert manager.state_of("phonon-2") is DownloadState.QUEUED
+            assert manager.state_of("crisperwhisper-2.0-turbo") is DownloadState.QUEUED
+        finally:
+            gate.set()
+            manager.shutdown()
+
+    def test_a_queued_download_starts_when_a_slot_frees(self):
+        first_gate, second_gate, started = threading.Event(), threading.Event(), []
+        manager = DownloadManager(event_bus=SimpleEventBus(), max_concurrent_downloads=1)
+        try:
+            manager.enqueue(_GatedJob("first", first_gate, started))
+            manager.enqueue(_GatedJob("second", second_gate, started))
+            _wait_for(lambda: started == ["first"])
+
+            first_gate.set()
+
+            _wait_for(lambda: started == ["first", "second"])
+        finally:
+            second_gate.set()
+            manager.shutdown()
+
+    def test_cancelling_a_queued_download_never_starts_it(self):
+        bus = SimpleEventBus()
+        states: list[str] = []
+        bus.subscribe(DownloadStateChangedEvent, lambda event: event.job_id == "waiting" and states.append(event.state))
+        gate, started = threading.Event(), []
+        manager = DownloadManager(event_bus=bus, max_concurrent_downloads=1)
+        try:
+            manager.enqueue(_GatedJob("running", gate, started))
+            manager.enqueue(_GatedJob("waiting", threading.Event(), started))
+            manager.cancel("waiting")
+
+            gate.set()
+
+            _wait_for(lambda: manager.state_of("waiting") is DownloadState.CANCELLED)
+            assert started == ["running"]
+            assert states == ["queued", "cancelled"]
+        finally:
+            manager.shutdown()
