@@ -82,13 +82,61 @@ _PINNED_MODEL = ModelInfo(
 )
 
 
+class TestTheNpuEngine:
+    """Bark and parakeet-ultra put the encoder on the NPU on a GPU-less laptop."""
+
+    @staticmethod
+    def _ranked(kind: str, openvino_installed: bool, model: str = "underdog-bark-3.0") -> list[str]:
+        from skryb.transcription.engine_selector import rank_engines
+        from skryb.transcription.model_info import get_model_info
+
+        descriptors = [
+            replace(d, available=openvino_installed) if d.engine_id == "openvino_parakeet" else d
+            for d in build_engine_registry().all_descriptors()
+        ]
+        hardware = HardwareProfile(kind=kind, device_name="test", gfx_arch=None)
+        return [c.engine_id for c in rank_engines(get_model_info(model), hardware, descriptors)]
+
+    @pytest.mark.parametrize(
+        "model",
+        ["underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
+         "underdog-bark-3.0-pro", "parakeet-ultra"],
+    )
+    def test_a_computer_without_a_gpu_runs_it_on_the_npu_engine_first(self, model: str) -> None:
+        assert self._ranked("cpu", openvino_installed=True, model=model) == [
+            "openvino_parakeet", "nano_parakeet",
+        ]
+
+    def test_without_openvino_installed_it_stays_on_pytorch(self) -> None:
+        assert self._ranked("cpu", openvino_installed=False) == ["nano_parakeet"]
+
+    @pytest.mark.parametrize("kind", ["amd_rocm", "nvidia_cuda"])
+    def test_a_computer_with_a_gpu_keeps_it_on_pytorch(self, kind: str) -> None:
+        assert self._ranked(kind, openvino_installed=True) == ["nano_parakeet"]
+
+    def test_parakeet_v3_has_no_transformers_weights_so_it_never_goes_to_the_npu(self) -> None:
+        assert self._ranked("cpu", True, model="parakeet-tdt-0.6b-v3") == ["nano_parakeet"]
+
+    def test_the_npu_engine_shares_the_parakeet_downloads(self, tmp_path: Path) -> None:
+        from skryb.transcription.engine_registry import EngineSpec
+        from skryb.transcription.openvino_parakeet_adapter import OpenVinoParakeetAdapter
+
+        engine = build_engine_registry().build("openvino_parakeet", EngineSpec(
+            model_name="underdog-bark-3.0", repo_id="ConwayResearch/Underdog-Bark-3.0",
+            device="cpu", language="en", beam_size=1, model_dir=tmp_path,
+        ))
+
+        assert isinstance(engine, OpenVinoParakeetAdapter)
+        assert engine.is_model_loaded() is False
+
+
 class TestBuildEngineRegistry:
     def test_should_register_only_surviving_engines(self) -> None:
         registry = build_engine_registry()
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
-            "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr",
+            "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr", "openvino_parakeet",
         }
 
     def test_should_declare_the_ct2_engine_torch_free(self) -> None:

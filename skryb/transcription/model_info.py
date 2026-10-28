@@ -51,6 +51,12 @@ _PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"nano_parakeet": 100},
 )
 
+# Transformers-layout checkpoints can also put the encoder on an Intel NPU.
+_NPU_PARAKEET_ENGINES: tuple[EngineId, ...] = ("openvino_parakeet", "nano_parakeet")
+_NPU_PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"openvino_parakeet": 110, "nano_parakeet": 100},
+)
+
 
 PARAKEET_MODELS: dict[str, ModelInfo] = {
     "parakeet-tdt-0.6b-v3": ModelInfo(
@@ -70,8 +76,49 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
         description="Parakeet v3 retrained by Moondream: fewer errors, same 25 languages",
         repo_id="moondream/parakeet-ultra",
         revision="73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
-        compatible_engines=("nano_parakeet",),
-        engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
+        compatible_engines=_NPU_PARAKEET_ENGINES,
+        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
+    ),
+    # Conway Research's Underdog Bark 3.0 family: Parakeet v3 post-trained
+    # for English (CC-BY-4.0). The three small ones ship one ANS-coded
+    # model.bark, unpacked once at first load (bark_pack); Pro is plain bf16
+    # in transformers' layout, like parakeet-ultra. Pinned because the
+    # unpacker is written against these files.
+    "underdog-bark-3.0": ModelInfo(
+        name="underdog-bark-3.0",
+        size_mb=163,
+        description="Underdog Bark 3.0: Parakeet v3 retrained, 163 MB, English only",
+        repo_id="ConwayResearch/Underdog-Bark-3.0",
+        revision="85db2ad18ab41e534a222ee253c29191d77ed919",
+        compatible_engines=_NPU_PARAKEET_ENGINES,
+        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
+    ),
+    "underdog-bark-3.0-plus": ModelInfo(
+        name="underdog-bark-3.0-plus",
+        size_mb=180,
+        description="Underdog Bark 3.0 Plus: fewer errors than Bark 3.0, 180 MB, English only",
+        repo_id="ConwayResearch/Underdog-Bark-3.0-Plus",
+        revision="d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
+        compatible_engines=_NPU_PARAKEET_ENGINES,
+        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
+    ),
+    "underdog-bark-3.0-clean": ModelInfo(
+        name="underdog-bark-3.0-clean",
+        size_mb=180,
+        description="Underdog Bark 3.0 Clean: Plus that drops ums, false starts and repeats",
+        repo_id="ConwayResearch/Underdog-Bark-3.0-Clean",
+        revision="6d34ed8639b2b9a33e764acf06748519bbb950cf",
+        compatible_engines=_NPU_PARAKEET_ENGINES,
+        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
+    ),
+    "underdog-bark-3.0-pro": ModelInfo(
+        name="underdog-bark-3.0-pro",
+        size_mb=1254,
+        description="Underdog Bark 3.0 Pro: the most accurate Bark, full precision, English only",
+        repo_id="ConwayResearch/Underdog-Bark-3.0-Pro",
+        revision="4b5c51e04aa8d16dda9ecdff71bc29f7360149e4",
+        compatible_engines=_NPU_PARAKEET_ENGINES,
+        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
     ),
 }
 

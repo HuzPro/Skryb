@@ -6,3 +6,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 -r requirements-all.txt
 torch>=2.5
+# Runs the Parakeet encoder on an Intel NPU when the computer has one.
+openvino>=2026.1

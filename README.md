@@ -59,7 +59,9 @@ first thing to include in a bug report.
 - **GPU first, CPU works too.** CUDA and ROCm, Windows ROCm included, are
   first-class. On a computer with no GPU the default is `phonon-2`, Parakeet
   v3 shrunk to 164 MB (English only). It runs on Fermion Research's CPU engine
-  at roughly 15 to 30 times faster than real time.
+  at roughly 15 to 30 times faster than real time. Underdog Bark 3.0
+  (163 MB, English only) is more accurate at the same size, and on a laptop
+  with an Intel NPU it runs on the NPU.
 - **Optional writing model.** A small local language model, run by llama.cpp,
   drops your self-corrections, so "dock 7, actually no, dock 9" comes out as
   "dock 9". It can also rewrite selected text when you say something like

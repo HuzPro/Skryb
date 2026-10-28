@@ -169,6 +169,27 @@ class TestHfRepoResolverIgnorePatterns:
 
         assert [f.filename for f in files] == ["config.json"]
 
+    def test_should_fetch_only_the_weights_and_notice_from_a_bark_repo(self):
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(
+            sha="sha",
+            files=[
+                _fake_sibling("NOTICE", 603),
+                _fake_sibling("bark_frontier.png", 160476),
+                _fake_sibling("bark_loader.py", 5820),
+                _fake_sibling("bark_mlx.py", 5011),
+                _fake_sibling("coreml/ane/BarkEncoder.mlpackage/Data/com.apple.CoreML/weights/weight.bin", 189133632),
+                _fake_sibling("coreml/ane/decoder.npz", 11168286),
+                _fake_sibling("mlx/config.json", 237042),
+                _fake_sibling("model.bark", 163398645),
+                _fake_sibling("runtime/transcribe_bark.py", 1817),
+            ],
+        )
+
+        files = HfRepoResolver(api=api).resolve("ConwayResearch/Underdog-Bark-3.0").files
+
+        assert [f.filename for f in files] == ["NOTICE", "model.bark"]
+
     def test_should_exclude_fp32_sharded_variants(self):
         api = MagicMock()
         api.repo_info.return_value = _fake_repo_info(

@@ -86,6 +86,10 @@ class TestPinnedRevisions:
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         "phonon-2": "fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
         "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
+        "underdog-bark-3.0": "85db2ad18ab41e534a222ee253c29191d77ed919",
+        "underdog-bark-3.0-plus": "d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
+        "underdog-bark-3.0-clean": "6d34ed8639b2b9a33e764acf06748519bbb950cf",
+        "underdog-bark-3.0-pro": "4b5c51e04aa8d16dda9ecdff71bc29f7360149e4",
     }
 
     @pytest.mark.parametrize(

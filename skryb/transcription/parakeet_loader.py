@@ -4,6 +4,7 @@ from pathlib import Path
 from skryb.transcription.backend_imports import (
     make_engine_dependency_error,
 )
+from skryb.transcription.bark_pack import BARK_FILENAME, unpacked_weights
 from skryb.transcription.hf_model_manager import (
     loadable_snapshot_dir,
     repo_has_loadable_snapshot,
@@ -13,6 +14,24 @@ from skryb.transcription.parakeet_hf_checkpoint import load_hf_parakeet
 
 _CPU_DEVICE = "cpu"
 _HF_WEIGHTS_FILENAME = "model.safetensors"
+
+
+def transformers_layout_weights(model_dir: Path, repo_id: str) -> Path | None:
+    """The installed snapshot's weights in transformers' layout, or ``None``.
+
+    ``None`` for a NeMo ``.nemo`` snapshot or a model that is not installed.
+    A Bark snapshot's ``model.bark`` is unpacked into that layout first.
+    """
+    repo_dir = model_dir / f"models--{repo_id.replace('/', '--')}"
+    if not repo_has_loadable_snapshot(repo_dir):
+        return None
+    snapshot = loadable_snapshot_dir(model_dir, repo_id)
+    if (snapshot / BARK_FILENAME).is_file():
+        return unpacked_weights(snapshot)
+    weights = snapshot / _HF_WEIGHTS_FILENAME
+    if any(snapshot.glob("*.nemo")) or not weights.exists():
+        return None
+    return weights
 
 
 class ParakeetModelLoader:
@@ -46,14 +65,7 @@ class ParakeetModelLoader:
         )
 
     def _hf_layout_weights(self) -> Path | None:
-        repo_dir = self._model_dir / f"models--{self._repo_id.replace('/', '--')}"
-        if not repo_has_loadable_snapshot(repo_dir):
-            return None
-        snapshot = loadable_snapshot_dir(self._model_dir, self._repo_id)
-        weights = snapshot / _HF_WEIGHTS_FILENAME
-        if any(snapshot.glob("*.nemo")) or not weights.exists():
-            return None
-        return weights
+        return transformers_layout_weights(self._model_dir, self._repo_id)
 
     def _import_backend(self) -> tuple[object, object]:
         try:

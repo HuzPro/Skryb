@@ -92,6 +92,18 @@ _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# The encoder on an Intel NPU through OpenVINO, the rest of Parakeet in
+# PyTorch on the CPU. Only offered on machines without a GPU; available once
+# the optional openvino package is installed (pip install skryb[npu]). With
+# no NPU it runs the encoder on OpenVINO's CPU device.
+_OPENVINO_PARAKEET_DESCRIPTOR = EngineDescriptor(
+    engine_id="openvino_parakeet",
+    display_name="Parakeet on the NPU (OpenVINO)",
+    supported_hardware=("cpu",),
+    base_priority=95,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
@@ -99,6 +111,7 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "crisperwhisper": 1,
     "crisperwhisper_ct2": 1,
     "native_qwen3_asr": 1,
+    "openvino_parakeet": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -113,6 +126,10 @@ def build_engine_registry() -> EngineRegistry:
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
             replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=native_engine_dll() is not None),
+            replace(
+                _OPENVINO_PARAKEET_DESCRIPTOR,
+                available=importlib.util.find_spec("openvino") is not None,
+            ),
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
@@ -121,6 +138,7 @@ def build_engine_registry() -> EngineRegistry:
             "crisperwhisper": _build_crisperwhisper_engine,
             "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
             "native_qwen3_asr": _build_native_qwen3_asr_engine,
+            "openvino_parakeet": _build_openvino_parakeet_engine,
         },
     )
 
@@ -144,6 +162,14 @@ def _build_nano_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
         device=spec.device,
         model_dir=spec.model_dir,
     )
+
+
+def _build_openvino_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.openvino_parakeet_adapter import (
+        OpenVinoParakeetAdapter,
+    )
+
+    return OpenVinoParakeetAdapter(model_dir=spec.model_dir, repo_id=spec.repo_id)
 
 
 def _build_phonon2_cpu_engine(spec: EngineSpec) -> TranscriptionEngine:
@@ -603,6 +629,7 @@ def build_composite_model_manager(
     return CompositeModelManager(
         by_engine={
             "nano_parakeet": nano_parakeet_manager,
+            "openvino_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
             "phonon2_cpu": phonon2_manager,
             "crisperwhisper": crisperwhisper_manager,

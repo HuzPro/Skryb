@@ -139,7 +139,7 @@ class TestHuggingFaceModelManagerCatalog:
         manager = _make_manager(tmp_path)
 
         assert [model.name for model in manager.list_models()] == [
-            DEFAULT_MODEL, "parakeet-ultra",
+            DEFAULT_MODEL, "parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro",
         ]
         assert manager.has_model(DEFAULT_MODEL) is True
         assert manager.has_model("unknown") is False
@@ -203,6 +203,29 @@ class TestPackedArchiveInstallation:
 
         assert _example_model_is_installed(tmp_path) is False
 
+
+
+class TestBarkInstallation:
+    """Underdog Bark's small models ship one model.bark and no config.json."""
+
+    def test_a_snapshot_holding_model_bark_is_installed(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "models--example--transformers"
+        snapshot = model_dir / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.bark").write_bytes(b"bark")
+        (snapshot / "NOTICE").write_text("CC-BY-4.0")
+        _write_refs_main(model_dir)
+
+        assert _example_model_is_installed(tmp_path) is True
+
+    def test_the_notice_alone_is_not_installed(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "models--example--transformers"
+        snapshot = model_dir / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "NOTICE").write_text("CC-BY-4.0")
+        _write_refs_main(model_dir)
+
+        assert _example_model_is_installed(tmp_path) is False
 
 class TestShardedSafetensorsInstallation:
     """``model.safetensors.index.json`` is a manifest, so its presence

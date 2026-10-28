@@ -8,6 +8,7 @@ from skryb.downloads.chunked_file_downloader import ChunkedFileDownloader
 from skryb.downloads.download_manager import DownloadHandle, DownloadManager
 from skryb.downloads.hf_repo_resolver import HfRepoResolver
 from skryb.downloads.model_download_job import ModelDownloadJob
+from skryb.transcription.bark_pack import BARK_FILENAME
 from skryb.transcription.ct2_conversion import prebuild_ct2_model
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import ModelInfo
@@ -165,6 +166,7 @@ class HuggingFaceModelManager(ModelManager):
             HuggingFaceModelManager._is_nemo_layout(snapshot)
             or HuggingFaceModelManager._is_safetensors_layout(snapshot)
             or HuggingFaceModelManager._is_packed_archive_layout(snapshot)
+            or (snapshot / BARK_FILENAME).is_file()
         )
 
     @staticmethod
