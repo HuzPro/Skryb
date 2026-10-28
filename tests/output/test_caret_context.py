@@ -363,6 +363,56 @@ class TestReplacementTakesTheShapeOfTheSelection:
         assert fit_to_context(text, CaretContext(before, selected, after)) == expected
 
 
+class TestSelectionWithNothingReadBeforeIt:
+    """Zen and some web views report the selection with nothing around it."""
+
+    @pytest.mark.parametrize(
+        ("selected", "after", "text", "expected"),
+        [
+            ("bought milk. ", "", "Picked up some bread.", "picked up some bread. "),
+            ("bought milk.", "", "Picked up some bread.", "picked up some bread."),
+            ("bought milk", "", "Picked up some bread.", "picked up some bread"),
+            ("bought milk. ", "Then I went home.", "Picked up bread.", "picked up bread. "),
+            ("None. ", "", "halal.", "Halal. "),
+            ("Make it up. ", "", "Make it work.", "Make it work. "),
+            ("I think so. ", "", "We think so.", "We think so. "),
+            ("bought milk. ", "", "I bought bread.", "I bought bread. "),
+            ("bought milk. ", "", "NASA called.", "NASA called. "),
+            ("3 apples. ", "", "Four apples.", "Four apples. "),
+            ("über cool. ", "", "Sehr gut.", "sehr gut. "),
+            ("bought milk. ", "", "...", "... "),
+        ],
+        ids=[
+            "the end of a sentence with its full stop and space",
+            "the end of a sentence without the space",
+            "words from the middle without a full stop",
+            "the end of a sentence before the next one",
+            "a capitalised sentence start keeps its capital",
+            "a whole field selected",
+            "the word I says nothing about the sentence",
+            "the dictation's own I stays capitalised",
+            "an acronym in the dictation stays capitalised",
+            "a selection starting with a digit leaves the case alone",
+            "a lowercase non-ASCII first letter",
+            "a dictation of punctuation only",
+        ],
+    )
+    def test_takes_the_case_of_the_selection(
+        self, selected: str, after: str, text: str, expected: str,
+    ) -> None:
+        assert fit_to_context(text, CaretContext("", selected, after)) == expected
+
+    def test_a_caret_at_the_start_of_the_field_still_starts_a_sentence(self) -> None:
+        context = CaretContext("", "", "Then home.")
+
+        assert fit_to_context("bought milk.", context).startswith("Bought")
+
+    def test_a_known_sentence_ending_before_the_selection_still_wins(self) -> None:
+        context = CaretContext("Here is the plan. ", "which slack channel ", "")
+
+        assert fit_to_context("There are two.", context) == "There are two "
+
+
 class TestInsertingWithoutASelection:
     @pytest.mark.parametrize(
         ("before", "after", "text", "expected"),

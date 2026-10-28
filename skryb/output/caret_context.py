@@ -232,6 +232,8 @@ def _starts_with_punctuation(core: str) -> bool:
 
 
 def _match_preceding_case(core: str, before: str, selected: str = "") -> str:
+    if not before and _WORD_PATTERN.search(selected):
+        return _match_selection_case(core, selected)
     if _at_sentence_start(before):
         return _capitalize_first_word(core)
     preceding = _unwrapped(before.rstrip(" \t"))
@@ -241,6 +243,25 @@ def _match_preceding_case(core: str, before: str, selected: str = "") -> str:
         if _starts_with_a_capital(selected):
             return core
         return _lowercase_first_word(core)
+    return core
+
+
+def _match_selection_case(core: str, selected: str) -> str:
+    """The case of the words a dictation replaces, with nothing read before them.
+
+    An empty ``before`` is either the start of the field or a field (Zen,
+    some web views) that reports the selection and nothing around it. The
+    selection's own first letter answers for both: words selected from the
+    end of a sentence start lowercase, a sentence start has its capital.
+    "I" is capitalised anywhere, so it says nothing.
+    """
+    first = _WORD_PATTERN.search(selected).group(0)
+    if first == "I":
+        return core
+    if first[0].islower():
+        return _lowercase_first_word(core)
+    if first[0].isupper():
+        return _capitalize_first_word(core)
     return core
 
 

@@ -270,8 +270,14 @@ def _context_of(element: _Element) -> CaretContext:
     selection = ranges.GetElement(0)
     document = pattern.DocumentRange
     if not _lies_within(selection, document):
-        _logger.debug("No caret context: the selection lies outside the field.")
-        return SELECTION_OUTSIDE_FIELD
+        if not _overlaps(selection, document):
+            _logger.debug(
+                "No caret context: the selection lies outside the field (%s).",
+                _edges_described(selection, document),
+            )
+            return SELECTION_OUTSIDE_FIELD
+        _logger.debug("The selection runs past the field's edge; reading the part inside it.")
+        selection = _clamped_to(selection, document)
     context = CaretContext(
         before=_adjacent_text(
             selection, document, uia.TextPatternRangeEndpoint_Start,
@@ -298,6 +304,44 @@ def _lies_within(selection: _TextRange, document: _TextRange) -> bool:
         selection.CompareEndpoints(start, document, start) >= 0
         and selection.CompareEndpoints(end, document, end) <= 0
     )
+
+
+def _overlaps(selection: _TextRange, document: _TextRange) -> bool:
+    """Whether some selected text lies inside the field.
+
+    A selection that starts inside the field and runs past its end (or the
+    other way round) is still the user's selection in this field: the
+    trailing space after a full stop, or a line break the provider counts
+    outside the field, can carry its edge over. A bare caret elsewhere on
+    the page never overlaps.
+    """
+    uia = _uia()
+    start = uia.TextPatternRangeEndpoint_Start
+    end = uia.TextPatternRangeEndpoint_End
+    return (
+        selection.CompareEndpoints(start, document, end) < 0
+        and selection.CompareEndpoints(end, document, start) > 0
+    )
+
+
+def _edges_described(selection: _TextRange, document: _TextRange) -> str:
+    """Where the selection's edges sit against the field's, for the log."""
+    uia = _uia()
+    start = uia.TextPatternRangeEndpoint_Start
+    end = uia.TextPatternRangeEndpoint_End
+    return (
+        f"start vs field start {selection.CompareEndpoints(start, document, start)}, "
+        f"end vs field end {selection.CompareEndpoints(end, document, end)}, "
+        f"{len(selection.GetText(_ALL_TEXT))} characters selected"
+    )
+
+
+def _clamped_to(selection: _TextRange, document: _TextRange) -> _TextRange:
+    uia = _uia()
+    clamped = selection.Clone()
+    _clamp_to_document(clamped, uia.TextPatternRangeEndpoint_Start, document)
+    _clamp_to_document(clamped, uia.TextPatternRangeEndpoint_End, document)
+    return clamped
 
 
 def _adjacent_text(selection: _TextRange, document: _TextRange, edge: int) -> str:

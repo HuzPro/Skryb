@@ -279,6 +279,47 @@ class TestFieldsInsideALargerDocument:
 
         assert _context_from(automation) is SELECTION_OUTSIDE_FIELD
 
+    def test_a_selection_running_past_the_end_of_the_field_is_read_up_to_its_edge(self):
+        text = "I went to the store and bought milk. "
+        page = _CHROME_BEFORE + text + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, start + len(text) - 1)
+        selected_from = start + text.index("bought")
+        automation = _automation_within(field, selected_from, start + len(text) + 1)
+
+        context = _context_from(automation)
+
+        assert context == CaretContext("I went to the store and ", "bought milk.", "")
+
+    def test_a_selection_starting_before_the_field_is_read_from_its_edge(self):
+        text = "bought milk. Then home."
+        page = _CHROME_BEFORE + text + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, start + len(text))
+        automation = _automation_within(field, start - 3, start + len("bought milk. "))
+
+        context = _context_from(automation)
+
+        assert context == CaretContext("", "bought milk. ", "Then home.")
+
+    def test_a_selection_wholly_after_the_field_is_still_outside_it(self):
+        text = "Hello there. "
+        page = _CHROME_BEFORE + text + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, start + len(text))
+        after_field = start + len(text)
+        automation = _automation_within(field, after_field + 1, after_field + 4)
+
+        assert _context_from(automation) is SELECTION_OUTSIDE_FIELD
+
+    def test_a_selection_ending_exactly_where_the_field_starts_is_outside_it(self):
+        page = _CHROME_BEFORE + "Hello there. " + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, len(page) - len(_CHROME_AFTER))
+        automation = _automation_within(field, start - 4, start)
+
+        assert _context_from(automation) is SELECTION_OUTSIDE_FIELD
+
     def test_should_read_the_full_width_when_it_fits_inside_the_field(self):
         field = "a" * 200 + "b" * 200
         automation = _automation_in_a_page(field, caret=200)
