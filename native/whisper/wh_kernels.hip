@@ -85,8 +85,10 @@ __global__ void conv_weight_kernel(const bf16* __restrict__ src, int N, int C, i
     dst[i] = tap < 3 ? src[((size_t)n * C + ci) * 3 + tap] : b(0.f);
 }
 
-__global__ __launch_bounds__(1024) void argmax_kernel(const bf16* __restrict__ logits, int n, int* ids) {
+// One block per row.
+__global__ __launch_bounds__(1024) void argmax_kernel(const bf16* __restrict__ all, int n, int ld, int* ids) {
     __shared__ unsigned long long best[32];
+    const bf16* logits = all + (size_t)blockIdx.x * ld;
     unsigned long long k = 0;
     for (int i = threadIdx.x; i < n; i += 1024) {
         const unsigned long long key = ((unsigned long long)fkey(f(logits[i])) << 32) | (0xffffffffu - (unsigned)i);
@@ -100,48 +102,7 @@ __global__ __launch_bounds__(1024) void argmax_kernel(const bf16* __restrict__ l
     __syncthreads();
     if (threadIdx.x == 0) {
         for (int w = 1; w < 32; w++) k = best[w] > k ? best[w] : k;
-        ids[0] = (int)(0xffffffffu - (unsigned)(k & 0xffffffffu));
-    }
-}
-
-__global__ void step_begin_kernel(const int* __restrict__ pos, const int* __restrict__ ids, const bf16* __restrict__ embed,
-                                  const bf16* __restrict__ pos_table, bf16* out, AttnTile* tile, int d) {
-    const int p = *pos;
-    const bf16* e = embed + (size_t)ids[p] * d;
-    const bf16* q = pos_table + (size_t)p * d;
-    for (int c = threadIdx.x; c < d; c += blockDim.x) out[c] = b(f(e[c]) + f(q[c]));
-    if (threadIdx.x == 0) *tile = AttnTile{0, 1, 0, p + 1};
-}
-
-__global__ void store_kv_kernel(const int* __restrict__ pos, const bf16* __restrict__ k, const bf16* __restrict__ v,
-                                bf16* kc, bf16* vc, int d) {
-    const size_t row = (size_t)*pos * d;
-    for (int c = threadIdx.x; c < d; c += blockDim.x) {
-        kc[row + c] = k[c];
-        vc[row + c] = v[c];
-    }
-}
-
-// The argmax of argmax_kernel, written where the next step reads it.
-__global__ __launch_bounds__(1024) void argmax_step_kernel(const bf16* __restrict__ logits, int n, int* ids, int* pos, int* last) {
-    __shared__ unsigned long long best[32];
-    unsigned long long k = 0;
-    for (int i = threadIdx.x; i < n; i += 1024) {
-        const unsigned long long key = ((unsigned long long)fkey(f(logits[i])) << 32) | (0xffffffffu - (unsigned)i);
-        k = key > k ? key : k;
-    }
-    for (int m = 16; m; m >>= 1) {
-        const unsigned long long o = __shfl_xor(k, m, 32);
-        k = o > k ? o : k;
-    }
-    if ((threadIdx.x & 31) == 0) best[threadIdx.x >> 5] = k;
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        for (int w = 1; w < 32; w++) k = best[w] > k ? best[w] : k;
-        const int id = (int)(0xffffffffu - (unsigned)(k & 0xffffffffu)), p = *pos;
-        ids[p + 1] = id;
-        *last = id;
-        *pos = p + 1;
+        ids[blockIdx.x] = (int)(0xffffffffu - (unsigned)(k & 0xffffffffu));
     }
 }
 
@@ -164,19 +125,7 @@ void wh_conv_weight(hipStream_t s, const bf16* src, int N, int C, int K, bf16* d
     conv_weight_kernel<<<cdiv(N * K, 256), 256, 0, s>>>(src, N, C, K, dst);
 }
 
-void wh_argmax(hipStream_t s, const bf16* logits, int n, int* ids) {
-    argmax_kernel<<<1, 1024, 0, s>>>(logits, n, ids);
+void wh_argmax(hipStream_t s, const bf16* logits, int n, int ld, int rows, int* ids) {
+    argmax_kernel<<<rows, 1024, 0, s>>>(logits, n, ld, ids);
 }
 
-void wh_step_begin(hipStream_t s, const int* pos, const int* ids, const bf16* embed, const bf16* pos_table, bf16* out,
-                   AttnTile* tile, int d) {
-    step_begin_kernel<<<1, 256, 0, s>>>(pos, ids, embed, pos_table, out, tile, d);
-}
-
-void wh_store_kv(hipStream_t s, const int* pos, const bf16* k, const bf16* v, bf16* k_cache, bf16* v_cache, int d) {
-    store_kv_kernel<<<1, 256, 0, s>>>(pos, k, v, k_cache, v_cache, d);
-}
-
-void wh_argmax_step(hipStream_t s, const bf16* logits, int n, int* ids, int* pos, int* last) {
-    argmax_step_kernel<<<1, 1024, 0, s>>>(logits, n, ids, pos, last);
-}
