@@ -58,6 +58,9 @@ __device__ __forceinline__ bf16 epi_value(const Epi& e, int row, int col, float 
     if (e.bias) v += f(e.bias[col]);
     bf16 r = b(v);
     if (e.act == ACT_GELU) r = b(gelu(f(r)));
+    else if (e.act == ACT_SILU) r = b(f(r) / (1.f + expf(-f(r))));
+    else if (e.act == ACT_RELU) r = b(fmaxf(f(r), 0.f));
+    if (e.scale != 1.f) r = b(f(r) * e.scale);
     if (e.res) {
         int rr = e.res_mod ? row % e.res_mod : row;
         r = b(f(r) + f(e.res[(size_t)rr * e.res_ld + col]));

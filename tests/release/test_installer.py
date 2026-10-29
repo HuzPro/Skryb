@@ -116,6 +116,9 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
         dll = repo / "native" / "engine" / "build" / "qasr.dll"
         dll.parent.mkdir(parents=True)
         dll.write_bytes(b"MZ native engine")
+        parakeet = repo / "native" / "parakeet" / "build" / "npk.dll"
+        parakeet.parent.mkdir(parents=True)
+        parakeet.write_bytes(b"MZ native parakeet")
     (repo / "skryb" / "transcription").mkdir()
     (root / "scratch").mkdir()
     return repo
@@ -148,6 +151,14 @@ class TestStageWheelSource:
         source = _stage_wheel_source(repo, tmp_path / "scratch")
 
         assert (source / "skryb" / "transcription" / "qasr.dll").read_bytes() == b"MZ native engine"
+        assert (source / "skryb" / "transcription" / "npk.dll").read_bytes() == b"MZ native parakeet"
+
+    def test_refuses_to_build_an_installer_without_the_native_parakeet_engine(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        (repo / "native" / "parakeet" / "build" / "npk.dll").unlink()
+
+        with pytest.raises(InstallerBuildError, match=r"native/parakeet/build\.sh"):
+            _stage_wheel_source(repo, tmp_path / "scratch")
 
     def test_refuses_to_build_an_installer_without_the_native_engine(self, tmp_path):
         repo = _fake_repo(tmp_path, engine_built=False)

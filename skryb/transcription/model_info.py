@@ -58,10 +58,11 @@ _BARK_PLUS_DESCRIPTION = (
 )
 
 
-# Transformers-layout checkpoints can also put the encoder on an Intel NPU.
-_NPU_PARAKEET_ENGINES: tuple[EngineId, ...] = ("openvino_parakeet", "nano_parakeet")
+# Transformers-layout checkpoints can also run on the native gfx1200 engine
+# or put the encoder on an Intel NPU; nano-parakeet is the default elsewhere.
+_NPU_PARAKEET_ENGINES: tuple[EngineId, ...] = ("native_parakeet", "openvino_parakeet", "nano_parakeet")
 _NPU_PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"openvino_parakeet": 110, "nano_parakeet": 100},
+    {"native_parakeet": 120, "openvino_parakeet": 110, "nano_parakeet": 100},
 )
 
 

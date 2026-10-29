@@ -3,7 +3,7 @@
 
 typedef __bf16 bf16;
 
-enum { ACT_NONE = 0, ACT_GELU = 1 };
+enum { ACT_NONE = 0, ACT_GELU = 1, ACT_SILU = 2, ACT_RELU = 3 };
 
 // What a matrix product does with each fp32 result before it is stored.
 // Rounding follows PyTorch bf16: bias joins the fp32 sum, then each later op
@@ -14,6 +14,7 @@ struct Epi {
     int res_ld = 0;
     int res_mod = 0;               // residual row = row % res_mod when set
     int act = ACT_NONE;
+    float scale = 1.f;             // applied after the activation, before the residual
     const int* row_map = nullptr;  // output row per input row, -1 drops it
     bf16* out = nullptr;
     int ldo = 0;

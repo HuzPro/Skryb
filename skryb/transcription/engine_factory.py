@@ -36,7 +36,7 @@ from skryb.transcription.model_info import (
     get_model_info,
 )
 from skryb.transcription.model_manager import ModelManager
-from skryb.transcription.native_engine_dll import native_engine_dll
+from skryb.transcription.native_engine_dll import native_engine_dll, native_parakeet_dll
 
 _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     engine_id="nano_parakeet",
@@ -92,6 +92,18 @@ _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# Parakeet TDT on the same kind of hand-written gfx1200 kernels: loads in
+# about a second where nano-parakeet takes ten, and no torch import.
+_NATIVE_PARAKEET_DESCRIPTOR = EngineDescriptor(
+    engine_id="native_parakeet",
+    display_name="Parakeet (native HIP engine)",
+    supported_hardware=("amd_rocm",),
+    base_priority=95,
+    requires_torch=False,
+    supported_gfx=("gfx1200",),
+)
+
+
 # The encoder on an Intel NPU through OpenVINO, the rest of Parakeet in
 # PyTorch on the CPU. Only offered on machines without a GPU; available once
 # the optional openvino package is installed (pip install skryb[npu]). With
@@ -112,6 +124,7 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "crisperwhisper_ct2": 1,
     "native_qwen3_asr": 1,
     "openvino_parakeet": 1,
+    "native_parakeet": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -126,6 +139,7 @@ def build_engine_registry() -> EngineRegistry:
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
             replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=native_engine_dll() is not None),
+            replace(_NATIVE_PARAKEET_DESCRIPTOR, available=native_parakeet_dll() is not None),
             replace(
                 _OPENVINO_PARAKEET_DESCRIPTOR,
                 available=importlib.util.find_spec("openvino") is not None,
@@ -139,6 +153,7 @@ def build_engine_registry() -> EngineRegistry:
             "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
             "native_qwen3_asr": _build_native_qwen3_asr_engine,
             "openvino_parakeet": _build_openvino_parakeet_engine,
+            "native_parakeet": _build_native_parakeet_engine,
         },
     )
 
@@ -170,6 +185,12 @@ def _build_openvino_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
     )
 
     return OpenVinoParakeetAdapter(model_dir=spec.model_dir, repo_id=spec.repo_id)
+
+
+def _build_native_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.native_parakeet_adapter import NativeParakeetAdapter
+
+    return NativeParakeetAdapter(model_dir=spec.model_dir, repo_id=spec.repo_id)
 
 
 def _build_phonon2_cpu_engine(spec: EngineSpec) -> TranscriptionEngine:
@@ -261,13 +282,14 @@ def selectable_engine_ids(
         return tuple(d.engine_id for d in registry.all_descriptors())
     if models_dir is None:
         return model_info.compatible_engines
-    return _auto_selection(model_info, registry, models_dir)
+    return _auto_selection(model_info, registry, models_dir, config)
 
 
 def _auto_selection(
     model_info: ModelInfo,
     registry: EngineRegistry,
     models_dir: Path,
+    config: ConfigurationStore,
 ) -> tuple[EngineId, ...]:
     """The single engine ``auto`` will load, when that is knowable here.
 
@@ -276,10 +298,13 @@ def _auto_selection(
     engine that actually loads rather than about every candidate - which
     would report "needs torch" whenever any alternative did.
 
-    Falls back to every candidate when the ranking needs a hardware
-    probe, because probing is the import this is trying to avoid.
+    When the ranking needs hardware it uses the GPU an earlier launch
+    probed, and falls back to every candidate when there is none, because
+    probing is the import this is trying to avoid.
     """
-    ranked = _ranking_that_ignores_hardware(model_info, registry)
+    ranked = _ranking_that_ignores_hardware(model_info, registry) or _ranking_on_remembered_hardware(
+        model_info, registry, config,
+    )
     if not ranked:
         return model_info.compatible_engines
     installed = engines_with_model_on_disk(model_info, models_dir)
@@ -368,6 +393,23 @@ def resolve_engine_id(
 _UNPROBED_HARDWARE = HardwareProfile(
     kind="cpu", device_name="unprobed", gfx_arch=None,
 )
+
+
+def _ranking_on_remembered_hardware(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+    config: ConfigurationStore,
+) -> tuple[EngineId, ...]:
+    from skryb.transcription.cached_hardware_detector import remembered_hardware
+    from skryb.transcription.win32_display_adapters import display_adapter_fingerprint
+
+    hardware = remembered_hardware(config, display_adapter_fingerprint())
+    if hardware is None:
+        return ()
+    return tuple(
+        candidate.engine_id
+        for candidate in rank_engines(model_info, hardware, registry.all_descriptors())
+    )
 
 
 def _ranking_that_ignores_hardware(
@@ -633,6 +675,7 @@ def build_composite_model_manager(
         by_engine={
             "nano_parakeet": nano_parakeet_manager,
             "openvino_parakeet": nano_parakeet_manager,
+            "native_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
             "phonon2_cpu": phonon2_manager,
             "crisperwhisper": crisperwhisper_manager,
