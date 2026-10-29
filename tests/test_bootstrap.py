@@ -1266,6 +1266,11 @@ class TestLearningWiring:
 
 
 class TestAppAwareOutputChain:
+    @pytest.fixture(autouse=True)
+    def _a_plain_editor_has_focus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The chain reads the foreground app; on a desktop with a browser in front it would drop the full stop."""
+        monkeypatch.setattr("skryb.bootstrap._foreground_process", lambda: "notepad.exe")
+
     def _hooks(self, failures: list, method=None):
         from skryb.output.app_aware_delivery import DeliveryHooks
         from skryb.output.last_dictation import LastDictation
