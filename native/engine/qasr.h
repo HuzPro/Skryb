@@ -18,6 +18,9 @@ QASR_API QasrEngine* qasr_load(const char* path, char* err, int err_len);
 QASR_API int qasr_transcribe(QasrEngine* engine, const float* pcm, int samples, char* text, int text_len);
 // JSON timings of the last load or transcribe call.
 QASR_API const char* qasr_stats(QasrEngine* engine);
+// The model's odds of "?" over "." for the last transcript's final punctuation, from the two tokens'
+// logits where it was chosen; -1 when the transcript does not end in "." or "?".
+QASR_API float qasr_question_probability(QasrEngine* engine);
 QASR_API void qasr_free(QasrEngine* engine);
 
 #ifdef __cplusplus

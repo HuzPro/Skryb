@@ -282,6 +282,7 @@ class SettingsService:
                 self._config.get("transcription.mode")
             ),
             crisperwhisper_mode=self._crisperwhisper_mode(),
+            question_marks=self._config.get("transcription.question_marks", True) is not False,
             capture_content=(
                 self._config.get("diagnostics.enabled", True) is True
                 and self._config.get("diagnostics.capture_content", False) is True
@@ -342,6 +343,7 @@ class SettingsService:
         self._config.set(
             "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
         )
+        self._config.set("transcription.question_marks", draft.question_marks)
         self._config.set(LEARN_WORDS_KEY, draft.learn_words)
         self._config.set("history.retention_days", draft.history_retention_days)
         self._config.set("updates.check_automatically", draft.check_for_updates)

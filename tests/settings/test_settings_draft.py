@@ -147,6 +147,18 @@ class TestChangeSetFromDrafts:
         assert with_change.any_changed is True
 
 
+class TestHearingQuestionsChanges:
+    def test_turning_it_off_reloads_the_engine_that_applies_it(self) -> None:
+        changes = ChangeSet.between(_make_draft(question_marks=True), _make_draft(question_marks=False))
+
+        assert changes.engine_reload_required
+
+    def test_leaving_it_alone_changes_nothing(self) -> None:
+        draft = _make_draft(question_marks=False)
+
+        assert not ChangeSet.between(draft, draft).any_changed
+
+
 class TestCrisperWhisperModeChanges:
     def test_should_require_an_engine_reload(self) -> None:
         original = _make_draft(crisperwhisper_mode="intended")

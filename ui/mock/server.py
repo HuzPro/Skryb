@@ -103,7 +103,7 @@ def _default_settings():
     return {
         "model_size": "parakeet-tdt-0.6b-v3", "language": "en", "device": "auto", "engine": "auto",
         "output_mode": "direct_paste", "transcription_mode": "batch", "crisperwhisper_mode": "intended",
-        "capture_content": True, "input_device": "", "boost_quiet_speech": True, "learn_words": True,
+        "capture_content": True, "question_marks": True, "input_device": "", "boost_quiet_speech": True, "learn_words": True,
         "hotkey_bindings": [
             {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
             {"keys": "ctrl+shift+f9", "mode": "hold", "action": "dictate"},

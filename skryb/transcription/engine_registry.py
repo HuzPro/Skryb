@@ -31,6 +31,8 @@ class EngineSpec:
     model_dir: Path
     revision: str = ""
     crisperwhisper_mode: CrisperWhisperMode = "intended"
+    # A full stop the engine nearly made a question mark becomes one (engines that can tell).
+    question_marks: bool = True
 
 
 class EngineBuilder(Protocol):

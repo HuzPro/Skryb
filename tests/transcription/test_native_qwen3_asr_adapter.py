@@ -44,8 +44,12 @@ def test_transcribing_before_loading_is_refused(tmp_path: Path) -> None:
 class _FakeQasr:
     """Stands in for qasr.dll: writes a fixed transcript into the caller's buffer."""
 
-    def __init__(self, transcript: str) -> None:
+    def __init__(self, transcript: str, question_probability: float = -1.0) -> None:
         self._transcript = transcript.encode()
+        self._question_probability = question_probability
+
+    def qasr_question_probability(self, handle) -> float:  # noqa: ANN001
+        return self._question_probability
 
     def qasr_transcribe(self, handle, samples, count, buffer, size) -> int:  # noqa: ANN001
         ctypes.memmove(buffer, self._transcript, len(self._transcript))
@@ -97,3 +101,42 @@ def test_the_vocab_keeps_token_bytes_and_blanks_only_special_tokens(tmp_path: Pa
     assert piece(151645) == b""
     assert piece(151704) == b"<asr_text>"
     assert piece(5000) == b""
+
+
+def _transcribe(tmp_path: Path, transcript: str, probability: float, threshold: float | None = 0.3) -> str:
+    adapter = NativeQwen3AsrAdapter(tmp_path, question_threshold=threshold)
+    adapter._lib, adapter._handle = _FakeQasr(transcript, probability), 1
+    return adapter.transcribe(AudioSegment(data=np.zeros(16000, dtype=np.float32), sample_rate=16000)).text
+
+
+class TestHearingQuestions:
+    def test_a_full_stop_the_engine_nearly_made_a_question_mark_becomes_one(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "Why not store it all in the same storage.", 0.37) == (
+            "Why not store it all in the same storage?"
+        )
+
+    def test_a_full_stop_the_engine_was_sure_of_stays(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "Do the prod push stuff.", 0.04) == "Do the prod push stuff."
+
+    def test_the_bar_itself_counts_as_a_question(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "This one, right.", 0.3) == "This one, right?"
+
+    def test_switched_off_it_leaves_even_a_near_certain_question_alone(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "How long.", 0.99, threshold=None) == "How long."
+
+    def test_an_ellipsis_is_never_turned_into_a_question(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "So I was thinking...", 0.9) == "So I was thinking..."
+
+    def test_a_question_mark_the_engine_wrote_itself_is_kept(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "How big is the damage?", -1.0) == "How big is the damage?"
+
+    def test_only_the_last_full_stop_changes(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "Are you sure. Like we're good to disable the keys.", 0.5) == (
+            "Are you sure. Like we're good to disable the keys?"
+        )
+
+    def test_urdu_in_hindi_script_still_becomes_roman_urdu_after_the_change(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "हाँ जी क्या बात हुई.", 0.4) == "haan ji kya baat hui?"
+
+    def test_an_empty_transcript_stays_empty(self, tmp_path: Path) -> None:
+        assert _transcribe(tmp_path, "", 0.9) == ""

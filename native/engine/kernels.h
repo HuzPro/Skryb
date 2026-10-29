@@ -63,3 +63,5 @@ void silu_mul(hipStream_t s, const bf16* gu, bf16* out, int rows, int d);
 // Decoder input rows: ids[r] >= 0 takes that embedding row, -1 takes the next audio row.
 void embed(hipStream_t s, const int* ids, const bf16* table, const bf16* audio, int audio_start, bf16* out, int rows, int d);
 void argmax_ids(hipStream_t s, const unsigned long long* keys, int* ids, int rows);
+// fp32 logits of two tokens for each of M normalised rows (d = 2048): out[2 m + j] = x[m] . W[id_j].
+void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out);
