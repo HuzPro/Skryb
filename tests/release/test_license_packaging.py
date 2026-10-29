@@ -50,10 +50,12 @@ def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     (stand_ins / "skryb-ui.exe").write_bytes(b"MZ")
     (stand_ins / "qasr.dll").write_bytes(b"MZ")
     (stand_ins / "npk.dll").write_bytes(b"MZ")
+    (stand_ins / "nd.dll").write_bytes(b"MZ")
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(installer, "_UI_SHELL_BUILD", stand_ins / "skryb-ui.exe")
         patch.setattr(installer, "_NATIVE_ENGINE_BUILD", stand_ins / "qasr.dll")
         patch.setattr(installer, "_NATIVE_PARAKEET_BUILD", stand_ins / "npk.dll")
+        patch.setattr(installer, "_NATIVE_DIARIZER_BUILD", stand_ins / "nd.dll")
         return _stage_wheel_source(_REPO_ROOT, tmp_path_factory.mktemp("stage"))
 
 

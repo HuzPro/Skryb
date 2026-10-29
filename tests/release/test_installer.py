@@ -119,6 +119,9 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
         parakeet = repo / "native" / "parakeet" / "build" / "npk.dll"
         parakeet.parent.mkdir(parents=True)
         parakeet.write_bytes(b"MZ native parakeet")
+        diarizer = repo / "native" / "diar" / "build" / "nd.dll"
+        diarizer.parent.mkdir(parents=True)
+        diarizer.write_bytes(b"MZ native diarizer")
     (repo / "skryb" / "transcription").mkdir()
     (root / "scratch").mkdir()
     return repo
@@ -152,6 +155,7 @@ class TestStageWheelSource:
 
         assert (source / "skryb" / "transcription" / "qasr.dll").read_bytes() == b"MZ native engine"
         assert (source / "skryb" / "transcription" / "npk.dll").read_bytes() == b"MZ native parakeet"
+        assert (source / "skryb" / "transcription" / "nd.dll").read_bytes() == b"MZ native diarizer"
 
     def test_refuses_to_build_an_installer_without_the_native_parakeet_engine(self, tmp_path):
         repo = _fake_repo(tmp_path)

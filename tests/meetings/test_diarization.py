@@ -8,8 +8,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from skryb.core.exceptions import TranscriptionError
 from skryb.meetings.diarization import (
     DiarizerStream,
+    NativeDiarizer,
+    SpeakerCache,
     StreamingFeatures,
     slaney_mel_filters,
 )
@@ -132,12 +135,82 @@ class TestDiarizerStream:
         assert step.calls == []
 
 
+def _logits(rows: int, speakers: dict[int, slice]) -> np.ndarray:
+    """Step logits [rows * 8][8]: each listed speaker clearly talking over its rows, everyone else silent."""
+    logits = np.full((rows * 8, 8), -6.0, np.float32)
+    for speaker, rows_spoken in speakers.items():
+        logits[rows_spoken.start * 8:rows_spoken.stop * 8, speaker] = 6.0
+    return logits
 
 
+def _embeds(rows: int, start: int = 0) -> np.ndarray:
+    return (np.arange(start, start + rows, dtype=np.float32)[:, None] * np.ones((1, 512), np.float32))
 
 
+class TestSpeakerCache:
+    def test_chunks_fill_the_fifo_before_anything_reaches_the_cache(self) -> None:
+        cache = SpeakerCache(_STREAMING)
+
+        for step in range(29):  # 29 chunks of 9 frames = 261 frames, under the FIFO's 264
+            step_input = np.concatenate([cache.get_embeds(), _embeds(13, step * 9)])
+            cache.update(step_input, _logits(len(step_input), {0: slice(0, len(step_input))}), np.zeros(512), 9)
+
+        assert (cache.num_cache_frames, cache.num_fifo_frames) == (0, 261)
+        assert cache.get_embeds()[-1, 0] == 260
+
+    def test_an_overflowing_fifo_moves_its_oldest_frames_to_the_cache_in_order(self) -> None:
+        cache = SpeakerCache(_STREAMING)
+
+        for step in range(30):
+            step_input = np.concatenate([cache.get_embeds(), _embeds(13, step * 9)])
+            cache.update(step_input, _logits(len(step_input), {1: slice(0, len(step_input))}), np.zeros(512), 9)
+
+        assert cache.num_cache_frames == 222
+        assert cache.num_fifo_frames == 270 - 222
+        assert np.array_equal(cache.embeds[:222, 0], np.arange(222))
+        assert not cache.is_compressed
+
+    def test_a_full_cache_is_compressed_to_its_length_grouped_by_speaker_with_silence_slots(self) -> None:
+        cache = SpeakerCache(_STREAMING)
+        silence = np.full(512, -1.0, np.float32)
+
+        for step in range(70):  # alternate two speakers every ~90 frames
+            step_input = np.concatenate([cache.get_embeds(), _embeds(13, step * 9)])
+            speaker = (step // 10) % 2
+            cache.update(step_input, _logits(len(step_input), {speaker: slice(len(step_input) - 13, len(step_input))}),
+                         silence, 9)
+
+        assert cache.is_compressed
+        assert cache.num_cache_frames == 264
+        kept = cache.embeds[:264, 0]
+        silence_slots = kept == -1.0
+        assert silence_slots.sum() >= 2  # at least one reserved slot per speaker heard
+        heard = kept[~silence_slots]
+        assert len(np.unique(heard)) == len(heard)  # no frame kept twice
+
+    def test_probabilities_of_a_compressed_cache_are_the_ones_stored_with_its_frames(self) -> None:
+        cache = SpeakerCache(_STREAMING)
+        for step in range(70):
+            step_input = np.concatenate([cache.get_embeds(), _embeds(13, step * 9)])
+            cache.update(step_input, _logits(len(step_input), {0: slice(0, len(step_input))}), np.zeros(512), 9)
+        stored = cache.probs[:cache.num_cache_frames].copy()
+
+        step_input = np.concatenate([cache.get_embeds(), _embeds(13, 9999)])
+        cache.update(step_input, _logits(len(step_input), {}), np.zeros(512), 9)
+
+        assert np.array_equal(cache.probs[:len(stored)][:10], stored[:10])
 
 
+def test_without_its_dll_the_native_diarizer_says_it_isnt_installed(tmp_path: Path) -> None:
+    snapshot = _snapshot(tmp_path)
+    header = {name: {"dtype": "F32", "shape": shape, "data_offsets": [start, start + 4 * int(np.prod(shape))]}
+              for name, shape, start in (("model.audio_tower.embedder.projection.weight", [512, 1024], 0),
+                                         ("silence_embeds", [512], 512 * 1024 * 4))}
+    raw = json.dumps(header).encode()
+    (snapshot / "model.safetensors").write_bytes(len(raw).to_bytes(8, "little") + raw + bytes(513 * 1024 * 4))
+
+    with pytest.raises(TranscriptionError, match="isn't installed"):
+        NativeDiarizer(snapshot, dll_path=tmp_path / "nd.dll")
 
 
 def test_the_diarization_module_never_imports_torch() -> None:

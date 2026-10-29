@@ -74,6 +74,7 @@ if sys.platform != "win32":
 def _no_native_parakeet_engine(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
     """Engine choice in tests can't depend on whether this checkout has built npk.dll; a test that wants it says so."""
     monkeypatch.setenv("NPK_DLL", str(tmp_path_factory.getbasetemp() / "npk.dll not built"))
+    monkeypatch.setenv("ND_DLL", str(tmp_path_factory.getbasetemp() / "nd.dll not built"))
 
 
 @pytest.fixture()

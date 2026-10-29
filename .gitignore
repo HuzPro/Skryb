@@ -49,3 +49,5 @@ ui/src-tauri/gen/
 
 # Copied in by the installer build; never committed.
 skryb/transcription/qasr.dll
+skryb/transcription/npk.dll
+skryb/transcription/nd.dll

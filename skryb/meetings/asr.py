@@ -11,8 +11,10 @@ from pathlib import Path
 
 import numpy as np
 
+from skryb.core.exceptions import TranscriptionError
 from skryb.core.paths import AppPaths
 from skryb.meetings.capture import RATE
+from skryb.meetings.diarization import NativeDiarizer
 from skryb.meetings.models import DIARIZER, Diarizer, Labeller, Vad, gpu_available, release_gpu
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
@@ -23,6 +25,7 @@ from skryb.transcription.hardware_detector import HardwareDetector
 from skryb.transcription.hf_model_manager import loadable_snapshot_dir
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import get_model_info
+from skryb.transcription.native_engine_dll import native_diarizer_dll
 from skryb.transcription.qwen3_asr_prompt import PromptedTranscriber
 
 QWEN3_ASR = "qwen3-asr-1.7b"
@@ -52,6 +55,11 @@ def diarizer_snapshot(models_dir: Path) -> Path:
     return loadable_snapshot_dir(models_dir, DIARIZER.repo_id, DIARIZER.revision)
 
 
+def native_diarizer_usable(hardware_detector: HardwareDetector) -> bool:
+    """The native diarizer runs on an RX 9060 XT (gfx1200), once its DLL is installed."""
+    return native_diarizer_dll() is not None and hardware_detector.detect().gfx_arch == "gfx1200"
+
+
 class MeetingModels:
     """Loaded at meeting start by ``speaker_labeller``, released by ``release`` at stop."""
 
@@ -63,14 +71,16 @@ class MeetingModels:
         turns: EngineTurns,
         build_asr: Callable[[], TranscriptionEngine],
         diarizer_snapshot: Callable[[], Path],
+        native_diarizer: Callable[[], bool] = lambda: False,
     ) -> None:
         self._language = _ASKED_AS.get(language, "en")
         self._dictation_engine = dictation_engine
         self._turns = turns
         self._build_asr = build_asr
         self._diarizer_snapshot = diarizer_snapshot
+        self._native_diarizer = native_diarizer
         self._own: TranscriptionEngine | None = None
-        self._diarizer: Diarizer | None = None
+        self._diarizer: Labeller | None = None
 
     def voice_detector(self) -> Labeller:
         return Vad()
@@ -79,6 +89,12 @@ class MeetingModels:
         """Who is talking on the speakers, and a warning when that cannot be told."""
         if not self._borrowed_engine_is_prompted():
             self._own_engine()
+        if self._native_diarizer():
+            try:
+                self._diarizer = NativeDiarizer(self._diarizer_snapshot())
+                return self._diarizer, None
+            except TranscriptionError as error:
+                _logger.warning("The native diarizer didn't load, so the PyTorch one runs: %s", error)
         if not gpu_available():
             # ponytail: on the CPU the diarizer falls far behind live audio; add it back for CPUs if one keeps up.
             return Vad(), NO_GPU_WARNING
@@ -95,6 +111,8 @@ class MeetingModels:
         return self._own_engine().transcribe_prompted(clip, context, self._language).text
 
     def release(self) -> None:
+        if isinstance(self._diarizer, NativeDiarizer):
+            self._diarizer.dispose()
         self._diarizer = None
         if self._own is not None:
             self._own.dispose()
