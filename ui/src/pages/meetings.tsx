@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, Radio, Settings2, Square, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { NavLink, useParams } from "react-router";
+import { ArrowDown, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Radio, Settings2, Square, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate, useParams } from "react-router";
 import { formatGigabytes } from "../components/models";
-import { Card, InlineError, PageBody, PageTitle, ProgressBar, Row, Rows, Section } from "../components/parts";
+import { Card, ContextMenu, InlineError, PageBody, PageTitle, ProgressBar, Row, Rows, Section } from "../components/parts";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -14,7 +14,7 @@ import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, labelO
 import { chooseFolder, chooseMediaFile, onFileDrag } from "../lib/platform";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
-import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingTranscript } from "../lib/types";
+import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingSummary, MeetingTranscript } from "../lib/types";
 import { cn } from "../lib/utils";
 import { dayLabel, formatDuration } from "./history";
 
@@ -100,6 +100,61 @@ export function MeetingsNav() {
       isActive && "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)] hover:bg-card",
     );
   const past = (overview?.meetings ?? []).filter((meeting) => !(recording && meeting.id === live?.id));
+  const { confirm } = useStore();
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [problem, setProblem] = useState("");
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const showing = (id: string) => location.pathname.startsWith("/meetings/") && decodeURIComponent(location.pathname.slice("/meetings/".length)) === id;
+  const rename = async (id: string, name: string | null) => {
+    setRenaming(null);
+    if (name === null || name.trim() === meetingName(id)) return;
+    setProblem("");
+    try {
+      const renamed = await api.post<{ id: string }>(`/api/meetings/${encodeURIComponent(id)}/name`, { name });
+      // Shown at once, so the old name doesn't flash back while the list reloads.
+      client.setQueryData<MeetingOverview>(["meetings"], (overview) =>
+        overview && { ...overview, meetings: overview.meetings.map((meeting) => (meeting.id === id ? { ...meeting, id: renamed.id } : meeting)) },
+      );
+      await client.invalidateQueries({ queryKey: ["meetings"] });
+      if (showing(id)) navigate(`/meetings/${encodeURIComponent(renamed.id)}`, { replace: true });
+    } catch (error) {
+      setProblem(errorText(error));
+    }
+  };
+  const remove = async (id: string) => {
+    const sure = await confirm(
+      "Delete this meeting?",
+      `“${meetingName(id)}” goes to the Recycle Bin with its recording and transcript. You can restore it from there.`,
+      "Delete",
+    );
+    if (!sure) return;
+    setProblem("");
+    try {
+      await api.del(`/api/meetings/${encodeURIComponent(id)}`);
+      if (showing(id)) navigate("/meetings", { replace: true });
+      client.removeQueries({ queryKey: ["meeting", id] });
+      await client.invalidateQueries({ queryKey: ["meetings"] });
+    } catch (error) {
+      setProblem(errorText(error));
+    }
+  };
+  const openMenu = (id: string, event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    const row = event.currentTarget.getBoundingClientRect();
+    // The Menu key and Shift+F10 open it with no pointer: then it opens under the row.
+    const byKeyboard = event.clientX === 0 && event.clientY === 0;
+    setMenu({ id, x: byKeyboard ? row.left + 12 : event.clientX, y: byKeyboard ? row.bottom : event.clientY });
+  };
+  const keys = (id: string, event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "F2") setRenaming(id);
+    else if (event.key === "Delete") void remove(id);
+    else return;
+    event.preventDefault();
+  };
   return (
     <>
       <nav className="flex flex-col gap-0.5 px-2 pt-2">
@@ -111,18 +166,46 @@ export function MeetingsNav() {
       </nav>
       <div className="mt-4 px-4 pb-1 text-[11.5px] font-semibold text-muted-foreground">Past meetings</div>
       <nav aria-label="Past meetings" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2">
-        {past.map((meeting) => (
-          <NavLink key={meeting.id} to={`/meetings/${encodeURIComponent(meeting.id)}`} draggable={false} className={(state) => cn(link(state), "flex-col items-start gap-0 py-1.5")}>
-            <span className="w-full truncate" title={meeting.id}>
-              {meetingName(meeting.id)}
-            </span>
-            <span className="w-full truncate text-[11.5px] font-normal text-muted-foreground">
-              {when(meeting.started)} · {formatDuration(meeting.seconds)}
-            </span>
-          </NavLink>
-        ))}
+        {past.map((meeting) =>
+          renaming === meeting.id ? (
+            <RenameField key={meeting.id} meeting={meeting} onDone={(name) => void rename(meeting.id, name)} />
+          ) : (
+            <NavLink
+              key={meeting.id}
+              to={`/meetings/${encodeURIComponent(meeting.id)}`}
+              draggable={false}
+              onContextMenu={(event) => openMenu(meeting.id, event)}
+              onKeyDown={(event) => keys(meeting.id, event)}
+              className={(state) => cn(link(state), "flex-col items-start gap-0 py-1.5", menu?.id === meeting.id && "bg-accent text-foreground")}
+            >
+              <span className="w-full truncate" title={meeting.id}>
+                {meetingName(meeting.id)}
+              </span>
+              <span className="w-full truncate text-[11.5px] font-normal text-muted-foreground">
+                {when(meeting.started)} · {formatDuration(meeting.seconds)}
+              </span>
+            </NavLink>
+          ),
+        )}
         {overview && !past.length ? <p className="px-2.5 py-1 text-[12px] text-muted-foreground">Meetings you record show up here.</p> : null}
+        {problem ? (
+          <p role="alert" className="px-2.5 py-1 text-[12px] text-destructive">
+            {problem}
+          </p>
+        ) : null}
       </nav>
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={meetingName(menu.id)}
+          onClose={closeMenu}
+          items={[
+            { label: "Rename", icon: PencilLine, shortcut: "F2", onSelect: () => setRenaming(menu.id) },
+            { label: "Delete", icon: Trash2, shortcut: "Del", danger: true, onSelect: () => void remove(menu.id) },
+          ]}
+        />
+      ) : null}
       <nav className="flex flex-col gap-0.5 px-2 pt-2">
         <NavLink to="/meeting-settings" draggable={false} className={(state) => cn(link(state), "h-8")}>
           <Settings2 className="size-4" />
@@ -130,6 +213,38 @@ export function MeetingsNav() {
         </NavLink>
       </nav>
     </>
+  );
+}
+
+/** The meeting's name as a text box in its row: Enter or clicking away saves it, Escape keeps the old one. */
+function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (name: string | null) => void }) {
+  const done = useRef(false);
+  const finish = (name: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(name);
+  };
+  return (
+    <div className="flex flex-col rounded-md bg-card px-2.5 py-1.5 shadow-[0_0_0_1px_var(--border)]">
+      <input
+        autoFocus
+        defaultValue={meetingName(meeting.id)}
+        maxLength={80}
+        aria-label="Meeting name"
+        onFocus={(event) => event.currentTarget.select()}
+        onBlur={(event) => finish(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") finish(event.currentTarget.value);
+          else if (event.key === "Escape") finish(null);
+          else return;
+          event.preventDefault();
+        }}
+        className="-mx-1 rounded-sm bg-transparent px-1 text-[13px] font-medium text-foreground outline-none ring-1 ring-primary"
+      />
+      <span className="truncate text-[11.5px] text-muted-foreground">
+        {when(meeting.started)} · {formatDuration(meeting.seconds)}
+      </span>
+    </div>
   );
 }
 

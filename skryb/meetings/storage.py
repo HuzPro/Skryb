@@ -7,6 +7,7 @@ Each meeting folder holds ``them.flac`` (what the PC played), ``me.flac``
 
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,7 @@ LANGUAGES = ("en", "ur", "auto")
 
 
 _NAME_CHARS = 80
+_DATE_AND_TIME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(?: [0-9]{2}-[0-9]{2})?")
 
 
 @dataclass(frozen=True)
@@ -52,9 +54,23 @@ def default_meetings_folder(
 
 def new_meeting_folder(root: Path, started: datetime, name: str = "") -> Path:
     """``YYYY-MM-DD HH-MM``, then *name* when given, with `` (2)`` and up when a meeting already has that name."""
-    folder = root / " ".join(part for part in (started.strftime("%Y-%m-%d %H-%M"), _folder_safe(name)) if part)
+    return _unused(root / " ".join(part for part in (started.strftime("%Y-%m-%d %H-%M"), _folder_safe(name)) if part))
+
+
+def rename_meeting(folder: Path, name: str) -> Path:
+    """Call the meeting in *folder* *name*: its date and time stay, a blank name leaves only them. Returns the new folder."""
+    stamp = _DATE_AND_TIME.match(folder.name)
+    target = _unused(folder.with_name(" ".join(part for part in (stamp and stamp.group(0), _folder_safe(name)) if part) or "Meeting"), folder)
+    # Compared by name: Windows paths are equal in any case, and a change of case is still a rename.
+    if target.name != folder.name:
+        folder.rename(target)
+    return target
+
+
+def _unused(folder: Path, owner: Path | None = None) -> Path:
+    """*folder*, or with `` (2)`` and up when another meeting has it; *owner* may keep its own name, in any case."""
     candidate, n = folder, 2
-    while candidate.exists():
+    while candidate.exists() and not (owner is not None and os.path.samefile(candidate, owner)):
         candidate = folder.with_name(f"{folder.name} ({n})")
         n += 1
     return candidate

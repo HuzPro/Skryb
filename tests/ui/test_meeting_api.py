@@ -29,6 +29,8 @@ _TIMEOUT_SECONDS = 10.0
 class MeetingRig:
     def __init__(self, tmp_path: Path) -> None:
         self.root = tmp_path / "Meetings"
+        self.recycle_bin = tmp_path / "Recycle Bin"
+        self.recycle_refusal: OSError | None = None
         self.installed = {"nemotron-3-diarization": True, "qwen3-asr-1.7b": True}
         self.downloads: list[str] = []
         self.opened: list[Path] = []
@@ -52,8 +54,14 @@ class MeetingRig:
         )
         self.server.bind(MeetingApi(
             self.recorder, self.hub, folder=lambda: self.root, model_files=files,
-            open_path=self.opened.append, run_in_background=lambda action: action(),
+            open_path=self.opened.append, run_in_background=lambda action: action(), recycle=self._recycle,
         ).routes())
+
+    def _recycle(self, folder: Path) -> None:
+        if self.recycle_refusal is not None:
+            raise self.recycle_refusal
+        self.recycle_bin.mkdir(exist_ok=True)
+        folder.rename(self.recycle_bin / folder.name)
 
     def _capture(self, _record_microphone: bool) -> FakeCapture:
         self.captures.append(FakeCapture(np.concatenate([voice(0, 2.5), silence(1)])))
@@ -255,3 +263,87 @@ def test_a_file_in_a_language_skryb_doesnt_offer_is_refused(rig: MeetingRig, tmp
     status, error = rig.call("POST", "/api/meetings/files", {"path": str(video), "language": "fr"})
 
     assert status == 400 and "Pick English or Urdu for the file." in json.dumps(error)
+
+
+def _ids(rig: MeetingRig) -> list[str]:
+    return [m["id"] for m in rig.call("GET", "/api/meetings")[1]["meetings"]]
+
+
+def test_renaming_a_saved_meeting_renames_its_folder_and_answers_with_its_new_id(rig: MeetingRig) -> None:
+    rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Welcome aboard.")])
+
+    status, body = rig.call("POST", "/api/meetings/2026-10-16 20-20 Ops Onboarding/name", {"name": "Onboarding – ٹیم"})
+
+    assert status == 200 and body == {"id": "2026-10-16 20-20 Onboarding – ٹیم"}
+    assert _ids(rig) == ["2026-10-16 20-20 Onboarding – ٹیم"]
+    status, transcript = rig.call("GET", "/api/meetings/2026-10-16 20-20 Onboarding – ٹیم")
+    assert status == 200 and transcript["entries"][0]["text"] == "Welcome aboard."
+
+
+def test_deleting_a_saved_meeting_sends_its_folder_to_the_recycle_bin(rig: MeetingRig) -> None:
+    rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Welcome aboard.")])
+    rig.saved_meeting("2026-10-21 15-05 Harbor scoping call", [("them", 0, 0.0, "Hi.")])
+
+    assert rig.call("DELETE", "/api/meetings/2026-10-16 20-20 Ops Onboarding")[0] == 204
+
+    assert _ids(rig) == ["2026-10-21 15-05 Harbor scoping call"]
+    assert (rig.recycle_bin / "2026-10-16 20-20 Ops Onboarding" / "transcript.json").is_file()
+
+
+def test_a_delete_windows_refuses_keeps_the_meeting_and_says_why(rig: MeetingRig) -> None:
+    rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Welcome aboard.")])
+    rig.recycle_refusal = OSError("Windows couldn't move 2026-10-16 20-20 Ops Onboarding to the Recycle Bin (code 0x20).")
+
+    status, body = rig.call("DELETE", "/api/meetings/2026-10-16 20-20 Ops Onboarding")
+
+    assert status == 400 and body["error"].startswith("Couldn't delete it: Windows couldn't move")
+    assert _ids(rig) == ["2026-10-16 20-20 Ops Onboarding"]
+
+
+@pytest.mark.parametrize("meeting_id", ["..", "missing", "vocabulary.txt"])
+def test_only_meetings_in_the_meetings_folder_can_be_renamed_or_deleted(rig: MeetingRig, meeting_id: str) -> None:
+    rig.root.mkdir(parents=True)
+    (rig.root / "vocabulary.txt").write_text("Northwind\n", encoding="utf-8")
+
+    assert rig.call("POST", f"/api/meetings/{meeting_id}/name", {"name": "x"})[0] in (404, 400)
+    assert rig.call("DELETE", f"/api/meetings/{meeting_id}")[0] in (404, 400)
+    assert (rig.root / "vocabulary.txt").is_file() and not rig.recycle_bin.exists()
+
+
+@pytest.mark.parametrize("body", [{}, {"name": 7}, ["Retro"], None])
+def test_a_rename_without_a_name_is_refused(rig: MeetingRig, body: object) -> None:
+    rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Hi.")])
+
+    assert rig.call("POST", "/api/meetings/2026-10-16 20-20 Ops Onboarding/name", body)[0] == 400
+    assert _ids(rig) == ["2026-10-16 20-20 Ops Onboarding"]
+
+
+def test_a_meeting_being_recorded_cant_be_renamed_or_deleted(rig: MeetingRig) -> None:
+    stream = rig.events()
+    rig.call("POST", "/api/meetings/start")
+    while stream.until("meeting")["type"] != "entry":
+        pass
+
+    renamed = rig.call("POST", "/api/meetings/2026-10-29 14-05/name", {"name": "Retro"})
+    deleted = rig.call("DELETE", "/api/meetings/2026-10-29 14-05")
+
+    assert renamed[0] == 400 and renamed[1]["error"] == "This meeting is still being recorded or transcribed. Stop it first."
+    assert deleted[0] == 400
+    assert (rig.root / "2026-10-29 14-05").is_dir()
+    stream.close()
+
+
+def test_the_meeting_just_recorded_can_be_renamed_and_its_speakers_named_in_the_new_folder(rig: MeetingRig) -> None:
+    stream = rig.events()
+    rig.call("POST", "/api/meetings/start")
+    while stream.until("meeting")["type"] != "entry":
+        pass
+    rig.call("POST", "/api/meetings/stop")
+    stream.close()
+
+    _status, body = rig.call("POST", "/api/meetings/2026-10-29 14-05/name", {"name": "Retro"})
+    assert rig.call("POST", f"/api/meetings/{body['id']}/rename", {"key": "them:0", "name": "Sana"})[0] == 204
+
+    assert body["id"] == "2026-10-29 14-05 Retro"
+    assert not (rig.root / "2026-10-29 14-05").exists()
+    assert "**Sana**" in (rig.root / "2026-10-29 14-05 Retro" / "transcript.md").read_text(encoding="utf-8")

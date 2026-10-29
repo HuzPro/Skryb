@@ -75,6 +75,14 @@ class MeetingRecorder:
         session = self._current or self._last
         return session if session is not None and session.folder.name == meeting_id else None
 
+    def let_go(self, meeting_id: str) -> None:
+        """Forget a saved meeting about to be renamed or deleted; one still being recorded or transcribed is refused."""
+        with self._handover:
+            if self._current is not None and self._current.folder.name == meeting_id:
+                raise MeetingError("This meeting is still being recorded or transcribed. Stop it first.")
+            if self._last is not None and self._last.folder.name == meeting_id:
+                self._last = None
+
     def start(self) -> None:
         with self._turn:
             if isinstance(self._current, FileSession):

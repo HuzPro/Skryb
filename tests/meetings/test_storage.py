@@ -11,6 +11,7 @@ from skryb.meetings.storage import (
     meeting_folder,
     meeting_settings_from,
     new_meeting_folder,
+    rename_meeting,
     vocabulary_file,
 )
 from skryb.meetings.transcript import VOCABULARY_TEMPLATE, Transcript
@@ -150,3 +151,55 @@ def test_a_second_file_with_the_same_name_in_the_same_minute_gets_a_number(tmp_p
     (tmp_path / "2026-10-29 14-05 Sprint review").mkdir()
 
     assert new_meeting_folder(tmp_path, datetime(2026, 10, 29, 14, 5), "Sprint review").name == "2026-10-29 14-05 Sprint review (2)"
+
+
+_STARTED = datetime(2026, 10, 16, 20, 20)
+_LINES = [("them", 0, 0.0, "Shall we start?"), ("me", 0, 2.0, "Haan, chalein.")]
+
+
+@pytest.mark.parametrize(("old", "name", "new"), [
+    ("2026-10-16 20-20 Weekly sync", "Planning – ٹیم میٹنگ", "2026-10-16 20-20 Planning – ٹیم میٹنگ"),
+    ("2026-10-16 20-20", "Sprint review", "2026-10-16 20-20 Sprint review"),
+    ("2026-10-16 20-20 Weekly sync (3)", "Retro", "2026-10-16 20-20 Retro"),
+    ("2026-10-16 Weekly sync", "Retro", "2026-10-16 Retro"),
+    ("Weekly sync", "Retro", "Retro"),
+    ("2026-10-16 20-20 Weekly sync", 'Q3: "plan" / review?', "2026-10-16 20-20 Q3 plan review"),
+    ("2026-10-16 20-20 Weekly sync", "x" * 300, "2026-10-16 20-20 " + "x" * 80),
+    ("2026-10-16 20-20 Weekly sync", "   ", "2026-10-16 20-20"),
+    ("Weekly sync", "", "Meeting"),
+])
+def test_renaming_a_meeting_keeps_its_date_and_time_and_moves_its_files(tmp_path: Path, old: str, name: str, new: str) -> None:
+    folder = _meeting(tmp_path, old, _STARTED, _LINES)
+    (folder / "them.flac").write_bytes(b"fLaC")
+
+    renamed = rename_meeting(folder, name)
+
+    assert renamed == tmp_path / new
+    assert not folder.exists()
+    assert (renamed / "them.flac").read_bytes() == b"fLaC"
+    assert [m.id for m in list_meetings(tmp_path)] == [new]
+
+
+def test_a_name_another_meeting_has_gets_the_next_free_number_even_among_a_thousand(tmp_path: Path) -> None:
+    (tmp_path / "2026-10-16 20-20 Standup").mkdir()
+    for n in range(2, 1001):
+        (tmp_path / f"2026-10-16 20-20 Standup ({n})").mkdir()
+    folder = _meeting(tmp_path, "2026-10-16 20-20 Weekly sync", _STARTED, _LINES)
+
+    assert rename_meeting(folder, "Standup").name == "2026-10-16 20-20 Standup (1001)"
+
+
+def test_renaming_a_meeting_to_its_own_name_changes_nothing(tmp_path: Path) -> None:
+    folder = _meeting(tmp_path, "2026-10-16 20-20 Weekly sync", _STARTED, _LINES)
+
+    assert rename_meeting(folder, "Weekly sync") == folder
+    assert folder.is_dir()
+
+
+def test_a_change_of_case_alone_still_renames_the_folder(tmp_path: Path) -> None:
+    folder = _meeting(tmp_path, "2026-10-16 20-20 weekly sync", _STARTED, _LINES)
+
+    renamed = rename_meeting(folder, "Weekly Sync")
+
+    assert renamed.name == "2026-10-16 20-20 Weekly Sync"
+    assert [entry.name for entry in tmp_path.iterdir()] == ["2026-10-16 20-20 Weekly Sync"]

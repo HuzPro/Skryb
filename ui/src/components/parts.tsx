@@ -1,5 +1,5 @@
-import { ChevronRight } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { ChevronRight, type LucideIcon } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { keyCaps } from "../lib/keys";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
@@ -201,4 +201,87 @@ export function StatusDot({ tone }: { tone: "success" | "warning" | "destructive
     primary: "bg-primary",
   }[tone];
   return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", color)} />;
+}
+
+export interface MenuItem {
+  label: string;
+  icon: LucideIcon;
+  onSelect: () => void;
+  /** The key that does the same without the menu, shown on the right. */
+  shortcut?: string;
+  danger?: boolean;
+}
+
+/** A right-click menu at (x, y), kept inside the window. Escape, a click elsewhere, scrolling or leaving the window closes it. */
+export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: number; label: string; items: MenuItem[]; onClose: () => void }) {
+  const menu = useRef<HTMLDivElement>(null);
+  const opener = useRef<Element | null>(null);
+  const [place, setPlace] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    opener.current = document.activeElement;
+    const box = menu.current!.getBoundingClientRect();
+    setPlace({ left: Math.max(4, Math.min(x, window.innerWidth - box.width - 4)), top: Math.max(4, Math.min(y, window.innerHeight - box.height - 4)) });
+    menu.current!.querySelector("button")?.focus();
+  }, [x, y]);
+  useEffect(() => {
+    const elsewhere = (event: Event) => {
+      if (!menu.current?.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener("pointerdown", elsewhere, true);
+    window.addEventListener("scroll", elsewhere, true);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("resize", onClose);
+    return () => {
+      window.removeEventListener("pointerdown", elsewhere, true);
+      window.removeEventListener("scroll", elsewhere, true);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+  const close = () => {
+    onClose();
+    if (opener.current instanceof HTMLElement) opener.current.focus();
+  };
+  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
+    const buttons = [...menu.current!.querySelectorAll("button")];
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (event.key === "Escape" || event.key === "Tab") {
+      event.preventDefault();
+      close();
+    } else if (step) {
+      event.preventDefault();
+      buttons[(at + step + buttons.length) % buttons.length]?.focus();
+    }
+  };
+  return (
+    <div
+      ref={menu}
+      role="menu"
+      aria-label={label}
+      onKeyDown={keys}
+      onContextMenu={(event) => event.preventDefault()}
+      style={place}
+      className="fixed z-50 min-w-[176px] animate-[fade-in_100ms_ease-out] rounded-lg border bg-card p-1 shadow-lg"
+    >
+      {items.map(({ label: name, icon: Icon, onSelect, shortcut, danger }) => (
+        <button
+          key={name}
+          role="menuitem"
+          onClick={() => {
+            close();
+            onSelect();
+          }}
+          className={cn(
+            "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] outline-none hover:bg-accent focus:bg-accent [&_svg]:size-4",
+            danger ? "text-destructive" : "text-foreground",
+          )}
+        >
+          <Icon />
+          <span className="flex-1 text-left">{name}</span>
+          {shortcut ? <span className="text-[11.5px] text-muted-foreground">{shortcut}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
 }

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, FileDown, FileUp, FolderOpen, LoaderCircle, Mic, Minus, Square, Users, X, type LucideIcon } from "lucide-react";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { NavLink } from "react-router";
 import { api, errorText } from "../lib/api";
 import { isDirty } from "../lib/draft";
@@ -141,7 +141,104 @@ export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange
   );
 }
 
+export const SIDEBAR = { standard: 212, least: 180, most: 520 };
+// The page beside the sidebar keeps at least this much of the window.
+const PAGE_ROOM = 420;
+const SIDEBAR_WIDTH = "sidebar-width";
+
+type WidthMemory = Pick<Storage, "getItem" | "setItem">;
+
+function browserStorage(): WidthMemory | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** A sidebar width that fits the window: never narrower than 180 px, never so wide the page has no room. */
+export function fitSidebar(width: number, windowWidth: number): number {
+  return Math.round(Math.max(SIDEBAR.least, Math.min(width, SIDEBAR.most, windowWidth - PAGE_ROOM)));
+}
+
+/** The width the sidebar was last dragged to; the standard width the first time or when storage is blocked. */
+export function savedSidebarWidth(memory: WidthMemory | null = browserStorage()): number {
+  try {
+    const width = Number(memory?.getItem(SIDEBAR_WIDTH));
+    return Number.isFinite(width) && width > 0 ? width : SIDEBAR.standard;
+  } catch {
+    return SIDEBAR.standard;
+  }
+}
+
+export function saveSidebarWidth(width: number, memory: WidthMemory | null = browserStorage()): void {
+  try {
+    memory?.setItem(SIDEBAR_WIDTH, String(Math.round(width)));
+  } catch {
+    // Storage blocked: the sidebar opens at the standard width next time.
+  }
+}
+
+function useSidebarWidth(): [number, (width: number) => void] {
+  const [wanted, setWanted] = useState(savedSidebarWidth);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const resized = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", resized);
+    return () => window.removeEventListener("resize", resized);
+  }, []);
+  const choose = (width: number) => {
+    setWanted(width);
+    saveSidebarWidth(width);
+  };
+  return [fitSidebar(wanted, windowWidth), choose];
+}
+
+/** The sidebar's right edge: drag it, or use the arrow keys, to widen it; double-click puts it back. */
+function SidebarEdge({ width, onResize }: { width: number; onResize: (width: number) => void }) {
+  const drag = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const edge = event.currentTarget;
+    const from = event.clientX;
+    const widthAt = (x: number) => fitSidebar(width + x - from, window.innerWidth);
+    const move = (moved: globalThis.PointerEvent) => onResize(widthAt(moved.clientX));
+    const stop = () => {
+      edge.removeEventListener("pointermove", move);
+      edge.removeEventListener("pointerup", stop);
+      edge.removeEventListener("pointercancel", stop);
+    };
+    edge.setPointerCapture(event.pointerId);
+    edge.addEventListener("pointermove", move);
+    edge.addEventListener("pointerup", stop);
+    edge.addEventListener("pointercancel", stop);
+  };
+  const nudge = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === "ArrowRight" ? 16 : event.key === "ArrowLeft" ? -16 : 0;
+    if (!step) return;
+    event.preventDefault();
+    onResize(fitSidebar(width + step, window.innerWidth));
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Sidebar width"
+      aria-valuemin={SIDEBAR.least}
+      aria-valuemax={SIDEBAR.most}
+      aria-valuenow={width}
+      tabIndex={0}
+      title="Drag to resize. Double-click to reset."
+      onPointerDown={drag}
+      onDoubleClick={() => onResize(SIDEBAR.standard)}
+      onKeyDown={nudge}
+      className="absolute inset-y-0 -right-[3px] z-10 w-[6px] cursor-col-resize outline-none transition-colors duration-150 hover:bg-primary/40 focus-visible:bg-primary/60 active:bg-primary/60"
+    />
+  );
+}
+
 export function Sidebar({ items, mode, onMode, meetings }: { items: NavItem[]; mode: Mode; onMode: (mode: Mode) => void; meetings: ReactNode }) {
+  const [width, setWidth] = useSidebarWidth();
   const status = useEngineStatus();
   const app = status.app;
   const { settings, discardSettings } = useStore();
@@ -173,7 +270,8 @@ export function Sidebar({ items, mode, onMode, meetings }: { items: NavItem[]; m
     });
 
   return (
-    <aside className="flex w-[212px] shrink-0 flex-col border-r bg-sidebar">
+    <aside style={{ width }} className="relative flex shrink-0 flex-col border-r bg-sidebar">
+      <SidebarEdge width={width} onResize={setWidth} />
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 pr-2.5 pl-4">
         <span className="pointer-events-none flex">
           <Mark app={app} />

@@ -10,9 +10,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from skryb.core.action_dispatcher import ThreadedActionDispatcher
+from skryb.core.recycle_bin import move_to_recycle_bin
 from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
-from skryb.meetings.storage import list_meetings, meeting_folder, vocabulary_file
+from skryb.meetings.storage import list_meetings, meeting_folder, rename_meeting, vocabulary_file
 from skryb.meetings.transcript import Transcript, is_speaker_key
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, Route
 from skryb.ui.event_hub import EventHub
@@ -36,6 +37,7 @@ class MeetingApi:
         model_files: MeetingModelFiles,
         open_path: Callable[[Path], None],
         run_in_background: Callable[[Callable[[], None]], None] = _IN_BACKGROUND.dispatch,
+        recycle: Callable[[Path], None] = move_to_recycle_bin,
     ) -> None:
         self._recorder = recorder
         self._hub = hub
@@ -43,6 +45,7 @@ class MeetingApi:
         self._model_files = model_files
         self._open_path = open_path
         self._run_in_background = run_in_background
+        self._recycle = recycle
 
     def routes(self) -> list[Route]:
         return [
@@ -56,6 +59,8 @@ class MeetingApi:
             ("POST", "/api/meetings/folder/open", self._open_meetings_folder),
             ("GET", "/api/meetings/{id}", self._read),
             ("POST", "/api/meetings/{id}/rename", self._rename),
+            ("POST", "/api/meetings/{id}/name", self._rename_meeting),
+            ("DELETE", "/api/meetings/{id}", self._delete_meeting),
             ("POST", "/api/meetings/{id}/open", self._open_meeting),
         ]
 
@@ -143,6 +148,32 @@ class MeetingApi:
             raise ApiError(400, f"Could not save the new name: {exc}") from exc
         return _NO_CONTENT
 
+    def _rename_meeting(self, request: ApiRequest) -> ApiResponse:
+        name = _name_request(request.body)
+        folder = self._released_folder(request)
+        try:
+            renamed = rename_meeting(folder, name)
+        except OSError as exc:
+            raise ApiError(400, f"Couldn't rename it: {exc.strerror or exc}. Close anything using its files and try again.") from exc
+        return ApiResponse(200, {"id": renamed.name})
+
+    def _delete_meeting(self, request: ApiRequest) -> ApiResponse:
+        folder = self._released_folder(request)
+        try:
+            self._recycle(folder)
+        except OSError as exc:
+            raise ApiError(400, f"Couldn't delete it: {exc}") from exc
+        return _NO_CONTENT
+
+    def _released_folder(self, request: ApiRequest) -> Path:
+        """A saved meeting's folder, once the recorder no longer holds it."""
+        folder = self._meeting_folder(request)
+        try:
+            self._recorder.let_go(folder.name)
+        except MeetingError as exc:
+            raise ApiError(400, str(exc)) from exc
+        return folder
+
     def _open_meeting(self, request: ApiRequest) -> ApiResponse:
         self._open_path(self._meeting_folder(request))
         return _NO_CONTENT
@@ -173,6 +204,13 @@ def _file_request(body: object) -> tuple[Path, str]:
     if not path.is_absolute() or not path.is_file():
         raise ApiError(400, f"{path.name or 'That file'} isn't there any more.")
     return path, language
+
+
+def _name_request(body: object) -> str:
+    try:
+        return Fields(body, "body").text("name")
+    except ValueError as exc:
+        raise ApiError(400, "Say what to call the meeting.", str(exc)) from exc
 
 
 def _rename_request(body: object) -> tuple[str, str]:

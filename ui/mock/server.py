@@ -15,6 +15,7 @@ import json
 import math
 import queue
 import random
+import re
 import subprocess
 import threading
 import time
@@ -858,6 +859,23 @@ class Handler(BaseHTTPRequestHandler):
             meeting["names"][key] = name or ("Me" if key.startswith("me:") else f"Speaker {int(key.split(':')[1]) + 1}")
             core.emit("meeting", {"type": "names", "id": rest[0], "names": meeting["names"]})
             self._send(204)
+        elif len(rest) == 1 and method == "DELETE":
+            if core.meetings.pop(rest[0], None) is None:
+                self._error(404, "That meeting is no longer in the meetings folder.")
+                return
+            self._send(204)
+        elif len(rest) == 2 and rest[1] == "name":
+            name = " ".join(re.sub(r'[<>:"/\\|?*]', " ", str((self._body() or {}).get("name", ""))).split())[:80].rstrip(" .")
+            stamp = re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(?: [0-9]{2}-[0-9]{2})?", rest[0])
+            if rest[0] not in core.meetings:
+                self._error(404, "That meeting is no longer in the meetings folder.")
+                return
+            renamed = " ".join(part for part in (stamp and stamp.group(0), name) if part) or "Meeting"
+            base, n = renamed, 2
+            while renamed != rest[0] and renamed in core.meetings:
+                renamed, n = f"{base} ({n})", n + 1
+            core.meetings[renamed] = core.meetings.pop(rest[0])
+            self._send(200, {"id": renamed})
         elif len(rest) == 2 and rest[1] == "open":
             self._send(204)
         else:
