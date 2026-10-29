@@ -1,4 +1,4 @@
-"""What a meeting loads, and how it shares Qwen3-ASR with dictation, without torch or a GPU."""
+"""What a meeting loads, how it shares Qwen3-ASR with dictation, and which model writes each line, without torch or a GPU."""
 
 import threading
 import time
@@ -45,6 +45,23 @@ class FakeQwen(TranscriptionEngine):
         self.disposed = True
 
 
+class FakeApex:
+    """The Roman Urdu model: hands back its lines in order, one per utterance."""
+
+    built: list["FakeApex"] = []
+    lines: list[str] = []
+
+    def __init__(self, snapshot: Path) -> None:
+        self.snapshot = snapshot
+        self.heard: list[float] = []
+        FakeApex.built.append(self)
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        assert audio.dtype == np.float32 and audio.flags.c_contiguous
+        self.heard.append(len(audio) / 16000)
+        return FakeApex.lines.pop(0)
+
+
 class FakeParakeet(TranscriptionEngine):
     def load_model(self) -> None: ...
     def is_model_loaded(self) -> bool:
@@ -62,6 +79,8 @@ def no_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(asr, "Diarizer", lambda snapshot: LevelLabeller(0.01))
     monkeypatch.setattr(asr, "release_gpu", lambda: None)
     monkeypatch.setattr(asr, "gpu_available", lambda: True)
+    monkeypatch.setattr(asr, "RomanUrduAsr", FakeApex)
+    FakeApex.built, FakeApex.lines = [], []
 
 
 def _models(dictation: TranscriptionEngine, own: FakeQwen | None = None, language: str = "en", turns: EngineTurns | None = None) -> tuple[MeetingModels, list[FakeQwen]]:
@@ -73,7 +92,7 @@ def _models(dictation: TranscriptionEngine, own: FakeQwen | None = None, languag
 
     return MeetingModels(
         language=language, dictation_engine=lambda: dictation, turns=turns or EngineTurns(),
-        build_asr=build, diarizer_snapshot=lambda: Path("snapshot"),
+        build_asr=build, diarizer_snapshot=lambda: Path("snapshot"), roman_urdu_snapshot=lambda: Path("apex"),
     ), built
 
 
@@ -102,14 +121,101 @@ def test_when_dictation_uses_another_model_the_meeting_loads_its_own_and_unloads
     assert built[0].disposed
 
 
-@pytest.mark.parametrize("setting, asked", [("en", "en"), ("ur", "hi"), ("auto", None), ("klingon", "en")])
-def test_the_meeting_language_setting_is_what_qwen3_asr_is_asked_for(setting: str, asked: str | None) -> None:
+@pytest.mark.parametrize("setting", ["en", "ur", "auto", "klingon"])
+def test_qwen3_asr_is_always_asked_for_english_since_urdu_lines_come_from_the_roman_urdu_model(setting: str) -> None:
     dictation = FakeQwen()
     models, _built = _models(dictation, language=setting)
+    FakeApex.lines = ["Let's look at the quarterly numbers."]
 
     models.transcribe(_CLIP, None)
 
-    assert dictation.calls[0][2] == asked
+    assert dictation.calls[0][2] == "en"
+
+
+def test_an_english_meeting_never_loads_the_roman_urdu_model() -> None:
+    dictation = FakeQwen("Let's look at the quarterly numbers.")
+    models, _built = _models(dictation, language="en")
+
+    models.speaker_labeller()
+    text = models.transcribe(_CLIP, None)
+
+    assert text == "Let's look at the quarterly numbers."
+    assert FakeApex.built == []
+
+
+@pytest.mark.parametrize("setting", ["ur", "auto"])
+def test_an_urdu_meeting_keeps_the_roman_urdu_line_spelled_the_urdu_way(setting: str) -> None:
+    dictation = FakeQwen("should never be asked")
+    models, _built = _models(dictation, language=setting)
+    FakeApex.lines = ["Vah kah rahe the ki yah free text box basically kaam nahin karta."]
+
+    text = models.transcribe(_CLIP, "Names and terms that may come up: Northwind.")
+
+    assert text == "Woh kah rahe the ki yeh free text box basically kaam nahin karta."
+    assert dictation.calls == []
+    assert FakeApex.built[0].snapshot == Path("apex") and FakeApex.built[0].heard == [3.0]
+
+
+@pytest.mark.parametrize("apex_line", [
+    "So the estimator connects to LedgerLine first.",
+    "nan",
+    " NaN ",
+    "",
+    "haan haan haan haan haan haan haan",
+    "Theek hai.",
+])
+def test_an_urdu_meeting_hands_english_empty_and_runaway_lines_to_qwen3_asr_with_the_vocabulary(apex_line: str) -> None:
+    dictation = FakeQwen("So the estimator connects to LedgerLine first.")
+    models, _built = _models(dictation, language="ur")
+    FakeApex.lines = [apex_line]
+
+    text = models.transcribe(_CLIP, "Names and terms that may come up: LedgerLine.")
+
+    assert text == "So the estimator connects to LedgerLine first."
+    assert dictation.calls == [(3.0, "Names and terms that may come up: LedgerLine.", "en")]
+
+
+def test_an_urdu_meeting_loads_the_roman_urdu_model_once_at_the_start_and_lets_go_of_it_at_the_end() -> None:
+    models, _built = _models(FakeQwen(), language="ur")
+    FakeApex.lines = ["Main kal tak woh sheet bhej dunga, theek hai?"] * 3
+
+    models.speaker_labeller()
+    for _ in range(3):
+        models.transcribe(_CLIP, None)
+    assert len(FakeApex.built) == 1
+    models.release()
+
+    assert models._roman_urdu is None
+
+
+@pytest.mark.parametrize(("line", "urdu"), [
+    ("Haan theek hai, main kal tak woh sheet bhej dunga.", True),
+    ("Aap ka experience kya raha?", True),
+    ("Yah sahi hai.", True),  # two Urdu words: the least that counts
+    ("Theek hai.", False),  # one is not enough
+    ("The main point is that we ship on Friday.", False),
+    ("Bachon ko pata hai ke unhein kya karna hai, you know, in the first place.", True),
+    ("Pakistan versus wahan par?", False),
+    ("nan", False),
+    ("NaN", False),
+    ("", False),
+    ("   ", False),
+    ("hai hai hai hai hai hai", False),  # six in a row is a runaway loop
+    ("hai hai hai hai hai", True),  # five is still speech
+    ("Café naïve résumé, Zoë's ka matlab hai", True),
+    ("وہاں پر کیا ہو رہا ہے", False),  # Urdu script has no Roman words to count
+])
+def test_a_roman_urdu_line_is_kept_only_when_it_reads_as_urdu(line: str, urdu: bool) -> None:
+    assert asr.reads_as_urdu(line) is urdu
+
+
+def test_judging_a_runaway_line_thousands_of_words_long_stays_fast() -> None:
+    line = " ".join(["main", "kal", "tak", "woh", "sheet", "bhej", "dunga"] * 700)
+    started = time.monotonic()
+
+    assert asr.reads_as_urdu(line)
+    assert not asr.reads_as_urdu(line + " theek" * 3000)
+    assert time.monotonic() - started < 1.0
 
 
 def test_a_meeting_clip_waits_while_a_dictation_is_decoding_on_the_shared_model() -> None:

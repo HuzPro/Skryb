@@ -31,7 +31,7 @@ class MeetingRecorder:
         self,
         *,
         settings: Callable[[], MeetingSettings],
-        missing_models: Callable[[], list[str]],
+        missing_models: Callable[[str], list[str]],
         make_models: Callable[[MeetingSettings], Models],
         make_capture: Callable[[bool], MeetingCapture],
         publish: Callable[[Event], None],
@@ -89,10 +89,10 @@ class MeetingRecorder:
                 raise MeetingError(_FILE_BUSY)
             if self._current is not None:
                 return
-            missing = self._missing_models()
+            settings = self._settings()
+            missing = self._missing_models(settings.language)
             if missing:
                 raise MeetingError(f"Download the meeting models first: {', '.join(missing)}.")
-            settings = self._settings()
             started = self._clock()
             session = Session(
                 new_meeting_folder(settings.folder, started), started,
@@ -120,7 +120,7 @@ class MeetingRecorder:
             if self._current is not None:
                 raise MeetingError(_FILE_BUSY if isinstance(self._current, FileSession) else
                                    "A meeting is being recorded. Stop it before transcribing a file.")
-            missing = self._missing_models()
+            missing = self._missing_models(language)
             if missing:
                 raise MeetingError(f"Download the meeting models first: {', '.join(missing)}.")
             try:

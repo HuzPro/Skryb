@@ -71,6 +71,9 @@ MEETING_MODELS = [
      "description": "Tells up to 8 speakers apart as they talk (NVIDIA Nemotron 3 Diarization)"},
     {"name": "qwen3-asr-1.7b", "label": "Qwen3-ASR speech-to-text", "display_size": "4.1 GB", "size": 4_080_000_000,
      "description": "Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, PyTorch elsewhere"},
+    {"name": "whisper-hindi2hinglish-apex", "label": "Roman Urdu speech-to-text", "display_size": "1.6 GB",
+     "size": 1_624_000_000, "description": "Writes spoken Urdu in Roman Urdu, English words in English. For Urdu and"
+     " Auto meetings (Oriserve Whisper Hindi2Hinglish Apex)", "urdu_only": True},
 ]
 MEETING_LINES = [
     ("them:0", "All right, let's jump in. Launch Board first, then the order intake."),
@@ -803,11 +806,13 @@ class Handler(BaseHTTPRequestHandler):
         core = self.core
         live = core.live_meeting
         if not rest and method == "GET":
-            ready = all(model["installed"] for model in core.meeting_models)
+            urdu = core.settings["meetings"]["language"] != "en"
+            ready = all(model["installed"] for model in core.meeting_models if urdu or not model.get("urdu_only"))
             ids = sorted(core.meetings, key=lambda meeting_id: core.meetings[meeting_id]["started"], reverse=True)
             self._send(200, {"recording": core.app["meeting_recording"], "folder": core.settings["meetings"]["folder"],
                              "models_ready": ready,
-                             "models": [{k: v for k, v in model.items() if k != "size"} for model in core.meeting_models],
+                             "models": [{k: v for k, v in model.items() if k not in ("size", "urdu_only")}
+                                        for model in core.meeting_models],
                              "meetings": [core.meeting_summary(meeting_id) for meeting_id in ids]})
         elif rest == ["live"]:
             # Like the core: a saved meeting is in the list, no longer live.

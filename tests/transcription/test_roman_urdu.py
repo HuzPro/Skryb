@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from skryb.transcription.roman_urdu import romanize
+from skryb.transcription.roman_urdu import romanize, urdu_spelling
 
 
 @pytest.mark.parametrize("hindi, roman", [
@@ -56,3 +56,38 @@ def test_a_long_meeting_worth_of_mixed_lines_converts_quickly() -> None:
     out = [romanize(line) for _ in range(5000)]
     assert time.monotonic() - started < 5
     assert out[0] == "ab jo market khol rahi hai software engineering ki market men se log fire kar rahe hain"
+
+
+@pytest.mark.parametrize("hinglish, urdu", [
+    ("vah kah rahe the", "woh kah rahe the"),
+    ("Vah sahi hai", "Woh sahi hai"),
+    ("yah kyonki ham vahaan the", "yeh kyunke hum wahan the"),
+    ("mainne kuchh nahin kaha", "maine kuch nahin kaha"),
+    ("bachchon ko zyaada vakt chaahie", "bachon ko zyada waqt chahiye"),
+    ("Achchha, thik hai.", "Acha, theek hai."),
+    ("unhonne pahle kaha", "unhon ne pehle kaha"),
+])
+def test_the_commonest_hindi_spellings_are_respelled_the_urdu_way(hinglish: str, urdu: str) -> None:
+    assert urdu_spelling(hinglish) == urdu
+
+
+@pytest.mark.parametrize("text", [
+    "The van was vacant, so we took the vote.",  # v-words that aren't Urdu
+    "a yahoo account, the vahana and thikness",  # only whole words are respelled
+    "woh yeh hum wahan",  # already Urdu spelling
+    "",
+    "Café résumé naïve Zoë",
+    "وہاں پر کیا ہو رہا ہے",
+])
+def test_text_without_hindi_spellings_comes_back_unchanged(text: str) -> None:
+    assert urdu_spelling(text) == text
+
+
+def test_respelling_a_long_meeting_transcript_stays_fast() -> None:
+    text = "vah kah rahe the ki yah free text box basically kaam nahin karta. " * 2000
+    started = time.monotonic()
+
+    out = urdu_spelling(text)
+
+    assert out.count("woh") == 2000 and "vah" not in out
+    assert time.monotonic() - started < 1.0

@@ -25,6 +25,9 @@ _IGNORE_PATTERNS = (
     # image; the app reads the .bps.tar.zst.
     "*.fsq",
     "*.jpg",
+    # Whisper Hindi2Hinglish Apex's sample clips.
+    "*.wav",
+    "*.mp3",
 )
 
 _HF_RESOLVE_URL = "https://huggingface.co/{repo_id}/resolve/{sha}/{filename}"

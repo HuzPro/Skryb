@@ -31,7 +31,7 @@ class MeetingRig:
         self.root = tmp_path / "Meetings"
         self.recycle_bin = tmp_path / "Recycle Bin"
         self.recycle_refusal: OSError | None = None
-        self.installed = {"nemotron-3-diarization": True, "qwen3-asr-1.7b": True}
+        self.installed = {"nemotron-3-diarization": True, "qwen3-asr-1.7b": True, "whisper-hindi2hinglish-apex": True}
         self.downloads: list[str] = []
         self.opened: list[Path] = []
         self.captures: list[FakeCapture] = []
@@ -39,8 +39,9 @@ class MeetingRig:
         self.server = ApiServer(self.hub, poll_seconds=0.02)
         self.server.start()
         files = MeetingModelFiles(
-            diarizer_installed=lambda: self.installed["nemotron-3-diarization"],
-            download_diarizer=lambda: self.downloads.append("nemotron-3-diarization"),
+            language=lambda: "en",
+            meeting_only_installed=lambda name: self.installed[name],
+            download_meeting_only=self.downloads.append,
             is_installed=lambda name: self.installed[name],
             start_download=self.downloads.append,
         )
@@ -115,7 +116,7 @@ def test_the_overview_lists_saved_meetings_the_folder_and_whether_the_models_are
     assert overview["recording"] is False and overview["models_ready"] is True
     assert overview["folder"] == str(rig.root)
     assert [m["id"] for m in overview["meetings"]] == ["2026-10-16 Ops Onboarding"]
-    assert [m["name"] for m in overview["models"]] == ["nemotron-3-diarization", "qwen3-asr-1.7b"]
+    assert [m["name"] for m in overview["models"]] == ["nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex"]
     assert all(m["download"] is None for m in overview["models"])
 
 

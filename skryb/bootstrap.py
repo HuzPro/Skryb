@@ -117,10 +117,12 @@ from skryb.output.win32_modifier_key_state_reader import (
 )
 from skryb.output.word_learning import WordLearner, learns_words
 from skryb.history.retention import HistoryPruner, history_retention_days
-from skryb.meetings.asr import MeetingModels, build_meeting_asr, diarizer_snapshot, native_diarizer_usable
+from skryb.meetings.asr import (
+    MeetingModels, build_meeting_asr, diarizer_snapshot, native_diarizer_usable, roman_urdu_snapshot,
+)
 from skryb.meetings.capture import Capture
 from skryb.meetings.model_files import MeetingModelFiles
-from skryb.meetings.models import DIARIZER
+from skryb.meetings.models import DIARIZER, ROMAN_URDU
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import meeting_settings_from
 from skryb.history.service import HistoryService
@@ -965,13 +967,14 @@ def _build_meetings(
     on_change: Callable[[bool], None],
 ) -> tuple[MeetingRecorder, MeetingModelFiles]:
     """Meeting recording, sharing dictation's Qwen3-ASR when dictation has it loaded."""
-    diarizer = build_hf_model_manager(
-        paths.models_dir, download_manager, license_policy, {DIARIZER.name: DIARIZER},
+    meeting_only = build_hf_model_manager(
+        paths.models_dir, download_manager, license_policy, {DIARIZER.name: DIARIZER, ROMAN_URDU.name: ROMAN_URDU},
     )
-    diarizer_downloads = DownloadCoordinator(diarizer)
+    meeting_only_downloads = DownloadCoordinator(meeting_only)
     files = MeetingModelFiles(
-        diarizer_installed=lambda: diarizer.is_installed(DIARIZER.name),
-        download_diarizer=lambda: diarizer_downloads.start(DIARIZER.name),
+        language=lambda: meeting_settings_from(config).language,
+        meeting_only_installed=meeting_only.is_installed,
+        download_meeting_only=meeting_only_downloads.start,
         is_installed=settings_service.is_installed,
         start_download=settings_service.start_download,
     )
@@ -986,6 +989,7 @@ def _build_meetings(
                 build_meeting_asr, paths, registry, hardware_detector, license_policy,
             ),
             diarizer_snapshot=functools.partial(diarizer_snapshot, paths.models_dir),
+            roman_urdu_snapshot=functools.partial(roman_urdu_snapshot, paths.models_dir),
             native_diarizer=functools.partial(native_diarizer_usable, hardware_detector),
         ),
         make_capture=Capture,

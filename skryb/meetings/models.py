@@ -1,4 +1,4 @@
-"""The meeting-only models: speech detection (CPU) and who is speaking (GPU).
+"""The meeting-only models: speech detection (CPU), who is speaking (GPU) and Roman Urdu speech-to-text.
 
 Torch is imported here only when a meeting starts, so a launch that never
 records a meeting never pays for it.
@@ -22,6 +22,15 @@ DIARIZER = ModelInfo(
     description="Tells up to 8 speakers apart as they talk (NVIDIA Nemotron 3 Diarization)",
     repo_id="nvidia/Nemotron-3-Diarization",
     revision="f667ed73aee57d40cc39428eb768b4fd87a0a29e",
+)
+# Oriserve's whisper-large-v3-turbo fine-tune for Urdu and Hindi meetings: Latin letters, English words left in English.
+ROMAN_URDU = ModelInfo(
+    name="whisper-hindi2hinglish-apex",
+    size_mb=1624,
+    description="Writes spoken Urdu in Roman Urdu, English words in English. For Urdu and Auto meetings"
+                " (Oriserve Whisper Hindi2Hinglish Apex)",
+    repo_id="Oriserve/Whisper-Hindi2Hinglish-Apex",
+    revision="f3214eed20b4e4d4144e739982d911f87b9cb223",
 )
 _SPEECH = 0.5
 
@@ -120,3 +129,28 @@ class Diarizer:
         self._cache = out.speaker_cache
         logits: np.ndarray = out.logits[0].float().cpu().numpy()
         return logits
+
+
+class RomanUrduAsr:
+    """Whisper Hindi2Hinglish Apex on PyTorch: one utterance in, one line of Roman Urdu out.
+
+    Asked for English, as its model card does: that is what keeps English words
+    in English. fp16 on the GPU, fp32 on the CPU.
+    """
+
+    def __init__(self, snapshot: Path) -> None:
+        torch = import_torch()
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+        self._torch = torch
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._dtype = torch.float16 if self._device == "cuda" else torch.float32
+        self._processor: Any = WhisperProcessor.from_pretrained(snapshot)
+        model = WhisperForConditionalGeneration.from_pretrained(snapshot, dtype=self._dtype)
+        self._model: Any = model.to(self._device).eval()
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        features = self._processor(audio, sampling_rate=RATE, return_tensors="pt").input_features
+        with self._torch.inference_mode():
+            ids = self._model.generate(features.to(self._device, self._dtype), task="transcribe", language="en")
+        return str(self._processor.batch_decode(ids, skip_special_tokens=True)[0]).strip()

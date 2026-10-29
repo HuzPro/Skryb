@@ -481,6 +481,7 @@ function modelLine(model: MeetingModel): string {
 export function MeetingModels({ overview, compact = false }: { overview: MeetingOverview; compact?: boolean }) {
   const [problem, setProblem] = useState("");
   const downloading = overview.models.some((model) => model.download && model.download.state !== "failed");
+  const allInstalled = overview.models.every((model) => model.installed);
   const download = async () => {
     setProblem("");
     try {
@@ -493,12 +494,12 @@ export function MeetingModels({ overview, compact = false }: { overview: Meeting
     <Card className={cn("px-4 py-3.5", compact && "border-primary/30 bg-selected")}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-[13.5px] font-medium">{overview.models_ready ? "Meeting models" : "Meetings need two models"}</h2>
+          <h2 className="text-[13.5px] font-medium">{overview.models_ready ? "Meeting models" : "Meetings need these models"}</h2>
           <p className="mt-0.5 max-w-[560px] text-[12.5px] text-muted-foreground">
-            One tells the voices apart, the other writes down what they say. Both run on this PC; nothing leaves it.
+            One tells the voices apart, the others write down what they say. All run on this PC; nothing leaves it.
           </p>
         </div>
-        {overview.models_ready ? null : (
+        {allInstalled ? null : (
           <Button size="sm" disabled={downloading} onClick={() => void download()}>
             <Download />
             {downloading ? "Downloading" : "Download meeting models"}

@@ -82,3 +82,27 @@ def _drop_silent_a(syllables: list[list]) -> None:
         s = syllables[k]
         if s[2] and not s[3] and syllables[k - 1][1] and syllables[k + 1][0] and syllables[k + 1][1]:
             s[1] = ""
+
+
+# How a Hinglish model spells common words, and how Urdu speakers type them.
+_URDU_SPELLINGS = {
+    "vah": "woh", "vo": "woh", "yah": "yeh", "vahi": "wahi", "vahaan": "wahan", "yahaan": "yahan", "kahaan": "kahan",
+    "ham": "hum", "hamne": "humne", "hamen": "hamein", "hamaara": "hamara", "hamaare": "hamare", "hamaari": "hamari",
+    "mainne": "maine", "unhonne": "unhon ne", "kuchh": "kuch", "kyon": "kyun", "kyonki": "kyunke",
+    "chaahie": "chahiye", "chaahiye": "chahiye", "zyaada": "zyada", "pahle": "pehle", "kahte": "kehte",
+    "achchha": "acha", "achchhi": "achi", "achchhe": "ache", "bachcha": "bacha", "bachche": "bache",
+    "bachchon": "bachon", "usmen": "usmein", "jismen": "jismein", "vakt": "waqt", "thik": "theek", "chiz": "cheez",
+    "vaala": "wala", "vaali": "wali", "vaale": "wale",
+}
+_HINDI_SPELLED = re.compile(r"\b(" + "|".join(_URDU_SPELLINGS) + r")\b", re.IGNORECASE)
+
+
+def urdu_spelling(text: str) -> str:
+    """Roman text with its commonest Hindi spellings respelled the Urdu way: "vah" is "woh", "kyonki" is "kyunke"."""
+    return _HINDI_SPELLED.sub(_respelled, text)
+
+
+def _respelled(match: re.Match[str]) -> str:
+    word = match.group()
+    urdu = _URDU_SPELLINGS[word.lower()]
+    return urdu[0].upper() + urdu[1:] if word[0].isupper() else urdu

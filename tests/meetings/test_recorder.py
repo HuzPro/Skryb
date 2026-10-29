@@ -22,16 +22,22 @@ class Rig:
         self.models: list[FakeModels] = []
         self.settings = MeetingSettings(self.root, record_microphone=True, language="ur")
         self.asked_for: list[MeetingSettings] = []
+        self.models_checked_for: list[str] = []
+        self._missing = list(missing or [])
         self._capture_fails = capture_fails
         self.recorder = MeetingRecorder(
             settings=lambda: self.settings,
-            missing_models=lambda: list(missing or []),
+            missing_models=self._missing_models,
             make_models=self._models,
             make_capture=self._capture,
             publish=self.events.append,
             on_change=self.changes.append,
             clock=lambda: datetime(2026, 10, 29, 14, 5, 33),
         )
+
+    def _missing_models(self, language: str) -> list[str]:
+        self.models_checked_for.append(language)
+        return self._missing
 
     def _models(self, settings: MeetingSettings) -> FakeModels:
         self.asked_for.append(settings)
@@ -244,3 +250,22 @@ def test_a_file_that_cant_start_says_why_and_leaves_no_folder(
 
     assert not rig.root.exists() or not any(rig.root.iterdir())
     assert rig.events == []
+
+
+def test_a_meeting_checks_the_models_its_language_needs(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+
+    rig.recorder.start()
+    rig.recorder.stop()
+
+    assert rig.models_checked_for == ["ur"]
+
+
+def test_a_file_checks_the_models_the_files_language_needs_not_the_meeting_settings(tmp_path: Path) -> None:
+    rig = FileRig(tmp_path, missing=["Roman Urdu speech-to-text"])
+    rig.settings = MeetingSettings(rig.root, record_microphone=True, language="en")
+
+    with pytest.raises(MeetingError, match="Download the meeting models first: Roman Urdu speech-to-text."):
+        rig.recorder.transcribe_file(rig.video_ok, "ur")
+
+    assert rig.models_checked_for == ["ur"]
