@@ -599,14 +599,14 @@ class TestAutoPrefersTheTorchFreeEngine:
 
 
 class TestPhonon2OnTheCpuEngine:
-    """Phonon-2 runs on Fermion's CPU engine whatever GPU the machine has."""
+    """Phonon-2.5 English runs on Fermion's CPU engine whatever GPU the machine has."""
 
     def _installed(self, models_dir: Path) -> Path:
-        model_info = get_model_info("phonon-2")
-        repo = models_dir / "models--FermionResearch--Phonon-2"
+        model_info = get_model_info("phonon-2.5-english")
+        repo = models_dir / "models--FermionResearch--Phonon-2.5-English"
         snapshot = repo / "snapshots" / model_info.revision
         snapshot.mkdir(parents=True)
-        (snapshot / "phonon-2.bps.tar.zst").write_bytes(b"zstd tar")
+        (snapshot / "phonon-2.5-en.bps.tar.zst").write_bytes(b"zstd tar")
         (snapshot / "config.json").write_text("{}")
         (repo / "refs").mkdir()
         (repo / "refs" / "main").write_text(model_info.revision)
@@ -616,7 +616,7 @@ class TestPhonon2OnTheCpuEngine:
         detector = FakeHardwareDetector()
 
         engine_id = resolve_engine_id(
-            _config(model_size="phonon-2"), get_model_info("phonon-2"),
+            _config(model_size="phonon-2.5-english"), get_model_info("phonon-2.5-english"),
             detector, build_engine_registry(),
         )
 
@@ -632,7 +632,7 @@ class TestPhonon2OnTheCpuEngine:
         snapshot = self._installed(tmp_path)
 
         engine = create_engine_for_active_model(
-            _config(model_size="phonon-2"), _paths(tmp_path),
+            _config(model_size="phonon-2.5-english"), _paths(tmp_path),
             build_engine_registry(), hardware,
             license_policy=AllowAllLicensePolicy(),
         )
@@ -644,7 +644,7 @@ class TestPhonon2OnTheCpuEngine:
         snapshot = self._installed(tmp_path)
         (snapshot.parent.parent / "refs" / "main").write_text("0" * 40)
 
-        assert engines_with_model_on_disk(get_model_info("phonon-2"), tmp_path) == frozenset()
+        assert engines_with_model_on_disk(get_model_info("phonon-2.5-english"), tmp_path) == frozenset()
 
     def test_the_composite_manager_downloads_it_through_its_own_child(
         self, tmp_path: Path,
@@ -654,5 +654,5 @@ class TestPhonon2OnTheCpuEngine:
         )
         self._installed(tmp_path)
 
-        assert manager.has_model("phonon-2") is True
-        assert manager.is_installed("phonon-2") is True
+        assert manager.has_model("phonon-2.5-english") is True
+        assert manager.is_installed("phonon-2.5-english") is True

@@ -56,7 +56,7 @@ fewer errors) is an optional download that runs on the same engine. A CUDA or
 ROCm GPU is expected for those. Parakeet technically runs on CPU, but measured
 throughput is about 15x slower than real time.
 
-On a computer with no GPU, a fresh install defaults to `phonon-2`: Fermion
+On a computer with no GPU, a fresh install defaults to `phonon-2.5-english`: Fermion
 Research's 164 MB compression of Parakeet v3 (English only, batch only). It
 runs on Fermion's CPU engine from the pinned `fermion-research` package, which
 uses native AVX2 / AVX-512 kernels on the packed weights. On a 6-core desktop

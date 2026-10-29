@@ -1,9 +1,10 @@
-"""Phonon-2 on Fermion's CPU engine, against a fake ``fermion`` package.
+"""Phonon on Fermion's CPU engine, against a fake ``fermion`` package.
 
 The real engine and its 164 MB weights stay out of unit tests; the
 manual real-weights check drives the adapter from a subprocess script.
 """
 
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -18,10 +19,19 @@ from skryb.core.exceptions import (
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription import phonon2_cpu_adapter
 from skryb.transcription.phonon2_cpu_adapter import (
-    ARCHIVE_FILENAME,
     Phonon2CpuAdapter,
     unpacked_model_dir,
 )
+
+ARCHIVE_FILENAME = "phonon-2.5-en.bps.tar.zst"
+# The "artifact" block of FermionResearch/Phonon-2.5-English's config.json at the pinned commit.
+_ARTIFACT = {
+    "profile": "five-value-25-en",
+    "backend": "phonon2-five-value",
+    "filename": ARCHIVE_FILENAME,
+    "download_bytes": 163693770,
+    "container": "model.fermion",
+}
 
 
 class _FakeSpeech:
@@ -71,10 +81,12 @@ def fermion(monkeypatch: pytest.MonkeyPatch) -> _FakeFermion:
     return fake
 
 
-def _snapshot(tmp_path: Path) -> Path:
-    snapshot = tmp_path / "models--FermionResearch--Phonon-2" / "snapshots" / "fb09063c"
+def _snapshot(tmp_path: Path, artifact: dict | None = None) -> Path:
+    snapshot = tmp_path / "models--FermionResearch--Phonon-2.5-English" / "snapshots" / "da200358"
     snapshot.mkdir(parents=True)
     (snapshot / ARCHIVE_FILENAME).write_bytes(b"zstd tar")
+    config = {"model_id": "FermionResearch/Phonon-2.5-English", "artifact": artifact or _ARTIFACT}
+    (snapshot / "config.json").write_text(json.dumps(config), encoding="utf-8")
     return snapshot
 
 
@@ -101,8 +113,31 @@ class TestLoading:
         assert fermion.unpacked == [(snapshot / ARCHIVE_FILENAME, snapshot / ".phonon2")]
         assert fermion.loads == [(
             unpacked_model_dir(snapshot),
-            {"profile": "five-value", "backend": "phonon2-five-value", "quiet": True},
+            {"profile": "five-value-25-en", "backend": "phonon2-five-value", "quiet": True},
         )]
+
+    def test_phonon_2s_own_archive_and_profile_come_from_its_config_too(
+        self, fermion: _FakeFermion, tmp_path: Path,
+    ) -> None:
+        snapshot = _snapshot(tmp_path, {
+            "profile": "five-value", "backend": "phonon2-five-value", "filename": "phonon-2.bps.tar.zst",
+        })
+
+        Phonon2CpuAdapter(snapshot).load_model()
+
+        assert fermion.unpacked == [(snapshot / "phonon-2.bps.tar.zst", snapshot / ".phonon2")]
+        assert fermion.loads[0][1]["profile"] == "five-value"
+
+    @pytest.mark.parametrize("config", ["", "{not json", '{"model_id": "x"}', '{"artifact": {"profile": "p"}}'])
+    def test_a_missing_or_broken_config_is_a_clear_error(
+        self, fermion: _FakeFermion, tmp_path: Path, config: str,
+    ) -> None:
+        snapshot = _snapshot(tmp_path)
+        (snapshot / "config.json").write_text(config, encoding="utf-8")
+
+        with pytest.raises(TranscriptionError, match="config.json"):
+            Phonon2CpuAdapter(snapshot).load_model()
+        assert fermion.unpacked == []
 
     def test_later_loads_reuse_the_unpacked_model_without_unpacking_again(
         self, fermion: _FakeFermion, tmp_path: Path,

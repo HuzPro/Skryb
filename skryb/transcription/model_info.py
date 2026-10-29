@@ -139,26 +139,26 @@ _PHONON2_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
 )
 
 
-# Fermion Research's 164 MB compression of parakeet-tdt-0.6b-v3. Pinned
-# because the CPU engine release (``fermion-research``) is pinned against
-# this archive.
+# Fermion Research's 164 MB compression of parakeet-tdt-0.6b-v3, the
+# English-only Phonon-2.5. Pinned because the CPU engine release
+# (``fermion-research``) is pinned against this archive.
 PHONON2_MODELS: dict[str, ModelInfo] = {
-    "phonon-2": ModelInfo(
-        name="phonon-2",
+    "phonon-2.5-english": ModelInfo(
+        name="phonon-2.5-english",
         size_mb=164,
         description="Parakeet v3 shrunk to 164 MB by Fermion Research: fast on CPU, English only",
-        repo_id="FermionResearch/Phonon-2",
-        revision="fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
+        repo_id="FermionResearch/Phonon-2.5-English",
+        revision="da200358d638886bc96c758c672ad5568828b119",
         compatible_engines=("phonon2_cpu",),
         engine_priorities=_PHONON2_ENGINE_PRIORITIES,
     ),
 }
 
-CPU_DEFAULT_MODEL = "phonon-2"
+CPU_DEFAULT_MODEL = "phonon-2.5-english"
 
 
 def default_model_for(hardware: HardwareKind) -> str:
-    """The model a fresh install starts on: Phonon-2 when there is no GPU."""
+    """The model a fresh install starts on: Phonon-2.5 English when there is no GPU."""
     return CPU_DEFAULT_MODEL if hardware == "cpu" else DEFAULT_MODEL
 
 
@@ -327,6 +327,8 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "ark-asr-3b": DEFAULT_MODEL,
     "parakeet-tdt-0.6b-v2": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
+    # Same size and engine, fewer errors on real dictation.
+    "phonon-2": "phonon-2.5-english",
 }
 
 

@@ -376,13 +376,13 @@ class TestDownloadsPastTheLimitWaitTheirTurn:
         gate, started = threading.Event(), []
         manager = DownloadManager(event_bus=bus, max_concurrent_downloads=5)
         names = ["parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
-                 "underdog-bark-3.0-pro", "phonon-2", "crisperwhisper-2.0-turbo"]
+                 "underdog-bark-3.0-pro", "phonon-2.5-english", "crisperwhisper-2.0-turbo"]
         try:
             for name in names:
                 manager.enqueue(_GatedJob(name, gate, started))
             assert [job for job, state in states if state == "queued"] == names
             _wait_for(lambda: len(started) == 5)
-            assert manager.state_of("phonon-2") is DownloadState.QUEUED
+            assert manager.state_of("phonon-2.5-english") is DownloadState.QUEUED
             assert manager.state_of("crisperwhisper-2.0-turbo") is DownloadState.QUEUED
         finally:
             gate.set()

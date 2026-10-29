@@ -74,7 +74,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2", *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2.5-english", *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
@@ -133,7 +133,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {_PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2", *_CRISPERWHISPER}
+        assert names == {_PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2.5-english", *_CRISPERWHISPER}
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
         service, *_ = _build_service(
@@ -201,7 +201,7 @@ class TestQwen3OnlyWhereItsEngineRuns:
         names = self._listed(monkeypatch, tmp_path, gfx_arch)
 
         assert "qwen3-asr-1.7b" not in names
-        assert {_PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER} <= names
+        assert {_PARAKEET, _PARAKEET_ULTRA, "phonon-2.5-english", *_CRISPERWHISPER} <= names
 
     def test_is_hidden_when_its_engine_is_not_installed(self, monkeypatch, tmp_path):
         assert "qwen3-asr-1.7b" not in self._listed(monkeypatch, tmp_path, "gfx1200", dll_installed=False)
