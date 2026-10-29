@@ -37,7 +37,7 @@ def test_english_words_inside_a_mixed_line_are_left_alone() -> None:
 
 
 def test_lines_without_hindi_script_are_returned_unchanged() -> None:
-    for line in ["Mission Control first.", "", "ٹھیک ہے", "Price is $12 ✓", "  spaced  "]:
+    for line in ["Launch Board first.", "", "ٹھیک ہے", "Price is $12 ✓", "  spaced  "]:
         assert romanize(line) == line
 
 

@@ -110,7 +110,7 @@ def notice_text(version: str) -> str:
             "during installation.",
             "",
             f"{APP_NAME} is open source, licensed under the Apache License,",
-            "Version 2.0; see LICENSE.txt. Copyright 2026 Huzaifa Tatari.",
+            "Version 2.0; see LICENSE.txt. Copyright 2026 HuzPro.",
             "",
         ]
     )

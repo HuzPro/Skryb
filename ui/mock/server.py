@@ -224,7 +224,7 @@ class Core:
             "rules": [
                 {"kind": "literal", "spoken": ["jason", "jayson"], "replacement": "JSON", "case_sensitive": False,
                  "whole_words": True, "phonetic": False, "enabled": True, "learned": False},
-                {"kind": "literal", "spoken": ["huzaifa", "huzeifa"], "replacement": "Huzaifa", "case_sensitive": False,
+                {"kind": "literal", "spoken": ["siobhan", "shivawn"], "replacement": "Siobhán", "case_sensitive": False,
                  "whole_words": True, "phonetic": True, "enabled": True, "learned": True},
                 {"kind": "literal", "spoken": [" dot com"], "replacement": ".com", "case_sensitive": False,
                  "whole_words": True, "phonetic": False, "enabled": True, "learned": False},
