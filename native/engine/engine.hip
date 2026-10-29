@@ -315,7 +315,8 @@ struct QasrEngine {
     }
 
     void load(const char* path);
-    std::string transcribe(const float* pcm, int n);
+    std::string transcribe(const float* pcm, int n) { return transcribe(pcm, n, prefix, suffix); }
+    std::string transcribe(const float* pcm, int n, const std::vector<int>& pre, const std::vector<int>& suf);
 
    private:
     void read_host(HANDLE f, const Entry& e, void* dst);
@@ -626,7 +627,7 @@ std::string QasrEngine::detokenize(const std::vector<int>& ids) {
     return utf8_encode(strip(text));
 }
 
-std::string QasrEngine::transcribe(const float* pcm, int n) {
+std::string QasrEngine::transcribe(const float* pcm, int n, const std::vector<int>& pre, const std::vector<int>& suf) {
     const auto t0 = Clock::now();
     const int n_eff = std::max(n, 8000);
     const int frames = n_eff / 160, fpad = cdiv(frames, 100) * 100, chunks = fpad / 100;
@@ -646,7 +647,7 @@ std::string QasrEngine::transcribe(const float* pcm, int n) {
         for (int q = ws; q < we; q += 16) tiles.push_back({q, std::min(q + 16, we), ws, we});
     }
     const int n_enc_tiles = (int)tiles.size();
-    const int L = (int)prefix.size() + T + (int)suffix.size();
+    const int L = (int)pre.size() + T + (int)suf.size();
     // Prefill tiles per row chunk, query rows relative to the chunk; causal masking uses pos_off.
     std::vector<int> chunk_tiles;
     for (int r0 = 0; r0 < L; r0 += kPrefillRows) {
@@ -654,9 +655,9 @@ std::string QasrEngine::transcribe(const float* pcm, int n) {
         chunk_tiles.push_back((int)tiles.size());
         for (int q = 0; q < rows_here; q += 16) tiles.push_back({q, std::min(q + 16, rows_here), 0, INT_MAX});
     }
-    std::vector<int> ids(prefix);
-    ids.resize(prefix.size() + T, -1);
-    ids.insert(ids.end(), suffix.begin(), suffix.end());
+    std::vector<int> ids(pre);
+    ids.resize(pre.size() + T, -1);
+    ids.insert(ids.end(), suf.begin(), suf.end());
 
     // Scratch, sized before any kernel runs so growing it never stalls mid-stream.
     float* pcm_d = buf<float>("pcm", n_eff);
@@ -719,7 +720,7 @@ std::string QasrEngine::transcribe(const float* pcm, int n) {
     int last_rows = 0;
     for (int c = 0, r0 = 0; r0 < L; c++, r0 += kPrefillRows) {
         last_rows = std::min(kPrefillRows, L - r0);
-        embed(s, ids_d + r0, w("dec.embed"), buf<bf16>("aemb", 1), (int)prefix.size() - r0, dx, last_rows, 2048);
+        embed(s, ids_d + r0, w("dec.embed"), buf<bf16>("aemb", 1), (int)pre.size() - r0, dx, last_rows, 2048);
         if (last_rows <= kMaxRows) decoder_layers(last_rows, r0, nullptr, 0);
         else decoder_layers(last_rows, r0, tiles_d + chunk_tiles[c], cdiv(last_rows, 16));
     }
@@ -767,6 +768,20 @@ QASR_API QasrEngine* qasr_load(const char* path, char* err, int err_len) {
 QASR_API int qasr_transcribe(QasrEngine* e, const float* pcm, int samples, char* text, int text_len) {
     try {
         const std::string t = e->transcribe(pcm, samples);
+        if ((int)t.size() >= text_len) throw std::runtime_error("text buffer too small");
+        std::memcpy(text, t.c_str(), t.size() + 1);
+        return (int)t.size();
+    } catch (const std::exception& x) {
+        if (text && text_len > 0) std::snprintf(text, text_len, "%s", x.what());
+        return -1;
+    }
+}
+
+QASR_API int qasr_transcribe_prompted(QasrEngine* e, const float* pcm, int samples, const int* prefix, int prefix_len,
+                                      const int* suffix, int suffix_len, char* text, int text_len) {
+    try {
+        const std::vector<int> pre(prefix, prefix + prefix_len), suf(suffix, suffix + suffix_len);
+        const std::string t = e->transcribe(pcm, samples, pre, suf);
         if ((int)t.size() >= text_len) throw std::runtime_error("text buffer too small");
         std::memcpy(text, t.c_str(), t.size() + 1);
         return (int)t.size();

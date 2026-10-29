@@ -128,10 +128,11 @@ def _prompt_ids(model_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     """Token ids around the audio placeholders, as the chat template renders them."""
     from tokenizers import Tokenizer
 
+    from skryb.transcription.qwen3_asr_prompt import prompt_text
+
     tok = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
-    prefix = "<|im_start|>system\n<|im_end|>\n<|im_start|>user\n<|audio_start|>"
-    suffix = "<|audio_end|><|im_end|>\n<|im_start|>assistant\nlanguage English<asr_text>"
-    enc = lambda s: np.array(tok.encode(s, add_special_tokens=False).ids, np.int32)
+    prefix, suffix = prompt_text(None, "en")
+    enc =lambda s: np.array(tok.encode(s, add_special_tokens=False).ids, np.int32)
     return enc(prefix), enc(suffix)
 
 

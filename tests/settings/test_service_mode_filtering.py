@@ -133,7 +133,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {_PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2", *_CRISPERWHISPER}
+        assert names == {_PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2", *_CRISPERWHISPER, "qwen3-asr-1.7b"}
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
         service, *_ = _build_service(
@@ -177,11 +177,12 @@ class TestStreamingHardwareGate:
         assert service.supports_streaming_hardware() is False
 
 
-class TestQwen3OnlyWhereItsEngineRuns:
-    """The native engine's kernels are compiled for gfx1200 and live in qasr.dll."""
+class TestQwen3RunsOnEveryComputer:
+    """The native engine's kernels are compiled for gfx1200 and live in qasr.dll;
+    everywhere else Qwen3-ASR runs on its transformers engine."""
 
     @staticmethod
-    def _listed(monkeypatch, tmp_path, gfx_arch, *, dll_installed=True, kind="amd_rocm"):
+    def _service(monkeypatch, tmp_path, gfx_arch, *, dll_installed=True, kind="amd_rocm"):
         dll = tmp_path / "qasr.dll"
         monkeypatch.setattr(
             engine_factory, "native_engine_dll", lambda: dll if dll_installed else None,
@@ -190,26 +191,29 @@ class TestQwen3OnlyWhereItsEngineRuns:
         service, *_ = _build_service(
             models=ALL_MODELS, registry=build_engine_registry(), hardware=hardware,
         )
-        return {view.name for view in service.list_models()}
+        return service
+
+    def _engines(self, monkeypatch, tmp_path, gfx_arch, **kwargs):
+        service = self._service(monkeypatch, tmp_path, gfx_arch, **kwargs)
+        assert "qwen3-asr-1.7b" in {view.name for view in service.list_models()}
+        return [candidate.engine_id for candidate in service.engine_candidates_for("qwen3-asr-1.7b")]
 
     @pytest.mark.parametrize("gfx_arch", ["gfx1200", "GFX1200", "gfx1200:sramecc-:xnack-", " gfx1200 "])
-    def test_is_offered_on_the_rx_9060_xt_with_its_engine_installed(self, monkeypatch, tmp_path, gfx_arch):
-        assert "qwen3-asr-1.7b" in self._listed(monkeypatch, tmp_path, gfx_arch)
+    def test_the_rx_9060_xt_runs_it_on_the_native_engine_first(self, monkeypatch, tmp_path, gfx_arch):
+        assert self._engines(monkeypatch, tmp_path, gfx_arch) == ["native_qwen3_asr", "qwen3_asr"]
 
     @pytest.mark.parametrize("gfx_arch", ["gfx1201", "gfx1100", "gfx1101", "gfx90a", "", None, "gfx12000"])
-    def test_is_hidden_on_other_amd_gpus(self, monkeypatch, tmp_path, gfx_arch):
-        names = self._listed(monkeypatch, tmp_path, gfx_arch)
+    def test_other_amd_gpus_run_it_on_transformers(self, monkeypatch, tmp_path, gfx_arch):
+        assert self._engines(monkeypatch, tmp_path, gfx_arch) == ["qwen3_asr"]
 
-        assert "qwen3-asr-1.7b" not in names
-        assert {_PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER} <= names
-
-    def test_is_hidden_when_its_engine_is_not_installed(self, monkeypatch, tmp_path):
-        assert "qwen3-asr-1.7b" not in self._listed(monkeypatch, tmp_path, "gfx1200", dll_installed=False)
+    def test_without_the_native_dll_it_runs_on_transformers(self, monkeypatch, tmp_path):
+        assert self._engines(monkeypatch, tmp_path, "gfx1200", dll_installed=False) == ["qwen3_asr"]
 
     @pytest.mark.parametrize("kind", ["cpu", "nvidia_cuda"])
-    def test_is_hidden_without_an_amd_gpu(self, monkeypatch, tmp_path, kind):
-        assert "qwen3-asr-1.7b" not in self._listed(monkeypatch, tmp_path, None, kind=kind)
+    def test_nvidia_and_cpu_run_it_on_transformers(self, monkeypatch, tmp_path, kind):
+        assert self._engines(monkeypatch, tmp_path, None, kind=kind) == ["qwen3_asr"]
 
     def test_every_model_is_listed_before_the_hardware_is_known(self, monkeypatch, tmp_path):
-        assert "qwen3-asr-1.7b" in self._listed(monkeypatch, tmp_path, None, dll_installed=False, kind=None)
+        service = self._service(monkeypatch, tmp_path, None, dll_installed=False, kind=None)
 
+        assert "qwen3-asr-1.7b" in {view.name for view in service.list_models()}

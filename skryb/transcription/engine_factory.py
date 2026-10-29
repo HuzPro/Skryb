@@ -92,6 +92,15 @@ _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# Qwen3-ASR through transformers, for every machine the native engine can't serve.
+_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="qwen3_asr",
+    display_name="Qwen3-ASR (Transformers)",
+    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
+    base_priority=50,
+)
+
+
 # The encoder on an Intel NPU through OpenVINO, the rest of Parakeet in
 # PyTorch on the CPU. Only offered on machines without a GPU; available once
 # the optional openvino package is installed (pip install skryb[npu]). With
@@ -112,6 +121,7 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "crisperwhisper_ct2": 1,
     "native_qwen3_asr": 1,
     "openvino_parakeet": 1,
+    "qwen3_asr": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -126,6 +136,7 @@ def build_engine_registry() -> EngineRegistry:
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
             replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=native_engine_dll() is not None),
+            _QWEN3_ASR_DESCRIPTOR,
             replace(
                 _OPENVINO_PARAKEET_DESCRIPTOR,
                 available=importlib.util.find_spec("openvino") is not None,
@@ -139,6 +150,7 @@ def build_engine_registry() -> EngineRegistry:
             "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
             "native_qwen3_asr": _build_native_qwen3_asr_engine,
             "openvino_parakeet": _build_openvino_parakeet_engine,
+            "qwen3_asr": _build_qwen3_asr_engine,
         },
     )
 
@@ -196,6 +208,19 @@ def _build_native_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
     )
 
 
+def _build_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.hf_model_manager import (
+        loadable_snapshot_dir,
+    )
+    from skryb.transcription.qwen3_asr_adapter import Qwen3AsrAdapter
+
+    return Qwen3AsrAdapter(
+        loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
+        device=spec.device,
+        language=spec.language,
+    )
+
+
 def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
     from skryb.transcription.crisperwhisper_adapter import (
         CrisperWhisperAdapter,
@@ -236,6 +261,7 @@ def selectable_engine_ids(
     config: ConfigurationStore,
     registry: EngineRegistry,
     models_dir: Path | None = None,
+    hardware: HardwareProfile | None = None,
 ) -> tuple[EngineId, ...]:
     """Engine ids this config could end up running, read from config alone.
 
@@ -246,7 +272,8 @@ def selectable_engine_ids(
 
     A model name the catalogue no longer knows (a config that predates a
     migration) widens to every registered engine, so the answer stays on
-    the safe side of "might need torch".
+    the safe side of "might need torch". *hardware* is a probe already
+    remembered, which settles a ranking that depends on the GPU.
     """
     explicit = config.get("transcription.engine", "auto")
     if isinstance(explicit, str) and explicit != "auto":
@@ -259,13 +286,14 @@ def selectable_engine_ids(
         return tuple(d.engine_id for d in registry.all_descriptors())
     if models_dir is None:
         return model_info.compatible_engines
-    return _auto_selection(model_info, registry, models_dir)
+    return _auto_selection(model_info, registry, models_dir, hardware)
 
 
 def _auto_selection(
     model_info: ModelInfo,
     registry: EngineRegistry,
     models_dir: Path,
+    hardware: HardwareProfile | None = None,
 ) -> tuple[EngineId, ...]:
     """The single engine ``auto`` will load, when that is knowable here.
 
@@ -275,9 +303,15 @@ def _auto_selection(
     would report "needs torch" whenever any alternative did.
 
     Falls back to every candidate when the ranking needs a hardware
-    probe, because probing is the import this is trying to avoid.
+    probe that is not remembered, because probing is the import this is
+    trying to avoid.
     """
     ranked = _ranking_that_ignores_hardware(model_info, registry)
+    if not ranked and hardware is not None:
+        ranked = tuple(
+            candidate.engine_id
+            for candidate in rank_engines(model_info, hardware, registry.all_descriptors())
+        )
     if not ranked:
         return model_info.compatible_engines
     installed = engines_with_model_on_disk(model_info, models_dir)
@@ -291,10 +325,11 @@ def startup_requires_torch(
     config: ConfigurationStore,
     registry: EngineRegistry,
     models_dir: Path | None = None,
+    hardware: HardwareProfile | None = None,
 ) -> bool:
     """Whether this launch will load an engine built on torch."""
     return registry.requires_torch(
-        selectable_engine_ids(config, registry, models_dir),
+        selectable_engine_ids(config, registry, models_dir, hardware),
     )
 
 
@@ -635,8 +670,33 @@ def build_composite_model_manager(
             "crisperwhisper": crisperwhisper_manager,
             "crisperwhisper_ct2": crisperwhisper_manager,
             "native_qwen3_asr": qwen3_asr_manager,
+            "qwen3_asr": qwen3_asr_manager,
         },
         active_engine_provider=active_engine_provider,
+    )
+
+
+def build_hf_model_manager(
+    models_dir: Path,
+    download_manager: DownloadManager,
+    license_policy: LicensePolicy,
+    models: dict[str, ModelInfo],
+) -> ModelManager:
+    """A HuggingFace-cache manager for models outside the dictation catalogue."""
+    from skryb.downloads.chunked_file_downloader import ChunkedFileDownloader
+    from skryb.downloads.hf_repo_resolver import HfRepoResolver
+    from skryb.downloads.requests_http_client import RequestsHttpClient
+    from skryb.transcription.hf_model_manager import HuggingFaceModelManager
+
+    return HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=HfRepoResolver(api=_BuiltOnFirstUse(_hf_api)),
+        file_downloader=ChunkedFileDownloader(
+            http=RequestsHttpClient(session=_BuiltOnFirstUse(_requests_session)),
+        ),
+        models=models,
+        license_policy=license_policy,
     )
 
 
