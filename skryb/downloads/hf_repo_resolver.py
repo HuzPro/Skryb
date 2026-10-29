@@ -21,6 +21,12 @@ _IGNORE_PATTERNS = (
     "mlx/*",
     "runtime/*",
     "bark_*.py",
+    # Nemotron 3 Diarization's NeMo and llama.cpp builds and its demo media,
+    # beside the safetensors this app reads (about 300 MB).
+    "Nemotron-3-Diarization.nemo",
+    "*.gguf",
+    "*.mp4",
+    "*.gif",
 )
 
 _HF_RESOLVE_URL = "https://huggingface.co/{repo_id}/resolve/{sha}/{filename}"

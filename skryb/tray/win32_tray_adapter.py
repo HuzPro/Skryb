@@ -57,6 +57,9 @@ _ID_HISTORY = 4
 _ID_PASTE_LAST = 5
 _ID_COPY_LAST = 6
 _ID_UPDATE = 7
+_ID_MEETING = 8
+_ID_MEETINGS = 9
+_MEETING_NOTE = "  ·  Recording a meeting"
 
 # The tray menu takes the focus; paste-last hands it back first.
 _FOCUS_RESTORE_SECONDS = 0.3
@@ -287,12 +290,12 @@ def _paste_when_in_front(target: int, paste: Callable[[], None]) -> None:
     paste()
 
 
-def create_hicons(state: AppState, size: int = _ICON_SIZE) -> list[int]:
+def create_hicons(state: AppState, size: int = _ICON_SIZE, meeting: bool = False) -> list[int]:
     """Render the state's tray frames and convert each to a Win32 ``HICON``.
 
     The caller owns the returned handles and must ``DestroyIcon`` them.
     """
-    return [image_to_hicon(frame) for frame in create_icon_frames(state, size)]
+    return [image_to_hicon(frame) for frame in create_icon_frames(state, size, meeting)]
 
 
 def image_to_hicon(image: object) -> int:
@@ -367,6 +370,10 @@ class Win32TrayBackend:
     # No update item until the release updater offers one.
     _update_offer: Callable[[], str] | None = None
     _on_update_clicked: Callable[[], None] | None = None
+    # No meeting items unless the app records meetings.
+    _meeting_recording: Callable[[], bool] | None = None
+    _on_meeting_clicked: Callable[[], None] | None = None
+    _on_meetings_clicked: Callable[[], None] | None = None
 
     def __init__(
         self,
@@ -383,10 +390,16 @@ class Win32TrayBackend:
         dispatcher: GuiThreadDispatcher,
         update_offer: Callable[[], str] | None = None,
         on_update_clicked: Callable[[], None] | None = None,
+        meeting_recording: Callable[[], bool] | None = None,
+        on_meeting_clicked: Callable[[], None] | None = None,
+        on_meetings_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._update_offer = update_offer
         self._on_update_clicked = on_update_clicked
+        self._meeting_recording = meeting_recording
+        self._on_meeting_clicked = on_meeting_clicked
+        self._on_meetings_clicked = on_meetings_clicked
         self._get_state_label = get_state_label
         self._on_settings_clicked = on_settings_clicked
         self._on_quit_clicked = on_quit_clicked
@@ -518,6 +531,7 @@ class Win32TrayBackend:
         if update and self._on_update_clicked is not None:
             _user32.AppendMenuW(menu, _MF_STRING, _ID_UPDATE, f"Restart and update to {update}")
             _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
+        self._append_meeting_items(menu)
         if self._on_paste_last_clicked is not None:
             _user32.AppendMenuW(
                 menu, _MF_STRING, _ID_PASTE_LAST, "Paste last dictation",
@@ -544,6 +558,18 @@ class Win32TrayBackend:
         )
         _user32.DestroyMenu(menu)
         self._dispatch_menu_command(command, previous)
+
+    def _append_meeting_items(self, menu: int) -> None:
+        if self._on_meeting_clicked is None:
+            return
+        recording = self._meeting_recording is not None and self._meeting_recording()
+        _user32.AppendMenuW(
+            menu, _MF_STRING, _ID_MEETING,
+            "Stop meeting recording" if recording else "Start meeting recording",
+        )
+        if self._on_meetings_clicked is not None:
+            _user32.AppendMenuW(menu, _MF_STRING, _ID_MEETINGS, "Meetings...")
+        _user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
 
     def _append_microphone_menu(self, menu: int) -> None:
         if self._list_microphones is None or self._on_microphone_chosen is None:
@@ -582,6 +608,8 @@ class Win32TrayBackend:
             _ID_HISTORY: self._on_history_clicked,
             _ID_COPY_LAST: self._on_copy_last_clicked,
             _ID_UPDATE: self._on_update_clicked,
+            _ID_MEETING: self._on_meeting_clicked,
+            _ID_MEETINGS: self._on_meetings_clicked,
             _ID_QUIT: self._on_quit_clicked,
         }.get(command)
 
@@ -634,11 +662,16 @@ class Win32TrayAdapter:
         on_copy_last_clicked: Callable[[], None] | None = None,
         update_offer: Callable[[], str] | None = None,
         on_update_clicked: Callable[[], None] | None = None,
+        meeting_recording: Callable[[], bool] | None = None,
+        on_meeting_clicked: Callable[[], None] | None = None,
+        on_meetings_clicked: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._dispatcher = dispatcher
         self._get_state_label = get_state_label
         self._visible = False
+        self._state = initial_state
+        self._meeting = False
         self._title = _TITLE_PREFIX + initial_label
         self._hicons: list[int] = []
         self._frame = 0
@@ -653,6 +686,9 @@ class Win32TrayAdapter:
             dispatcher=dispatcher,
             update_offer=update_offer,
             on_update_clicked=on_update_clicked,
+            meeting_recording=meeting_recording,
+            on_meeting_clicked=on_meeting_clicked,
+            on_meetings_clicked=on_meetings_clicked,
         )
         self._apply_icon(initial_state)
         self._backend.set_tooltip(self._title)
@@ -684,6 +720,9 @@ class Win32TrayAdapter:
     def notify(self, title: str, message: str) -> None:
         self._dispatcher.dispatch(lambda: self._backend.notify(title, message))
 
+    def set_meeting_recording(self, recording: bool) -> None:
+        self._dispatcher.dispatch(lambda: self._apply_meeting(recording))
+
     def run(self, setup: Callable[["Win32TrayAdapter"], None]) -> None:
         setup(self)
         self._root.mainloop()
@@ -704,11 +743,21 @@ class Win32TrayAdapter:
     def _apply_state_update(self, state: AppState, label: str) -> None:
         self._apply_icon(state)
         self._title = _TITLE_PREFIX + label
-        self._backend.set_tooltip(self._title)
+        self._backend.set_tooltip(self._shown_title())
+
+    def _apply_meeting(self, recording: bool) -> None:
+        self._meeting = recording
+        self._apply_icon(self._state)
+        if self._elapsed_provider is None:
+            self._backend.set_tooltip(self._shown_title())
+
+    def _shown_title(self) -> str:
+        return self._title + _MEETING_NOTE if self._meeting else self._title
 
     def _apply_icon(self, state: AppState) -> None:
         self._stop_animation()
-        new_hicons = create_hicons(state)
+        self._state = state
+        new_hicons = create_hicons(state, meeting=self._meeting)
         self._backend.set_icon(new_hicons[0])
         self._destroy_icons()
         self._hicons = new_hicons
@@ -737,7 +786,7 @@ class Win32TrayAdapter:
         self._stop_elapsed_timer()
         self._elapsed_provider = provider
         if provider is None:
-            self._backend.set_tooltip(self._title)
+            self._backend.set_tooltip(self._shown_title())
             return
         self._refresh_elapsed_tooltip()
         self._elapsed_after_id = self._root.after(
@@ -781,6 +830,9 @@ def build_win32_tray_adapter(
     on_copy_last_clicked: Callable[[], None] | None = None,
     update_offer: Callable[[], str] | None = None,
     on_update_clicked: Callable[[], None] | None = None,
+    meeting_recording: Callable[[], bool] | None = None,
+    on_meeting_clicked: Callable[[], None] | None = None,
+    on_meetings_clicked: Callable[[], None] | None = None,
 ) -> Win32TrayAdapter:
     """Factory matching :data:`skryb.tray.app.TrayIconFactory`.
 
@@ -804,4 +856,7 @@ def build_win32_tray_adapter(
         on_copy_last_clicked=on_copy_last_clicked,
         update_offer=update_offer,
         on_update_clicked=on_update_clicked,
+        meeting_recording=meeting_recording,
+        on_meeting_clicked=on_meeting_clicked,
+        on_meetings_clicked=on_meetings_clicked,
     )

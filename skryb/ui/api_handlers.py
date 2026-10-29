@@ -38,6 +38,7 @@ from skryb.settings.transcription_mode import TranscriptionMode
 from skryb.transcription.model_info import ALL_MODELS, family_display_size
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, ApiServer, Route
 from skryb.ui.event_hub import EventHub, Json
+from skryb.ui.meeting_handlers import MeetingApi
 from skryb.ui.shapes import (
     Fields,
     bindings_from_json,
@@ -252,6 +253,7 @@ class CoreApi:
         open_path: Callable[[Path], None] = open_with_shell,
         updates: ReleaseUpdater | None = None,
         preview_sound: Callable[[str, float], None] = _silent,
+        meetings: MeetingApi | None = None,
     ) -> None:
         self._service = service
         self._hub = hub
@@ -267,6 +269,7 @@ class CoreApi:
         self._open_path = open_path
         self._updates = updates
         self._preview_sound = preview_sound
+        self._meetings = meetings
         self._lock = threading.Lock()
 
     def serve_on(self, server: ApiServer) -> None:
@@ -318,10 +321,11 @@ class CoreApi:
             ("POST", "/api/updates/check", self._check_for_updates),
             ("POST", "/api/updates/install", self._install_update),
         ]
+        # Meetings keep their own order: stopping one waits for its last lines, which must not hold up settings.
         return [
             (method, path, handler if method == "GET" else self._one_at_a_time(handler))
             for method, path, handler in table
-        ]
+        ] + (self._meetings.routes() if self._meetings is not None else [])
 
     def _one_at_a_time(
         self, handler: Callable[[ApiRequest], ApiResponse],
@@ -345,6 +349,7 @@ class CoreApi:
             "pill_default_position": list(DEFAULT_PILL_POSITION),
             # None: this copy runs from a git checkout and updates through git.
             "update": asdict(self._updates.status()) if self._updates is not None else None,
+            "meeting_recording": self._meetings is not None and self._meetings.recording(),
         }
 
     def publish_app_info(self) -> None:

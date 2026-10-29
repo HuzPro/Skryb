@@ -117,6 +117,12 @@ from skryb.output.win32_modifier_key_state_reader import (
 )
 from skryb.output.word_learning import WordLearner, learns_words
 from skryb.history.retention import HistoryPruner, history_retention_days
+from skryb.meetings.asr import MeetingModels, build_meeting_asr, diarizer_snapshot
+from skryb.meetings.capture import Capture
+from skryb.meetings.model_files import MeetingModelFiles
+from skryb.meetings.models import DIARIZER
+from skryb.meetings.recorder import MeetingError, MeetingRecorder
+from skryb.meetings.storage import meeting_settings_from
 from skryb.history.service import HistoryService
 from skryb.recording.audio_ducking import AudioDucking, core_audio_sessions
 from skryb.recording.audio_segment import AudioSegment
@@ -149,6 +155,7 @@ from skryb.transcription.engine import TranscriptionEngine
 from skryb.transcription.engine_preload import EnginePreload
 from skryb.transcription.engine_factory import (
     build_composite_model_manager,
+    build_hf_model_manager,
     create_engine_for_active_model,
     engines_with_model_on_disk,
     resolve_device,
@@ -180,9 +187,10 @@ from skryb.transcription.streaming.streaming_engine import (
 from skryb.transcription_use_case import RecordAndTranscribeUseCase
 from skryb.tray.app import SystemTrayApp
 from skryb.tray.win32_tray_adapter import build_win32_tray_adapter
-from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version
+from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version, open_with_shell
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
+from skryb.ui.meeting_handlers import MeetingApi
 from skryb.ui.voice_feed import VoiceFeed
 
 _logger = logging.getLogger(__name__)
@@ -601,7 +609,7 @@ def _load_engine_with_fallback(
     started_at = time.monotonic()
     device = resolve_device(
         config, registry, hardware_detector,
-        selectable_engine_ids(config, registry, paths.models_dir),
+        selectable_engine_ids(config, registry, paths.models_dir, hardware_detector.peek()),
     )
     try:
         try:
@@ -934,6 +942,57 @@ def _make_active_engine_provider(
     return provider
 
 
+def _build_meetings(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware_detector: HardwareDetector,
+    license_policy: LicensePolicy,
+    download_manager: DownloadManager,
+    settings_service: SettingsService,
+    use_case: RecordAndTranscribeUseCase,
+    *,
+    publish: Callable[[dict[str, object]], None],
+    on_change: Callable[[bool], None],
+) -> tuple[MeetingRecorder, MeetingModelFiles]:
+    """Meeting recording, sharing dictation's Qwen3-ASR when dictation has it loaded."""
+    diarizer = build_hf_model_manager(
+        paths.models_dir, download_manager, license_policy, {DIARIZER.name: DIARIZER},
+    )
+    diarizer_downloads = DownloadCoordinator(diarizer)
+    files = MeetingModelFiles(
+        diarizer_installed=lambda: diarizer.is_installed(DIARIZER.name),
+        download_diarizer=lambda: diarizer_downloads.start(DIARIZER.name),
+        is_installed=settings_service.is_installed,
+        start_download=settings_service.start_download,
+    )
+    recorder = MeetingRecorder(
+        settings=functools.partial(meeting_settings_from, config),
+        missing_models=files.missing,
+        make_models=lambda settings: MeetingModels(
+            language=settings.language,
+            dictation_engine=use_case.current_engine,
+            turns=use_case.engine_turns,
+            build_asr=functools.partial(
+                build_meeting_asr, paths, registry, hardware_detector, license_policy,
+            ),
+            diarizer_snapshot=functools.partial(diarizer_snapshot, paths.models_dir),
+        ),
+        make_capture=Capture,
+        publish=publish,
+        on_change=on_change,
+    )
+    return recorder, files
+
+
+def _toggle_meeting(meetings: MeetingRecorder, explain: Callable[[str], None]) -> None:
+    """Start or stop from the tray; a meeting that cannot start says why and opens the Meetings page."""
+    try:
+        meetings.toggle()
+    except MeetingError as exc:
+        explain(str(exc))
+
+
 _ENGINE_LOAD_TIMEOUT_SECONDS = 120.0
 # A restart onto newer code waits while either is under way.
 _DICTATING = (AppState.RECORDING, AppState.TRANSCRIBING)
@@ -1258,6 +1317,21 @@ def build_app(
 
     VoiceFeed(event_bus, api_server.hub.publish, level=lambda: recorder.current_rms)
 
+    def meeting_changed(recording: bool) -> None:
+        app.meeting_recording_changed(recording)
+        api.publish_app_info()
+
+    meetings, meeting_files = _build_meetings(
+        config, paths, registry, hardware_detector, license_policy, download_manager,
+        settings_service, record_and_transcribe_use_case,
+        publish=functools.partial(api_server.hub.publish, "meeting"),
+        on_change=meeting_changed,
+    )
+
+    def explain_meeting_problem(message: str) -> None:
+        app.notify(message)
+        show_page("meetings")
+
     # The shell's requests arrive on the API server's threads; applying
     # settings rebuilds the output chain and the hotkey hook, which the
     # settings window always did on the GUI thread.
@@ -1283,6 +1357,13 @@ def build_app(
         ),
         updates=updater,
         preview_sound=cue_player.preview,
+        meetings=MeetingApi(
+            meetings,
+            api_server.hub,
+            folder=lambda: meeting_settings_from(config).folder,
+            model_files=meeting_files,
+            open_path=open_with_shell,
+        ),
     )
     launcher = ShellLauncher(
         api_server,
@@ -1336,13 +1417,18 @@ def build_app(
             on_devices_changed=hot_plug.devices_changed,
             update_offer=updater.offered_version if updater is not None else None,
             on_update_clicked=install_update if updater is not None else None,
+            meeting_recording=meetings.is_recording,
+            on_meeting_clicked=lambda: action_dispatcher.dispatch(
+                functools.partial(_toggle_meeting, meetings, explain_meeting_problem),
+            ),
+            on_meetings_clicked=functools.partial(show_page, "meetings"),
         ),
         on_open_settings=functools.partial(show_page, "settings"),
         build_status=RunningBuild(source_checkout()).status,
         start_replacement=functools.partial(start_another_copy, "--restart"),
         download_manager=download_manager,
         owned_disposables=tuple(
-            item for item in (overlay, ducking, history_pruner, updater)
+            item for item in (meetings, overlay, ducking, history_pruner, updater)
             if item is not None
         ),
     )

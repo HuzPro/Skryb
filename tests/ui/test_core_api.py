@@ -27,7 +27,7 @@ _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
     "crisperwhisper_mode", "capture_content", "input_device", "boost_quiet_speech",
     "learn_words", "hotkey_bindings", "double_tap_locks_hold", "recording",
-    "history_retention_days", "paste_method_overrides", "check_for_updates",
+    "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",
@@ -115,6 +115,7 @@ def test_the_app_and_its_settings_answer_in_the_contracts_shapes(rig: Rig) -> No
     assert set(settings) == _SETTINGS_KEYS
     assert settings["learn_words"] is True
     assert set(settings["recording"]) == _RECORDING_KEYS
+    assert set(settings["meetings"]) == {"folder", "record_microphone", "language"}
     assert settings["model_size"] == PARAKEET
     assert settings["output_mode"] == "direct_paste"
     assert all(set(binding) == {"keys", "mode", "action"} for binding in settings["hotkey_bindings"])

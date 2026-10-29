@@ -103,3 +103,23 @@ class TestColorSchemeFromRegistry:
         )
 
         assert scheme == ColorScheme.LIGHT
+
+
+class TestMeetingBadge:
+    """While a meeting records, a recording-red dot sits in the icon's bottom-right corner."""
+
+    def test_a_recording_meeting_adds_a_red_dot_in_the_corner_of_every_frame(self):
+        plain = render_frames_for_scheme(AppState.TRANSCRIBING, ColorScheme.DARK, size=64)
+        marked = render_frames_for_scheme(AppState.TRANSCRIBING, ColorScheme.DARK, size=64, meeting=True)
+
+        assert len(marked) == len(plain)
+        for frame in marked:
+            r, g, b, a = frame.getpixel((52, 52))
+            assert a == 255 and r > 200 and g < 120 and b < 120
+
+    def test_the_rest_of_the_mark_is_left_as_it_was(self):
+        plain = render_frames_for_scheme(AppState.IDLE, ColorScheme.LIGHT, size=64)[0]
+        marked = render_frames_for_scheme(AppState.IDLE, ColorScheme.LIGHT, size=64, meeting=True)[0]
+
+        assert marked.getpixel(_STEM) == plain.getpixel(_STEM)
+        assert marked.getpixel((4, 4)) == plain.getpixel((4, 4))

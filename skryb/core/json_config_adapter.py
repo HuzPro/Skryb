@@ -63,6 +63,12 @@ DEFAULT_CONFIG = {
     "updates": {
         "check_automatically": True,
     },
+    # A blank folder is D:\Meetings, or Documents\Skryb Meetings without a D: drive.
+    "meetings": {
+        "folder": "",
+        "record_microphone": True,
+        "language": "en",
+    },
 }
 
 

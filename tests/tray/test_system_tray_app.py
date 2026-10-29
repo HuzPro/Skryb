@@ -831,3 +831,31 @@ class TestRestart:
 
         exit_now.assert_not_called()
         assert call_order == []
+
+
+class TestMeetingRecordingOnTheIcon:
+    def test_a_meeting_started_before_the_icon_exists_shows_once_it_does(self):
+        icons: list = []
+
+        def factory(**kwargs):
+            icon = MagicMock()
+            icon.run.side_effect = lambda setup: setup(icon)
+            icons.append(icon)
+            return icon
+
+        app = _build_app(tray_factory=factory)
+        app.meeting_recording_changed(True)
+        app.run()
+
+        icons[0].set_meeting_recording.assert_called_once_with(True)
+
+    def test_starting_and_stopping_a_meeting_marks_and_unmarks_the_icon(self):
+        icon = MagicMock()
+        icon.run.side_effect = lambda setup: setup(icon)
+        app = _build_app(tray_factory=lambda **kwargs: icon)
+        app.run()
+
+        app.meeting_recording_changed(True)
+        app.meeting_recording_changed(False)
+
+        assert [call.args for call in icon.set_meeting_recording.call_args_list] == [(True,), (False,)]

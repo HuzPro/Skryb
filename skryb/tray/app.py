@@ -74,6 +74,7 @@ class TrayIcon(Protocol):
         self, provider: Callable[[], float] | None,
     ) -> None: ...
     def notify(self, title: str, message: str) -> None: ...
+    def set_meeting_recording(self, recording: bool) -> None: ...
     def run(self, setup: Callable[..., None]) -> None: ...
     def stop(self) -> None: ...
 
@@ -129,6 +130,7 @@ class SystemTrayApp:
         # recording or retries the failed one - the implicit acknowledgement.
         self._error_sticky = False
         self._silence_reported = False
+        self._meeting_recording = False
 
         self._event_bus.subscribe(StateChangedEvent, self._handle_state_changed)
         self._event_bus.subscribe(ErrorOccurredEvent, self._handle_error)
@@ -179,6 +181,12 @@ class SystemTrayApp:
         if self._icon is not None:
             self._icon.notify("Skryb", message)
 
+    def meeting_recording_changed(self, recording: bool) -> None:
+        """Marks the tray icon while a meeting records, from any thread."""
+        self._meeting_recording = recording
+        if self._icon is not None:
+            self._icon.set_meeting_recording(recording)
+
     def pause_listener(self) -> None:
         self._hotkey_listener.pause()
 
@@ -190,6 +198,8 @@ class SystemTrayApp:
         from skryb.core.startup_log import milestone
 
         milestone("tray-visible")
+        if self._meeting_recording:
+            icon.set_meeting_recording(True)
         self._replay_engine_outcome(icon)
         self._hotkey_listener.start()
 
