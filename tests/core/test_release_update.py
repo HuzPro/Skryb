@@ -536,3 +536,26 @@ class TestKnowingAnInstalledCopy:
         (tmp_path / "venv").mkdir()
 
         assert not is_installed_copy(tmp_path / "venv")
+
+
+class TestAskingGitHub:
+    def test_checks_through_the_release_download_link_not_the_rate_limited_api(self, monkeypatch):
+        asked: list[str] = []
+
+        class _Answer:
+            def raise_for_status(self) -> None:
+                pass
+
+            def json(self) -> object:
+                return _github("0.7.0")
+
+        def get(url: str, **_kwargs: object) -> _Answer:
+            asked.append(url)
+            return _Answer()
+
+        monkeypatch.setattr("requests.get", get)
+
+        answer = release_update.fetch_latest_release("0.6.0")
+
+        assert asked == ["https://github.com/HuzPro/Skryb/releases/latest/download/latest.json"]
+        assert release_from_github(answer).version == "0.7.0"

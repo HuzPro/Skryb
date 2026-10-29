@@ -27,7 +27,9 @@ from skryb.downloads.chunked_file_downloader import FileDownloadPlan
 
 _logger = logging.getLogger(__name__)
 
-LATEST_RELEASE_URL = "https://api.github.com/repos/HuzPro/Skryb/releases/latest"
+# Not the API: its 60 anonymous requests an hour are shared with everything on the
+# connection. Each release publishes this file (release/latest_manifest.py) instead.
+LATEST_RELEASE_URL = "https://github.com/HuzPro/Skryb/releases/latest/download/latest.json"
 FIRST_CHECK_SECONDS = 15.0
 CHECK_EVERY_SECONDS = 3600.0
 # The installer is about 31 MB; anything far bigger is not one of ours.
@@ -134,7 +136,7 @@ def fetch_latest_release(running_version: str) -> object:
 
     response = requests.get(
         LATEST_RELEASE_URL,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": f"skryb/{running_version}"},
+        headers={"User-Agent": f"skryb/{running_version}"},
         timeout=30,
     )
     response.raise_for_status()

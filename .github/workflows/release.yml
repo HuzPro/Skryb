@@ -198,6 +198,17 @@ jobs:
           pattern: Skryb-Setup
           merge-multiple: true
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The installed app finds new versions through this file, not GitHub's
+      # rate-limited API.
+      - name: Describe the release for the app's updater
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: python -m release.latest_manifest "$VERSION" artifacts
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -206,7 +217,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: artifacts/*.exe
+          files: |
+            artifacts/*.exe
+            artifacts/latest.json
           body: |
             Skryb v${{ needs.gate.outputs.version }} for Windows x64.
 
