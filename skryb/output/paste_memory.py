@@ -11,22 +11,35 @@ from skryb.output.caret_context import (
 
 _logger = logging.getLogger(__name__)
 
+_VK_BACK = 0x08
 _VK_CAPITAL = 0x14
+_SHIFT_KEYS = frozenset({0x10, 0xA0, 0xA1})
+_CTRL_ALT_KEYS = frozenset({0x11, 0x12, 0xA2, 0xA3, 0xA4, 0xA5})
 _MODIFIER_KEYS = frozenset({
-    0x10, 0x11, 0x12,  # generic Shift, Ctrl, Alt
-    0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5,  # left and right Shift, Ctrl, Alt
+    *_SHIFT_KEYS, *_CTRL_ALT_KEYS,
     0x5B, 0x5C,  # left and right Windows
     _VK_CAPITAL,
 })
+_LLKHF_INJECTED = 0x10
+
+KeyCharacter = Callable[[int, bool], str]
+"""The character a key types (vk, shift held), or "" when it types none."""
+
+
+def _types_nothing(vk: int, shift: bool) -> str:
+    return ""
 
 
 class PasteMemory:
-    """What this app last pasted, for as long as it is still next to the caret.
+    """The text just before the caret, as far as this app saw it go in.
 
-    The stand-in for reading the text box when the box cannot be read. It
-    only vouches for the caret while nothing could have moved it: any key
-    the user types, any mouse click and any change of window forget it, so
-    it can never invent context for a caret the user put somewhere else.
+    The stand-in for reading the text box when the box cannot be read: what
+    this app pasted, followed along as the user types characters and
+    deletes them with Backspace, or what the user typed since the caret was
+    last put somewhere. It only vouches for the caret while nothing could
+    have moved it: any other key (Enter, an arrow, a shortcut), any mouse
+    click and any change of window forget it, so it can never invent
+    context for a caret the user put somewhere else.
     """
 
     def __init__(
@@ -34,10 +47,12 @@ class PasteMemory:
         foreground: Callable[[], int],
         click_count: Callable[[], int],
         own_input_tag: int,
+        key_character: KeyCharacter = _types_nothing,
     ) -> None:
         self._foreground = foreground
         self._click_count = click_count
         self._own_input_tag = own_input_tag
+        self._key_character = key_character
         self._lock = threading.Lock()
         self._text = ""
         self._hwnd = 0
@@ -101,7 +116,30 @@ class PasteMemory:
                 return
             if self._is_hotkey_press(vk):
                 return
+            self._follow_typing(vk, flags)
+
+    def _follow_typing(self, vk: int, flags: int) -> None:
+        """Track a character typed or deleted at the caret; forget on anything else.
+
+        Keys another program injects and shortcuts with Ctrl or Alt (paste,
+        undo, delete a word) can change the text in ways the memory cannot
+        follow.
+        """
+        if flags & _LLKHF_INJECTED or self._held & _CTRL_ALT_KEYS:
             self._text = ""
+            return
+        if vk == _VK_BACK:
+            self._text = self._text[:-1]
+            return
+        typed = self._key_character(vk, bool(self._held & _SHIFT_KEYS))
+        if not typed:
+            self._text = ""
+            return
+        hwnd = self._foreground()
+        if not self._still_in_place(hwnd):
+            # Typing starts a fresh memory: the caret is right after what is typed.
+            self._text, self._hwnd, self._clicks = "", hwnd, self._click_count()
+        self._text = (self._text + typed)[-CONTEXT_CHARS:]
 
     def _still_in_place(self, hwnd: int) -> bool:
         return (

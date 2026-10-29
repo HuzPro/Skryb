@@ -56,7 +56,7 @@ from skryb.edit_capture.win32_foreground import (
     foreground_hwnd,
     foreground_window,
 )
-from skryb.edit_capture.win32_input import caps_lock_enabled, click_count
+from skryb.edit_capture.win32_input import caps_lock_enabled, click_count, key_character
 from skryb.hotkeys.actions import HotkeyActions, strategies_for
 from skryb.hotkeys.bindings import (
     BindingAction,
@@ -237,8 +237,12 @@ def _ignore_delivery(text: str) -> None:
     return None
 
 
+def _typed_character(vk: int, shift: bool) -> str:
+    return key_character(vk, shift, False, False, caps_lock=caps_lock_enabled())
+
+
 # One per process, like the keyboard hook and the caret it stands in for.
-_paste_memory = PasteMemory(foreground_hwnd, click_count, SKRYB_INPUT_TAG)
+_paste_memory = PasteMemory(foreground_hwnd, click_count, SKRYB_INPUT_TAG, _typed_character)
 _REREAD_CARET_AFTER_SECONDS = 0.1
 # A recording that starts after a minute without a decode wakes the engine.
 _WAKE_AFTER_IDLE_SECONDS = 60.0
