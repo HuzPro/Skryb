@@ -69,7 +69,7 @@ from skryb.transcription.model_info import (
     get_model_info,
     is_catalog_model as _is_catalog_model,
 )
-from skryb.transcription.model_info import has_speech_styles, speech_style_of
+from skryb.transcription.model_info import has_crisperwhisper_modes
 
 CRISPERWHISPER_MODES: tuple[str, ...] = ("intended", "verbatim")
 from skryb.transcription.model_manager import ModelManager
@@ -328,11 +328,7 @@ class SettingsService:
 
     @staticmethod
     def model_has_speech_styles(name: str) -> bool:
-        return has_speech_styles(name)
-
-    @staticmethod
-    def model_speech_style(name: str) -> tuple[str, str] | None:
-        return speech_style_of(name)
+        return has_crisperwhisper_modes(name)
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
         original = self.current_draft()

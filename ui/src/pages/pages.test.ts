@@ -6,8 +6,7 @@ import { finalText, formatDuration, groupByDay, preview } from "./history";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
-import { combinedDownload, modelEntries } from "../components/models";
-import { memberFor, styleInUse, withMode, withStyle } from "./transcription";
+import { withMode } from "./transcription";
 import { describeUpdate } from "./updates";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -160,74 +159,6 @@ describe("settings helpers", () => {
     expect(live).toMatchObject({ transcription_mode: "streaming", model_size: "nemotron-b", engine: "auto" });
     expect(withMode(live, "batch", models)).toMatchObject({ transcription_mode: "batch", model_size: "parakeet" });
     expect(withMode(settings, "batch", models)).toMatchObject({ model_size: "parakeet", engine: "nano_parakeet" });
-  });
-});
-
-describe("Bark Plus speech styles", () => {
-  const family = "underdog-bark-3.0-plus";
-  const bark = { display_size: "180 MB", style_family: family, style_family_size: "360 MB", description: "Bark Plus", download: null };
-  const models = [
-    { name: "phonon-2", installed: true, style_family: null, speech_style: null, display_size: "164 MB", download: null },
-    { ...bark, name: "underdog-bark-3.0-plus", installed: false, speech_style: "verbatim" },
-    { ...bark, name: "underdog-bark-3.0-clean", installed: true, speech_style: "intended" },
-    { name: "crisperwhisper-2.0-turbo", installed: true, has_speech_styles: true, download: null },
-  ] as unknown as Model[];
-
-  it("shows Plus and Clean as one card named Plus, with both downloads' size, in Plus's place", () => {
-    const entries = modelEntries(models);
-    expect(entries.map((entry) => entry.model.name)).toEqual(["phonon-2", family, "crisperwhisper-2.0-turbo"]);
-    expect(entries[1]?.model.display_size).toBe("360 MB");
-    expect(entries[1]?.members.map((member) => member.name)).toEqual(["underdog-bark-3.0-plus", "underdog-bark-3.0-clean"]);
-    expect(entries[0]?.members).toEqual([models[0]]);
-  });
-
-  it("counts the card as installed only once both versions are downloaded", () => {
-    expect(modelEntries(models)[1]?.model.installed).toBe(false);
-    const both = models.map((model) => ({ ...model, installed: true }));
-    expect(modelEntries(both)[1]?.model.installed).toBe(true);
-  });
-
-  it("picks Clean for Intended and Plus for Verbatim when the card is chosen", () => {
-    const members = modelEntries(models)[1]?.members ?? [];
-    expect(memberFor(members, "intended")?.name).toBe("underdog-bark-3.0-clean");
-    expect(memberFor(members, "verbatim")?.name).toBe("underdog-bark-3.0-plus");
-    expect(memberFor([models[0] as Model], "verbatim")?.name).toBe("phonon-2");
-  });
-
-  it("shows the two downloads as one, busiest state first, bytes added up", () => {
-    const downloading = (state: "queued" | "downloading" | "paused" | "failed", done: number, error = "") => ({ state, bytes_done: done, bytes_total: 180_000_000, error });
-    const members = [
-      { ...models[1], download: downloading("downloading", 90_000_000) },
-      { ...models[2], download: downloading("queued", 0) },
-    ] as Model[];
-    expect(combinedDownload(members)).toEqual({ state: "downloading", bytes_done: 90_000_000, bytes_total: 360_000_000, error: "" });
-    expect(combinedDownload([{ ...members[0], download: downloading("paused", 5) }, members[1]] as Model[])?.state).toBe("queued");
-    expect(combinedDownload([{ ...members[0], download: downloading("failed", 0, "HTTP 503") }, { ...members[1], download: null }] as Model[])).toMatchObject({
-      state: "failed", error: "HTTP 503",
-    });
-    expect(combinedDownload(models.slice(1, 3))).toBeNull();
-  });
-
-  it("reads the style from the selected member, and from the setting for anything else", () => {
-    const settings = { model_size: "underdog-bark-3.0-plus", crisperwhisper_mode: "intended" } as Settings;
-    expect(styleInUse(settings, models)).toBe("verbatim");
-    expect(styleInUse({ ...settings, model_size: "crisperwhisper-2.0-turbo" }, models)).toBe("intended");
-    expect(styleInUse({ ...settings, model_size: "not-listed" }, models)).toBe("intended");
-  });
-
-  it("swaps Clean for Plus when the style changes, keeping the chosen engine", () => {
-    const settings = { model_size: "underdog-bark-3.0-clean", crisperwhisper_mode: "intended", engine: "openvino_parakeet" } as Settings;
-    expect(withStyle(settings, "verbatim", models)).toMatchObject({
-      model_size: "underdog-bark-3.0-plus", crisperwhisper_mode: "verbatim", engine: "openvino_parakeet",
-    });
-    expect(withStyle(withStyle(settings, "verbatim", models), "intended", models)).toMatchObject({ model_size: "underdog-bark-3.0-clean" });
-  });
-
-  it("changes only the setting for CrisperWhisper and models without styles", () => {
-    const crisper = { model_size: "crisperwhisper-2.0-turbo", crisperwhisper_mode: "intended" } as Settings;
-    expect(withStyle(crisper, "verbatim", models)).toEqual({ ...crisper, crisperwhisper_mode: "verbatim" });
-    const phonon = { model_size: "phonon-2", crisperwhisper_mode: "intended" } as Settings;
-    expect(withStyle(phonon, "verbatim", models)).toEqual({ ...phonon, crisperwhisper_mode: "verbatim" });
   });
 });
 

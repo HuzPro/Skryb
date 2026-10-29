@@ -15,12 +15,6 @@ _IGNORE_PATTERNS = (
     ".gitattributes",
     ".gitignore",
     "*.png",
-    # Underdog Bark's Apple builds and its own loader scripts, which ride
-    # beside the one file this app reads (about 400 MB per repo).
-    "coreml/*",
-    "mlx/*",
-    "runtime/*",
-    "bark_*.py",
     # Nemotron 3 Diarization's NeMo and llama.cpp builds and its demo media,
     # beside the safetensors this app reads (about 300 MB).
     "Nemotron-3-Diarization.nemo",

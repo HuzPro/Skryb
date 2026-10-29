@@ -4,7 +4,6 @@ from pathlib import Path
 from skryb.transcription.backend_imports import (
     make_engine_dependency_error,
 )
-from skryb.transcription.bark_pack import BARK_FILENAME, unpacked_weights
 from skryb.transcription.hf_model_manager import (
     loadable_snapshot_dir,
     repo_has_loadable_snapshot,
@@ -20,14 +19,11 @@ def transformers_layout_weights(model_dir: Path, repo_id: str) -> Path | None:
     """The installed snapshot's weights in transformers' layout, or ``None``.
 
     ``None`` for a NeMo ``.nemo`` snapshot or a model that is not installed.
-    A Bark snapshot's ``model.bark`` is unpacked into that layout first.
     """
     repo_dir = model_dir / f"models--{repo_id.replace('/', '--')}"
     if not repo_has_loadable_snapshot(repo_dir):
         return None
     snapshot = loadable_snapshot_dir(model_dir, repo_id)
-    if (snapshot / BARK_FILENAME).is_file():
-        return unpacked_weights(snapshot)
     weights = snapshot / _HF_WEIGHTS_FILENAME
     if any(snapshot.glob("*.nemo")) or not weights.exists():
         return None

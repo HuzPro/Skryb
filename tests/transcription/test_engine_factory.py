@@ -91,10 +91,10 @@ _PINNED_MODEL = ModelInfo(
 
 
 class TestTheNpuEngine:
-    """Bark and parakeet-ultra put the encoder on the NPU on a GPU-less laptop."""
+    """parakeet-ultra puts the encoder on the NPU on a GPU-less laptop."""
 
     @staticmethod
-    def _ranked(kind: str, openvino_installed: bool, model: str | ModelInfo = "underdog-bark-3.0") -> list[str]:
+    def _ranked(kind: str, openvino_installed: bool, model: str | ModelInfo = "parakeet-ultra") -> list[str]:
         from skryb.transcription.engine_selector import rank_engines
 
         info = model if isinstance(model, ModelInfo) else get_model_info(model)
@@ -105,13 +105,8 @@ class TestTheNpuEngine:
         hardware = HardwareProfile(kind=kind, device_name="test", gfx_arch=None)
         return [c.engine_id for c in rank_engines(info, hardware, descriptors)]
 
-    @pytest.mark.parametrize(
-        "model",
-        ["underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
-         "underdog-bark-3.0-pro", "parakeet-ultra"],
-    )
-    def test_a_computer_without_a_gpu_runs_it_on_the_npu_engine_first(self, model: str) -> None:
-        assert self._ranked("cpu", openvino_installed=True, model=model) == [
+    def test_a_computer_without_a_gpu_runs_it_on_the_npu_engine_first(self) -> None:
+        assert self._ranked("cpu", openvino_installed=True) == [
             "openvino_parakeet", "nano_parakeet",
         ]
 
@@ -130,7 +125,7 @@ class TestTheNpuEngine:
         from skryb.transcription.openvino_parakeet_adapter import OpenVinoParakeetAdapter
 
         engine = build_engine_registry().build("openvino_parakeet", EngineSpec(
-            model_name="underdog-bark-3.0", repo_id="ConwayResearch/Underdog-Bark-3.0",
+            model_name="parakeet-ultra", repo_id="moondream/parakeet-ultra",
             device="cpu", language="en", beam_size=1, model_dir=tmp_path,
         ))
 
@@ -138,10 +133,7 @@ class TestTheNpuEngine:
         assert engine.is_model_loaded() is False
 
 
-_TRANSFORMERS_LAYOUT_PARAKEETS = [
-    "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
-    "underdog-bark-3.0-pro", "parakeet-ultra",
-]
+_TRANSFORMERS_LAYOUT_PARAKEETS = ["parakeet-ultra"]
 
 
 class TestTheNativeParakeetEngine:

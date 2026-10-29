@@ -169,26 +169,22 @@ class TestHfRepoResolverIgnorePatterns:
 
         assert [f.filename for f in files] == ["config.json"]
 
-    def test_should_fetch_only_the_weights_and_notice_from_a_bark_repo(self):
+    def test_should_skip_the_model_card_figures(self):
         api = MagicMock()
         api.repo_info.return_value = _fake_repo_info(
             sha="sha",
             files=[
-                _fake_sibling("NOTICE", 603),
-                _fake_sibling("bark_frontier.png", 160476),
-                _fake_sibling("bark_loader.py", 5820),
-                _fake_sibling("bark_mlx.py", 5011),
-                _fake_sibling("coreml/ane/BarkEncoder.mlpackage/Data/com.apple.CoreML/weights/weight.bin", 189133632),
-                _fake_sibling("coreml/ane/decoder.npz", 11168286),
-                _fake_sibling("mlx/config.json", 237042),
-                _fake_sibling("model.bark", 163398645),
-                _fake_sibling("runtime/transcribe_bark.py", 1817),
+                _fake_sibling("config.json", 1834),
+                _fake_sibling("figures/caching_schema.png", 412_337),
+                _fake_sibling("figures/results_wer_and_scaling.png", 98_210),
+                _fake_sibling("model.safetensors", 2_469_850_112),
+                _fake_sibling("tokenizer.json", 22_045),
             ],
         )
 
-        files = HfRepoResolver(api=api).resolve("ConwayResearch/Underdog-Bark-3.0").files
+        files = HfRepoResolver(api=api).resolve("nvidia/nemotron-speech-streaming-en-0.6b").files
 
-        assert [f.filename for f in files] == ["NOTICE", "model.bark"]
+        assert [f.filename for f in files] == ["config.json", "model.safetensors", "tokenizer.json"]
 
     def test_should_exclude_fp32_sharded_variants(self):
         api = MagicMock()

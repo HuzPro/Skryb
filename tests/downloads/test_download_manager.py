@@ -375,8 +375,8 @@ class TestDownloadsPastTheLimitWaitTheirTurn:
         bus.subscribe(DownloadStateChangedEvent, lambda event: states.append((event.job_id, event.state)))
         gate, started = threading.Event(), []
         manager = DownloadManager(event_bus=bus, max_concurrent_downloads=5)
-        names = ["parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
-                 "underdog-bark-3.0-pro", "phonon-2", "crisperwhisper-2.0-turbo"]
+        names = ["parakeet-tdt-0.6b-v3", "parakeet-ultra", "nemotron-speech-streaming-en-0.6b", "qwen3-asr-1.7b",
+                 "crisperwhisper-2.0-large", "phonon-2", "crisperwhisper-2.0-turbo"]
         try:
             for name in names:
                 manager.enqueue(_GatedJob(name, gate, started))

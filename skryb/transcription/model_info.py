@@ -51,13 +51,6 @@ def format_size_mb(size_mb: int) -> str:
     return f"{size_mb} MB"
 
 
-# Plus and Clean show as one model in Settings, so both carry its description.
-_BARK_PLUS_DESCRIPTION = (
-    "Underdog Bark 3.0 Plus: fewer errors than Bark 3.0. Downloads two versions: "
-    "Clean drops ums, false starts and repeats (Intended), Plus keeps them (Verbatim). English only"
-)
-
-
 # Transformers-layout checkpoints can also run on the native gfx1200 engine
 # or put the encoder on an Intel NPU; nano-parakeet is the default elsewhere.
 _NPU_PARAKEET_ENGINES: tuple[EngineId, ...] = ("native_parakeet", "openvino_parakeet", "nano_parakeet")
@@ -76,47 +69,6 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
         description="Parakeet v3 retrained by Moondream: fewer errors, same 25 languages",
         repo_id="moondream/parakeet-ultra",
         revision="73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
-        compatible_engines=_NPU_PARAKEET_ENGINES,
-        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
-    ),
-    # Conway Research's Underdog Bark 3.0 family: Parakeet v3 post-trained
-    # for English (CC-BY-4.0). The three small ones ship one ANS-coded
-    # model.bark, unpacked once at first load (bark_pack); Pro is plain bf16
-    # in transformers' layout, like parakeet-ultra. Pinned because the
-    # unpacker is written against these files.
-    "underdog-bark-3.0": ModelInfo(
-        name="underdog-bark-3.0",
-        size_mb=163,
-        description="Underdog Bark 3.0: Parakeet v3 retrained, 163 MB, English only",
-        repo_id="ConwayResearch/Underdog-Bark-3.0",
-        revision="85db2ad18ab41e534a222ee253c29191d77ed919",
-        compatible_engines=_NPU_PARAKEET_ENGINES,
-        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
-    ),
-    "underdog-bark-3.0-plus": ModelInfo(
-        name="underdog-bark-3.0-plus",
-        size_mb=180,
-        description=_BARK_PLUS_DESCRIPTION,
-        repo_id="ConwayResearch/Underdog-Bark-3.0-Plus",
-        revision="d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
-        compatible_engines=_NPU_PARAKEET_ENGINES,
-        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
-    ),
-    "underdog-bark-3.0-clean": ModelInfo(
-        name="underdog-bark-3.0-clean",
-        size_mb=180,
-        description=_BARK_PLUS_DESCRIPTION,
-        repo_id="ConwayResearch/Underdog-Bark-3.0-Clean",
-        revision="6d34ed8639b2b9a33e764acf06748519bbb950cf",
-        compatible_engines=_NPU_PARAKEET_ENGINES,
-        engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
-    ),
-    "underdog-bark-3.0-pro": ModelInfo(
-        name="underdog-bark-3.0-pro",
-        size_mb=1254,
-        description="Underdog Bark 3.0 Pro: the most accurate Bark, full precision, English only",
-        repo_id="ConwayResearch/Underdog-Bark-3.0-Pro",
-        revision="4b5c51e04aa8d16dda9ecdff71bc29f7360149e4",
         compatible_engines=_NPU_PARAKEET_ENGINES,
         engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
     ),
@@ -248,45 +200,12 @@ def has_crisperwhisper_modes(name: str) -> bool:
     return name in CRISPERWHISPER_MODELS
 
 
-# Bark Plus comes as two downloads that differ only in what they do with
-# ums, false starts and repeats, so Settings shows them as one model and
-# the speech style picks the download.
-SPEECH_STYLE_FAMILIES: dict[str, dict[str, str]] = {
-    "underdog-bark-3.0-plus": {
-        "intended": "underdog-bark-3.0-clean",
-        "verbatim": "underdog-bark-3.0-plus",
-    },
-}
-
-
-def speech_style_of(name: str) -> tuple[str, str] | None:
-    """``(family, style)`` for a model that is one speech style of a family."""
-    for family, styles in SPEECH_STYLE_FAMILIES.items():
-        for style, member in styles.items():
-            if member == name:
-                return family, style
-    return None
-
-
-def family_display_size(family: str) -> str:
-    """Both styles download together, so the family's size is theirs added up."""
-    return format_size_mb(sum(ALL_MODELS[member].size_mb for member in SPEECH_STYLE_FAMILIES[family].values()))
-
-
-def has_speech_styles(name: str) -> bool:
-    return has_crisperwhisper_modes(name) or speech_style_of(name) is not None
-
-
 def transcribes_verbatim(name: str, crisperwhisper_mode: str) -> bool:
     """Whether *name* hands over the words as spoken, so cleanup must stay off.
 
-    A family member is its style; a CrisperWhisper model follows the mode
-    setting. A mode left behind from an earlier model never applies to a
-    model without styles.
+    A mode left behind from an earlier model never applies to a model
+    without speech styles.
     """
-    family_style = speech_style_of(name)
-    if family_style is not None:
-        return family_style[1] == "verbatim"
     return has_crisperwhisper_modes(name) and crisperwhisper_mode == "verbatim"
 
 
@@ -319,6 +238,17 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     # Parakeet Ultra is NVIDIA's v3 retrained by Moondream: smaller and more accurate.
     "parakeet-tdt-0.6b-v3": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
+    "underdog-bark-3.0": CPU_DEFAULT_MODEL,
+    "underdog-bark-3.0-plus": CPU_DEFAULT_MODEL,
+    "underdog-bark-3.0-clean": CPU_DEFAULT_MODEL,
+    "underdog-bark-3.0-pro": CPU_DEFAULT_MODEL,
+}
+# Live mode needs a model that streams; Phonon only transcribes whole clips.
+_REMOVED_MODEL_STREAMING_REPLACEMENTS: dict[str, str] = {
+    "underdog-bark-3.0": DEFAULT_MODEL,
+    "underdog-bark-3.0-plus": DEFAULT_MODEL,
+    "underdog-bark-3.0-clean": DEFAULT_MODEL,
+    "underdog-bark-3.0-pro": DEFAULT_MODEL,
 }
 
 
@@ -327,10 +257,14 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
     replacement = _REMOVED_MODEL_REPLACEMENTS.get(current)
     if replacement is None:
         return
+    if config.get("transcription.mode", "batch") == "streaming":
+        replacement = _REMOVED_MODEL_STREAMING_REPLACEMENTS.get(current, replacement)
     _logger.warning(
         "Model '%s' has been removed; switching to '%s'.", current, replacement
     )
     config.set("transcription.model_size", replacement)
+    # An engine pinned for the removed model may not run its replacement.
+    config.set("transcription.engine", "auto")
     config.save()
 
 

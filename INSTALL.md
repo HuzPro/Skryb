@@ -64,22 +64,14 @@ forced to the AVX2 kernels, a 3 s dictation took about 0.2 s and long audio ran
 about 30x faster than real time. The first load unpacks the 164 MB archive once
 into the snapshot's `.phonon2` folder.
 
-Underdog Bark 3.0 (Conway Research, CC-BY-4.0, English only) is Parakeet v3
-retrained and packed into one `model.bark`: `underdog-bark-3.0` (163 MB),
-`underdog-bark-3.0-plus` (180 MB, fewer errors), `underdog-bark-3.0-clean`
-(180 MB, also drops "um", false starts and repeats) and `underdog-bark-3.0-pro`
-(1.25 GB, the most accurate, plain safetensors). They run on the Parakeet
-engine. The first load unpacks `model.bark` once into the snapshot's `.bark`
-folder (about 1.3 GB), using the pinned `constriction` package.
-
 ### Intel NPU
 
 On a computer with an Intel NPU and no GPU, `pip install -e .[npu]` adds
-OpenVINO (the CPU requirements file already includes it). The Bark models and
-`parakeet-ultra` then run their encoder on the NPU, and the rest of the model
-on the CPU. The first load exports the encoder to OpenVINO IR in the snapshot's
-`.openvino` folder and compiles it, which takes a minute or two; later loads
-reuse the compiled copy. The NPU needs Intel's NPU driver 32.0.100.5540 or
+OpenVINO (the CPU requirements file already includes it). `parakeet-ultra`
+then runs its encoder on the NPU, and the rest of the model on the CPU. The
+first load exports the encoder to OpenVINO IR in the snapshot's `.openvino`
+folder and compiles it, which takes a minute or two; later loads reuse the
+compiled copy. The NPU needs Intel's NPU driver 32.0.100.5540 or
 newer. Without a working NPU the same engine runs the encoder on the CPU.
 `python scripts\check_npu.py` reports which device it got and how fast it is.
 OpenVINO's model converter reports usage to Intel unless you opt out; Skryb

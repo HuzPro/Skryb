@@ -144,7 +144,7 @@ class TestHuggingFaceModelManagerCatalog:
         manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
 
         assert [model.name for model in manager.list_models()] == [
-            "parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro",
+            "parakeet-ultra",
         ]
         assert manager.has_model("parakeet-ultra") is True
         assert manager.has_model("unknown") is False
@@ -210,27 +210,40 @@ class TestPackedArchiveInstallation:
 
 
 
-class TestBarkInstallation:
-    """Underdog Bark's small models ship one model.bark and no config.json."""
+class TestALeftoverBarkDownload:
+    """The Underdog Bark models were dropped; their downloads stay on disk untouched."""
 
-    def test_a_snapshot_holding_model_bark_is_installed(self, tmp_path: Path) -> None:
+    @staticmethod
+    def _write_bark_download(root: Path) -> Path:
+        model_dir = root / "models--ConwayResearch--Underdog-Bark-3.0"
+        snapshot = model_dir / "snapshots" / "85db2ad18ab41e534a222ee253c29191d77ed919"
+        (snapshot / ".bark").mkdir(parents=True)
+        (snapshot / "model.bark").write_bytes(b"\x00" * 4096)
+        (snapshot / ".bark" / "model.safetensors").write_bytes(b"\x00" * 8192)
+        (snapshot / "NOTICE").write_text("Underdog Bark 3.0 © Conway Research, CC-BY-4.0", encoding="utf-8")
+        _write_refs_main(model_dir, "85db2ad18ab41e534a222ee253c29191d77ed919")
+        return model_dir
+
+    def test_it_is_not_listed_or_installed_and_its_files_are_kept(self, tmp_path: Path) -> None:
+        bark = self._write_bark_download(tmp_path)
+        before = sorted(path.relative_to(tmp_path) for path in bark.rglob("*"))
+        manager = _make_manager(tmp_path)
+
+        assert "underdog-bark-3.0" not in [model.name for model in manager.list_models()]
+        assert manager.has_model("underdog-bark-3.0") is False
+        assert manager.is_installed("underdog-bark-3.0") is False
+        assert sorted(path.relative_to(tmp_path) for path in bark.rglob("*")) == before
+
+    def test_a_snapshot_holding_only_model_bark_is_not_a_complete_model(self, tmp_path: Path) -> None:
         model_dir = tmp_path / "models--example--transformers"
         snapshot = model_dir / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
-        (snapshot / "model.bark").write_bytes(b"bark")
-        (snapshot / "NOTICE").write_text("CC-BY-4.0")
-        _write_refs_main(model_dir)
-
-        assert _example_model_is_installed(tmp_path) is True
-
-    def test_the_notice_alone_is_not_installed(self, tmp_path: Path) -> None:
-        model_dir = tmp_path / "models--example--transformers"
-        snapshot = model_dir / "snapshots" / "abc123"
-        snapshot.mkdir(parents=True)
-        (snapshot / "NOTICE").write_text("CC-BY-4.0")
+        (snapshot / "model.bark").write_bytes(b"\x00" * 4096)
+        (snapshot / "NOTICE").write_text("CC-BY-4.0", encoding="utf-8")
         _write_refs_main(model_dir)
 
         assert _example_model_is_installed(tmp_path) is False
+
 
 class TestShardedSafetensorsInstallation:
     """``model.safetensors.index.json`` is a manifest, so its presence

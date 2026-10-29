@@ -74,11 +74,6 @@ export interface Model {
   supports_batch: boolean;
   supports_streaming: boolean;
   has_speech_styles: boolean;
-  /** Set for one speech style of a model that ships each style as its own download (Bark Plus). */
-  style_family?: string | null;
-  speech_style?: "intended" | "verbatim" | null;
-  /** Every member's download added up: the family downloads as one model. */
-  style_family_size?: string | null;
   license_id: string | null;
   download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
 }
