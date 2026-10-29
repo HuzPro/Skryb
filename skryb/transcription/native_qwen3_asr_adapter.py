@@ -31,6 +31,10 @@ _PACK_FILENAME = "qwen3-asr.bin"
 _SAMPLE_RATE = 16000
 _TEXT_BUFFER_BYTES = 1 << 20
 _ERROR_BUFFER_BYTES = 1024
+# The engine's own odds of "?" over "." where it ended the transcript with a full stop. On 1,108 of
+# Huz's dictations, 0.3 turned 6 full stops into question marks: 2 clearly right, none clearly
+# wrong, 4 that read fine either way. Lower bars caught more but got about 3 in 10 wrong.
+QUESTION_THRESHOLD = 0.3
 
 
 def packed_model_path(snapshot: Path) -> Path:
@@ -41,9 +45,12 @@ def packed_model_path(snapshot: Path) -> Path:
 class NativeQwen3AsrAdapter(TranscriptionEngine):
     """Batch Qwen3-ASR through ``qasr.dll``. One call at a time, like every adapter here."""
 
-    def __init__(self, snapshot: Path, dll_path: Path | None = None) -> None:
+    def __init__(
+        self, snapshot: Path, dll_path: Path | None = None, question_threshold: float | None = QUESTION_THRESHOLD,
+    ) -> None:
         self._snapshot = snapshot
         self._dll_path = dll_path or native_engine_dll() or SHIPPED_DLL
+        self._question_threshold = question_threshold
         self._lib: ctypes.CDLL | None = None
         self._handle: int | None = None
         self._text = ctypes.create_string_buffer(_TEXT_BUFFER_BYTES)
@@ -81,13 +88,27 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         if length < 0:
             raise TranscriptionError(f"Native Qwen3-ASR failed: {self._text.value.decode(errors='replace')}")
         _logger.debug("native qwen3-asr %s", self._stats())
+        text = self._text.raw[:length].decode("utf-8", errors="replace")
         return TranscriptionResult(
             # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
-            text=romanize(self._text.raw[:length].decode("utf-8", errors="replace")),
+            text=romanize(self._with_heard_question(text)),
             language="en",
             language_probability=0.0,
             transcription_seconds=time.perf_counter() - started_at,
         )
+
+    def _with_heard_question(self, text: str) -> str:
+        """The final full stop as a question mark when the engine nearly chose one."""
+        if self._question_threshold is None:
+            return text
+        core = text.rstrip()
+        if not core.endswith(".") or core.endswith(".."):
+            return text
+        probability = self._lib.qasr_question_probability(self._handle)
+        if probability < self._question_threshold:
+            return text
+        _logger.info("Final full stop heard as a question (p=%.2f).", probability)
+        return core[:-1] + "?" + text[len(core):]
 
     def dispose(self) -> None:
         if self._handle is None or self._lib is None:
@@ -123,6 +144,8 @@ def _open_library(dll_path: Path) -> ctypes.CDLL:
     lib.qasr_transcribe.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
     lib.qasr_stats.restype = ctypes.c_char_p
     lib.qasr_stats.argtypes = [ctypes.c_void_p]
+    lib.qasr_question_probability.restype = ctypes.c_float
+    lib.qasr_question_probability.argtypes = [ctypes.c_void_p]
     lib.qasr_free.restype = None
     lib.qasr_free.argtypes = [ctypes.c_void_p]
     return lib

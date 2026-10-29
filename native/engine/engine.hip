@@ -289,6 +289,11 @@ struct QasrEngine {
     float *part_o = nullptr, *part_ml = nullptr;
     int* ids_round = nullptr;  // [last token, drafts...]
     int* ids_ver = nullptr;
+    // The model's own odds of "?" over "." where the transcript ends: the logits of both tokens on
+    // every row that picks a token, kept for the last one when it is a full stop or question mark.
+    int dot_id = -1, question_id = -1;
+    float* pair = nullptr;           // device [kMaxRows][2]
+    float question_probability = -1.f;  // -1 when the transcript does not end in "." or "?"
     struct Layer { bf16 *ln1, *qkv, *qn, *kn, *o, *ln2, *gu, *down; Q4 q_qkv, q_o, q_gu, q_down; };
     std::vector<Layer> layers;
     Q4 q_head{};
@@ -374,6 +379,12 @@ void QasrEngine::load(const char* path) {
     read_host(f, host_entry("vocab.offsets"), vocab_off.data());
     vocab.resize(host_entry("vocab.bytes").bytes);
     read_host(f, host_entry("vocab.bytes"), vocab.data());
+    for (int id = 0; id + 1 < (int)vocab_off.size(); id++) {
+        if (vocab_off[id + 1] - vocab_off[id] != 1) continue;
+        const char c = (char)vocab[vocab_off[id]];
+        if (c == '.' && dot_id < 0) dot_id = id;
+        if (c == '?' && question_id < 0) question_id = id;
+    }
     prefix.resize(host_entry("prompt.prefix").bytes / 4);
     read_host(f, host_entry("prompt.prefix"), prefix.data());
     suffix.resize(host_entry("prompt.suffix").bytes / 4);
@@ -473,6 +484,7 @@ void QasrEngine::prepare_decoder() {
     HIP_OK(hipMalloc(&part_ml, (size_t)kMaxSplits * 16 * 16 * 2 * 4));
     HIP_OK(hipMalloc(&ids_round, kMaxRows * 4));
     HIP_OK(hipMalloc(&ids_ver, kMaxRows * 4));
+    HIP_OK(hipMalloc(&pair, kMaxRows * 2 * 4));
     if (const char* v = std::getenv("QASR_DRAFT")) draft_len = std::max(0, std::min(kMaxRows - 1, std::atoi(v)));
     if (!draft_len) return;
 
@@ -566,6 +578,7 @@ void QasrEngine::logits_argmax(const bf16* x, int M, int* ids, bool draft) {
     if (draft) gemv_q4(s, dh, q_head, kVocab, 2048, e);
     else gemm(s, dh, 2048, w("dec.embed"), M, kVocab, 2048, e);
     argmax_ids(s, argkeys, ids, M);
+    if (!draft && dot_id >= 0 && question_id >= 0) pair_logits(s, dh, M, w("dec.embed"), dot_id, question_id, pair);
 }
 
 // Greedy decoding after the prefill. With a draft, each round guesses draft_len tokens with the
@@ -576,14 +589,24 @@ std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) 
     bf16* dx = buf<bf16>("dx", (size_t)kMaxRows * 2048);
     std::vector<int> out;
     rounds = accepted = 0;
+    question_probability = -1.f;
     logits_argmax(last_row, 1, ids_round);
     int pos = L;
     int host[2 * kMaxRows];
+    float pairs[2 * kMaxRows];
     HIP_OK(hipMemcpyAsync(host, ids_round, 4, hipMemcpyDeviceToHost, s));
+    HIP_OK(hipMemcpyAsync(pairs, pair, 2 * 4, hipMemcpyDeviceToHost, s));
     HIP_OK(hipStreamSynchronize(s));
     auto finished = [&](int t) { return t == kEos1 || t == kEos2 || (int)out.size() >= max_new; };
+    // Each kept token sets the odds when it is punctuation and clears them otherwise, so after the
+    // loop they belong to the last token.
+    auto keep = [&](int t, const float* logits) {
+        out.push_back(t);
+        question_probability = t == dot_id || t == question_id
+            ? 1.f / (1.f + std::exp(logits[0] - logits[1])) : -1.f;
+    };
     if (finished(host[0])) return out;
-    out.push_back(host[0]);
+    keep(host[0], pairs);
     while ((int)out.size() < max_new) {
         const int k = std::min(draft_len, max_new - (int)out.size());
         for (int i = 0; i < k; i++) {
@@ -596,6 +619,7 @@ std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) 
         logits_argmax(dx, k + 1, ids_ver);
         HIP_OK(hipMemcpyAsync(host, ids_round, (k + 1) * 4, hipMemcpyDeviceToHost, s));
         HIP_OK(hipMemcpyAsync(host + kMaxRows, ids_ver, (k + 1) * 4, hipMemcpyDeviceToHost, s));
+        HIP_OK(hipMemcpyAsync(pairs, pair, (k + 1) * 2 * 4, hipMemcpyDeviceToHost, s));
         HIP_OK(hipStreamSynchronize(s));
         int a = 0;
         while (a < k && host[1 + a] == host[kMaxRows + a]) a++;
@@ -605,7 +629,7 @@ std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) 
         for (int i = 0; i <= a; i++) {
             const int t = host[kMaxRows + i];
             if (finished(t)) return out;
-            out.push_back(t);
+            keep(t, pairs + 2 * i);
         }
         pos += a + 1;
         HIP_OK(hipMemcpyAsync(ids_round, ids_ver + a, 4, hipMemcpyDeviceToDevice, s));
@@ -778,12 +802,14 @@ QASR_API int qasr_transcribe(QasrEngine* e, const float* pcm, int samples, char*
 
 QASR_API const char* qasr_stats(QasrEngine* e) { return e->stats.c_str(); }
 
+QASR_API float qasr_question_probability(QasrEngine* e) { return e->question_probability; }
+
 QASR_API void qasr_free(QasrEngine* e) {
     if (!e) return;
     (void)hipDeviceSynchronize();
     for (auto& kv : e->scratch) (void)hipFree(kv.second.first);
     void* devs[] = {e->dev, e->tables, e->filters, e->inv_freq, e->pos13, e->conv3_map, e->gmax, e->argkeys, e->ids_one,
-                    e->dec_tiles, e->part_o, e->part_ml, e->ids_round, e->ids_ver, e->q4_mem};
+                    e->dec_tiles, e->part_o, e->part_ml, e->ids_round, e->ids_ver, e->q4_mem, e->pair};
     for (void* p : devs) if (p) (void)hipFree(p);
     if (e->host_tok) (void)hipHostFree(e->host_tok);
     if (e->s) (void)hipStreamDestroy(e->s);

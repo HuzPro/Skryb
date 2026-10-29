@@ -31,6 +31,7 @@ export interface Settings {
   output_mode: OutputMode;
   transcription_mode: TranscriptionMode;
   crisperwhisper_mode: "intended" | "verbatim";
+  question_marks: boolean;
   capture_content: boolean;
   input_device: string;
   boost_quiet_speech: boolean;

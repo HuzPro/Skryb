@@ -552,6 +552,18 @@ __global__ void argmax_ids_kernel(const unsigned long long* keys, int* ids, int 
     if (i < rows) ids[i] = (int)(0xffffffffu - (unsigned)(keys[i] & 0xffffffffu));
 }
 
+__global__ __launch_bounds__(256) void pair_logits_kernel(const bf16* __restrict__ x, const bf16* __restrict__ W,
+                                                          int id0, int id1, float* out) {
+    __shared__ float red[8];
+    const int m = blockIdx.x, j = blockIdx.y;
+    const bf16* xr = x + (size_t)m * 2048;
+    const bf16* wr = W + (size_t)(j ? id1 : id0) * 2048;
+    float acc = 0.f;
+    for (int i = threadIdx.x; i < 2048; i += 256) acc = fmaf(f(xr[i]), f(wr[i]), acc);
+    acc = block_sum(acc, red);
+    if (threadIdx.x == 0) out[m * 2 + j] = acc;
+}
+
 int cdiv(int a, int c) { return (a + c - 1) / c; }
 
 }  // namespace
@@ -656,6 +668,10 @@ void silu_mul(hipStream_t s, const bf16* gu, bf16* out, int rows, int d) {
 
 void embed(hipStream_t s, const int* ids, const bf16* table, const bf16* audio, int audio_start, bf16* out, int rows, int d) {
     embed_kernel<<<rows, 256, 0, s>>>(ids, table, audio, audio_start, out, d);
+}
+
+void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out) {
+    pair_logits_kernel<<<dim3(M, 2), 256, 0, s>>>(x, W, id0, id1, out);
 }
 
 void argmax_ids(hipStream_t s, const unsigned long long* keys, int* ids, int rows) {

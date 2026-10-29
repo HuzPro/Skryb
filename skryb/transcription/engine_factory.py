@@ -188,11 +188,13 @@ def _build_native_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
         loadable_snapshot_dir,
     )
     from skryb.transcription.native_qwen3_asr_adapter import (
+        QUESTION_THRESHOLD,
         NativeQwen3AsrAdapter,
     )
 
     return NativeQwen3AsrAdapter(
         loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
+        question_threshold=QUESTION_THRESHOLD if spec.question_marks else None,
     )
 
 
@@ -500,6 +502,7 @@ def create_engine_for_active_model(
         model_dir=paths.models_dir,
         revision=model_info.revision,
         crisperwhisper_mode=_resolve_crisperwhisper_mode(config, engine_id),
+        question_marks=config.get("transcription.question_marks", True) is not False,
     )
     return registry.build(engine_id, spec)
 

@@ -25,7 +25,7 @@ from skryb.ui.shapes import draft_from_json
 
 _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
-    "crisperwhisper_mode", "capture_content", "input_device", "boost_quiet_speech",
+    "crisperwhisper_mode", "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "learn_words", "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates",
 }

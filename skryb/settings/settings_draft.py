@@ -23,6 +23,8 @@ class SettingsDraft:
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
     crisperwhisper_mode: str = "intended"
+    # Handed to the engine when it is built, like the speech style.
+    question_marks: bool = True
     capture_content: bool = False
     # "" is the Windows default microphone. Both are read at the start of
     # every recording, so neither needs a rebuild to take effect.
@@ -77,6 +79,7 @@ class ChangeSet:
             or original.engine != updated.engine
             or original.transcription_mode != updated.transcription_mode
             or crisperwhisper_mode_changed
+            or original.question_marks != updated.question_marks
         )
         hotkey_changed = (
             original.hotkey_bindings != updated.hotkey_bindings

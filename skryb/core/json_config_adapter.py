@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
         "mode": "batch",
         "crisperwhisper_mode": "intended",
         "wake_after_idle_seconds": 60.0,
+        "question_marks": True,
     },
     "audio": {
         "sample_rate": 16000,

@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { ModelCard, modelEntries, useModels } from "../components/models";
 import { ChoiceCards, Disclosure, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
 import { Select } from "../components/ui/select";
+import { Switch } from "../components/ui/switch";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { Engines, Model, Settings, TranscriptionMode } from "../lib/types";
@@ -161,6 +162,12 @@ export function TranscriptionPage() {
               disabled={!hasStyles}
               onChange={(style) => editSettings((current) => withStyle(current, style as Style, models))}
             />
+          </Row>
+          <Row
+            title="Hear questions"
+            description="When Qwen3-ASR nearly ended a sentence with a question mark, it uses one. Only Qwen3-ASR on the native engine can tell."
+          >
+            <Switch aria-label="Hear questions" checked={draft.question_marks} onCheckedChange={(on) => editSettings((current) => ({ ...current, question_marks: on }))} />
           </Row>
         </Rows>
         <Disclosure label="Advanced" defaultOpen={draft.engine !== "auto"}>
