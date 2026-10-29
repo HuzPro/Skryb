@@ -152,20 +152,21 @@ def default_model_for(hardware: HardwareKind) -> str:
 
 
 _QWEN3_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"native_qwen3_asr": 100},
+    {"native_qwen3_asr": 100, "qwen3_asr": 50},
 )
 
 # The most accurate open model on the Open ASR Leaderboard as of Oct 2026,
-# run by this repo's own HIP engine (native/engine). Pinned because the
-# packer's tensor layout is written against this exact checkpoint.
+# run by this repo's own HIP engine (native/engine) on the RX 9060 XT and
+# by transformers everywhere else. Pinned because the packer's tensor
+# layout is written against this exact checkpoint.
 QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
     "qwen3-asr-1.7b": ModelInfo(
         name="qwen3-asr-1.7b",
         size_mb=4080,
-        description="Qwen3-ASR 1.7B on the native AMD engine: most accurate, no PyTorch (RX 9060 XT)",
+        description="Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, PyTorch elsewhere",
         repo_id="Qwen/Qwen3-ASR-1.7B-hf",
         revision="bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
-        compatible_engines=("native_qwen3_asr",),
+        compatible_engines=("native_qwen3_asr", "qwen3_asr"),
         engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
     ),
 }
@@ -338,7 +339,6 @@ _REMOVED_ENGINES: frozenset[str] = frozenset({
     "faster_whisper",
     "granite_speech",
     "granite_turboctc",
-    "qwen3_asr",
     "transformers",
 })
 

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,7 @@ from skryb.core.exceptions import TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
 from skryb.transcription.native_engine_dll import SHIPPED_DLL, native_engine_dll
+from skryb.transcription.qwen3_asr_prompt import prompt_text
 from skryb.transcription.result import TranscriptionResult
 from skryb.transcription.roman_urdu import romanize
 
@@ -54,6 +56,8 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         self._lib: ctypes.CDLL | None = None
         self._handle: int | None = None
         self._text = ctypes.create_string_buffer(_TEXT_BUFFER_BYTES)
+        self._tokenizer: Callable[[str], list[int]] | None = None
+        self._warned_unprompted = False
 
     def load_model(self) -> None:
         started_at = time.perf_counter()
@@ -75,16 +79,38 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         return self._handle is not None
 
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
+        lib, handle, samples = self._ready(audio)
+        return self._decoded(lambda: lib.qasr_transcribe(
+            handle, samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), samples.size,
+            self._text, _TEXT_BUFFER_BYTES,
+        ))
+
+    def transcribe_prompted(
+        self, audio: AudioSegment, context: str | None, language: str | None,
+    ) -> TranscriptionResult:
+        """Transcribe with names to spell and a forced language, or detected when *language* is None."""
+        lib, handle, samples = self._ready(audio)
+        if not hasattr(lib, "qasr_transcribe_prompted"):
+            self._warn_unprompted_once()
+            return self.transcribe(audio)
+        prefix, suffix = (np.array(self._token_ids(text), np.int32) for text in prompt_text(context, language))
+        ints = ctypes.POINTER(ctypes.c_int)
+        return self._decoded(lambda: lib.qasr_transcribe_prompted(
+            handle, samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), samples.size,
+            prefix.ctypes.data_as(ints), prefix.size, suffix.ctypes.data_as(ints), suffix.size,
+            self._text, _TEXT_BUFFER_BYTES,
+        ))
+
+    def _ready(self, audio: AudioSegment) -> tuple[ctypes.CDLL, int, np.ndarray]:
         if self._handle is None or self._lib is None:
             raise TranscriptionError("Model not loaded")
         if audio.sample_rate != _SAMPLE_RATE:
             raise TranscriptionError(f"Native Qwen3-ASR needs {_SAMPLE_RATE} Hz audio, got {audio.sample_rate}")
-        samples = np.ascontiguousarray(audio.data, dtype=np.float32)
+        return self._lib, self._handle, np.ascontiguousarray(audio.data, dtype=np.float32)
+
+    def _decoded(self, run: Callable[[], int]) -> TranscriptionResult:
         started_at = time.perf_counter()
-        length = self._lib.qasr_transcribe(
-            self._handle, samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), samples.size,
-            self._text, _TEXT_BUFFER_BYTES,
-        )
+        length = run()
         if length < 0:
             raise TranscriptionError(f"Native Qwen3-ASR failed: {self._text.value.decode(errors='replace')}")
         _logger.debug("native qwen3-asr %s", self._stats())
@@ -109,6 +135,23 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
             return text
         _logger.info("Final full stop heard as a question (p=%.2f).", probability)
         return core[:-1] + "?" + text[len(core):]
+
+    def _token_ids(self, text: str) -> list[int]:
+        if self._tokenizer is None:
+            from tokenizers import Tokenizer
+
+            tokenizer = Tokenizer.from_file(str(self._snapshot / "tokenizer.json"))
+            self._tokenizer = lambda piece: tokenizer.encode(piece, add_special_tokens=False).ids
+        return self._tokenizer(text)
+
+    def _warn_unprompted_once(self) -> None:
+        if self._warned_unprompted:
+            return
+        self._warned_unprompted = True
+        _logger.warning(
+            "This qasr.dll predates prompts: meeting names and the language setting are not passed on. "
+            "Rebuild it with native/engine/build.sh.",
+        )
 
     def dispose(self) -> None:
         if self._handle is None or self._lib is None:
@@ -142,6 +185,13 @@ def _open_library(dll_path: Path) -> ctypes.CDLL:
     lib.qasr_load.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
     lib.qasr_transcribe.restype = ctypes.c_int
     lib.qasr_transcribe.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    if hasattr(lib, "qasr_transcribe_prompted"):
+        lib.qasr_transcribe_prompted.restype = ctypes.c_int
+        ints = ctypes.POINTER(ctypes.c_int)
+        lib.qasr_transcribe_prompted.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_int,
+            ints, ctypes.c_int, ints, ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+        ]
     lib.qasr_stats.restype = ctypes.c_char_p
     lib.qasr_stats.argtypes = [ctypes.c_void_p]
     lib.qasr_question_probability.restype = ctypes.c_float

@@ -24,6 +24,7 @@ from skryb.core.json_config_adapter import (
     load_json_object,
 )
 from skryb.core.state_machine import AppState, AppStateMachine
+from skryb.meetings.storage import meeting_settings_from
 from skryb.hotkeys.bindings import (
     bindings_to_config,
     migrate_legacy_hotkey,
@@ -308,7 +309,16 @@ class SettingsService:
                     ).items(),
                 )
             ),
+            **self._meeting_fields(),
         )
+
+    def _meeting_fields(self) -> dict[str, str | bool]:
+        meetings = meeting_settings_from(self._config)
+        return {
+            "meetings_folder": str(meetings.folder),
+            "meetings_record_microphone": meetings.record_microphone,
+            "meetings_language": meetings.language,
+        }
 
     def _crisperwhisper_mode(self) -> str:
         configured = self._config.get(
@@ -347,6 +357,9 @@ class SettingsService:
         self._config.set(LEARN_WORDS_KEY, draft.learn_words)
         self._config.set("history.retention_days", draft.history_retention_days)
         self._config.set("updates.check_automatically", draft.check_for_updates)
+        self._config.set("meetings.folder", draft.meetings_folder.strip())
+        self._config.set("meetings.record_microphone", draft.meetings_record_microphone)
+        self._config.set("meetings.language", draft.meetings_language)
         # A process name holds a dot, so the map is stored whole rather
         # than key by dotted key.
         self._config.set(

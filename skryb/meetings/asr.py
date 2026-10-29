@@ -1,0 +1,114 @@
+"""Everything a meeting loads when it starts and lets go of when it stops.
+
+Speech-to-text is Qwen3-ASR. When dictation already has it loaded, the
+meeting borrows that instance between dictations; otherwise it loads its
+own, on the engine Skryb picks for this computer.
+"""
+
+import logging
+from collections.abc import Callable
+from pathlib import Path
+
+import numpy as np
+
+from skryb.core.paths import AppPaths
+from skryb.meetings.capture import RATE
+from skryb.meetings.models import DIARIZER, Diarizer, Labeller, Vad, gpu_available, release_gpu
+from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.engine_registry import EngineRegistry, EngineSpec
+from skryb.transcription.engine_selector import rank_engines
+from skryb.transcription.engine_turns import EngineTurns
+from skryb.transcription.hardware_detector import HardwareDetector
+from skryb.transcription.hf_model_manager import loadable_snapshot_dir
+from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription.model_info import get_model_info
+from skryb.transcription.qwen3_asr_prompt import PromptedTranscriber
+
+QWEN3_ASR = "qwen3-asr-1.7b"
+# The meeting language setting, as Qwen3-ASR is asked for it. It has no Urdu:
+# Urdu is asked for as Hindi, and the Hindi script it writes is romanized.
+_ASKED_AS = {"en": "en", "ur": "hi", "auto": None}
+NO_GPU_WARNING = "No GPU found, so speakers are not told apart: everyone on the call is Speaker 1."
+
+_logger = logging.getLogger(__name__)
+
+
+def build_meeting_asr(
+    paths: AppPaths, registry: EngineRegistry, hardware_detector: HardwareDetector, license_policy: LicensePolicy,
+) -> TranscriptionEngine:
+    """Qwen3-ASR on the best engine for this computer: the native one on an RX 9060 XT."""
+    info = get_model_info(QWEN3_ASR)
+    license_policy.assert_accepted(info)
+    hardware = hardware_detector.detect()
+    engine_id = rank_engines(info, hardware, registry.all_descriptors())[0].engine_id
+    return registry.build(engine_id, EngineSpec(
+        model_name=info.name, repo_id=info.repo_id, device="cpu" if hardware.kind == "cpu" else "cuda",
+        language="en", beam_size=1, model_dir=paths.models_dir, revision=info.revision,
+    ))
+
+
+def diarizer_snapshot(models_dir: Path) -> Path:
+    return loadable_snapshot_dir(models_dir, DIARIZER.repo_id, DIARIZER.revision)
+
+
+class MeetingModels:
+    """Loaded at meeting start by ``speaker_labeller``, released by ``release`` at stop."""
+
+    def __init__(
+        self,
+        *,
+        language: str,
+        dictation_engine: Callable[[], TranscriptionEngine],
+        turns: EngineTurns,
+        build_asr: Callable[[], TranscriptionEngine],
+        diarizer_snapshot: Callable[[], Path],
+    ) -> None:
+        self._language = _ASKED_AS.get(language, "en")
+        self._dictation_engine = dictation_engine
+        self._turns = turns
+        self._build_asr = build_asr
+        self._diarizer_snapshot = diarizer_snapshot
+        self._own: TranscriptionEngine | None = None
+        self._diarizer: Diarizer | None = None
+
+    def voice_detector(self) -> Labeller:
+        return Vad()
+
+    def speaker_labeller(self) -> tuple[Labeller, str | None]:
+        """Who is talking on the speakers, and a warning when that cannot be told."""
+        if not self._borrowed_engine_is_prompted():
+            self._own_engine()
+        if not gpu_available():
+            # ponytail: on the CPU the diarizer falls far behind live audio; add it back for CPUs if one keeps up.
+            return Vad(), NO_GPU_WARNING
+        self._diarizer = Diarizer(self._diarizer_snapshot())
+        return self._diarizer, None
+
+    def transcribe(self, audio: np.ndarray, context: str | None) -> str:
+        clip = AudioSegment(np.ascontiguousarray(audio, dtype=np.float32), RATE)
+        with self._turns.meeting():
+            engine = self._dictation_engine()
+            if isinstance(engine, PromptedTranscriber):
+                return engine.transcribe_prompted(clip, context, self._language).text
+        # ponytail: if dictation switches to Qwen3-ASR mid-meeting, the meeting keeps its own copy until it ends.
+        return self._own_engine().transcribe_prompted(clip, context, self._language).text
+
+    def release(self) -> None:
+        self._diarizer = None
+        if self._own is not None:
+            self._own.dispose()
+            self._own = None
+        release_gpu()
+
+    def _borrowed_engine_is_prompted(self) -> bool:
+        return isinstance(self._dictation_engine(), PromptedTranscriber)
+
+    def _own_engine(self) -> PromptedTranscriber:
+        if self._own is None:
+            engine = self._build_asr()
+            engine.load_model()
+            self._own = engine
+            _logger.info("Loaded Qwen3-ASR for the meeting: dictation uses another model.")
+        assert isinstance(self._own, PromptedTranscriber)
+        return self._own

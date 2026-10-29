@@ -18,21 +18,6 @@ _GFX_ARCH_KEY = "hardware.probe.gfx_arch"
 _FINGERPRINT_KEY = "hardware.probe.fingerprint"
 
 
-def remembered_hardware(config: ConfigurationStore, fingerprint: str) -> HardwareProfile | None:
-    """The last probe's answer while the display adapters still match *fingerprint*, else None."""
-    if not fingerprint or config.get(_FINGERPRINT_KEY) != fingerprint:
-        return None
-    kind = config.get(_KIND_KEY)
-    if kind not in ALL_HARDWARE_KINDS:
-        return None
-    gfx_arch = config.get(_GFX_ARCH_KEY)
-    return HardwareProfile(
-        kind=cast(HardwareKind, kind),
-        device_name=str(config.get(_DEVICE_NAME_KEY, "")),
-        gfx_arch=None if gfx_arch is None else str(gfx_arch),
-    )
-
-
 class CachedHardwareDetector(HardwareDetector):
     """Remembers the GPU probe in config until the display adapters change.
 
@@ -66,7 +51,17 @@ class CachedHardwareDetector(HardwareDetector):
         return self._inner.peek() or self._remembered(self._fingerprint())
 
     def _remembered(self, fingerprint: str) -> HardwareProfile | None:
-        return remembered_hardware(self._config, fingerprint)
+        if not fingerprint or self._config.get(_FINGERPRINT_KEY) != fingerprint:
+            return None
+        kind = self._config.get(_KIND_KEY)
+        if kind not in ALL_HARDWARE_KINDS:
+            return None
+        gfx_arch = self._config.get(_GFX_ARCH_KEY)
+        return HardwareProfile(
+            kind=cast(HardwareKind, kind),
+            device_name=str(self._config.get(_DEVICE_NAME_KEY, "")),
+            gfx_arch=None if gfx_arch is None else str(gfx_arch),
+        )
 
     def _remember(self, profile: HardwareProfile, fingerprint: str) -> None:
         self._config.set(_KIND_KEY, profile.kind)

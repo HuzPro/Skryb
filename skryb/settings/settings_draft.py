@@ -44,6 +44,10 @@ class SettingsDraft:
     paste_method_overrides: tuple[tuple[str, str], ...] = ()
     # The updater reads it before every hourly check.
     check_for_updates: bool = True
+    # Read when a meeting starts, so none of them needs a rebuild.
+    meetings_folder: str = ""
+    meetings_record_microphone: bool = True
+    meetings_language: str = "en"
 
 
 @dataclass(frozen=True)

@@ -24,10 +24,11 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
-    # CrisperWhisper requires transformers 4.40. The app is validated with
-    # 5.16.0, and the upper bound keeps a future major out until tested.
-    # torchaudio is the decode backend transformers' audio loader uses.
-    "transformers>=5.16.0,<6",
+    # 5.18.0 is the first release with Nemotron 3 Diarization, which meetings
+    # use to tell speakers apart; CrisperWhisper only needs 4.40. The upper
+    # bound keeps a future major out until tested. torchaudio is the decode
+    # backend transformers' audio loader uses.
+    "transformers>=5.18.0,<6",
     # Whisper prompt building and decoding go straight to the Rust
     # tokenizer, so no engine has to import Transformers for them.
     "tokenizers>=0.23.1",
@@ -50,6 +51,15 @@ dependencies = [
     # exactly: the file's symbol models must be rebuilt exactly as they
     # were when it was packed, and Conway Research pins this version.
     "constriction==0.5.0",
+    # Meetings record what the PC plays through WASAPI loopback, which only
+    # this PortAudio build exposes (Apache-2.0, PortAudio itself MIT).
+    "PyAudioWPatch>=0.2.12.9; sys_platform == 'win32'",
+    # Silero speech detection for the meeting microphone (MIT); its model
+    # files ship inside the package.
+    "silero-vad>=6.2",
+    # Writes each meeting's them.flac and me.flac (BSD-3). nano-parakeet
+    # already pulls it in; listed because the app now imports it directly.
+    "soundfile>=0.12.0",
 ]
 
 [project.optional-dependencies]

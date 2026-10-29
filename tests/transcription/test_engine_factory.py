@@ -188,37 +188,17 @@ class TestTheNativeParakeetEngine:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr("skryb.transcription.engine_factory.native_parakeet_dll", lambda: tmp_path / "npk.dll")
-        monkeypatch.setattr(
-            "skryb.transcription.win32_display_adapters.display_adapter_fingerprint",
-            lambda: "AMD Radeon RX 9060 XT",
-        )
-        config = FakeConfig({
-            "transcription.model_size": "parakeet-ultra",
-            "transcription.engine": "auto",
-            "hardware.probe.kind": "amd_rocm",
-            "hardware.probe.device_name": "AMD Radeon RX 9060 XT",
-            "hardware.probe.gfx_arch": "gfx1200",
-            "hardware.probe.fingerprint": "AMD Radeon RX 9060 XT",
-        })
+        config = FakeConfig({"transcription.model_size": "parakeet-ultra", "transcription.engine": "auto"})
+        remembered = HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200")
 
-        assert selectable_engine_ids(config, build_engine_registry(), tmp_path) == ("native_parakeet",)
-        assert startup_requires_torch(config, build_engine_registry(), tmp_path) is False
+        assert selectable_engine_ids(config, build_engine_registry(), tmp_path, remembered) == ("native_parakeet",)
+        assert startup_requires_torch(config, build_engine_registry(), tmp_path, remembered) is False
 
-    def test_startup_still_warms_torch_after_the_gpu_was_swapped(
+    def test_startup_still_warms_torch_when_no_gpu_probe_is_remembered(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr("skryb.transcription.engine_factory.native_parakeet_dll", lambda: tmp_path / "npk.dll")
-        monkeypatch.setattr(
-            "skryb.transcription.win32_display_adapters.display_adapter_fingerprint",
-            lambda: "NVIDIA GeForce RTX 5090",
-        )
-        config = FakeConfig({
-            "transcription.model_size": "parakeet-ultra",
-            "transcription.engine": "auto",
-            "hardware.probe.kind": "amd_rocm",
-            "hardware.probe.gfx_arch": "gfx1200",
-            "hardware.probe.fingerprint": "AMD Radeon RX 9060 XT",
-        })
+        config = FakeConfig({"transcription.model_size": "parakeet-ultra", "transcription.engine": "auto"})
 
         assert startup_requires_torch(config, build_engine_registry(), tmp_path) is True
 
@@ -230,7 +210,7 @@ class TestBuildEngineRegistry:
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
             "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr", "openvino_parakeet",
-            "native_parakeet",
+            "native_parakeet", "qwen3_asr",
         }
 
     def test_should_declare_the_ct2_engine_torch_free(self) -> None:
@@ -747,3 +727,39 @@ class TestPhonon2OnTheCpuEngine:
 
         assert manager.has_model("phonon-2") is True
         assert manager.is_installed("phonon-2") is True
+
+
+class TestQwen3StartupStaysTorchFreeOnTheRx9060Xt:
+    """Qwen3-ASR has a torch engine for everyone and a torch-free one for gfx1200.
+    A launch decides about torch before probing, so it reads the probe a past launch saved."""
+
+    _RX_9060_XT = HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200")
+
+    @pytest.fixture(autouse=True)
+    def _native_dll_present(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(
+            "skryb.transcription.engine_factory.native_engine_dll", lambda: tmp_path / "qasr.dll",
+        )
+
+    def _config(self) -> FakeConfig:
+        return FakeConfig({"transcription.model_size": "qwen3-asr-1.7b", "transcription.engine": "auto"})
+
+    def test_with_the_remembered_rx_9060_xt_it_picks_the_native_engine_and_skips_torch(self, tmp_path: Path) -> None:
+        registry = build_engine_registry()
+
+        assert selectable_engine_ids(self._config(), registry, tmp_path, self._RX_9060_XT) == ("native_qwen3_asr",)
+        assert startup_requires_torch(self._config(), registry, tmp_path, self._RX_9060_XT) is False
+
+    @pytest.mark.parametrize("hardware", [
+        HardwareProfile(kind="nvidia_cuda", device_name="NVIDIA GeForce RTX 4070", gfx_arch=None),
+        HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 7900 XTX", gfx_arch="gfx1100"),
+        HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None),
+    ])
+    def test_on_any_other_computer_it_runs_on_transformers_and_warms_torch(self, tmp_path: Path, hardware: HardwareProfile) -> None:
+        registry = build_engine_registry()
+
+        assert selectable_engine_ids(self._config(), registry, tmp_path, hardware) == ("qwen3_asr",)
+        assert startup_requires_torch(self._config(), registry, tmp_path, hardware) is True
+
+    def test_before_any_probe_has_been_saved_it_plans_for_torch(self, tmp_path: Path) -> None:
+        assert startup_requires_torch(self._config(), build_engine_registry(), tmp_path) is True

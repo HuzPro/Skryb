@@ -19,6 +19,7 @@ from skryb.output.dictionary_config import (
     dictionary_from_json,
 )
 from skryb.output.output_mode import OutputMode
+from skryb.meetings.storage import LANGUAGES as MEETING_LANGUAGES
 from skryb.output.paste_method import PasteMethod, normalized_process_name
 from skryb.recording.preferences import DUCK_MODES
 from skryb.settings.service import CRISPERWHISPER_MODES
@@ -87,6 +88,11 @@ def settings_json(draft: SettingsDraft) -> Json:
         "history_retention_days": draft.history_retention_days,
         "paste_method_overrides": [list(pair) for pair in draft.paste_method_overrides],
         "check_for_updates": draft.check_for_updates,
+        "meetings": {
+            "folder": draft.meetings_folder,
+            "record_microphone": draft.meetings_record_microphone,
+            "language": draft.meetings_language,
+        },
     }
 
 
@@ -98,6 +104,10 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
     """
     settings = Fields(document, "settings")
     recording = settings.section("recording")
+    meetings = settings.section("meetings")
+    meetings_folder = meetings.text("folder").strip()
+    if not meetings_folder:
+        raise ValueError("settings.meetings.folder cannot be blank.")
     retention = settings.whole("history_retention_days")
     if retention < 0:
         raise ValueError("settings.history_retention_days cannot be negative.")
@@ -135,6 +145,9 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         history_retention_days=retention,
         paste_method_overrides=_overrides_from_json(settings.items("paste_method_overrides")),
         check_for_updates=settings.flag("check_for_updates"),
+        meetings_folder=meetings_folder,
+        meetings_record_microphone=meetings.flag("record_microphone"),
+        meetings_language=meetings.one_of("language", MEETING_LANGUAGES),
     )
 
 

@@ -736,3 +736,74 @@ class FakeDesktop:
     def DwmGetWindowAttribute(self, hwnd, _attribute, value, _size):  # noqa: N802
         value._obj.value = 1 if self._find(hwnd)["cloaked"] else 0
         return 0
+
+
+class TestMeetingRecording:
+    """Starting and stopping a meeting from the tray, and the icon showing one records."""
+
+    def _backend(self, calls: list, recording: list[bool]):
+        backend = mod.Win32TrayBackend.__new__(mod.Win32TrayBackend)
+        backend._get_state_label = lambda: "Idle - ready"
+        backend._on_settings_clicked = lambda: calls.append("settings")
+        backend._on_quit_clicked = lambda: calls.append("quit")
+        backend._on_history_clicked = lambda: calls.append("history")
+        backend._on_paste_last_clicked = None
+        backend._on_copy_last_clicked = None
+        backend._list_microphones = None
+        backend._on_microphone_chosen = None
+        backend._offered_microphones = []
+        backend._hwnd = 0
+        backend._dispatcher = SyncDispatcher()
+        backend._meeting_recording = lambda: recording[0]
+        backend._on_meeting_clicked = lambda: calls.append("meeting")
+        backend._on_meetings_clicked = lambda: calls.append("meetings window")
+        return backend
+
+    def _menu(self, monkeypatch, backend, chosen: int = 0) -> list[str]:
+        labels: list[str] = []
+        user32 = MagicMock()
+        user32.AppendMenuW.side_effect = lambda menu, flags, item, label: labels.append(label)
+        user32.TrackPopupMenu.return_value = chosen
+        monkeypatch.setattr(mod, "_user32", user32)
+        backend._show_context_menu()
+        return [label for label in labels if label]
+
+    def test_the_menu_offers_to_start_a_meeting_recording_near_the_top(self, monkeypatch):
+        items = self._menu(monkeypatch, self._backend([], [False]))
+
+        assert items[1:3] == ["Start meeting recording", "Meetings..."]
+
+    def test_while_a_meeting_records_the_menu_offers_to_stop_it(self, monkeypatch):
+        items = self._menu(monkeypatch, self._backend([], [True]))
+
+        assert items[1] == "Stop meeting recording"
+
+    def test_choosing_the_item_starts_or_stops_and_meetings_opens_the_window(self, monkeypatch):
+        calls: list = []
+        backend = self._backend(calls, [False])
+
+        self._menu(monkeypatch, backend, mod._ID_MEETING)
+        self._menu(monkeypatch, backend, mod._ID_MEETINGS)
+
+        assert calls == ["meeting", "meetings window"]
+
+    def test_without_meetings_the_menu_has_no_meeting_items(self, monkeypatch):
+        backend = self._backend([], [False])
+        backend._on_meeting_clicked = None
+
+        assert not any("eeting" in item for item in self._menu(monkeypatch, backend))
+
+    def test_the_icon_gets_its_badge_and_the_tooltip_says_a_meeting_is_recording(self, adapter, backend, monkeypatch):
+        rendered: list[bool] = []
+        monkeypatch.setattr(mod, "create_hicons", lambda state, size=32, meeting=False: rendered.append(meeting) or [1])
+        monkeypatch.setattr(mod._user32, "DestroyIcon", lambda hicon: True)
+
+        adapter.set_meeting_recording(True)
+        adapter.update_state(AppState.RECORDING, "Recording...")
+        adapter.set_meeting_recording(False)
+
+        assert rendered == [True, True, False]
+        tooltips = [call.args[0] for call in backend.set_tooltip.call_args_list]
+        assert "Skryb - Idle - ready  ·  Recording a meeting" in tooltips
+        assert "Skryb - Recording...  ·  Recording a meeting" in tooltips
+        assert tooltips[-1] == "Skryb - Recording..."

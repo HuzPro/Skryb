@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from skryb.core.single_instance import SingleInstanceMutex
     from skryb.transcription.engine_preload import EnginePreload
     from skryb.transcription.engine_registry import EngineRegistry
+    from skryb.transcription.engine_types import HardwareProfile
     from skryb.transcription.hardware_detector import HardwareDetector
     from skryb.transcription.license_policy import LicensePolicy
     from skryb.transcription.model_manager import ModelManager
@@ -339,7 +340,7 @@ def _start_torch_prewarm_if_needed(
     """
     from skryb.transcription.engine_factory import startup_requires_torch
 
-    if not startup_requires_torch(config, registry, models_dir):
+    if not startup_requires_torch(config, registry, models_dir, _remembered_hardware(config)):
         logging.getLogger(__name__).info(
             "Torch prewarm skipped: no engine this launch can select needs it",
         )
@@ -353,6 +354,15 @@ def _start_torch_prewarm_if_needed(
 
 def _nothing_to_await() -> None:
     return None
+
+
+def _remembered_hardware(config: ConfigurationStore) -> HardwareProfile | None:
+    """The GPU probe a past launch saved, read without importing torch."""
+    from skryb.transcription.cached_hardware_detector import CachedHardwareDetector
+    from skryb.transcription.torch_hardware_detector import TorchHardwareDetector
+    from skryb.transcription.win32_display_adapters import display_adapter_fingerprint
+
+    return CachedHardwareDetector(TorchHardwareDetector(), config, display_adapter_fingerprint).peek()
 
 
 def _run(paths: AppPaths, startup: _Startup, *, restarted: bool = False) -> None:
@@ -485,7 +495,7 @@ def _start_engine_preload(
         return None
     if config.get("transcription.language") in (None, "auto"):
         return None
-    if startup_requires_torch(config, registry, paths.models_dir):
+    if startup_requires_torch(config, registry, paths.models_dir, hardware_detector.peek()):
         return None
     import importlib
 

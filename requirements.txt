@@ -10,9 +10,9 @@ Pillow>=10.0.0
 huggingface-hub>=0.20.0
 requests>=2.31.0
 nano-parakeet>=0.2.1
-# CrisperWhisper requires transformers 4.40. The app is validated with
-# 5.16.0; torchaudio is the decode backend transformers' audio loader uses.
-transformers>=5.16.0,<6
+# 5.18.0 is the first release with Nemotron 3 Diarization (meetings);
+# torchaudio is the decode backend transformers' audio loader uses.
+transformers>=5.18.0,<6
 # Whisper prompt building and decoding go straight to the Rust tokenizer.
 tokenizers>=0.23.1
 torchaudio>=2.5
@@ -29,3 +29,7 @@ fermion-research==0.2.11
 psutil>=5.9; sys_platform == 'win32'
 # Unpacks Underdog Bark's model.bark. Pinned to the version it was packed with.
 constriction==0.5.0
+# Meetings: what the PC plays (WASAPI loopback), speech detection, FLAC audio.
+PyAudioWPatch>=0.2.12.9; sys_platform == 'win32'
+silero-vad>=6.2
+soundfile>=0.12.0

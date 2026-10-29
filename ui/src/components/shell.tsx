@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, FileDown, FileUp, FolderOpen, LoaderCircle, Minus, Square, X, type LucideIcon } from "lucide-react";
+import { CircleAlert, FileDown, FileUp, FolderOpen, LoaderCircle, Mic, Minus, Square, Users, X, type LucideIcon } from "lucide-react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { NavLink } from "react-router";
 import { api, errorText } from "../lib/api";
@@ -103,7 +103,45 @@ function FooterButton({ label, icon: Icon, onClick }: { label: string; icon: Luc
   );
 }
 
-export function Sidebar({ items }: { items: NavItem[] }) {
+export type Mode = "dictation" | "meetings";
+
+const MODES: { value: Mode; label: string; icon: LucideIcon }[] = [
+  { value: "dictation", label: "Dictation", icon: Mic },
+  { value: "meetings", label: "Meetings", icon: Users },
+];
+
+/** Two icon buttons in one pill: the chosen mode sits raised on a lighter fill, the other lies flat. */
+export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange: (mode: Mode) => void; recording: boolean }) {
+  return (
+    <div role="radiogroup" aria-label="Mode" className="flex items-center gap-px rounded-[9px] border bg-muted p-[2px]">
+      {MODES.map(({ value, label, icon: Icon }) => {
+        const selected = value === mode;
+        const hint = value === "meetings" && recording ? `${label} (recording now)` : label;
+        return (
+          <button
+            key={value}
+            role="radio"
+            aria-checked={selected}
+            aria-label={hint}
+            title={hint}
+            onClick={() => onChange(value)}
+            className={cn(
+              "relative grid h-[22px] w-7 place-items-center rounded-[7px] border border-transparent text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-3.5",
+              selected && "border-border bg-card text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.08)]",
+            )}
+          >
+            <Icon />
+            {value === "meetings" && recording ? (
+              <span className="absolute top-[3px] right-[4px] size-[5px] animate-pulse rounded-full bg-destructive" />
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function Sidebar({ items, mode, onMode, meetings }: { items: NavItem[]; mode: Mode; onMode: (mode: Mode) => void; meetings: ReactNode }) {
   const status = useEngineStatus();
   const app = status.app;
   const { settings, discardSettings } = useStore();
@@ -136,13 +174,15 @@ export function Sidebar({ items }: { items: NavItem[] }) {
 
   return (
     <aside className="flex w-[212px] shrink-0 flex-col border-r bg-sidebar">
-      <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 px-4">
+      <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 pr-2.5 pl-4">
         <span className="pointer-events-none flex">
           <Mark app={app} />
         </span>
         <span className="pointer-events-none text-[13px] font-semibold">Skryb</span>
+        <span data-tauri-drag-region className="flex-1 self-stretch" />
+        <ModeToggle mode={mode} onChange={onMode} recording={app?.meeting_recording ?? false} />
       </div>
-      <nav className="flex flex-col gap-0.5 px-2 pt-2">
+      {mode === "meetings" ? meetings : <nav className="flex flex-col gap-0.5 px-2 pt-2">
         {items.map(({ path, label, icon: Icon }) => (
           <NavLink
             key={path}
@@ -159,10 +199,10 @@ export function Sidebar({ items }: { items: NavItem[] }) {
             {label}
           </NavLink>
         ))}
-      </nav>
-      <div className="mt-auto flex flex-col gap-2 p-3">
+      </nav>}
+      <div className={cn("flex flex-col gap-2 p-3", mode === "dictation" && "mt-auto")}>
         {note ? <p className="px-1 text-[11.5px] text-muted-foreground">{note}</p> : null}
-        <div className="rounded-lg border bg-card px-3 py-2">
+        <div className={cn("rounded-lg border bg-card px-3 py-2", mode === "meetings" && "hidden")}>
           <div className="flex items-center gap-1.5 text-[12px] font-medium">
             <StatusDot tone={status.tone} />
             {status.label}

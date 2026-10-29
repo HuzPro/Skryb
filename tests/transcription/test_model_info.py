@@ -41,7 +41,6 @@ _REMOVED_ENGINES = (
     "transformers",
     "granite_speech",
     "granite_turboctc",
-    "qwen3_asr",
 )
 
 

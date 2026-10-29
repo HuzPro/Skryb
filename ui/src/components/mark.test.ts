@@ -11,6 +11,7 @@ const app = (state: AppState, loading = false): AppInfo => ({
   history_directory: "",
   pill_default_position: [0.5, 1],
   update: null,
+  meeting_recording: false,
 });
 
 describe("the logo's motion", () => {

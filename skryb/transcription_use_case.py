@@ -35,6 +35,7 @@ from skryb.output.last_dictation import LastDictation
 from skryb.recording.audio_segment import AudioSegment, load_wav
 from skryb.recording.recorder import AudioRecorder
 from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.engine_turns import EngineTurns
 from skryb.transcription.placeholder_engine import PlaceholderEngine
 from skryb.transcription.result import TranscriptionResult
 from skryb.transcription.streaming.live_streaming_controller import (
@@ -80,6 +81,7 @@ class RecordAndTranscribeUseCase:
         last_dictation: LastDictation | None = None,
         wake_after_idle_seconds: Callable[[], float] = _never_wake,
         clock: Callable[[], float] = time.monotonic,
+        engine_turns: EngineTurns | None = None,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -99,9 +101,9 @@ class RecordAndTranscribeUseCase:
         self._streaming_active = False
         self._stream_requested_at: datetime | None = None
         self._action_lock = threading.Lock()
-        # A retry from history runs beside live dictation; one model must
-        # never decode two recordings at once.
-        self._engine_lock = threading.Lock()
+        # A retry from history runs beside live dictation, and a meeting can
+        # share the model; one model must never decode two recordings at once.
+        self.engine_turns = engine_turns or EngineTurns()
         # Latched signal: did the user press the hotkey while the
         # engine was still loading? On ``LOADING → IDLE`` we replay
         # exactly one activation so the user's first hotkey is honoured
@@ -213,7 +215,7 @@ class RecordAndTranscribeUseCase:
 
     def _transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         heard = self._prepare_audio(audio)
-        with self._engine_lock:
+        with self.engine_turns.dictation():
             try:
                 return self._engine.transcribe(heard)
             finally:
@@ -229,7 +231,7 @@ class RecordAndTranscribeUseCase:
     def _wake_engine(self) -> None:
         # The engine lock makes the dictation's own decode wait for this
         # warmup rather than run beside it on the same GPU.
-        with self._engine_lock:
+        with self.engine_turns.dictation():
             started = self._clock()
             try:
                 self._engine.warmup()
@@ -335,6 +337,10 @@ class RecordAndTranscribeUseCase:
     def dispose_current_engine(self) -> None:
         self._engine.dispose()
 
+    def current_engine(self) -> TranscriptionEngine:
+        """The batch engine in use; take a meeting turn before decoding with it."""
+        return self._engine
+
     def set_engine(self, engine: TranscriptionEngine) -> None:
         # Permit ``LOADING`` so bootstrap can attach the real engine to
         # the placeholder that the use case was constructed with on a
@@ -343,7 +349,7 @@ class RecordAndTranscribeUseCase:
         self._require_swappable_state()
         # Under the engine lock, so a wake or a history retry still
         # decoding finishes before its engine is disposed.
-        with self._engine_lock:
+        with self.engine_turns.dictation():
             old_engine = self._engine
             self._engine = engine
             old_engine.dispose()
@@ -364,7 +370,7 @@ class RecordAndTranscribeUseCase:
             engine.dispose()
             raise EngineSwapError("no streaming controller configured")
         self._streaming.set_engine(engine)
-        with self._engine_lock:
+        with self.engine_turns.dictation():
             old_engine = self._engine
             self._engine = PlaceholderEngine()
             old_engine.dispose()

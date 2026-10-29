@@ -23,6 +23,15 @@ export interface RecordingSettings {
   warn_before_cap_seconds: number;
 }
 
+/** English; Urdu, written in Roman Urdu; or each sentence in whichever of the two it is. */
+export type MeetingLanguage = "en" | "ur" | "auto";
+
+export interface MeetingSettings {
+  folder: string;
+  record_microphone: boolean;
+  language: MeetingLanguage;
+}
+
 export interface Settings {
   model_size: string;
   language: string;
@@ -42,6 +51,7 @@ export interface Settings {
   history_retention_days: number;
   paste_method_overrides: [string, PasteMethod][];
   check_for_updates: boolean;
+  meetings: MeetingSettings;
 }
 
 export interface ChangeSet {
@@ -149,6 +159,7 @@ export interface AppInfo {
   history_directory: string;
   pill_default_position: [number, number];
   update: UpdateStatus | null;
+  meeting_recording: boolean;
 }
 
 export interface UpdateStatus {
@@ -170,6 +181,71 @@ export interface Engines {
   candidates: EngineCandidate[];
   hardware: Hardware;
 }
+
+/** One line of a meeting. `key` is `them:N` for the Nth voice on the speakers, `me:0` for the microphone. */
+export interface MeetingEntry {
+  id: number;
+  track: "me" | "them";
+  speaker: number;
+  start: number;
+  end: number;
+  text: string;
+  key: string;
+}
+
+export interface MeetingTranscript {
+  folder: string;
+  started: string;
+  /** Every speaker's shown name: the name given, else "Speaker N" or "Me". */
+  names: Record<string, string>;
+  entries: MeetingEntry[];
+}
+
+export type MeetingStatus = "Starting" | "Loading models" | "Recording" | "Finishing" | "Saved";
+
+export interface LiveMeeting extends MeetingTranscript {
+  id: string;
+  recording: boolean;
+  status: MeetingStatus;
+  device: string | null;
+  warning: string | null;
+}
+
+export interface MeetingSummary {
+  id: string;
+  started: string;
+  seconds: number;
+  speakers: number;
+  lines: number;
+  words: number;
+  has_audio: boolean;
+}
+
+export interface MeetingModel {
+  name: string;
+  label: string;
+  display_size: string;
+  description: string;
+  installed: boolean;
+  download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
+}
+
+export interface MeetingOverview {
+  recording: boolean;
+  folder: string;
+  models_ready: boolean;
+  models: MeetingModel[];
+  meetings: MeetingSummary[];
+}
+
+/** What the core sends as `meeting` events; every one names its meeting by `id` except `saved`'s own field. */
+export type MeetingEvent =
+  | { type: "status"; id: string; status: MeetingStatus; folder: string; device: string | null; warning: string | null }
+  | { type: "entry"; id: string; entry: MeetingEntry }
+  | { type: "remove"; id: string; entry_id: number }
+  | { type: "names"; id: string; names: Record<string, string> }
+  | ({ type: "started" } & Omit<LiveMeeting, "recording">)
+  | { type: "saved"; id: string };
 
 export interface SaveResult {
   changes: ChangeSet;

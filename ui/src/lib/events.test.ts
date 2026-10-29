@@ -23,6 +23,7 @@ const app: AppInfo = {
   history_directory: "D:\\logs",
   pill_default_position: [0.5, 1],
   update: null,
+  meeting_recording: false,
 };
 
 const models = [model("parakeet-tdt-0.6b-v3", true), model("crisperwhisper-2.0-turbo"), model("crisperwhisper-2.0-large")];
