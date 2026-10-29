@@ -63,10 +63,14 @@ class Vad:
     frame_seconds = WINDOW / RATE
 
     def __init__(self) -> None:
+        self._torch = import_torch()
+        threads = self._torch.get_num_threads()
+        # Its import runs torch.set_num_threads(1), which would leave every other torch model
+        # in the process (dictation on the CPU included) on one thread.
         from silero_vad import load_silero_vad
 
-        self._torch = import_torch()
         self._model = load_silero_vad()
+        self._torch.set_num_threads(threads)
         self._rest = np.zeros(0, np.float32)
 
     def push(self, audio: np.ndarray, last: bool = False) -> list[int]:

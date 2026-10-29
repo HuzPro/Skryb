@@ -154,3 +154,17 @@ def test_without_a_gpu_voices_on_the_speakers_are_not_told_apart_and_the_window_
 
     assert labeller.frame_seconds == 0.032
     assert warning == NO_GPU_WARNING
+
+
+def test_loading_the_speech_detector_leaves_torch_on_every_thread_it_had() -> None:
+    import subprocess
+    import sys
+
+    probe = (
+        "import torch; torch.set_num_threads(4);"
+        "from skryb.meetings.models import Vad; Vad();"
+        "print(torch.get_num_threads())"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+
+    assert result.stdout.strip().splitlines()[-1] == "4"

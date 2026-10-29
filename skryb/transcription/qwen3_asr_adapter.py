@@ -19,8 +19,15 @@ from skryb.transcription.roman_urdu import romanize
 _logger = logging.getLogger(__name__)
 
 _CPU_DEVICE = "cpu"
-# The model card's bound per request; a meeting clip is cut at 15 s, well inside it.
-_MAX_NEW_TOKENS = 256
+_SAMPLE_RATE = 16000
+# Speech runs about 3 words (4 to 5 tokens) a second; this leaves room for fast talkers, and a
+# fixed cap would cut a long dictation short.
+_TOKENS_PER_SECOND = 10
+_MIN_NEW_TOKENS = 64
+
+
+def new_token_budget(seconds: float) -> int:
+    return _MIN_NEW_TOKENS + int(seconds * _TOKENS_PER_SECOND)
 
 
 class Qwen3AsrAdapter(TranscriptionEngine):
@@ -70,7 +77,9 @@ class Qwen3AsrAdapter(TranscriptionEngine):
         ).to(self._device, self._dtype)
         prompt_length = inputs["input_ids"].shape[1]
         with torch.inference_mode():
-            output = self._model.generate(**inputs, max_new_tokens=_MAX_NEW_TOKENS)
+            output = self._model.generate(
+                **inputs, max_new_tokens=new_token_budget(audio.data.size / _SAMPLE_RATE),
+            )
         text = self._processor.decode(output[0, prompt_length:], return_format="transcription_only")
         return TranscriptionResult(
             # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
