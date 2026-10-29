@@ -36,7 +36,11 @@ from skryb.transcription.model_info import (
     get_model_info,
 )
 from skryb.transcription.model_manager import ModelManager
-from skryb.transcription.native_engine_dll import native_engine_dll, native_parakeet_dll
+from skryb.transcription.native_engine_dll import (
+    native_engine_dll,
+    native_parakeet_dll,
+    native_whisper_dll,
+)
 
 _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     engine_id="nano_parakeet",
@@ -104,6 +108,18 @@ _NATIVE_PARAKEET_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# CrisperWhisper on the same gfx1200 kernels: about 2 s to load where the
+# Transformers engine takes 20-60, and no torch or Transformers import.
+_NATIVE_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
+    engine_id="native_crisperwhisper",
+    display_name="CrisperWhisper 2.0 (native HIP engine)",
+    supported_hardware=("amd_rocm",),
+    base_priority=95,
+    requires_torch=False,
+    supported_gfx=("gfx1200",),
+)
+
+
 # Qwen3-ASR through transformers, for every machine the native engine can't serve.
 _QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
     engine_id="qwen3_asr",
@@ -133,6 +149,7 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "phonon2_cpu": 1,
     "crisperwhisper": 1,
     "crisperwhisper_ct2": 1,
+    "native_crisperwhisper": 1,
     "native_qwen3_asr": 1,
     "openvino_parakeet": 1,
     "native_parakeet": 1,
@@ -152,6 +169,7 @@ def build_engine_registry() -> EngineRegistry:
             _CRISPERWHISPER_CT2_DESCRIPTOR,
             replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=native_engine_dll() is not None),
             replace(_NATIVE_PARAKEET_DESCRIPTOR, available=native_parakeet_dll() is not None),
+            replace(_NATIVE_CRISPERWHISPER_DESCRIPTOR, available=native_whisper_dll() is not None),
             _QWEN3_ASR_DESCRIPTOR,
             replace(
                 _OPENVINO_PARAKEET_DESCRIPTOR,
@@ -167,6 +185,7 @@ def build_engine_registry() -> EngineRegistry:
             "native_qwen3_asr": _build_native_qwen3_asr_engine,
             "openvino_parakeet": _build_openvino_parakeet_engine,
             "native_parakeet": _build_native_parakeet_engine,
+            "native_crisperwhisper": _build_native_crisperwhisper_engine,
             "qwen3_asr": _build_qwen3_asr_engine,
         },
     )
@@ -256,6 +275,21 @@ def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
         revision=spec.revision,
         device=spec.device,
         model_dir=spec.model_dir,
+        language=spec.language,
+        mode=spec.crisperwhisper_mode,
+    )
+
+
+def _build_native_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.hf_model_manager import (
+        loadable_snapshot_dir,
+    )
+    from skryb.transcription.native_crisperwhisper_adapter import (
+        NativeCrisperWhisperAdapter,
+    )
+
+    return NativeCrisperWhisperAdapter(
+        model_dir=loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
         language=spec.language,
         mode=spec.crisperwhisper_mode,
     )
@@ -454,9 +488,10 @@ def engine_candidates_ignoring_hardware(
     probe. The recommendation carries no reason: no hardware was probed
     to give one.
     """
+    # An engine that isn't installed can't be picked, so it can't make hardware matter either.
     compatible = [
         descriptor for descriptor in registry.all_descriptors()
-        if descriptor.engine_id in model_info.compatible_engines
+        if descriptor.engine_id in model_info.compatible_engines and descriptor.available
     ]
     runs_anywhere = all(
         ALL_HARDWARE_KINDS <= set(descriptor.supported_hardware)
@@ -593,7 +628,7 @@ def _resolve_crisperwhisper_mode(
     config: ConfigurationStore,
     engine_id: EngineId,
 ) -> CrisperWhisperMode:
-    if engine_id not in ("crisperwhisper", "crisperwhisper_ct2"):
+    if engine_id not in ("crisperwhisper", "crisperwhisper_ct2", "native_crisperwhisper"):
         return "intended"
     from skryb.transcription.crisperwhisper_adapter import (
         resolve_crisperwhisper_mode,
@@ -711,6 +746,7 @@ def build_composite_model_manager(
             "phonon2_cpu": phonon2_manager,
             "crisperwhisper": crisperwhisper_manager,
             "crisperwhisper_ct2": crisperwhisper_manager,
+            "native_crisperwhisper": crisperwhisper_manager,
             "native_qwen3_asr": qwen3_asr_manager,
             "qwen3_asr": qwen3_asr_manager,
         },

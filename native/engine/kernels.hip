@@ -90,6 +90,16 @@ struct ConvA {
     }
 };
 
+// Implicit im2col for a kernel-3 pad-1 1D conv over channels-last input; k = tap * C + ci, C a multiple of 8.
+struct Conv1dA {
+    const bf16* in; int t_in, C, stride;
+    __device__ uint4 load(int row, int k, int M) const {
+        const int tap = k / C, ci = k - tap * C, it = stride * row - 1 + tap;
+        if (row >= M || tap > 2 || it < 0 || it >= t_in) return uint4{0, 0, 0, 0};
+        return *(const uint4*)(in + (size_t)it * C + ci);
+    }
+};
+
 // Block tile BM x BN, K step BK; 8 waves as 2 (M) x 4 (N), each wave (BM/2) x (BN/4).
 // grid.z splits K: each split stores its fp32 partials in ws[split], and gemm_finish sums them and applies
 // the epilogue (plain stores: fp32 atomics to VRAM are several times slower here).
@@ -444,9 +454,10 @@ __global__ __launch_bounds__(32) void attn_kernel(AttnArgs a) {
     }
 }
 
-// grid (rows, heads), block 128. A split holding only masked keys has m = -inf and adds exactly nothing,
+// grid (rows, heads), block D. A split holding only masked keys has m = -inf and adds exactly nothing,
 // so the result does not depend on how many trailing splits a call happens to include.
-__global__ __launch_bounds__(128) void attn_combine_kernel(AttnArgs a, int splits) {
+template <int D>
+__global__ __launch_bounds__(D) void attn_combine_kernel(AttnArgs a, int splits) {
     const int r = blockIdx.x, h = blockIdx.y, d = threadIdx.x;
     float mx = NEG_INF;
     for (int sp = 0; sp < splits; sp++) mx = fmaxf(mx, a.part_ml[(((size_t)sp * a.n_heads + h) * 16 + r) * 2]);
@@ -457,7 +468,7 @@ __global__ __launch_bounds__(128) void attn_combine_kernel(AttnArgs a, int split
         if (m == NEG_INF) continue;
         const float wgt = expf(m - mx);
         lsum += wgt * a.part_ml[i * 2 + 1];
-        osum += wgt * a.part_o[i * 128 + d];
+        osum += wgt * a.part_o[i * D + d];
     }
     const float inv = lsum > 0.f ? 1.f / lsum : 0.f;
     a.o[(size_t)r * a.o_rs + h * a.o_hs + d] = b(osum * inv);
@@ -622,6 +633,10 @@ void conv3x3_480(hipStream_t s, const bf16* in, int chunks, int ih, int iw, cons
     launch_gemm(s, ConvA{in, ih, iw, oh, ow}, W, chunks * oh * ow, N, 4320, e);
 }
 
+void conv1d_k3(hipStream_t s, const bf16* in, int t_in, int C, int stride, const bf16* W, int M, int N, int K, const Epi& e) {
+    launch_gemm(s, Conv1dA{in, t_in, C, stride}, W, M, N, K, e);
+}
+
 void conv1(hipStream_t s, const bf16* melT, int fpad, int chunk0, int chunks, const bf16* w, const bf16* bias, bf16* out) {
     int n = chunks * 3200 * 480;
     conv1_kernel<<<cdiv(n, 256), 256, 0, s>>>(melT, fpad, chunk0, chunks, w, bias, out);
@@ -636,6 +651,7 @@ void log_mel(hipStream_t s, const float* pcm, int n, int frames, int fpad, const
 
 void layer_norm(hipStream_t s, const bf16* x, const bf16* w, const bf16* bb, bf16* y, int rows, int d) {
     if (d == 1024) layer_norm_kernel<1024><<<rows, 256, 0, s>>>(x, w, bb, y);
+    else if (d == 1280) layer_norm_kernel<1280><<<rows, 256, 0, s>>>(x, w, bb, y);
 }
 
 void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int rows, int d) {
@@ -653,8 +669,9 @@ void attention(hipStream_t s, const AttnArgs& a, int head_dim) {
     else attn_kernel<128><<<g, 32, 0, s>>>(a);
 }
 
-void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits) {
-    attn_combine_kernel<<<dim3(rows, a.n_heads), 128, 0, s>>>(a, splits);
+void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits, int head_dim) {
+    if (head_dim == 64) attn_combine_kernel<64><<<dim3(rows, a.n_heads), 64, 0, s>>>(a, splits);
+    else attn_combine_kernel<128><<<dim3(rows, a.n_heads), 128, 0, s>>>(a, splits);
 }
 
 void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, _Float16* scale) {

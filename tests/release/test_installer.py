@@ -119,6 +119,9 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
         parakeet = repo / "native" / "parakeet" / "build" / "npk.dll"
         parakeet.parent.mkdir(parents=True)
         parakeet.write_bytes(b"MZ native parakeet")
+        whisper = repo / "native" / "whisper" / "build" / "cw.dll"
+        whisper.parent.mkdir(parents=True)
+        whisper.write_bytes(b"MZ native whisper")
     (repo / "skryb" / "transcription").mkdir()
     (root / "scratch").mkdir()
     return repo
@@ -152,12 +155,20 @@ class TestStageWheelSource:
 
         assert (source / "skryb" / "transcription" / "qasr.dll").read_bytes() == b"MZ native engine"
         assert (source / "skryb" / "transcription" / "npk.dll").read_bytes() == b"MZ native parakeet"
+        assert (source / "skryb" / "transcription" / "cw.dll").read_bytes() == b"MZ native whisper"
 
     def test_refuses_to_build_an_installer_without_the_native_parakeet_engine(self, tmp_path):
         repo = _fake_repo(tmp_path)
         (repo / "native" / "parakeet" / "build" / "npk.dll").unlink()
 
         with pytest.raises(InstallerBuildError, match=r"native/parakeet/build\.sh"):
+            _stage_wheel_source(repo, tmp_path / "scratch")
+
+    def test_refuses_to_build_an_installer_without_the_native_crisperwhisper_engine(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        (repo / "native" / "whisper" / "build" / "cw.dll").unlink()
+
+        with pytest.raises(InstallerBuildError, match=r"native/whisper/build\.sh"):
             _stage_wheel_source(repo, tmp_path / "scratch")
 
     def test_refuses_to_build_an_installer_without_the_native_engine(self, tmp_path):

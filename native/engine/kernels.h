@@ -45,6 +45,9 @@ struct Q4 { const uint4* q; const _Float16* s; };
 void gemm(hipStream_t s, const bf16* A, int lda, const bf16* W, int M, int N, int K, const Epi& e);
 // 3x3 stride-2 pad-1 conv over channels-last [chunk][ih][iw][480] input, as an implicit GEMM.
 void conv3x3_480(hipStream_t s, const bf16* in, int chunks, int ih, int iw, const bf16* W, int N, const Epi& e);
+// Kernel-3 pad-1 1D conv over channels-last [t_in][C] input as an implicit GEMM: W is [N][K] with
+// k = tap * C + ci, zero past 3 * C (K rounded up to 32); output row t reads input rows stride * t - 1 + tap.
+void conv1d_k3(hipStream_t s, const bf16* in, int t_in, int C, int stride, const bf16* W, int M, int N, int K, const Epi& e);
 // First conv (1 input channel) straight from the log-mel, channels-last [chunk][64][50][480] out, GELU applied.
 void conv1(hipStream_t s, const bf16* melT, int fpad, int chunk0, int chunks, const bf16* w, const bf16* b, bf16* out);
 // Whisper-style log-mel: out [128][fpad] bf16, frames >= frames are zero.
@@ -55,8 +58,8 @@ void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int
 void qk_norm_rope(hipStream_t s, bf16* qkv, const bf16* qn, const bf16* kn, bf16* kc, bf16* vc,
                   int rows, int pos0, const float* inv_freq);
 void attention(hipStream_t s, const AttnArgs& a, int head_dim);
-// Merges split-key partials for rows [0, rows) into a.o (head_dim 128).
-void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits);
+// Merges split-key partials for rows [0, rows) into a.o.
+void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits, int head_dim = 128);
 void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, _Float16* scale);
 // One activation row times 4-bit weights, same epilogue rules as gemm.
 void gemv_q4(hipStream_t s, const bf16* x, const Q4& w, int N, int K, const Epi& e);

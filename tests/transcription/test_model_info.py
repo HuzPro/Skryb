@@ -167,9 +167,10 @@ class TestModelCatalog:
         assert CRISPERWHISPER_MODELS
         for model in CRISPERWHISPER_MODELS.values():
             assert "non-commercial research license" in model.description
-            assert model.compatible_engines[0] == "crisperwhisper"
+            # PyTorch is the engine every machine has; the others only add speed where they run.
+            assert "crisperwhisper" in model.compatible_engines
             assert set(model.compatible_engines) <= {
-                "crisperwhisper", "crisperwhisper_ct2",
+                "native_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2",
             }
 
     def test_crisperwhisper_should_not_replace_default_model(self) -> None:
