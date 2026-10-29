@@ -98,7 +98,7 @@ class TestRuntimeNotice:
         notice = notice_text("0.2.0")
 
         assert "Apache License" in notice
-        assert "HuzPro" in notice
+        assert "Huzaifa Tatari" in notice
         assert "proprietary" not in notice.lower()
 
 

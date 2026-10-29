@@ -10,7 +10,7 @@ description = "Local, offline speech-to-text dictation for Windows on NVIDIA, AM
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE.txt", "NOTICE"]
-authors = [{ name = "HuzPro" }]
+authors = [{ name = "Huzaifa Tatari", email = "huzaifa.tatari@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     # 2.5 is the PyTorch floor transformers 5.16 documents.
