@@ -6,7 +6,6 @@ or incomplete; every later load reads the IR and ``decoder.npz`` without importi
 
 import logging
 import os
-import re
 import shutil
 import time
 from collections.abc import Callable
@@ -26,7 +25,6 @@ _EXAMPLE_LENGTH = 180
 
 
 # Fermion's writer stores the kernel-1 pointwise convs as [O, I]; ParakeetForTDT has [O, I, 1].
-_POINTWISE_CONV = re.compile(r"\.conv\.pointwise_conv[12]\.weight$")
 
 
 def export(
@@ -60,23 +58,14 @@ def transformers_layout_state(weights: Path, with_encoder: bool) -> dict[str, to
 def phonon_state(container: Path, with_encoder: bool) -> dict[str, torch.Tensor]:
     """nano-parakeet's parameters from a Phonon ``model.fermion``, expanded to dense fp32.
 
-    Fermion's own reader (pure NumPy, from the pinned ``fermion-research``) expands every record
-    exactly as its transformers reference does before a strict load into ``ParakeetForTDT``.
+    A strict load into nano-parakeet wants each batch norm's ``num_batches_tracked``, which the dense
+    weights leave out; it is zero here, as eval mode never reads it.
     """
-    from fermion._speech import _engine_phonon2
+    from skryb.transcription.phonon2_cpu_adapter import dense_weights
 
-    reader = _engine_phonon2.load("fermion_container")
-    tensors, _ = reader.read_container(str(container), threads=os.cpu_count() or 1)
-    hf = {}
-    for name, array in tensors.items():
-        if name.endswith("num_batches_tracked"):
-            # Stored as fp16, so large counts read as inf; eval-mode batch norm never reads it.
-            hf[name] = torch.tensor(0, dtype=torch.int64)
-            continue
-        dense = np.ascontiguousarray(array, dtype=np.float32)
-        if dense.ndim == 2 and _POINTWISE_CONV.search(name):
-            dense = dense[:, :, None]
-        hf[name] = torch.from_numpy(dense)
+    hf = {name: torch.from_numpy(values) for name, values in dense_weights(container).items()}
+    for name in [name for name in hf if name.endswith("batch_norm.running_mean")]:
+        hf[name.replace("running_mean", "num_batches_tracked")] = torch.tensor(0, dtype=torch.int64)
     return _fp32(remap_hf_parakeet_state_dict(hf), with_encoder)
 
 

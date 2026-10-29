@@ -75,11 +75,12 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
 }
 
 
-# The NPU engine runs Phonon too, expanded to dense weights at its one-time
-# export. It ranks below Fermion's CPU engine until it is measured on a
-# real Intel NPU; pick it in Settings to try it.
+# Phonon is Parakeet v3's network, so the native Parakeet engine runs it on an
+# RX 9060 XT, packed once from Fermion's dense expansion. The NPU engine runs
+# it too; it ranks below Fermion's CPU engine until it is measured on a real
+# Intel NPU; pick it in Settings to try it.
 _PHONON2_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"phonon2_cpu": 100, "openvino_parakeet": 90},
+    {"native_parakeet": 120, "phonon2_cpu": 100, "openvino_parakeet": 90},
 )
 
 
@@ -93,7 +94,7 @@ PHONON2_MODELS: dict[str, ModelInfo] = {
         description="Parakeet v3 shrunk to 164 MB by Fermion Research: fast on CPU, English only",
         repo_id="FermionResearch/Phonon-2.5-English",
         revision="da200358d638886bc96c758c672ad5568828b119",
-        compatible_engines=("phonon2_cpu", "openvino_parakeet"),
+        compatible_engines=("phonon2_cpu", "native_parakeet", "openvino_parakeet"),
         engine_priorities=_PHONON2_ENGINE_PRIORITIES,
     ),
 }

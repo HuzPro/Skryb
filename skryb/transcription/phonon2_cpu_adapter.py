@@ -18,9 +18,12 @@ interrupted unpack never leaves a directory that looks finished.
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
+
+import numpy as np
 
 from skryb.core.exceptions import TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
@@ -37,6 +40,7 @@ _logger = logging.getLogger(__name__)
 # ships at the pinned commit.
 _UNPACKED_DIRECTORY_NAME = ".phonon2"
 _CONTAINER_FILENAME = "model.fermion"
+_POINTWISE_CONV = re.compile(r"\.conv\.pointwise_conv[12]\.weight$")
 _THREADS_ENV = "FERMION_CPU_THREADS"
 _MAX_THREADS = 16
 _INSTALL_HINT = (
@@ -113,6 +117,26 @@ def phonon_container(snapshot: Path) -> Path:
     """*snapshot*'s unpacked ``model.fermion``, unpacking the archive first if that hasn't happened yet."""
     _, fetch = _import_backend()
     return _ensure_unpacked(fetch, snapshot, read_artifact(snapshot)["filename"]) / _CONTAINER_FILENAME
+
+
+def dense_weights(container: Path) -> dict[str, np.ndarray]:
+    """*container* (a Phonon ``model.fermion``) as dense fp32 tensors under transformers' ``ParakeetForTDT`` names.
+
+    Fermion's own reader (pure NumPy, from the pinned ``fermion-research``) expands every record exactly as
+    its transformers reference does. Batch norm's ``num_batches_tracked`` is left out: it is stored as fp16,
+    so large counts read as inf, and eval-mode batch norm never reads it.
+    """
+    from fermion._speech import _engine_phonon2
+
+    reader = _engine_phonon2.load("fermion_container")
+    tensors, _ = reader.read_container(str(container), threads=os.cpu_count() or 1)
+    dense = {}
+    for name, array in tensors.items():
+        if name.endswith("num_batches_tracked"):
+            continue
+        values = np.ascontiguousarray(array, dtype=np.float32)
+        dense[name] = values[:, :, None] if values.ndim == 2 and _POINTWISE_CONV.search(name) else values
+    return dense
 
 
 def read_artifact(snapshot: Path) -> dict:

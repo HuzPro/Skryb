@@ -161,6 +161,15 @@ class TestTheNativeParakeetEngine:
     def test_without_the_dll_it_stays_on_pytorch(self) -> None:
         assert self._ranked("gfx1200", dll_installed=False, model="parakeet-ultra") == ["nano_parakeet"]
 
+    def test_an_rx_9060_xt_runs_phonon_on_it_ahead_of_fermions_cpu_engine(self) -> None:
+        assert self._ranked("gfx1200", dll_installed=True, model="phonon-2.5-english")[:2] == [
+            "native_parakeet", "phonon2_cpu",
+        ]
+
+    @pytest.mark.parametrize(("gfx_arch", "dll_installed"), [("gfx1100", True), ("gfx1200", False)])
+    def test_phonon_stays_on_fermions_cpu_engine_anywhere_else(self, gfx_arch: str, dll_installed: bool) -> None:
+        assert self._ranked(gfx_arch, dll_installed=dll_installed, model="phonon-2.5-english")[0] == "phonon2_cpu"
+
     def test_it_shares_the_parakeet_downloads(self, tmp_path: Path) -> None:
         from skryb.transcription.engine_registry import EngineSpec
         from skryb.transcription.native_parakeet_adapter import NativeParakeetAdapter

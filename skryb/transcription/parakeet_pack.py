@@ -149,7 +149,11 @@ def _bundled_tokenizer() -> Path:
 
 
 def pack(weights: Path, out: Path) -> None:
-    state = remap_hf_parakeet_state_dict(read_safetensors(weights))
+    pack_state(remap_hf_parakeet_state_dict(read_safetensors(weights)), out)
+
+
+def pack_state(state: dict[str, np.ndarray], out: Path) -> None:
+    """Write *state* (nano-parakeet's names, fp32) to *out* as the engine's parakeet.bin, atomically."""
     device = _device_tensors(state)
     offsets, vocab_bytes = _vocab()
     host = [("vocab.offsets", offsets), ("vocab.bytes", vocab_bytes)]
