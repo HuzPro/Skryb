@@ -15,12 +15,6 @@ _IGNORE_PATTERNS = (
     ".gitattributes",
     ".gitignore",
     "*.png",
-    # Underdog Bark's Apple builds and its own loader scripts, which ride
-    # beside the one file this app reads (about 400 MB per repo).
-    "coreml/*",
-    "mlx/*",
-    "runtime/*",
-    "bark_*.py",
 )
 
 _HF_RESOLVE_URL = "https://huggingface.co/{repo_id}/resolve/{sha}/{filename}"

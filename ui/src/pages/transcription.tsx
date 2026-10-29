@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { ModelCard, modelEntries, useModels } from "../components/models";
+import { ModelCard, useModels } from "../components/models";
 import { ChoiceCards, Disclosure, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
 import { Select } from "../components/ui/select";
 import { api } from "../lib/api";
@@ -38,26 +38,6 @@ export function withMode(settings: Settings, mode: TranscriptionMode, models: Mo
   return { ...settings, transcription_mode: mode, model_size: replacement?.name ?? settings.model_size, engine: "auto" };
 }
 
-type Style = Settings["crisperwhisper_mode"];
-
-/** Picking a family card picks its member for the style in use. */
-export function memberFor(members: Model[], style: Style): Model | undefined {
-  return members.length > 1 ? members.find((member) => member.speech_style === style) : members[0];
-}
-
-/** A family member is its own style; any other model reads the setting. */
-export function styleInUse(settings: Settings, models: Model[]): Style {
-  return models.find((model) => model.name === settings.model_size)?.speech_style ?? settings.crisperwhisper_mode;
-}
-
-/** A new style swaps a family member for its sibling; CrisperWhisper only changes the setting. */
-export function withStyle(settings: Settings, style: Style, models: Model[]): Settings {
-  const next = { ...settings, crisperwhisper_mode: style };
-  const family = models.find((model) => model.name === settings.model_size)?.style_family;
-  const sibling = family ? models.find((model) => model.style_family === family && model.speech_style === style) : undefined;
-  return sibling ? { ...next, model_size: sibling.name } : next;
-}
-
 export function useEngines(model: string | undefined): Engines | undefined {
   const engines = useQuery({
     queryKey: ["engines", model],
@@ -87,7 +67,7 @@ export function TranscriptionPage() {
     : hardware.streaming_supported
       ? ""
       : "Needs a CUDA or ROCm GPU, and none was detected.";
-  const shown = modelEntries(models.filter((model) => fitsMode(model, draft.transcription_mode)));
+  const shown = models.filter((model) => fitsMode(model, draft.transcription_mode));
   const selectedModel = models.find((model) => model.name === draft.model_size);
   const hasStyles = selectedModel?.has_speech_styles ?? false;
   const candidates = engines?.candidates ?? [];
@@ -118,15 +98,12 @@ export function TranscriptionPage() {
       </Section>
       <Section title="Models">
         <div role="radiogroup" aria-label="Model" className="flex flex-col gap-2">
-          {shown.map(({ model, members }) => (
+          {shown.map((model) => (
             <ModelCard
               key={model.name}
               model={model}
-              members={members}
-              selected={members.some((member) => member.name === draft.model_size)}
-              onSelect={() =>
-                editSettings((current) => ({ ...current, model_size: memberFor(members, current.crisperwhisper_mode)?.name ?? model.name, engine: "auto" }))
-              }
+              selected={model.name === draft.model_size}
+              onSelect={() => editSettings((current) => ({ ...current, model_size: model.name, engine: "auto" }))}
             />
           ))}
           {models.length && !shown.length ? <p className="text-[12.5px] text-muted-foreground">No models for this mode.</p> : null}
@@ -146,20 +123,18 @@ export function TranscriptionPage() {
           <Row
             title="Speech style"
             description={
-              !hasStyles
-                ? "Only CrisperWhisper and Underdog Bark Plus have speech styles."
-                : selectedModel && !selectedModel.installed
-                  ? `This style needs ${selectedModel.name}. Download it above, then save.`
-                  : "Verbatim keeps fillers and skips the dictionary, spoken commands, and number formatting."
+              hasStyles
+                ? "Verbatim keeps fillers and skips the dictionary, spoken commands, and number formatting."
+                : "Only CrisperWhisper models have speech styles."
             }
           >
             <Select
               label="Speech style"
               className="w-56"
-              value={styleInUse(draft, models)}
+              value={draft.crisperwhisper_mode}
               options={STYLES}
               disabled={!hasStyles}
-              onChange={(style) => editSettings((current) => withStyle(current, style as Style, models))}
+              onChange={(style) => editSettings((current) => ({ ...current, crisperwhisper_mode: style as Settings["crisperwhisper_mode"] }))}
             />
           </Row>
         </Rows>

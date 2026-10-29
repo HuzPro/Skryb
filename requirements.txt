@@ -27,5 +27,3 @@ pycaw>=20240210; sys_platform == 'win32'
 fermion-research==0.2.11
 # Counts physical cores for Phonon-2's thread count.
 psutil>=5.9; sys_platform == 'win32'
-# Unpacks Underdog Bark's model.bark. Pinned to the version it was packed with.
-constriction==0.5.0

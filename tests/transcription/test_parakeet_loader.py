@@ -161,28 +161,3 @@ class TestTransformersLayoutSnapshots:
         ).load("cpu")
 
         assert model == "v3"
-
-    def test_a_bark_snapshot_loads_the_weights_unpacked_from_model_bark(
-        self, monkeypatch, tmp_path,
-    ):
-        import torch
-
-        from skryb.transcription import parakeet_loader
-
-        snapshot = _install_snapshot(
-            tmp_path, "ConwayResearch/Underdog-Bark-3.0", "model.bark", "NOTICE",
-        )
-        unpacked = snapshot / ".bark" / "model.safetensors"
-        captured: dict = {}
-        monkeypatch.setattr(parakeet_loader, "unpacked_weights", lambda s: unpacked if s == snapshot else None)
-        monkeypatch.setattr(
-            parakeet_loader, "load_hf_parakeet",
-            lambda module, torch_module, path, device, dtype: captured.update(path=path, dtype=dtype) or "bark",
-        )
-
-        model = ParakeetModelLoader(
-            repo_id="ConwayResearch/Underdog-Bark-3.0", model_dir=tmp_path,
-        ).load("cpu")
-
-        assert model == "bark"
-        assert captured == {"path": unpacked, "dtype": torch.float32}

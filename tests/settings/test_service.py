@@ -49,7 +49,6 @@ from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import ALL_MODELS
 
 _PARAKEET = "parakeet-tdt-0.6b-v3"
-_BARK = ("underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro")
 
 
 def test_recording_consent_round_trips_through_saved_settings() -> None:
@@ -181,7 +180,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, "parakeet-ultra", *_BARK, "phonon-2", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, "parakeet-ultra", "phonon-2", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_should_mark_installed_status_on_view(self):

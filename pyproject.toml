@@ -46,10 +46,6 @@ dependencies = [
     # Counts physical cores for Phonon-2's thread count. pycaw already
     # pulls it in; listed because the app now imports it directly.
     "psutil>=5.9; sys_platform == 'win32'",
-    # ANS decoder for Underdog Bark's model.bark (MIT / Apache-2.0). Pinned
-    # exactly: the file's symbol models must be rebuilt exactly as they
-    # were when it was packed, and Conway Research pins this version.
-    "constriction==0.5.0",
 ]
 
 [project.optional-dependencies]

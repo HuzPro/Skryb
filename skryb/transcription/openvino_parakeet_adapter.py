@@ -58,7 +58,7 @@ _INSTALL_HINT = "The NPU engine needs OpenVINO. Install it with: pip install ope
 
 
 class OpenVinoParakeetAdapter(TranscriptionEngine):
-    """Parakeet TDT (Bark, parakeet-ultra) with the encoder on the NPU."""
+    """Parakeet TDT (parakeet-ultra) with the encoder on the NPU."""
 
     def __init__(self, model_dir: Path, repo_id: str) -> None:
         self._model_dir = model_dir

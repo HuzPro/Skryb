@@ -33,6 +33,10 @@ _REMOVED_MODEL_EXPECTATIONS = (
     ("ark-asr-3b", DEFAULT_MODEL),
     ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
     ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
+    ("underdog-bark-3.0", "phonon-2"),
+    ("underdog-bark-3.0-plus", "phonon-2"),
+    ("underdog-bark-3.0-clean", "phonon-2"),
+    ("underdog-bark-3.0-pro", "phonon-2"),
 )
 
 _REMOVED_ENGINES = (
@@ -86,10 +90,6 @@ class TestPinnedRevisions:
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         "phonon-2": "fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
         "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
-        "underdog-bark-3.0": "85db2ad18ab41e534a222ee253c29191d77ed919",
-        "underdog-bark-3.0-plus": "d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
-        "underdog-bark-3.0-clean": "6d34ed8639b2b9a33e764acf06748519bbb950cf",
-        "underdog-bark-3.0-pro": "4b5c51e04aa8d16dda9ecdff71bc29f7360149e4",
     }
 
     @pytest.mark.parametrize(
@@ -186,6 +186,12 @@ def _saved_config(path: Path, key: str, value: str) -> JsonConfigAdapter:
     return reloaded
 
 
+def _loaded_config(path: Path) -> JsonConfigAdapter:
+    config = JsonConfigAdapter(path)
+    config.load()
+    return config
+
+
 class TestRemovedModelMigration:
     @pytest.mark.parametrize(
         ("removed_model", "replacement"), _REMOVED_MODEL_EXPECTATIONS,
@@ -211,6 +217,81 @@ class TestRemovedModelMigration:
         migrate_removed_models(config)
 
         assert config.get("transcription.model_size") == DEFAULT_MODEL
+
+    def test_a_current_model_keeps_the_engine_it_was_pinned_to(self, tmp_path: Path) -> None:
+        config = _saved_config(tmp_path / "config.json", "transcription.model_size", "parakeet-ultra")
+        config.set("transcription.engine", "openvino_parakeet")
+
+        migrate_removed_models(config)
+
+        assert config.get("transcription.engine") == "openvino_parakeet"
+
+
+class TestABarkConfigMovesToPhonon2:
+    @staticmethod
+    def _bark_config(path: Path, model: str) -> JsonConfigAdapter:
+        config = JsonConfigAdapter(path)
+        config.load()
+        for key, value in {
+            "transcription.model_size": model,
+            "transcription.engine": "openvino_parakeet",
+            "transcription.crisperwhisper_mode": "verbatim",
+            "transcription.language": "en",
+            "audio.input_device": "USB Microphone (Røde NT-USB Mini)",
+            "hotkey.double_tap_locks_hold": False,
+            "history.retention_days": 0,
+            "dictionary.learn_words": True,
+            "output.paste_method_overrides": {
+                "WINWORD.EXE": "ctrl_shift_v", "Code - Insiders.exe": "type", "Zoë's Notes.exe": "type", "": "type",
+            },
+        }.items():
+            config.set(key, value)
+        config.save()
+        return _loaded_config(path)
+
+    @pytest.mark.parametrize(
+        "bark", ["underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro"],
+    )
+    def test_every_bark_model_lands_on_phonon_2_with_the_engine_back_on_auto(
+        self, tmp_path: Path, bark: str,
+    ) -> None:
+        path = tmp_path / "config.json"
+        expected = self._bark_config(path, bark)
+        expected.set("transcription.model_size", "phonon-2")
+        expected.set("transcription.engine", "auto")
+
+        migrate_removed_models(_loaded_config(path))
+
+        assert _loaded_config(path).get_all() == expected.get_all()
+
+    def test_the_migrated_config_resolves_to_phonon_2s_cpu_engine(self, tmp_path: Path) -> None:
+        from skryb.transcription.engine_factory import build_engine_registry, selectable_engine_ids
+
+        config = self._bark_config(tmp_path / "config.json", "underdog-bark-3.0-plus")
+
+        migrate_removed_models(config)
+        migrate_engine_field(config)
+
+        assert selectable_engine_ids(config, build_engine_registry()) == ("phonon2_cpu",)
+
+    def test_a_second_launch_leaves_the_migrated_config_alone(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.json"
+        migrate_removed_models(self._bark_config(path, "underdog-bark-3.0-pro"))
+        config = _loaded_config(path)
+        config.set("transcription.engine", "phonon2_cpu")
+        config.save()
+
+        migrate_removed_models(_loaded_config(path))
+
+        assert _loaded_config(path).get("transcription.engine") == "phonon2_cpu"
+
+    def test_names_that_only_look_like_bark_are_left_alone(self, tmp_path: Path) -> None:
+        for name in ("UNDERDOG-BARK-3.0", "underdog-bark-3.0 ", "underdog-bark-4.0", "bark"):
+            config = _saved_config(tmp_path / "config.json", "transcription.model_size", name)
+
+            migrate_removed_models(config)
+
+            assert config.get("transcription.model_size") == name
 
 
 class TestRemovedEngineMigration:
@@ -262,49 +343,7 @@ class TestDefaultModelForHardware:
         assert info.display_size == "164 MB"
 
 
-class TestBarkPlusSpeechStyles:
-    def test_clean_is_the_intended_style_and_plus_the_verbatim_one(self) -> None:
-        from skryb.transcription.model_info import speech_style_of
-
-        assert speech_style_of("underdog-bark-3.0-clean") == ("underdog-bark-3.0-plus", "intended")
-        assert speech_style_of("underdog-bark-3.0-plus") == ("underdog-bark-3.0-plus", "verbatim")
-
-    def test_other_models_belong_to_no_family(self) -> None:
-        from skryb.transcription.model_info import ALL_MODELS, speech_style_of
-
-        others = set(ALL_MODELS) - {"underdog-bark-3.0-clean", "underdog-bark-3.0-plus"}
-        assert all(speech_style_of(name) is None for name in others)
-        assert speech_style_of("") is None
-        assert speech_style_of("UNDERDOG-BARK-3.0-PLUS") is None
-
-    def test_both_styles_and_crisperwhisper_offer_the_style_choice(self) -> None:
-        from skryb.transcription.model_info import has_speech_styles
-
-        assert has_speech_styles("underdog-bark-3.0-clean")
-        assert has_speech_styles("underdog-bark-3.0-plus")
-        assert has_speech_styles("crisperwhisper-2.0-turbo")
-        assert not has_speech_styles("underdog-bark-3.0")
-        assert not has_speech_styles("underdog-bark-3.0-pro")
-        assert not has_speech_styles("phonon-2")
-
-    def test_every_family_member_is_a_real_catalog_model(self) -> None:
-        from skryb.transcription.model_info import ALL_MODELS, SPEECH_STYLE_FAMILIES
-
-        for family, styles in SPEECH_STYLE_FAMILIES.items():
-            assert family in ALL_MODELS
-            assert set(styles) == {"intended", "verbatim"}
-            assert all(member in ALL_MODELS for member in styles.values())
-
-
 class TestWhichModelsTranscribeVerbatim:
-    def test_bark_plus_is_verbatim_whatever_the_crisperwhisper_setting_says(self) -> None:
-        from skryb.transcription.model_info import transcribes_verbatim
-
-        assert transcribes_verbatim("underdog-bark-3.0-plus", "intended")
-        assert transcribes_verbatim("underdog-bark-3.0-plus", "verbatim")
-        assert not transcribes_verbatim("underdog-bark-3.0-clean", "verbatim")
-        assert not transcribes_verbatim("underdog-bark-3.0-clean", "intended")
-
     def test_crisperwhisper_follows_its_mode_setting(self) -> None:
         from skryb.transcription.model_info import transcribes_verbatim
 
@@ -314,23 +353,11 @@ class TestWhichModelsTranscribeVerbatim:
     def test_a_leftover_verbatim_setting_never_turns_cleanup_off_for_other_models(self) -> None:
         from skryb.transcription.model_info import transcribes_verbatim
 
-        for name in ("phonon-2", "parakeet-ultra", "underdog-bark-3.0", "qwen3-asr-1.7b", "", "not-a-model"):
+        for name in ("phonon-2", "parakeet-ultra", "underdog-bark-3.0-plus", "qwen3-asr-1.7b", "", "not-a-model"):
             assert not transcribes_verbatim(name, "verbatim")
 
 
-class TestBarkPlusDownloadsAsOneModel:
-    def test_the_family_size_is_both_downloads_added_up(self) -> None:
-        from skryb.transcription.model_info import family_display_size
-
-        assert family_display_size("underdog-bark-3.0-plus") == "360 MB"
-
-    def test_both_versions_describe_the_one_model_settings_shows(self) -> None:
-        from skryb.transcription.model_info import get_model_info
-
-        plus = get_model_info("underdog-bark-3.0-plus").description
-        assert plus == get_model_info("underdog-bark-3.0-clean").description
-        assert "Clean" in plus and "Intended" in plus and "Verbatim" in plus
-
+class TestModelSizes:
     def test_sizes_round_to_gigabytes_from_a_thousand_megabytes(self) -> None:
         from skryb.transcription.model_info import format_size_mb
 

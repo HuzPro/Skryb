@@ -3,7 +3,7 @@
     python scripts\\check_npu.py [model] [recording.wav]
 
 Uses the app's own models folder and engine, so the model must already be
-downloaded (default ``underdog-bark-3.0``). The wav must be 16 kHz mono
+downloaded (default ``parakeet-ultra``). The wav must be 16 kHz mono
 16-bit, like the clips the diagnostics folder keeps. Without one it
 transcribes 5 s of silence, which still shows the device and the speed.
 """
@@ -26,7 +26,7 @@ _RATE = 16_000
 
 
 def main() -> None:
-    model = sys.argv[1] if len(sys.argv) > 1 else "underdog-bark-3.0"
+    model = sys.argv[1] if len(sys.argv) > 1 else "parakeet-ultra"
     _describe_devices()
     engine = OpenVinoParakeetAdapter(AppPaths().models_dir, get_model_info(model).repo_id)
     started_at = time.monotonic()

@@ -35,7 +35,7 @@ from skryb.settings.service import EngineEventListener, SettingsService
 from skryb.settings.settings_draft import ChangeSet
 from skryb.settings.signal import Signal
 from skryb.settings.transcription_mode import TranscriptionMode
-from skryb.transcription.model_info import ALL_MODELS, family_display_size
+from skryb.transcription.model_info import ALL_MODELS
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, ApiServer, Route
 from skryb.ui.event_hub import EventHub, Json
 from skryb.ui.shapes import (
@@ -501,7 +501,6 @@ class CoreApi:
                 "supports_batch": self._service.model_supports_batch(view.name),
                 "supports_streaming": self._service.model_supports_streaming(view.name),
                 "has_speech_styles": self._service.model_has_speech_styles(view.name),
-                **_speech_style_fields(self._service.model_speech_style(view.name)),
                 "license_id": ALL_MODELS[view.name].license_id or None,
                 "download": self._hub.download_of(view.name),
             }
@@ -821,14 +820,6 @@ def _text_field(key: str) -> Callable[[object], str]:
 
 def _flag_field(key: str) -> Callable[[object], bool]:
     return lambda body: Fields(body, "body").flag(key)
-
-
-def _speech_style_fields(family_style: tuple[str, str] | None) -> dict[str, str | None]:
-    """Members of one family show as a single model; the shell picks the member by style."""
-    if family_style is None:
-        return {"style_family": None, "speech_style": None, "style_family_size": None}
-    family, style = family_style
-    return {"style_family": family, "speech_style": style, "style_family_size": family_display_size(family)}
 
 
 def _cue_request(body: object) -> tuple[str, float]:
