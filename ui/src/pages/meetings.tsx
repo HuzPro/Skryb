@@ -10,7 +10,7 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
-import { applyMeetingEvent, colourOf, labelOf, meetingName, talkShares, turnsOf } from "../lib/meetings";
+import { afterLeavingLivePage, applyMeetingEvent, colourOf, labelOf, meetingName, talkShares, turnsOf } from "../lib/meetings";
 import { chooseFolder } from "../lib/platform";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
@@ -410,6 +410,14 @@ export function MeetingModels({ overview, compact = false }: { overview: Meeting
 export function LiveMeetingPage() {
   const live = useLiveMeeting();
   const overview = useMeetingOverview();
+  const client = useQueryClient();
+  // A meeting just saved stays on show until the page is left; back here, the page is ready for the next one.
+  useEffect(
+    () => () => {
+      client.setQueryData<LiveMeeting | null>(["meeting-live"], (current) => afterLeavingLivePage(current ?? null));
+    },
+    [client],
+  );
   const { settings } = useStore();
   const [focusKey, setFocusKey] = useState<{ key: string; at: number } | null>(null);
   const running = live?.recording ?? false;

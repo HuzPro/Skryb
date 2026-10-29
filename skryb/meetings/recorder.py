@@ -52,9 +52,9 @@ class MeetingRecorder:
         return None if current is None else current.transcript.started
 
     def live(self) -> dict[str, object] | None:
-        """The meeting being recorded, or else the last one this run recorded."""
+        """The meeting being recorded or still finishing its transcript; none once it is saved."""
         session = self._current or self._last
-        if session is None:
+        if session is None or (session is self._last and session.status == "Saved"):
             return None
         return {"recording": session is self._current, **session.state()}
 

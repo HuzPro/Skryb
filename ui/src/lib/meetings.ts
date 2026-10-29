@@ -66,6 +66,11 @@ export function meetingName(id: string): string {
   return !rest || /^\(\d+\)$/.test(rest) ? "Meeting" : rest;
 }
 
+/** What the live page shows when it is opened again: a meeting already saved is in the list, not here. */
+export function afterLeavingLivePage(live: LiveMeeting | null): LiveMeeting | null {
+  return live && !live.recording && live.status === "Saved" ? null : live;
+}
+
 /** The live meeting after one `meeting` event; events about other meetings leave it as it is. */
 export function applyMeetingEvent(live: LiveMeeting | null, event: MeetingEvent): LiveMeeting | null {
   if (event.type === "started") return { ...event, recording: true };

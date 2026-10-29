@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { launchPath, modeOf } from "../app";
-import { applyMeetingEvent, colourOf, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
+import { afterLeavingLivePage, applyMeetingEvent, colourOf, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
 import type { LiveMeeting, MeetingEntry } from "./types";
 
 const line = (id: number, key: string, start: number, end: number, text: string): MeetingEntry => {
@@ -133,6 +133,21 @@ describe("the live meeting's events", () => {
     expect([meeting?.recording, meeting?.status]).toEqual([false, "Finishing"]);
     meeting = applyMeetingEvent(meeting, { type: "saved", id: "2026-10-29 14-05" });
     expect([meeting?.recording, meeting?.status]).toEqual([false, "Saved"]);
+  });
+});
+
+describe("coming back to the live page", () => {
+  it("is ready for the next meeting once the last one is saved", () => {
+    const saved = applyMeetingEvent(live([line(0, "them:0", 0, 1, "Hi.")]), { type: "saved", id: "2026-10-29 14-05" });
+    expect(afterLeavingLivePage(saved)).toBeNull();
+  });
+
+  it("still shows a meeting that is recording or finishing its transcript", () => {
+    const recording = live();
+    const finishing = { ...live(), recording: false, status: "Finishing" as const };
+    expect(afterLeavingLivePage(recording)).toBe(recording);
+    expect(afterLeavingLivePage(finishing)).toBe(finishing);
+    expect(afterLeavingLivePage(null)).toBeNull();
   });
 });
 

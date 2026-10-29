@@ -744,7 +744,8 @@ class Handler(BaseHTTPRequestHandler):
                              "models": [{k: v for k, v in model.items() if k != "size"} for model in core.meeting_models],
                              "meetings": [core.meeting_summary(meeting_id) for meeting_id in ids]})
         elif rest == ["live"]:
-            self._send(200, {"meeting": live})
+            # Like the core: a saved meeting is in the list, no longer live.
+            self._send(200, {"meeting": None if live is None or live["status"] == "Saved" else live})
         elif rest == ["start"]:
             if not all(model["installed"] for model in core.meeting_models):
                 self._error(400, "Download the meeting models first: Speaker labels, Qwen3-ASR speech-to-text.")

@@ -68,7 +68,7 @@ def test_starting_twice_records_one_meeting(tmp_path: Path) -> None:
     rig.recorder.stop()
 
 
-def test_stopping_saves_the_meeting_and_keeps_it_on_show(tmp_path: Path) -> None:
+def test_a_saved_meeting_leaves_the_live_page_ready_for_the_next_one(tmp_path: Path) -> None:
     rig = Rig(tmp_path)
     rig.recorder.start()
     assert rig.captures[0].them.done.wait(_WAIT_SECONDS)
@@ -78,8 +78,8 @@ def test_stopping_saves_the_meeting_and_keeps_it_on_show(tmp_path: Path) -> None
     assert not rig.recorder.is_recording()
     assert rig.changes == [True, False]
     assert rig.events[-1] == {"type": "saved", "id": "2026-10-29 14-05"}
-    live = rig.recorder.live()
-    assert live is not None and live["recording"] is False and live["status"] == "Saved"
+    assert rig.recorder.live() is None
+    # Renaming a speaker right after saving still reaches the transcript it is holding.
     assert rig.recorder.live_session("2026-10-29 14-05") is not None
     assert rig.recorder.live_session("2026-10-16 Ops Onboarding") is None
 
