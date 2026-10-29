@@ -96,10 +96,10 @@ class TestRemembering:
 
 class TestForgetting:
     @pytest.mark.parametrize(
-        "vk", [_VK_A, _VK_BACK, _VK_RETURN, _VK_LEFT, _VK_SPACE],
-        ids=["a letter", "backspace", "enter", "an arrow", "space"],
+        "vk", [_VK_A, _VK_RETURN, _VK_LEFT, _VK_SPACE],
+        ids=["a letter the layout types nothing for", "enter", "an arrow", "space the layout types nothing for"],
     )
-    def test_forgets_once_the_user_presses_a_key(self, memory, vk):
+    def test_forgets_once_the_user_presses_a_key_it_cannot_follow(self, memory, vk):
         memory.remember("okay")
 
         press(memory, vk)
@@ -152,6 +152,140 @@ class TestForgetting:
         press(memory, _VK_M)
 
         assert memory.context() == NO_CONTEXT
+
+
+_VK_PERIOD = 0xBE
+_VK_SLASH = 0xBF
+_VK_2 = 0x32
+_VK_DELETE = 0x2E
+_VK_Z = 0x5A
+
+
+def us_layout(vk: int, shift: bool) -> str:
+    """A US keyboard for the keys these tests press."""
+    if 0x41 <= vk <= 0x5A:
+        letter = chr(vk)
+        return letter if shift else letter.lower()
+    return {
+        _VK_SPACE: " ", _VK_PERIOD: ">" if shift else ".", _VK_SLASH: "?" if shift else "/",
+        _VK_2: "@" if shift else "2",
+    }.get(vk, "")
+
+
+@pytest.fixture
+def typing_memory(desktop: Desktop) -> PasteMemory:
+    memory = PasteMemory(lambda: desktop.window, lambda: desktop.clicks, _OWN_TAG, us_layout)
+    memory.set_hotkeys([_HOTKEY, _SECOND_HOTKEY])
+    return memory
+
+
+def type_text(memory: PasteMemory, text: str) -> None:
+    for character in text:
+        shifted = character.isupper() or character in "?@>"
+        if shifted:
+            press(memory, _VK_LSHIFT)
+        vk = {" ": _VK_SPACE, ".": _VK_PERIOD, "/": _VK_SLASH, "?": _VK_SLASH, "@": _VK_2}.get(
+            character, ord(character.upper()),
+        )
+        press(memory, vk)
+        release(memory, vk)
+        if shifted:
+            release(memory, _VK_LSHIFT)
+
+
+class TestFollowingTyping:
+    def test_keeps_up_with_letters_typed_after_a_paste(self, typing_memory):
+        typing_memory.remember("Send it to ")
+
+        type_text(typing_memory, "Omar")
+
+        assert typing_memory.context().before == "Send it to Omar"
+
+    def test_backspace_takes_the_last_character_off(self, typing_memory):
+        typing_memory.remember("Okay. ")
+
+        press(typing_memory, _VK_BACK)
+        press(typing_memory, _VK_BACK)
+        type_text(typing_memory, "?")
+
+        assert typing_memory.context().before == "Okay?"
+
+    def test_remembers_what_was_typed_when_nothing_was_pasted_yet(self, typing_memory):
+        type_text(typing_memory, "the admin password")
+
+        assert typing_memory.context().before == "the admin password"
+
+    def test_typing_after_a_click_starts_over_from_the_new_caret(self, typing_memory, desktop):
+        typing_memory.remember("first message ")
+        desktop.clicks += 1
+
+        type_text(typing_memory, "talha")
+
+        assert typing_memory.context().before == "talha"
+
+    def test_keeps_only_the_context_width_of_a_long_run_of_typing(self, typing_memory):
+        type_text(typing_memory, "word " * 3000)
+
+        before = typing_memory.context().before
+        assert len(before) == CONTEXT_CHARS
+        assert before.endswith("word word ")
+
+    @pytest.mark.parametrize("vk", [_VK_RETURN, _VK_LEFT, _VK_DELETE], ids=["enter", "an arrow", "delete"])
+    def test_forgets_on_a_key_that_moves_or_sends_the_text(self, typing_memory, vk):
+        type_text(typing_memory, "hello")
+
+        press(typing_memory, vk)
+
+        assert typing_memory.context() == NO_CONTEXT
+
+    def test_forgets_on_a_ctrl_shortcut_even_one_that_types_a_letter(self, typing_memory):
+        type_text(typing_memory, "hello")
+
+        press(typing_memory, _VK_LCONTROL)
+        press(typing_memory, _VK_Z)
+
+        assert typing_memory.context() == NO_CONTEXT
+
+    def test_forgets_letters_another_program_injects(self, typing_memory):
+        type_text(typing_memory, "hello")
+
+        press(typing_memory, _VK_A, flags=_INJECTED)
+
+        assert typing_memory.context() == NO_CONTEXT
+
+    def test_backspacing_everything_away_knows_nothing(self, typing_memory):
+        type_text(typing_memory, "ab")
+
+        for _ in range(5):
+            press(typing_memory, _VK_BACK)
+
+        assert typing_memory.context() == NO_CONTEXT
+
+
+class TestSpacingAfterTypingIntoAnUnreadableBox:
+    def dictate(self, memory: PasteMemory, text: str) -> str:
+        read = read_or_remember(lambda: NO_CONTEXT, memory, lambda: None)
+        fitted = fit_to_context(text, read())
+        memory.remember(fitted)
+        return fitted
+
+    def test_puts_a_space_before_a_dictation_that_follows_a_typed_word(self, typing_memory):
+        type_text(typing_memory, "talha")
+
+        assert self.dictate(typing_memory, "Can we somehow just tell Rafael. ") == " can we somehow just tell Rafael. "
+
+    def test_puts_a_space_after_retyping_a_character_that_was_backspaced(self, typing_memory):
+        self.dictate(typing_memory, "Check the admin passwords. ")
+        for _ in range(3):
+            press(typing_memory, _VK_BACK)
+        type_text(typing_memory, "d")
+
+        assert self.dictate(typing_memory, "How about this? ") == " how about this? "
+
+    def test_glues_nothing_after_a_typed_slash(self, typing_memory):
+        type_text(typing_memory, "github.com/")
+
+        assert self.dictate(typing_memory, "HuzPro") == "HuzPro"
 
 
 class TestKeysThatLeaveTheCaretAlone:
