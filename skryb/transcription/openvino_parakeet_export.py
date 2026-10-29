@@ -6,8 +6,10 @@ or incomplete; every later load reads the IR and ``decoder.npz`` without importi
 
 import logging
 import os
+import re
 import shutil
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -23,9 +25,18 @@ _EXAMPLE_FRAMES = 201
 _EXAMPLE_LENGTH = 180
 
 
-def export(openvino: object, weights: Path, encoder_path: Path, decoder_path: Path) -> None:
-    """Write whichever of the encoder IR and the decoder tensors is missing."""
-    state = _remapped_state_dict(weights, with_encoder=not encoder_path.is_file())
+# Fermion's writer stores the kernel-1 pointwise convs as [O, I]; ParakeetForTDT has [O, I, 1].
+_POINTWISE_CONV = re.compile(r"\.conv\.pointwise_conv[12]\.weight$")
+
+
+def export(
+    openvino: object, load_state: Callable[[bool], dict], encoder_path: Path, decoder_path: Path,
+) -> None:
+    """Write whichever of the encoder IR and the decoder tensors is missing.
+
+    *load_state* gives nano-parakeet's parameters in fp32, the encoder's only when asked for.
+    """
+    state = load_state(not encoder_path.is_file())
     if not encoder_path.is_file():
         export_encoder(openvino, state, encoder_path)
     if not decoder_path.is_file():
@@ -39,13 +50,39 @@ def export_decoder(state: dict, path: Path) -> None:
     os.replace(partial, path)
 
 
-def _remapped_state_dict(weights: Path, with_encoder: bool) -> dict[str, torch.Tensor]:
-    """nano-parakeet's parameters in fp32; the encoder's only when it is to be exported."""
+def transformers_layout_state(weights: Path, with_encoder: bool) -> dict[str, torch.Tensor]:
+    """nano-parakeet's parameters from a transformers-layout ``model.safetensors``."""
     from safetensors.torch import load_file
 
-    state = remap_hf_parakeet_state_dict(load_file(str(weights)))
-    return {
-        name: tensor.float() if tensor.is_floating_point() else tensor
+    return _fp32(remap_hf_parakeet_state_dict(load_file(str(weights))), with_encoder)
+
+
+def phonon_state(container: Path, with_encoder: bool) -> dict[str, torch.Tensor]:
+    """nano-parakeet's parameters from a Phonon ``model.fermion``, expanded to dense fp32.
+
+    Fermion's own reader (pure NumPy, from the pinned ``fermion-research``) expands every record
+    exactly as its transformers reference does before a strict load into ``ParakeetForTDT``.
+    """
+    from fermion._speech import _engine_phonon2
+
+    reader = _engine_phonon2.load("fermion_container")
+    tensors, _ = reader.read_container(str(container), threads=os.cpu_count() or 1)
+    hf = {}
+    for name, array in tensors.items():
+        if name.endswith("num_batches_tracked"):
+            # Stored as fp16, so large counts read as inf; eval-mode batch norm never reads it.
+            hf[name] = torch.tensor(0, dtype=torch.int64)
+            continue
+        dense = np.ascontiguousarray(array, dtype=np.float32)
+        if dense.ndim == 2 and _POINTWISE_CONV.search(name):
+            dense = dense[:, :, None]
+        hf[name] = torch.from_numpy(dense)
+    return _fp32(remap_hf_parakeet_state_dict(hf), with_encoder)
+
+
+def _fp32(state: dict, with_encoder: bool) -> dict[str, torch.Tensor]:
+    """Floating tensors in fp32; the encoder's only when it is to be exported."""
+    return {        name: tensor.float() if tensor.is_floating_point() else tensor
         for name, tensor in state.items()
         if with_encoder or not name.startswith("encoder.")
     }

@@ -612,16 +612,26 @@ class TestPhonon2OnTheCpuEngine:
         (repo / "refs" / "main").write_text(model_info.revision)
         return snapshot
 
-    def test_auto_picks_the_cpu_engine_without_probing_the_gpu(self) -> None:
-        detector = FakeHardwareDetector()
-
+    @pytest.mark.parametrize("hardware", [_CPU, _GPU])
+    def test_auto_keeps_it_on_fermions_engine_until_the_npu_engine_is_measured(self, hardware) -> None:
         engine_id = resolve_engine_id(
             _config(model_size="phonon-2.5-english"), get_model_info("phonon-2.5-english"),
-            detector, build_engine_registry(),
+            hardware, build_engine_registry(),
         )
 
         assert engine_id == "phonon2_cpu"
-        assert detector.detect_calls == 0
+
+    def test_a_computer_without_a_gpu_can_choose_the_npu_engine_for_it(self) -> None:
+        from skryb.transcription.engine_selector import rank_engines
+
+        descriptors = [
+            replace(d, available=True) if d.engine_id == "openvino_parakeet" else d
+            for d in build_engine_registry().all_descriptors()
+        ]
+        hardware = HardwareProfile(kind="cpu", device_name="Intel Core 5 320", gfx_arch=None)
+        ranked = rank_engines(get_model_info("phonon-2.5-english"), hardware, descriptors)
+
+        assert [c.engine_id for c in ranked] == ["phonon2_cpu", "openvino_parakeet"]
 
     @pytest.mark.parametrize("hardware", [_CPU, _GPU])
     def test_the_engine_opens_the_pinned_snapshot_on_any_hardware(

@@ -109,6 +109,12 @@ def _import_fermion_modules() -> tuple[object, object]:
     return engine_phonon2_cpu, fetch
 
 
+def phonon_container(snapshot: Path) -> Path:
+    """*snapshot*'s unpacked ``model.fermion``, unpacking the archive first if that hasn't happened yet."""
+    _, fetch = _import_backend()
+    return _ensure_unpacked(fetch, snapshot, read_artifact(snapshot)["filename"]) / _CONTAINER_FILENAME
+
+
 def read_artifact(snapshot: Path) -> dict:
     """The archive's file name and Fermion's profile and backend for it, from the repo's config.json."""
     try:
