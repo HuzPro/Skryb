@@ -167,7 +167,7 @@ describe("Bark Plus speech styles", () => {
   const family = "underdog-bark-3.0-plus";
   const bark = { display_size: "180 MB", style_family: family, style_family_size: "360 MB", description: "Bark Plus", download: null };
   const models = [
-    { name: "phonon-2", installed: true, style_family: null, speech_style: null, display_size: "164 MB", download: null },
+    { name: "phonon-2.5-english", installed: true, style_family: null, speech_style: null, display_size: "164 MB", download: null },
     { ...bark, name: "underdog-bark-3.0-plus", installed: false, speech_style: "verbatim" },
     { ...bark, name: "underdog-bark-3.0-clean", installed: true, speech_style: "intended" },
     { name: "crisperwhisper-2.0-turbo", installed: true, has_speech_styles: true, download: null },
@@ -175,7 +175,7 @@ describe("Bark Plus speech styles", () => {
 
   it("shows Plus and Clean as one card named Plus, with both downloads' size, in Plus's place", () => {
     const entries = modelEntries(models);
-    expect(entries.map((entry) => entry.model.name)).toEqual(["phonon-2", family, "crisperwhisper-2.0-turbo"]);
+    expect(entries.map((entry) => entry.model.name)).toEqual(["phonon-2.5-english", family, "crisperwhisper-2.0-turbo"]);
     expect(entries[1]?.model.display_size).toBe("360 MB");
     expect(entries[1]?.members.map((member) => member.name)).toEqual(["underdog-bark-3.0-plus", "underdog-bark-3.0-clean"]);
     expect(entries[0]?.members).toEqual([models[0]]);
@@ -191,7 +191,7 @@ describe("Bark Plus speech styles", () => {
     const members = modelEntries(models)[1]?.members ?? [];
     expect(memberFor(members, "intended")?.name).toBe("underdog-bark-3.0-clean");
     expect(memberFor(members, "verbatim")?.name).toBe("underdog-bark-3.0-plus");
-    expect(memberFor([models[0] as Model], "verbatim")?.name).toBe("phonon-2");
+    expect(memberFor([models[0] as Model], "verbatim")?.name).toBe("phonon-2.5-english");
   });
 
   it("shows the two downloads as one, busiest state first, bytes added up", () => {
@@ -226,7 +226,7 @@ describe("Bark Plus speech styles", () => {
   it("changes only the setting for CrisperWhisper and models without styles", () => {
     const crisper = { model_size: "crisperwhisper-2.0-turbo", crisperwhisper_mode: "intended" } as Settings;
     expect(withStyle(crisper, "verbatim", models)).toEqual({ ...crisper, crisperwhisper_mode: "verbatim" });
-    const phonon = { model_size: "phonon-2", crisperwhisper_mode: "intended" } as Settings;
+    const phonon = { model_size: "phonon-2.5-english", crisperwhisper_mode: "intended" } as Settings;
     expect(withStyle(phonon, "verbatim", models)).toEqual({ ...phonon, crisperwhisper_mode: "verbatim" });
   });
 });

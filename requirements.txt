@@ -23,8 +23,9 @@ comtypes>=1.4
 # Per-app volume, for lowering other apps while recording.
 pycaw>=20240210; sys_platform == 'win32'
 # Phonon-2's CPU engine. Pinned exactly: the app calls its internals, and
-# its native libraries were audited at this version.
-fermion-research==0.2.11
+# its native libraries were audited at 0.2.11; 0.2.15 changed two Windows
+# DLLs, checked the same way (same imports, no URLs).
+fermion-research==0.2.15
 # Counts physical cores for Phonon-2's thread count.
 psutil>=5.9; sys_platform == 'win32'
 # Unpacks Underdog Bark's model.bark. Pinned to the version it was packed with.

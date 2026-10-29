@@ -1,12 +1,13 @@
-"""Phonon-2 on the CPU, through Fermion Research's own CPU engine.
+"""Phonon (2 and 2.5 English) on the CPU, through Fermion Research's own CPU engine.
 
-Phonon-2 is parakeet-tdt-0.6b-v3 with its encoder stored at about 2.1 bits
+Phonon is parakeet-tdt-0.6b-v3 with its encoder stored at about 2.1 bits
 per weight. Fermion's engine (the pinned ``fermion-research`` package) runs
 the matrix maths on those packed weights with native AVX2 / AVX-512 / NEON
 kernels; expanding them back to full size, as nano-parakeet would, costs
 as much as Parakeet v3 itself.
 
-The repo ships the model as one zstd tar. Fermion's engine loads the
+The repo ships the model as one zstd tar, named with the profile Fermion's
+engine needs in the repo's ``config.json`` ("artifact"). The engine loads the
 unpacked directory, so the archive is unpacked once, inside the snapshot
 it came from (``snapshots/<sha>/.phonon2``), the way the CTranslate2 build
 is keyed to its snapshot. Fermion's unpacker verifies every member's
@@ -14,6 +15,7 @@ SHA-256, stages under a sibling name and renames into place last, so an
 interrupted unpack never leaves a directory that looks finished.
 """
 
+import json
 import logging
 import os
 import sys
@@ -31,28 +33,25 @@ from skryb.transcription.result import TranscriptionResult
 
 _logger = logging.getLogger(__name__)
 
-ARCHIVE_FILENAME = "phonon-2.bps.tar.zst"
 # Dot-prefixed so it can never collide with a directory the upstream repo
 # ships at the pinned commit.
 _UNPACKED_DIRECTORY_NAME = ".phonon2"
 _CONTAINER_FILENAME = "model.fermion"
-_PROFILE = "five-value"
-_BACKEND = "phonon2-five-value"
 _THREADS_ENV = "FERMION_CPU_THREADS"
 _MAX_THREADS = 16
 _INSTALL_HINT = (
-    "Phonon-2 needs Fermion's CPU engine. Install it with: "
-    "pip install fermion-research==0.2.11"
+    "Phonon needs Fermion's CPU engine. Install it with: "
+    "pip install fermion-research==0.2.15"
 )
 
 
 def unpacked_model_dir(snapshot: Path) -> Path:
-    """Where the unpacked Phonon-2 model for *snapshot* lives."""
+    """Where the unpacked Phonon model for *snapshot* lives."""
     return snapshot / _UNPACKED_DIRECTORY_NAME
 
 
 class Phonon2CpuAdapter(TranscriptionEngine):
-    """Phonon-2 on Fermion's CPU engine. It never uses the GPU."""
+    """Phonon on Fermion's CPU engine. It never uses the GPU."""
 
     def __init__(self, snapshot: Path) -> None:
         self._snapshot = snapshot
@@ -61,16 +60,17 @@ class Phonon2CpuAdapter(TranscriptionEngine):
     def load_model(self) -> None:
         started_at = time.monotonic()
         engine, fetch = _import_backend()
-        model_dir = _ensure_unpacked(fetch, self._snapshot)
+        artifact = read_artifact(self._snapshot)
+        model_dir = _ensure_unpacked(fetch, self._snapshot, artifact["filename"])
         _set_thread_count_without_powershell()
         try:
-            self._model = _load_model_from_disk(engine, model_dir)
+            self._model = _load_model_from_disk(engine, model_dir, artifact)
         except SystemExit as refusal:
             # Fermion refuses with SystemExit, which would otherwise end the
             # engine-load thread without a word.
-            raise TranscriptionError(f"Phonon-2 could not load: {refusal}") from refusal
+            raise TranscriptionError(f"Phonon could not load: {refusal}") from refusal
         _logger.info(
-            "[load_model phonon-2] complete in %.2fs on %s threads",
+            "[load_model phonon] %s complete in %.2fs on %s threads", artifact["profile"],
             time.monotonic() - started_at, os.environ.get(_THREADS_ENV, "default"),
         )
 
@@ -109,17 +109,26 @@ def _import_fermion_modules() -> tuple[object, object]:
     return engine_phonon2_cpu, fetch
 
 
-def _ensure_unpacked(fetch: object, snapshot: Path) -> Path:
+def read_artifact(snapshot: Path) -> dict:
+    """The archive's file name and Fermion's profile and backend for it, from the repo's config.json."""
+    try:
+        artifact = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))["artifact"]
+        return {key: str(artifact[key]) for key in ("filename", "profile", "backend")}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise TranscriptionError(f"{snapshot.name} has no usable Phonon config.json: {error}") from error
+
+
+def _ensure_unpacked(fetch: object, snapshot: Path, archive: str) -> Path:
     model_dir = unpacked_model_dir(snapshot)
     if (model_dir / _CONTAINER_FILENAME).is_file():
         return model_dir
-    _logger.info("Unpacking %s into %s", ARCHIVE_FILENAME, model_dir)
-    fetch._unpack(snapshot / ARCHIVE_FILENAME, model_dir)
+    _logger.info("Unpacking %s into %s", archive, model_dir)
+    fetch._unpack(snapshot / archive, model_dir)
     return model_dir
 
 
-def _load_model_from_disk(engine: object, model_dir: Path) -> object:
-    return engine.load(model_dir, profile=_PROFILE, backend=_BACKEND, quiet=True)
+def _load_model_from_disk(engine: object, model_dir: Path, artifact: dict) -> object:
+    return engine.load(model_dir, profile=artifact["profile"], backend=artifact["backend"], quiet=True)
 
 
 def _set_thread_count_without_powershell() -> None:

@@ -33,6 +33,7 @@ _REMOVED_MODEL_EXPECTATIONS = (
     ("ark-asr-3b", DEFAULT_MODEL),
     ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
     ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
+    ("phonon-2", "phonon-2.5-english"),
 )
 
 _REMOVED_ENGINES = (
@@ -84,7 +85,7 @@ class TestPinnedRevisions:
         "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
         "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
-        "phonon-2": "fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
+        "phonon-2.5-english": "da200358d638886bc96c758c672ad5568828b119",
         "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
         "underdog-bark-3.0": "85db2ad18ab41e534a222ee253c29191d77ed919",
         "underdog-bark-3.0-plus": "d4fab2f8b95681e5ad3cfb4e8c5f4e0c009b3deb",
@@ -246,15 +247,15 @@ class TestRemovedEngineMigration:
 
 
 class TestDefaultModelForHardware:
-    def test_a_machine_without_a_gpu_starts_on_phonon_2(self) -> None:
-        assert default_model_for("cpu") == "phonon-2"
+    def test_a_machine_without_a_gpu_starts_on_phonon_2_5_english(self) -> None:
+        assert default_model_for("cpu") == "phonon-2.5-english"
 
     @pytest.mark.parametrize("gpu", ["nvidia_cuda", "amd_rocm"])
     def test_a_machine_with_a_gpu_keeps_parakeet(self, gpu: str) -> None:
         assert default_model_for(gpu) == DEFAULT_MODEL
 
-    def test_phonon_2_is_ungated_english_only_and_cpu_engine_only(self) -> None:
-        info = get_model_info("phonon-2")
+    def test_phonon_2_5_english_is_ungated_english_only_and_cpu_engine_only(self) -> None:
+        info = get_model_info("phonon-2.5-english")
 
         assert info.license_id == ""
         assert "English only" in info.description
@@ -285,7 +286,7 @@ class TestBarkPlusSpeechStyles:
         assert has_speech_styles("crisperwhisper-2.0-turbo")
         assert not has_speech_styles("underdog-bark-3.0")
         assert not has_speech_styles("underdog-bark-3.0-pro")
-        assert not has_speech_styles("phonon-2")
+        assert not has_speech_styles("phonon-2.5-english")
 
     def test_every_family_member_is_a_real_catalog_model(self) -> None:
         from skryb.transcription.model_info import ALL_MODELS, SPEECH_STYLE_FAMILIES
@@ -314,7 +315,7 @@ class TestWhichModelsTranscribeVerbatim:
     def test_a_leftover_verbatim_setting_never_turns_cleanup_off_for_other_models(self) -> None:
         from skryb.transcription.model_info import transcribes_verbatim
 
-        for name in ("phonon-2", "parakeet-ultra", "underdog-bark-3.0", "qwen3-asr-1.7b", "", "not-a-model"):
+        for name in ("phonon-2.5-english", "parakeet-ultra", "underdog-bark-3.0", "qwen3-asr-1.7b", "", "not-a-model"):
             assert not transcribes_verbatim(name, "verbatim")
 
 
