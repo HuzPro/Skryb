@@ -114,7 +114,8 @@ _QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 
 
 # The encoder on an Intel NPU through OpenVINO, the rest of Parakeet in
-# PyTorch on the CPU. Only offered on machines without a GPU; available once
+# NumPy on the CPU; torch only for the one-time export. Only offered on
+# machines without a GPU; available once
 # the optional openvino package is installed (pip install skryb[npu]). With
 # no NPU it runs the encoder on OpenVINO's CPU device.
 _OPENVINO_PARAKEET_DESCRIPTOR = EngineDescriptor(
@@ -122,6 +123,7 @@ _OPENVINO_PARAKEET_DESCRIPTOR = EngineDescriptor(
     display_name="Parakeet on the NPU (OpenVINO)",
     supported_hardware=("cpu",),
     base_priority=95,
+    requires_torch=False,
 )
 
 

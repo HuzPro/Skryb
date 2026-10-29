@@ -16,11 +16,11 @@ import torch
 from skryb.core.exceptions import TranscriptionError
 from skryb.transcription.openvino_parakeet_adapter import (
     CompiledEncoder,
-    MaskedEncoder,
     bucket_frames,
     compile_encoder,
     split_at_pauses,
 )
+from skryb.transcription.openvino_parakeet_export import MaskedEncoder
 
 
 _RATE = 16_000
