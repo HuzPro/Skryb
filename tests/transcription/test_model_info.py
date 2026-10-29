@@ -365,12 +365,12 @@ class TestDefaultModelForHardware:
     def test_a_machine_with_a_gpu_keeps_parakeet(self, gpu: str) -> None:
         assert default_model_for(gpu) == DEFAULT_MODEL
 
-    def test_phonon_2_5_english_is_ungated_english_only_and_runs_on_fermion_or_the_npu(self) -> None:
+    def test_phonon_2_5_english_is_ungated_english_only_and_runs_on_fermion_the_gpu_or_the_npu(self) -> None:
         info = get_model_info("phonon-2.5-english")
 
         assert info.license_id == ""
         assert "English only" in info.description
-        assert info.compatible_engines == ("phonon2_cpu", "openvino_parakeet")
+        assert info.compatible_engines == ("phonon2_cpu", "native_parakeet", "openvino_parakeet")
         assert info.display_size == "164 MB"
 
 

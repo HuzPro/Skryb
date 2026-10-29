@@ -282,3 +282,52 @@ class TestThreadCountOnWindows:
         phonon2_cpu_adapter._set_thread_count_without_powershell()
 
         assert phonon2_cpu_adapter.os.environ["FERMION_CPU_THREADS"] == "3"
+
+
+class _FakeContainerReader:
+    def __init__(self, tensors: dict[str, np.ndarray]) -> None:
+        self.tensors, self.read = tensors, []
+
+    def read_container(self, path: str, threads: int) -> tuple[dict[str, np.ndarray], dict]:
+        self.read.append(path)
+        return self.tensors, {}
+
+
+class TestDenseWeights:
+    """Phonon's container as dense fp32 weights, the way the GPU and NPU engines take Parakeet's."""
+
+    @pytest.fixture
+    def reader(self, monkeypatch: pytest.MonkeyPatch) -> _FakeContainerReader:
+        layer = "encoder.layers.0."
+        fake = _FakeContainerReader({
+            layer + "conv.pointwise_conv1.weight": np.ones((2048, 1024), dtype=np.float16),
+            layer + "conv.pointwise_conv2.weight": np.ones((1024, 1024), dtype=np.float16),
+            layer + "conv.depthwise_conv.weight": np.ones((1024, 1, 9), dtype=np.float16),
+            layer + "feed_forward1.linear1.weight": np.full((4096, 1024), 0.5, dtype=np.float16),
+            layer + "conv.batch_norm.num_batches_tracked": np.array(np.inf, dtype=np.float16),
+        })
+        package, speech = ModuleType("fermion"), ModuleType("fermion._speech")
+        speech._engine_phonon2 = SimpleNamespace(load=lambda name: fake if name == "fermion_container" else None)
+        package._speech = speech
+        monkeypatch.setitem(sys.modules, "fermion", package)
+        monkeypatch.setitem(sys.modules, "fermion._speech", speech)
+        return fake
+
+    def test_every_tensor_comes_back_dense_in_fp32(self, reader: _FakeContainerReader, tmp_path: Path) -> None:
+        dense = phonon2_cpu_adapter.dense_weights(tmp_path / "model.fermion")
+
+        assert {array.dtype for array in dense.values()} == {np.dtype(np.float32)}
+        assert dense["encoder.layers.0.feed_forward1.linear1.weight"].shape == (4096, 1024)
+        assert reader.read == [str(tmp_path / "model.fermion")]
+
+    def test_pointwise_convs_get_back_their_kernel_axis(self, reader: _FakeContainerReader, tmp_path: Path) -> None:
+        dense = phonon2_cpu_adapter.dense_weights(tmp_path / "model.fermion")
+
+        assert dense["encoder.layers.0.conv.pointwise_conv1.weight"].shape == (2048, 1024, 1)
+        assert dense["encoder.layers.0.conv.pointwise_conv2.weight"].shape == (1024, 1024, 1)
+        assert dense["encoder.layers.0.conv.depthwise_conv.weight"].shape == (1024, 1, 9)
+
+    def test_the_batch_norm_counter_stored_as_inf_is_left_out(self, reader: _FakeContainerReader, tmp_path: Path) -> None:
+        dense = phonon2_cpu_adapter.dense_weights(tmp_path / "model.fermion")
+
+        assert not [name for name in dense if name.endswith("num_batches_tracked")]

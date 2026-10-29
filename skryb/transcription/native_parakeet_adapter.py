@@ -1,8 +1,9 @@
-"""Parakeet TDT 0.6B (Parakeet Ultra, Underdog Bark) on the native HIP engine (``native/parakeet``), no torch.
+"""Parakeet TDT 0.6B (Parakeet Ultra, Phonon) on the native HIP engine (``native/parakeet``), no torch.
 
 The engine is a DLL of hand-written kernels for the RX 9060 XT (gfx1200). It reads one packed file laid
 out as it sits in VRAM, built once from the downloaded snapshot inside it (``snapshots/<sha>/.npk``), the
-way the native Qwen3-ASR engine packs ``.qasr``.
+way the native Qwen3-ASR engine packs ``.qasr``. Phonon is the same network: its ``model.fermion`` is
+expanded to dense weights by Fermion's own reader and packed the same way.
 """
 
 import ctypes
@@ -11,15 +12,18 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 
-from skryb.core.exceptions import TranscriptionError
+from skryb.core.exceptions import ConfigurationError, TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
+from skryb.transcription.hf_model_manager import loadable_snapshot_dir
 from skryb.transcription.native_engine_dll import native_parakeet_dll
 from skryb.transcription.parakeet_loader import transformers_layout_weights
+from skryb.transcription.phonon2_cpu_adapter import read_artifact
 from skryb.transcription.result import TranscriptionResult
 
 _logger = logging.getLogger(__name__)
@@ -52,12 +56,7 @@ class NativeParakeetAdapter(TranscriptionEngine):
 
     def load_model(self) -> None:
         started_at = time.perf_counter()
-        weights = transformers_layout_weights(self._model_dir, self._repo_id)
-        if weights is None:
-            raise TranscriptionError(f"{self._repo_id} isn't downloaded, or isn't in transformers' layout")
-        packed = packed_model_path(weights)
-        if not packed.exists():
-            _pack_snapshot(weights, packed)
+        packed = self._packed_model()
         self._lib = _open_library(self._dll_path)
         error = ctypes.create_string_buffer(_ERROR_BUFFER_BYTES)
         handle = self._lib.npk_load(str(packed).encode(), error, _ERROR_BUFFER_BYTES)
@@ -67,6 +66,22 @@ class NativeParakeetAdapter(TranscriptionEngine):
         _logger.info(
             "[load_model native parakeet] complete in %.2fs | %s", time.perf_counter() - started_at, self._stats(),
         )
+
+    def _packed_model(self) -> Path:
+        """The engine file for this download, packed from its weights first if that hasn't happened yet."""
+        weights = transformers_layout_weights(self._model_dir, self._repo_id)
+        if weights is not None:
+            packed = packed_model_path(weights)
+            if not packed.exists():
+                _pack_snapshot(packed, lambda: _safetensors_state(weights))
+            return packed
+        snapshot = _phonon_snapshot(self._model_dir, self._repo_id)
+        if snapshot is None:
+            raise TranscriptionError(f"{self._repo_id} isn't downloaded, or isn't in transformers' layout")
+        packed = snapshot / _PACK_DIRECTORY_NAME / _PACK_FILENAME
+        if not packed.exists():
+            _pack_snapshot(packed, lambda: _phonon_state(snapshot))
+        return packed
 
     def is_model_loaded(self) -> bool:
         return self._handle is not None
@@ -109,12 +124,36 @@ class NativeParakeetAdapter(TranscriptionEngine):
         return json.loads(self._lib.npk_stats(self._handle).decode())
 
 
-def _pack_snapshot(weights: Path, packed: Path) -> None:
-    from skryb.transcription.parakeet_pack import pack
+def _phonon_snapshot(model_dir: Path, repo_id: str) -> Path | None:
+    """The installed snapshot when *repo_id* is a Phonon download, else None."""
+    try:
+        snapshot = loadable_snapshot_dir(model_dir, repo_id)
+        read_artifact(snapshot)
+    except (ConfigurationError, TranscriptionError):
+        return None
+    return snapshot
+
+
+def _safetensors_state(weights: Path) -> dict[str, np.ndarray]:
+    from skryb.transcription.parakeet_hf_checkpoint import remap_hf_parakeet_state_dict
+    from skryb.transcription.parakeet_pack import read_safetensors
+
+    return remap_hf_parakeet_state_dict(read_safetensors(weights))
+
+
+def _phonon_state(snapshot: Path) -> dict[str, np.ndarray]:
+    from skryb.transcription.parakeet_hf_checkpoint import remap_hf_parakeet_state_dict
+    from skryb.transcription.phonon2_cpu_adapter import dense_weights, phonon_container
+
+    return remap_hf_parakeet_state_dict(dense_weights(phonon_container(snapshot)))
+
+
+def _pack_snapshot(packed: Path, state: Callable[[], dict[str, np.ndarray]]) -> None:
+    from skryb.transcription.parakeet_pack import pack_state
 
     _logger.info("Packing Parakeet for the native engine (once per download): %s", packed)
     started_at = time.perf_counter()
-    pack(weights, packed)
+    pack_state(state(), packed)
     _logger.info("Packed in %.1fs", time.perf_counter() - started_at)
 
 
