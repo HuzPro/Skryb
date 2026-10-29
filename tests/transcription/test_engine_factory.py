@@ -680,29 +680,39 @@ class TestAutoPrefersTheTorchFreeEngine:
 
 
 class TestPhonon2OnTheCpuEngine:
-    """Phonon-2 runs on Fermion's CPU engine whatever GPU the machine has."""
+    """Phonon-2.5 English runs on Fermion's CPU engine whatever GPU the machine has."""
 
     def _installed(self, models_dir: Path) -> Path:
-        model_info = get_model_info("phonon-2")
-        repo = models_dir / "models--FermionResearch--Phonon-2"
+        model_info = get_model_info("phonon-2.5-english")
+        repo = models_dir / "models--FermionResearch--Phonon-2.5-English"
         snapshot = repo / "snapshots" / model_info.revision
         snapshot.mkdir(parents=True)
-        (snapshot / "phonon-2.bps.tar.zst").write_bytes(b"zstd tar")
+        (snapshot / "phonon-2.5-en.bps.tar.zst").write_bytes(b"zstd tar")
         (snapshot / "config.json").write_text("{}")
         (repo / "refs").mkdir()
         (repo / "refs" / "main").write_text(model_info.revision)
         return snapshot
 
-    def test_auto_picks_the_cpu_engine_without_probing_the_gpu(self) -> None:
-        detector = FakeHardwareDetector()
-
+    @pytest.mark.parametrize("hardware", [_CPU, _GPU])
+    def test_auto_keeps_it_on_fermions_engine_until_the_npu_engine_is_measured(self, hardware) -> None:
         engine_id = resolve_engine_id(
-            _config(model_size="phonon-2"), get_model_info("phonon-2"),
-            detector, build_engine_registry(),
+            _config(model_size="phonon-2.5-english"), get_model_info("phonon-2.5-english"),
+            hardware, build_engine_registry(),
         )
 
         assert engine_id == "phonon2_cpu"
-        assert detector.detect_calls == 0
+
+    def test_a_computer_without_a_gpu_can_choose_the_npu_engine_for_it(self) -> None:
+        from skryb.transcription.engine_selector import rank_engines
+
+        descriptors = [
+            replace(d, available=True) if d.engine_id == "openvino_parakeet" else d
+            for d in build_engine_registry().all_descriptors()
+        ]
+        hardware = HardwareProfile(kind="cpu", device_name="Intel Core 5 320", gfx_arch=None)
+        ranked = rank_engines(get_model_info("phonon-2.5-english"), hardware, descriptors)
+
+        assert [c.engine_id for c in ranked] == ["phonon2_cpu", "openvino_parakeet"]
 
     @pytest.mark.parametrize("hardware", [_CPU, _GPU])
     def test_the_engine_opens_the_pinned_snapshot_on_any_hardware(
@@ -713,7 +723,7 @@ class TestPhonon2OnTheCpuEngine:
         snapshot = self._installed(tmp_path)
 
         engine = create_engine_for_active_model(
-            _config(model_size="phonon-2"), _paths(tmp_path),
+            _config(model_size="phonon-2.5-english"), _paths(tmp_path),
             build_engine_registry(), hardware,
             license_policy=AllowAllLicensePolicy(),
         )
@@ -725,7 +735,7 @@ class TestPhonon2OnTheCpuEngine:
         snapshot = self._installed(tmp_path)
         (snapshot.parent.parent / "refs" / "main").write_text("0" * 40)
 
-        assert engines_with_model_on_disk(get_model_info("phonon-2"), tmp_path) == frozenset()
+        assert engines_with_model_on_disk(get_model_info("phonon-2.5-english"), tmp_path) == frozenset()
 
     def test_the_composite_manager_downloads_it_through_its_own_child(
         self, tmp_path: Path,
@@ -735,8 +745,8 @@ class TestPhonon2OnTheCpuEngine:
         )
         self._installed(tmp_path)
 
-        assert manager.has_model("phonon-2") is True
-        assert manager.is_installed("phonon-2") is True
+        assert manager.has_model("phonon-2.5-english") is True
+        assert manager.is_installed("phonon-2.5-english") is True
 
 
 class TestQwen3StartupStaysTorchFreeOnTheRx9060Xt:

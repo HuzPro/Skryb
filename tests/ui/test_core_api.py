@@ -407,7 +407,7 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
     assert status == 200
     by_name = {model["name"]: model for model in models}
     assert set(by_name) == {
-        PARAKEET, "phonon-2", NEMOTRON, TURBO, "crisperwhisper-2.0-large", "qwen3-asr-1.7b",
+        PARAKEET, "phonon-2.5-english", NEMOTRON, TURBO, "crisperwhisper-2.0-large", "qwen3-asr-1.7b",
     }
     assert by_name[PARAKEET]["installed"] is True
     assert by_name[PARAKEET]["license_id"] is None
@@ -422,26 +422,26 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
         "name", "display_size", "description", "installed", "supports_batch",
         "supports_streaming", "has_speech_styles", "license_id", "download",
     }
-    assert by_name["phonon-2"]["has_speech_styles"] is False
+    assert by_name["phonon-2.5-english"]["has_speech_styles"] is False
 
 
 def test_first_run_setup_lists_this_computers_default_model_first(make_rig) -> None:
     rig = make_rig(first_run=True, installed=())
-    rig.config.set("transcription.model_size", "phonon-2")
+    rig.config.set("transcription.model_size", "phonon-2.5-english")
 
     names = [model["name"] for model in rig.call("GET", "/api/models")[1]]
 
-    assert names[0] == "phonon-2"
+    assert names[0] == "phonon-2.5-english"
     assert names[1:3] == [PARAKEET, "crisperwhisper-2.0-turbo"]
     assert len(names) == len(set(names))
 
 
 def test_the_settings_window_keeps_the_catalogue_order(rig: Rig) -> None:
-    rig.config.set("transcription.model_size", "phonon-2")
+    rig.config.set("transcription.model_size", "phonon-2.5-english")
 
     names = [model["name"] for model in rig.call("GET", "/api/models")[1]]
 
-    assert names[:3] == [PARAKEET, "phonon-2", "crisperwhisper-2.0-turbo"]
+    assert names[:3] == [PARAKEET, "phonon-2.5-english", "crisperwhisper-2.0-turbo"]
 
 
 def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(make_rig) -> None:

@@ -21,6 +21,10 @@ _IGNORE_PATTERNS = (
     "*.gguf",
     "*.mp4",
     "*.gif",
+    # Phonon-2.5's second packing of the same weights (158 MB) and its card
+    # image; the app reads the .bps.tar.zst.
+    "*.fsq",
+    "*.jpg",
 )
 
 _HF_RESOLVE_URL = "https://huggingface.co/{repo_id}/resolve/{sha}/{filename}"

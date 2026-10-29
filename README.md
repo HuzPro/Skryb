@@ -56,7 +56,7 @@ first thing to include in a bug report.
 - **Live streaming mode (experimental).** Text appears while you speak, using
   Parakeet or the cache-aware `nemotron-speech-streaming-en-0.6b`. GPU only.
 - **GPU first, CPU works too.** CUDA and ROCm, Windows ROCm included, are
-  first-class. On a computer with no GPU the default is `phonon-2`, Parakeet
+  first-class. On a computer with no GPU the default is `phonon-2.5-english`, Parakeet
   v3 shrunk to 164 MB (English only). It runs on Fermion Research's CPU engine
   at roughly 15 to 30 times faster than real time.
 - **Learns your spellings.** Fix a word it got wrong after it pastes. Once two

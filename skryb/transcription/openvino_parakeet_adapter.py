@@ -1,4 +1,4 @@
-"""Parakeet TDT with its encoder on an Intel NPU, through OpenVINO.
+"""Parakeet TDT (Parakeet Ultra, or Phonon expanded to dense) with its encoder on an Intel NPU, through OpenVINO.
 
 The encoder is nearly all of the work. It is exported once from the
 transformers-layout weights to OpenVINO IR beside the download
@@ -78,12 +78,22 @@ class OpenVinoParakeetAdapter(TranscriptionEngine):
         )
 
     def _export(self, openvino: object, ir_path: Path, decoder_path: Path) -> None:
-        from skryb.transcription.openvino_parakeet_export import export
+        from functools import partial
+
+        from skryb.transcription import openvino_parakeet_export as exporter
 
         weights = transformers_layout_weights(self._model_dir, self._repo_id)
-        if weights is None:
-            raise TranscriptionError(f"{self._repo_id} has no transformers-layout weights for OpenVINO")
-        export(openvino, weights, ir_path, decoder_path)
+        if weights is not None:
+            load_state = partial(exporter.transformers_layout_state, weights)
+        else:
+            load_state = partial(exporter.phonon_state, self._phonon_container())
+        exporter.export(openvino, load_state, ir_path, decoder_path)
+
+    def _phonon_container(self) -> Path:
+        """A Phonon snapshot's ``model.fermion``, unpacked from its archive by Fermion if need be."""
+        from skryb.transcription.phonon2_cpu_adapter import phonon_container
+
+        return phonon_container(loadable_snapshot_dir(self._model_dir, self._repo_id))
 
     def is_model_loaded(self) -> bool:
         return self._model is not None

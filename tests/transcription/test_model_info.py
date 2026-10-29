@@ -33,10 +33,11 @@ _REMOVED_MODEL_EXPECTATIONS = (
     ("ark-asr-3b", DEFAULT_MODEL),
     ("parakeet-tdt-0.6b-v2", DEFAULT_MODEL),
     ("nemotron-streaming-compare", "nemotron-speech-streaming-en-0.6b"),
-    ("underdog-bark-3.0", "phonon-2"),
-    ("underdog-bark-3.0-plus", "phonon-2"),
-    ("underdog-bark-3.0-clean", "phonon-2"),
-    ("underdog-bark-3.0-pro", "phonon-2"),
+    ("underdog-bark-3.0", "phonon-2.5-english"),
+    ("underdog-bark-3.0-plus", "phonon-2.5-english"),
+    ("underdog-bark-3.0-clean", "phonon-2.5-english"),
+    ("underdog-bark-3.0-pro", "phonon-2.5-english"),
+    ("phonon-2", "phonon-2.5-english"),
 )
 
 _REMOVED_ENGINES = (
@@ -87,7 +88,7 @@ class TestPinnedRevisions:
         "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
         "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
-        "phonon-2": "fb09063c9dc8e130d97b3a2191ed5aed6b71bb31",
+        "phonon-2.5-english": "da200358d638886bc96c758c672ad5568828b119",
         "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
     }
 
@@ -253,7 +254,7 @@ class TestRemovedModelMigration:
         assert config.get("transcription.engine") == "openvino_parakeet"
 
 
-class TestABarkConfigMovesToPhonon2:
+class TestABarkConfigMovesToPhonon:
     @staticmethod
     def _bark_config(path: Path, model: str) -> JsonConfigAdapter:
         config = JsonConfigAdapter(path)
@@ -283,22 +284,26 @@ class TestABarkConfigMovesToPhonon2:
     ) -> None:
         path = tmp_path / "config.json"
         expected = self._bark_config(path, bark)
-        expected.set("transcription.model_size", "phonon-2")
+        expected.set("transcription.model_size", "phonon-2.5-english")
         expected.set("transcription.engine", "auto")
 
         migrate_removed_models(_loaded_config(path))
 
         assert _loaded_config(path).get_all() == expected.get_all()
 
-    def test_the_migrated_config_resolves_to_phonon_2s_cpu_engine(self, tmp_path: Path) -> None:
-        from skryb.transcription.engine_factory import build_engine_registry, selectable_engine_ids
+    def test_the_migrated_config_resolves_to_phonons_cpu_engine(self, tmp_path: Path) -> None:
+        from skryb.transcription.engine_factory import build_engine_registry, resolve_engine_id
+        from skryb.transcription.engine_types import HardwareProfile
+        from tests.fakes.hardware import FakeHardwareDetector
 
         config = self._bark_config(tmp_path / "config.json", "underdog-bark-3.0-plus")
 
         migrate_removed_models(config)
         migrate_engine_field(config)
 
-        assert selectable_engine_ids(config, build_engine_registry()) == ("phonon2_cpu",)
+        laptop = FakeHardwareDetector(HardwareProfile(kind="cpu", device_name="Intel Core 5 320", gfx_arch=None))
+        model = get_model_info(config.get("transcription.model_size"))
+        assert resolve_engine_id(config, model, laptop, build_engine_registry()) == "phonon2_cpu"
 
     def test_a_second_launch_leaves_the_migrated_config_alone(self, tmp_path: Path) -> None:
         path = tmp_path / "config.json"
@@ -353,19 +358,19 @@ class TestRemovedEngineMigration:
 
 
 class TestDefaultModelForHardware:
-    def test_a_machine_without_a_gpu_starts_on_phonon_2(self) -> None:
-        assert default_model_for("cpu") == "phonon-2"
+    def test_a_machine_without_a_gpu_starts_on_phonon_2_5_english(self) -> None:
+        assert default_model_for("cpu") == "phonon-2.5-english"
 
     @pytest.mark.parametrize("gpu", ["nvidia_cuda", "amd_rocm"])
     def test_a_machine_with_a_gpu_keeps_parakeet(self, gpu: str) -> None:
         assert default_model_for(gpu) == DEFAULT_MODEL
 
-    def test_phonon_2_is_ungated_english_only_and_cpu_engine_only(self) -> None:
-        info = get_model_info("phonon-2")
+    def test_phonon_2_5_english_is_ungated_english_only_and_runs_on_fermion_or_the_npu(self) -> None:
+        info = get_model_info("phonon-2.5-english")
 
         assert info.license_id == ""
         assert "English only" in info.description
-        assert info.compatible_engines == ("phonon2_cpu",)
+        assert info.compatible_engines == ("phonon2_cpu", "openvino_parakeet")
         assert info.display_size == "164 MB"
 
 
@@ -379,7 +384,7 @@ class TestWhichModelsTranscribeVerbatim:
     def test_a_leftover_verbatim_setting_never_turns_cleanup_off_for_other_models(self) -> None:
         from skryb.transcription.model_info import transcribes_verbatim
 
-        for name in ("phonon-2", "parakeet-ultra", "underdog-bark-3.0-plus", "qwen3-asr-1.7b", "", "not-a-model"):
+        for name in ("phonon-2.5-english", "parakeet-ultra", "underdog-bark-3.0-plus", "qwen3-asr-1.7b", "", "not-a-model"):
             assert not transcribes_verbatim(name, "verbatim")
 
 

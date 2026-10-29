@@ -180,7 +180,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, "phonon-2", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, "phonon-2.5-english", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_should_mark_installed_status_on_view(self):
