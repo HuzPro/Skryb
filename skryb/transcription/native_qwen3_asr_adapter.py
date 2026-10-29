@@ -125,7 +125,8 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 
     def _with_heard_question(self, text: str) -> str:
         """The final full stop as a question mark when the engine nearly chose one."""
-        if self._question_threshold is None:
+        # A qasr.dll built before the readout existed can't hear questions; it still transcribes.
+        if self._question_threshold is None or not hasattr(self._lib, "qasr_question_probability"):
             return text
         core = text.rstrip()
         if not core.endswith(".") or core.endswith(".."):
@@ -194,8 +195,9 @@ def _open_library(dll_path: Path) -> ctypes.CDLL:
         ]
     lib.qasr_stats.restype = ctypes.c_char_p
     lib.qasr_stats.argtypes = [ctypes.c_void_p]
-    lib.qasr_question_probability.restype = ctypes.c_float
-    lib.qasr_question_probability.argtypes = [ctypes.c_void_p]
+    if hasattr(lib, "qasr_question_probability"):
+        lib.qasr_question_probability.restype = ctypes.c_float
+        lib.qasr_question_probability.argtypes = [ctypes.c_void_p]
     lib.qasr_free.restype = None
     lib.qasr_free.argtypes = [ctypes.c_void_p]
     return lib

@@ -547,6 +547,8 @@ def create_engine_for_active_model(
         config, model_info, hardware_detector, registry,
         installed_engines=installed,
     )
+    if device_override == "cpu" and "cpu" not in registry.descriptor(engine_id).supported_hardware:
+        engine_id = _cpu_engine_for(model_info, registry, installed) or engine_id
     spec = EngineSpec(
         model_name=model_name,
         repo_id=model_info.repo_id,
@@ -561,6 +563,19 @@ def create_engine_for_active_model(
         question_marks=config.get("transcription.question_marks", True) is not False,
     )
     return registry.build(engine_id, spec)
+
+
+def _cpu_engine_for(
+    model_info: ModelInfo,
+    registry: EngineRegistry,
+    installed: frozenset[EngineId],
+) -> EngineId | None:
+    """The engine the CPU fallback runs after a GPU-only engine failed to load, if the model has one."""
+    ranked = [
+        candidate.engine_id
+        for candidate in rank_engines(model_info, _UNPROBED_HARDWARE, registry.all_descriptors())
+    ]
+    return next((e for e in ranked if e in installed), ranked[0] if ranked else None)
 
 
 def _resolve_beam_size(

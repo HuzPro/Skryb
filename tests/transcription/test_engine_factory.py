@@ -1,3 +1,4 @@
+import importlib.util
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -183,6 +184,23 @@ class TestTheNativeParakeetEngine:
         assert isinstance(engine, NativeParakeetAdapter)
         assert engine.is_model_loaded() is False
         assert "parakeet-ultra" in {m.name for m in manager.list_models()}
+
+    def test_the_cpu_fallback_after_it_fails_runs_parakeet_on_pytorch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("skryb.transcription.engine_factory.native_parakeet_dll", lambda: tmp_path / "npk.dll")
+        find_spec = importlib.util.find_spec
+        monkeypatch.setattr(  # without the optional NPU engine, PyTorch is the CPU's only Parakeet engine
+            "importlib.util.find_spec", lambda name, *rest: None if name == "openvino" else find_spec(name, *rest),
+        )
+
+        engine = create_engine_for_active_model(
+            _config(model_size="parakeet-ultra", device="cuda"), _paths(tmp_path), build_engine_registry(),
+            _GPU, license_policy=AllowAllLicensePolicy(), device_override="cpu",
+        )
+
+        assert isinstance(engine, NanoParakeetAdapter)
+        assert engine._device == "cpu"
 
     def test_startup_skips_torch_when_an_earlier_launch_found_an_rx_9060_xt(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

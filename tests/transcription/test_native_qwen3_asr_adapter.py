@@ -130,6 +130,19 @@ class TestHearingQuestions:
     def test_a_question_mark_the_engine_wrote_itself_is_kept(self, tmp_path: Path) -> None:
         assert _transcribe(tmp_path, "How big is the damage?", -1.0) == "How big is the damage?"
 
+    def test_an_engine_built_before_the_readout_still_transcribes(self, tmp_path: Path) -> None:
+        class _OlderQasr(_FakeQasr):
+            def __getattribute__(self, name: str):  # noqa: ANN204
+                if name == "qasr_question_probability":
+                    raise AttributeError(name)
+                return super().__getattribute__(name)
+
+        adapter = NativeQwen3AsrAdapter(tmp_path)
+        adapter._lib, adapter._handle = _OlderQasr("Is it done.", 0.9), 1
+        audio = AudioSegment(data=np.zeros(16000, dtype=np.float32), sample_rate=16000)
+
+        assert adapter.transcribe(audio).text == "Is it done."
+
     def test_only_the_last_full_stop_changes(self, tmp_path: Path) -> None:
         assert _transcribe(tmp_path, "Are you sure. Like we're good to disable the keys.", 0.5) == (
             "Are you sure. Like we're good to disable the keys?"
