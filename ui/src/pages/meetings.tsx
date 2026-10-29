@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Circle, CircleAlert, Download, FolderOpen, LoaderCircle, Radio, Settings2, Square } from "lucide-react";
+import { ArrowDown, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, Radio, Settings2, Square, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { NavLink, useParams } from "react-router";
 import { formatGigabytes } from "../components/models";
@@ -10,11 +10,11 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
-import { afterLeavingLivePage, applyMeetingEvent, colourOf, labelOf, meetingName, talkShares, turnsOf } from "../lib/meetings";
-import { chooseFolder } from "../lib/platform";
+import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, labelOf, MEDIA_EXTENSIONS, meetingName, percent, talkShares, turnsOf } from "../lib/meetings";
+import { chooseFolder, chooseMediaFile, onFileDrag } from "../lib/platform";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
-import type { DownloadState, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingTranscript } from "../lib/types";
+import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingTranscript } from "../lib/types";
 import { cn } from "../lib/utils";
 import { dayLabel, formatDuration } from "./history";
 
@@ -25,6 +25,10 @@ const LANGUAGES: { value: MeetingLanguage; label: string }[] = [
   { value: "en", label: "English" },
   { value: "ur", label: "Urdu, written in Roman Urdu" },
   { value: "auto", label: "English and Urdu, each sentence as spoken" },
+];
+const FILE_LANGUAGES: { value: FileLanguage; label: string }[] = [
+  { value: "en", label: "English" },
+  { value: "ur", label: "Urdu, written in Roman Urdu" },
 ];
 
 export function useMeetingOverview(): MeetingOverview | undefined {
@@ -89,6 +93,7 @@ export function MeetingsNav() {
   const overview = useMeetingOverview();
   const live = useLiveMeeting();
   const recording = live?.recording ?? overview?.recording ?? false;
+  const transcribingFile = recording && Boolean(live?.source);
   const link = ({ isActive }: { isActive: boolean }) =>
     cn(
       "flex items-center gap-2.5 rounded-md px-2.5 text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground",
@@ -99,9 +104,9 @@ export function MeetingsNav() {
     <>
       <nav className="flex flex-col gap-0.5 px-2 pt-2">
         <NavLink to="/meetings" end draggable={false} className={(state) => cn(link(state), "h-8")}>
-          <Radio className={cn("size-4", recording && "text-destructive")} />
-          {recording ? "Recording now" : "Live meeting"}
-          {recording ? <span className="ml-auto size-1.5 animate-pulse rounded-full bg-destructive" /> : null}
+          {transcribingFile ? <FileAudio className="size-4 text-primary" /> : <Radio className={cn("size-4", recording && "text-destructive")} />}
+          {transcribingFile ? "Transcribing a file" : recording ? "Recording now" : "Live meeting"}
+          {recording ? <span className={cn("ml-auto size-1.5 animate-pulse rounded-full", transcribingFile ? "bg-primary" : "bg-destructive")} /> : null}
         </NavLink>
       </nav>
       <div className="mt-4 px-4 pb-1 text-[11.5px] font-semibold text-muted-foreground">Past meetings</div>
@@ -135,6 +140,7 @@ function StartStopButton({ live, overview }: { live: LiveMeeting | null | undefi
   const [problem, setProblem] = useState("");
   const recording = live?.recording ?? false;
   const finishing = live?.status === "Finishing";
+  const file = recording && Boolean(live?.source);
   const run = async () => {
     setBusy(true);
     setProblem("");
@@ -150,13 +156,13 @@ function StartStopButton({ live, overview }: { live: LiveMeeting | null | undefi
     <div className="flex flex-col items-end gap-1">
       <Button
         size="default"
-        variant={recording ? "destructive" : "default"}
+        variant={file ? "outline" : recording ? "destructive" : "default"}
         disabled={busy || finishing || (!recording && overview?.models_ready === false)}
         onClick={() => void run()}
         className="h-10 min-w-[188px] rounded-lg px-5 text-[14px] [&_svg]:size-4"
       >
-        {busy || finishing ? <LoaderCircle className="animate-spin" /> : recording ? <Square className="fill-current" /> : <Circle className="fill-current" />}
-        {finishing ? "Finishing the transcript" : recording ? "Stop recording" : "Start meeting"}
+        {busy || finishing ? <LoaderCircle className="animate-spin" /> : file ? <X /> : recording ? <Square className="fill-current" /> : <Circle className="fill-current" />}
+        {finishing ? "Finishing the transcript" : file ? "Cancel" : recording ? "Stop recording" : "Start meeting"}
       </Button>
       {problem ? <span className="max-w-[360px] text-right text-[12px] text-destructive">{problem}</span> : null}
     </div>
@@ -405,6 +411,59 @@ export function MeetingModels({ overview, compact = false }: { overview: Meeting
   );
 }
 
+/** Drop a video or audio file on the window, or pick one: it is transcribed as a meeting of its own. */
+function FileDropCard({ ready, meetingLanguage, className }: { ready: boolean; meetingLanguage: MeetingLanguage | undefined; className?: string }) {
+  const [language, setLanguage] = useState<FileLanguage>(meetingLanguage === "ur" ? "ur" : "en");
+  const [over, setOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const transcribe = async (path: string | null) => {
+    if (!path) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      await api.post("/api/meetings/files", { path, language });
+    } catch (error) {
+      setProblem(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const latest = useRef(transcribe);
+  latest.current = transcribe;
+  useEffect(
+    () =>
+      onFileDrag((drag) => {
+        if (drag.type !== "drop") return setOver(drag.type === "over");
+        setOver(false);
+        if (ready) void latest.current(droppedMedia(drag.paths));
+        else setProblem("Download the meeting models first.");
+      }),
+    [ready],
+  );
+  return (
+    <Card className={cn("border-dashed px-5 py-4 transition-colors duration-150", over && "border-primary bg-primary/5", className)}>
+      <div className="flex items-start gap-3.5">
+        <FileAudio className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", over && "text-primary")} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-medium text-foreground">{over ? "Drop it to transcribe it" : "Transcribe a recording"}</p>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+            Drop a video or audio file anywhere on this window, or choose one. It becomes a meeting of its own, with the voices told apart.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Select value={language} options={FILE_LANGUAGES} onChange={(value) => setLanguage(value as FileLanguage)} label="Language of the file" className="w-[220px]" />
+            <Button variant="outline" disabled={busy || !ready} onClick={async () => void transcribe(await chooseMediaFile(MEDIA_EXTENSIONS))}>
+              {busy ? <LoaderCircle className="animate-spin" /> : null}
+              Choose file
+            </Button>
+          </div>
+          {problem ? <InlineError>{problem}</InlineError> : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // -- the live meeting -------------------------------------------------------------------
 
 export function LiveMeetingPage() {
@@ -421,17 +480,29 @@ export function LiveMeetingPage() {
   const { settings } = useStore();
   const [focusKey, setFocusKey] = useState<{ key: string; at: number } | null>(null);
   const running = live?.recording ?? false;
-  const elapsed = useElapsed(live?.started, running);
+  const file = Boolean(live?.source);
+  const elapsed = useElapsed(live?.started, running && !file);
   const meetings = settings?.saved.meetings;
   const language = LANGUAGES.find((choice) => choice.value === meetings?.language)?.label ?? "English";
 
   const header = (
     <div className="flex min-h-10 items-center gap-4">
       <div className="flex min-w-0 flex-1 items-center gap-x-4">
-        <h1 className="shrink-0 text-[20px] font-semibold tracking-tight">{live ? (running ? "Live meeting" : meetingName(live.id)) : "Meetings"}</h1>
+        <h1 className="shrink-0 text-[20px] font-semibold tracking-tight">{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Meetings"}</h1>
         {live ? <StatusBadge live={live} /> : null}
-        {live && running ? <span className="text-[13px] text-muted-foreground tabular-nums">{formatDuration(elapsed)}</span> : null}
+        {live && running && !file ? <span className="text-[13px] text-muted-foreground tabular-nums">{formatDuration(elapsed)}</span> : null}
         {live?.device && running ? <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">Listening to {live.device}</span> : null}
+        {file && running ? (
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="min-w-0 truncate text-[12.5px] text-muted-foreground" title={live?.source ?? ""}>{live?.source}</span>
+            {live?.progress != null ? (
+              <>
+                <ProgressBar value={live.progress} className="h-1.5 min-w-[80px] max-w-[220px] flex-1" />
+                <span className="text-[12.5px] text-muted-foreground tabular-nums">{percent(live.progress)}</span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <StartStopButton live={live} overview={overview} />
     </div>
@@ -443,6 +514,7 @@ export function LiveMeetingPage() {
       <p className="mt-1.5">
         Start here or from the tray icon. Skryb records what your PC plays{meetings?.record_microphone === false ? "" : " and your microphone"}, tells the voices apart and writes it all down as it goes, in {language}.
       </p>
+      <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} className="mt-6 text-left" />
     </div>
   );
 
@@ -454,11 +526,12 @@ export function LiveMeetingPage() {
       transcript={
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {overview && !overview.models_ready ? <MeetingModels overview={overview} compact /> : null}
+          {live && !running ? <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} /> : null}
           <TranscriptPane
             transcript={transcript}
             live={Boolean(live) && live?.status !== "Saved"}
             onNameClick={(key) => setFocusKey({ key, at: Date.now() })}
-            empty={live ? (running ? "Listening. Lines appear a second or two after someone stops talking." : "Nothing was said in this meeting.") : idle}
+            empty={live ? (running ? (file ? "Lines appear here as the file is transcribed." : "Listening. Lines appear a second or two after someone stops talking.") : "Nothing was said in this meeting.") : idle}
           />
         </div>
       }
@@ -470,10 +543,16 @@ export function LiveMeetingPage() {
             <h2 className="mb-2.5 text-[13px] font-semibold text-muted-foreground">Session</h2>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[12.5px]">
               {live ? <Detail term="Started">{when(live.started)}</Detail> : null}
-              {live ? <Detail term="Length">{formatDuration(running ? elapsed : Math.max(0, ...live.entries.map((entry) => entry.end)))}</Detail> : null}
-              <Detail term="Listening to">{running ? live?.device || "Finding the speakers" : "What your PC plays"}</Detail>
-              <Detail term="Microphone">{meetings?.record_microphone === false ? "Not recorded" : "Recorded as Me"}</Detail>
-              <Detail term="Language">{language}</Detail>
+              {live ? <Detail term="Length">{formatDuration(running && !file ? elapsed : Math.max(0, ...live.entries.map((entry) => entry.end)))}</Detail> : null}
+              {file ? (
+                <Detail term="File">{live?.source}</Detail>
+              ) : (
+                <>
+                  <Detail term="Listening to">{running ? live?.device || "Finding the speakers" : "What your PC plays"}</Detail>
+                  <Detail term="Microphone">{meetings?.record_microphone === false ? "Not recorded" : "Recorded as Me"}</Detail>
+                  <Detail term="Language">{language}</Detail>
+                </>
+              )}
               <Detail term="Saved to">
                 <span className="selectable">{live?.folder || overview?.folder || "…"}</span>
               </Detail>

@@ -196,7 +196,9 @@ export interface MeetingTranscript {
   entries: MeetingEntry[];
 }
 
-export type MeetingStatus = "Starting" | "Loading models" | "Recording" | "Finishing" | "Saved";
+export type MeetingStatus = "Starting" | "Loading models" | "Recording" | "Reading the file" | "Transcribing" | "Finishing" | "Saved";
+/** The languages a dropped file can be transcribed in. */
+export type FileLanguage = "en" | "ur";
 
 export interface LiveMeeting extends MeetingTranscript {
   id: string;
@@ -204,6 +206,10 @@ export interface LiveMeeting extends MeetingTranscript {
   status: MeetingStatus;
   device: string | null;
   warning: string | null;
+  /** The file's name when this meeting is a dropped video or audio file being transcribed. */
+  source?: string | null;
+  /** That file's progress through its current step, 0 to 1. */
+  progress?: number | null;
 }
 
 export interface MeetingSummary {
@@ -235,7 +241,7 @@ export interface MeetingOverview {
 
 /** What the core sends as `meeting` events; every one names its meeting by `id` except `saved`'s own field. */
 export type MeetingEvent =
-  | { type: "status"; id: string; status: MeetingStatus; folder: string; device: string | null; warning: string | null }
+  | { type: "status"; id: string; status: MeetingStatus; folder: string; device: string | null; warning: string | null; source?: string | null; progress?: number | null }
   | { type: "entry"; id: string; entry: MeetingEntry }
   | { type: "remove"; id: string; entry_id: number }
   | { type: "names"; id: string; names: Record<string, string> }

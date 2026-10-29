@@ -423,8 +423,73 @@ class Core:
                 at += length + rng.random()
                 index += 1
 
+    def transcribe_file(self, path: str, language: str) -> None:
+        """A file's meeting: read, load, then lines with progress, as the core publishes them."""
+        started = datetime.now().replace(microsecond=0)
+        name = path.replace("/", "\\").rsplit("\\", 1)[-1]
+        meeting_id = f"{started:%Y-%m-%d %H-%M} {name.rsplit('.', 1)[0]}"
+        self.live_meeting = {"id": meeting_id, "recording": True, "status": "Reading the file", "device": None,
+                             "warning": None, "folder": f"{self.settings['meetings']['folder']}\\{meeting_id}",
+                             "started": started.isoformat(), "names": {}, "entries": [], "source": name, "progress": 0.0}
+        self.app["meeting_recording"] = True
+        self.emit("meeting", {"type": "started", **{k: v for k, v in self.live_meeting.items() if k != "recording"}})
+        self.emit("app", self.app)
+        threading.Thread(target=self._read_and_transcribe, args=(meeting_id,), daemon=True).start()
+
+    def _file_status(self, meeting_id: str, status: str, progress: float | None) -> bool:
+        with self.lock:
+            live = self.live_meeting
+            if live is None or live["id"] != meeting_id or not live["recording"]:
+                return False
+            live["status"], live["progress"] = status, progress
+            self.emit("meeting", {"type": "status", "id": meeting_id, "status": status, "folder": live["folder"],
+                                  "device": None, "warning": live["warning"], "source": live["source"], "progress": progress})
+            return True
+
+    def _read_and_transcribe(self, meeting_id: str) -> None:
+        for step in range(1, 11):
+            time.sleep(0.15)
+            if not self._file_status(meeting_id, "Reading the file", step / 10):
+                return
+        time.sleep(0.6)
+        if not self._file_status(meeting_id, "Loading models", None):
+            return
+        time.sleep(0.8)
+        lines = 12
+        for index in range(lines):
+            if not self._file_status(meeting_id, "Transcribing", round(index / lines, 3)):
+                return
+            time.sleep(0.5)
+            with self.lock:
+                live = self.live_meeting
+                key, text = MEETING_LINES[index % len(MEETING_LINES)]
+                key = key if key.startswith("them:") else "them:3"
+                entry = {"id": index, "track": "them", "speaker": int(key[5:]), "start": index * 6.0 + 0.5,
+                         "end": index * 6.0 + 5.0, "text": text, "key": key}
+                live["entries"].append(entry)
+                live["names"] = {k: live["names"].get(k) or f"Speaker {int(k[5:]) + 1}" for k in sorted({e["key"] for e in live["entries"]})}
+                self.emit("meeting", {"type": "entry", "id": meeting_id, "entry": entry})
+        self._file_status(meeting_id, "Transcribing", 1.0)
+        with self.lock:
+            live = self.live_meeting
+            live["recording"] = False
+            self.app["meeting_recording"] = False
+            self.emit("app", self.app)
+            self.meeting_status("Saved")
+            self.meetings[live["id"]] = {key: live[key] for key in ("folder", "started", "names", "entries")}
+            self.emit("meeting", {"type": "saved", "id": live["id"]})
+
     def stop_meeting(self) -> None:
         live = self.live_meeting
+        if live.get("source"):
+            live["recording"] = False
+            live["warning"] = "Cancelled: the lines so far are saved."
+            self.app["meeting_recording"] = False
+            self.emit("app", self.app)
+            self.meeting_status("Saved")
+            self.meetings[live["id"]] = {key: live[key] for key in ("folder", "started", "names", "entries")}
+            self.emit("meeting", {"type": "saved", "id": live["id"]})
+            return
         self.meeting_status("Finishing")
         self.app["meeting_recording"] = False
         self.emit("app", self.app)
@@ -753,6 +818,19 @@ class Handler(BaseHTTPRequestHandler):
             if not core.app["meeting_recording"]:
                 core.start_meeting()
             self._send(202)
+        elif rest == ["files"]:
+            body = self._body() or {}
+            if body.get("language") not in ("en", "ur"):
+                self._error(400, "Pick English or Urdu for the file.")
+            elif not str(body.get("path") or "").strip():
+                self._error(400, "Say which file to transcribe and in which language.")
+            elif str(body["path"]).lower().endswith((".ogg", ".opus")):
+                self._error(400, "Skryb can't read .ogg files yet. It reads MP4, MOV, MKV, WebM, M4A, WMV, AVI, MP3, AAC, FLAC and WAV.")
+            elif core.app["meeting_recording"]:
+                self._error(400, "A meeting is being recorded. Stop it before transcribing a file.")
+            else:
+                core.transcribe_file(str(body["path"]), body["language"])
+                self._send(202)
         elif rest == ["stop"]:
             if live and live["recording"]:
                 core.stop_meeting()

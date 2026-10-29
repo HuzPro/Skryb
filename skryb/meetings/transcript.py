@@ -186,6 +186,10 @@ class Transcript:
             lines.append(e.text)
         return "\n".join(lines).strip() + "\n"
 
+    def save(self) -> None:
+        with self._lock:
+            self._save()
+
     def _save(self) -> None:
         data = {
             "started": self.started.isoformat(timespec="seconds"),

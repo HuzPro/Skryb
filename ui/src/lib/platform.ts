@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
@@ -90,6 +91,42 @@ export async function chooseFolder(title: string, defaultPath: string): Promise<
   if (!inTauri) return window.prompt(title, defaultPath);
   const chosen = await open({ title, defaultPath, multiple: false, directory: true });
   return typeof chosen === "string" ? chosen : null;
+}
+
+/** A video or audio file picked in Windows' open dialog; outside the app, a typed path. */
+export async function chooseMediaFile(extensions: string[]): Promise<string | null> {
+  if (!inTauri) return window.prompt("Path of a video or audio file", "C:\\Videos\\meeting.mp4");
+  const chosen = await open({
+    title: "Choose a video or audio file",
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Video and audio", extensions }, { name: "All files", extensions: ["*"] }],
+  });
+  return typeof chosen === "string" ? chosen : null;
+}
+
+export type FileDrag = { type: "over" } | { type: "leave" } | { type: "drop"; paths: string[] };
+
+/** Files dragged over and dropped on the window. The app hands over their paths; a browser has none to give. */
+export function onFileDrag(handler: (drag: FileDrag) => void): () => void {
+  if (!inTauri) return () => undefined;
+  let stop: (() => void) | null = null;
+  let stopped = false;
+  void getCurrentWebview()
+    .onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type === "drop") handler({ type: "drop", paths: payload.paths });
+      else if (payload.type === "leave") handler({ type: "leave" });
+      else handler({ type: "over" });
+    })
+    .then((unlisten) => {
+      if (stopped) unlisten();
+      else stop = unlisten;
+    });
+  return () => {
+    stopped = true;
+    stop?.();
+  };
 }
 
 export async function copyText(text: string): Promise<void> {

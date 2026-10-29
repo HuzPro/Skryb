@@ -66,6 +66,20 @@ export function meetingName(id: string): string {
   return !rest || /^\(\d+\)$/.test(rest) ? "Meeting" : rest;
 }
 
+/** Video and audio files Windows reads; the picker offers these, and anything else is still tried. */
+export const MEDIA_EXTENSIONS = ["mp4", "mov", "mkv", "webm", "m4a", "m4v", "wmv", "wma", "avi", "mp3", "aac", "flac", "wav", "3gp"];
+
+/** The first dropped file worth trying: one with a media extension, else the first of them. */
+export function droppedMedia(paths: string[]): string | null {
+  const media = paths.find((path) => MEDIA_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? ""));
+  return media ?? paths[0] ?? null;
+}
+
+/** Progress as the page shows it: whole percents, never past 100. */
+export function percent(progress: number | null | undefined): string {
+  return `${Math.min(100, Math.max(0, Math.floor((progress ?? 0) * 100)))}%`;
+}
+
 /** What the live page shows when it is opened again: a meeting already saved is in the list, not here. */
 export function afterLeavingLivePage(live: LiveMeeting | null): LiveMeeting | null {
   return live && !live.recording && live.status === "Saved" ? null : live;
@@ -77,7 +91,10 @@ export function applyMeetingEvent(live: LiveMeeting | null, event: MeetingEvent)
   if (!live || event.id !== live.id) return live;
   switch (event.type) {
     case "status":
-      return { ...live, status: event.status, folder: event.folder, device: event.device, warning: event.warning, recording: !STOPPED.has(event.status) };
+      return {
+        ...live, status: event.status, folder: event.folder, device: event.device, warning: event.warning,
+        source: event.source ?? live.source, progress: event.progress ?? null, recording: !STOPPED.has(event.status),
+      };
     case "entry":
       return { ...live, entries: [...live.entries.filter((entry) => entry.id !== event.entry.id), event.entry] };
     case "remove":

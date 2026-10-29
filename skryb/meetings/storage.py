@@ -20,6 +20,9 @@ _SECOND_DRIVE = Path("D:/")
 LANGUAGES = ("en", "ur", "auto")
 
 
+_NAME_CHARS = 80
+
+
 @dataclass(frozen=True)
 class MeetingSettings:
     folder: Path
@@ -47,14 +50,20 @@ def default_meetings_folder(
     return (home or Path.home()) / "Documents" / "Skryb Meetings"
 
 
-def new_meeting_folder(root: Path, started: datetime) -> Path:
-    """``YYYY-MM-DD HH-MM``, with `` (2)`` and up when a meeting already has that minute."""
-    folder = root / started.strftime("%Y-%m-%d %H-%M")
+def new_meeting_folder(root: Path, started: datetime, name: str = "") -> Path:
+    """``YYYY-MM-DD HH-MM``, then *name* when given, with `` (2)`` and up when a meeting already has that name."""
+    folder = root / " ".join(part for part in (started.strftime("%Y-%m-%d %H-%M"), _folder_safe(name)) if part)
     candidate, n = folder, 2
     while candidate.exists():
         candidate = folder.with_name(f"{folder.name} ({n})")
         n += 1
     return candidate
+
+
+def _folder_safe(name: str) -> str:
+    """*name* as part of a folder name: no characters Windows refuses, one line, at most 80 characters."""
+    cleaned = "".join(" " if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in name)
+    return " ".join(cleaned.split())[:_NAME_CHARS].rstrip(" .")
 
 
 def vocabulary_file(root: Path) -> Path:

@@ -132,3 +132,21 @@ def test_saved_meeting_settings_are_read_and_an_unknown_language_falls_back_to_e
     assert settings.folder == Path("E:\\Calls")
     assert settings.record_microphone is False
     assert settings.language == "en"
+
+
+@pytest.mark.parametrize(("name", "folder"), [
+    ("Sprint review", "2026-10-29 14-05 Sprint review"),
+    ('Q3: plan/review?* "final"', "2026-10-29 14-05 Q3 plan review final"),
+    ("  ٹیم   میٹنگ\tnotes  ", "2026-10-29 14-05 ٹیم میٹنگ notes"),
+    ("a" * 200, "2026-10-29 14-05 " + "a" * 80),
+    ("trailing dots...", "2026-10-29 14-05 trailing dots"),
+    ("", "2026-10-29 14-05"),
+])
+def test_a_file_meeting_is_named_after_the_file_in_a_name_windows_accepts(tmp_path: Path, name: str, folder: str) -> None:
+    assert new_meeting_folder(tmp_path, datetime(2026, 10, 29, 14, 5, 33), name).name == folder
+
+
+def test_a_second_file_with_the_same_name_in_the_same_minute_gets_a_number(tmp_path: Path) -> None:
+    (tmp_path / "2026-10-29 14-05 Sprint review").mkdir()
+
+    assert new_meeting_folder(tmp_path, datetime(2026, 10, 29, 14, 5), "Sprint review").name == "2026-10-29 14-05 Sprint review (2)"

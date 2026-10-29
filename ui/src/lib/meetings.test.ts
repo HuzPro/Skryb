@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { launchPath, modeOf } from "../app";
-import { afterLeavingLivePage, applyMeetingEvent, colourOf, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
+import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
 import type { LiveMeeting, MeetingEntry } from "./types";
 
 const line = (id: number, key: string, start: number, end: number, text: string): MeetingEntry => {
@@ -132,6 +132,32 @@ describe("the live meeting's events", () => {
     });
     expect([meeting?.recording, meeting?.status]).toEqual([false, "Finishing"]);
     meeting = applyMeetingEvent(meeting, { type: "saved", id: "2026-10-29 14-05" });
+    expect([meeting?.recording, meeting?.status]).toEqual([false, "Saved"]);
+  });
+});
+
+describe("a dropped file", () => {
+  it("picks the first video or audio file when several things are dropped at once", () => {
+    expect(droppedMedia(["C:\Docs\notes.txt", "D:\Calls\سالانہ جائزہ.MKV", "D:\Calls\b.mp4"])).toBe("D:\Calls\سالانہ جائزہ.MKV");
+  });
+
+  it("still tries a file without a media extension when nothing else was dropped", () => {
+    expect(droppedMedia(["C:\Downloads\recording"])).toBe("C:\Downloads\recording");
+    expect(droppedMedia([])).toBeNull();
+  });
+
+  it("shows progress in whole percents between 0 and 100", () => {
+    expect([percent(0), percent(0.4999), percent(1), percent(1.2), percent(-0.1), percent(null)]).toEqual(["0%", "49%", "100%", "100%", "0%", "0%"]);
+  });
+
+  it("carries the file's name and progress through its status events", () => {
+    const { recording: _recording, ...started } = live();
+    let meeting = applyMeetingEvent(null, { type: "started", ...started, source: "Weekly sync.mp4", progress: 0 });
+    meeting = applyMeetingEvent(meeting, {
+      type: "status", id: started.id, status: "Transcribing", folder: started.folder, device: null, warning: null, progress: 0.42,
+    });
+    expect([meeting?.source, meeting?.progress, meeting?.recording]).toEqual(["Weekly sync.mp4", 0.42, true]);
+    meeting = applyMeetingEvent(meeting, { type: "saved", id: started.id });
     expect([meeting?.recording, meeting?.status]).toEqual([false, "Saved"]);
   });
 });

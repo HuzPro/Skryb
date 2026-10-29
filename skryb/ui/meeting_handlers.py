@@ -1,4 +1,4 @@
-"""The Meetings window's endpoints: start and stop, the live meeting, and the saved ones.
+"""The Meetings window's endpoints: start and stop, a file to transcribe, the live meeting, and the saved ones.
 
 The live meeting's lines, names and status reach the window as ``meeting``
 server events; a saved meeting is read from its folder on request.
@@ -50,6 +50,7 @@ class MeetingApi:
             ("GET", "/api/meetings/live", self._live),
             ("POST", "/api/meetings/start", self._start),
             ("POST", "/api/meetings/stop", self._stop),
+            ("POST", "/api/meetings/files", self._transcribe_file),
             ("POST", "/api/meetings/models/download", self._download_models),
             ("POST", "/api/meetings/vocabulary/open", self._open_vocabulary),
             ("POST", "/api/meetings/folder/open", self._open_meetings_folder),
@@ -83,6 +84,14 @@ class MeetingApi:
     def _start(self, _request: ApiRequest) -> ApiResponse:
         try:
             self._recorder.start()
+        except MeetingError as exc:
+            raise ApiError(400, str(exc)) from exc
+        return _ACCEPTED
+
+    def _transcribe_file(self, request: ApiRequest) -> ApiResponse:
+        path, language = _file_request(request.body)
+        try:
+            self._recorder.transcribe_file(path, language)
         except MeetingError as exc:
             raise ApiError(400, str(exc)) from exc
         return _ACCEPTED
@@ -153,6 +162,17 @@ class MeetingApi:
             return Transcript.load(folder, lambda event: publish({**event, "id": meeting_id}))
         except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ApiError(400, f"That meeting's transcript could not be read: {exc}") from exc
+
+
+def _file_request(body: object) -> tuple[Path, str]:
+    try:
+        fields = Fields(body, "body")
+        path, language = Path(fields.text("path").strip()), fields.text("language")
+    except ValueError as exc:
+        raise ApiError(400, "Say which file to transcribe and in which language.", str(exc)) from exc
+    if not path.is_absolute() or not path.is_file():
+        raise ApiError(400, f"{path.name or 'That file'} isn't there any more.")
+    return path, language
 
 
 def _rename_request(body: object) -> tuple[str, str]:

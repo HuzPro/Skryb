@@ -142,3 +142,105 @@ def test_quitting_while_recording_closes_the_files_without_waiting_for_the_trans
     rig.recorder.dispose()
 
     assert rig.captures[0].stopped.wait(_WAIT_SECONDS)
+
+
+class FileRig(Rig):
+    """The recorder with a fake file reader: *audio* is what any file decodes to."""
+
+    def __init__(self, tmp_path: Path, audio: np.ndarray | None = None, unreadable: str | None = None, **kwargs) -> None:
+        super().__init__(tmp_path, **kwargs)
+        from skryb.meetings.media_file import MediaFileError
+
+        self.audio = np.concatenate([voice(0, 2), silence(1), voice(1, 2), silence(1)]) if audio is None else audio
+        self.gate = threading.Event()
+        self.gate.set()
+        self.video_ok = tmp_path / "Sprint review.mp4"
+        self.video_ok.write_bytes(b"fake")
+
+        def check(path: Path) -> None:
+            if unreadable:
+                raise MediaFileError(unreadable)
+
+        def decode(path: Path, progress, cancelled) -> np.ndarray:
+            self.gate.wait(_WAIT_SECONDS)
+            return self.audio
+
+        self.recorder._check_file = check
+        self.recorder._decode_file = decode
+
+    def wait_saved(self) -> None:
+        deadline = threading.Event()
+        for _ in range(int(_WAIT_SECONDS * 20)):
+            if any(e["type"] == "saved" for e in self.events):
+                return
+            deadline.wait(0.05)
+        raise AssertionError("the file never finished")
+
+
+def test_a_file_becomes_a_meeting_named_after_it_in_the_language_asked_for(tmp_path: Path) -> None:
+    rig = FileRig(tmp_path)
+
+    rig.recorder.transcribe_file(rig.video_ok, "en")
+    rig.wait_saved()
+
+    folder = rig.root / "2026-10-29 14-05 Sprint review"
+    assert (folder / "them.flac").exists() and (folder / "transcript.json").exists()
+    assert rig.asked_for[0].language == "en"
+    assert rig.events[0]["type"] == "started" and rig.events[0]["source"] == "Sprint review.mp4"
+    assert rig.events[-1] == {"type": "saved", "id": "2026-10-29 14-05 Sprint review"}
+    assert not rig.recorder.is_recording() and rig.recorder.live() is None
+    assert rig.changes == []  # the tray's recording light stays off
+
+
+def test_while_a_file_is_transcribed_a_meeting_cant_start_from_the_window_or_the_tray(tmp_path: Path) -> None:
+    rig = FileRig(tmp_path)
+    rig.gate.clear()
+    rig.recorder.transcribe_file(rig.video_ok, "ur")
+
+    for start in (rig.recorder.start, rig.recorder.toggle, lambda: rig.recorder.transcribe_file(rig.video_ok, "en")):
+        with pytest.raises(MeetingError, match="Skryb is transcribing a file. Cancel it on the Meetings page first."):
+            start()
+
+    assert rig.recorder.transcribing_file()
+    rig.gate.set()
+    rig.wait_saved()
+
+
+def test_a_file_cant_be_transcribed_while_a_meeting_records(tmp_path: Path) -> None:
+    rig = FileRig(tmp_path)
+    rig.recorder.start()
+
+    with pytest.raises(MeetingError, match="A meeting is being recorded. Stop it before transcribing a file."):
+        rig.recorder.transcribe_file(rig.video_ok, "en")
+
+    rig.recorder.stop()
+
+
+def test_cancelling_a_file_saves_it_without_touching_the_tray(tmp_path: Path) -> None:
+    rig = FileRig(tmp_path)
+    rig.gate.clear()
+    rig.recorder.transcribe_file(rig.video_ok, "en")
+
+    threading.Timer(0.2, rig.gate.set).start()
+    rig.recorder.stop()
+
+    assert rig.events[-1]["type"] == "saved"
+    assert not rig.recorder.is_recording()
+    assert rig.changes == []
+
+
+@pytest.mark.parametrize(("language", "unreadable", "missing", "message"), [
+    ("fr", None, None, "Pick English or Urdu for the file."),
+    ("en", "Skryb can't read .ogg files yet.", None, "Skryb can't read .ogg files yet."),
+    ("en", None, ["Speaker labels"], "Download the meeting models first: Speaker labels."),
+])
+def test_a_file_that_cant_start_says_why_and_leaves_no_folder(
+    tmp_path: Path, language: str, unreadable: str | None, missing: list[str] | None, message: str,
+) -> None:
+    rig = FileRig(tmp_path, unreadable=unreadable, missing=missing)
+
+    with pytest.raises(MeetingError, match=message):
+        rig.recorder.transcribe_file(rig.video_ok, language)
+
+    assert not rig.root.exists() or not any(rig.root.iterdir())
+    assert rig.events == []

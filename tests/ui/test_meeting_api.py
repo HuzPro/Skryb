@@ -209,3 +209,49 @@ def test_open_folder_opens_a_saved_meetings_folder(rig: MeetingRig) -> None:
     assert rig.call("POST", "/api/meetings/2026-10-16 Ops Onboarding/open")[0] == 204
     assert rig.call("POST", "/api/meetings/folder/open")[0] == 204
     assert rig.opened == [folder, rig.root]
+
+
+def _with_fake_file_reader(rig: MeetingRig) -> None:
+    rig.recorder._check_file = lambda path: None
+    rig.recorder._decode_file = lambda path, progress, cancelled: np.concatenate([voice(0, 2.5), silence(1)])
+
+
+def test_a_dropped_file_is_transcribed_into_a_saved_meeting_named_after_it(rig: MeetingRig, tmp_path: Path) -> None:
+    _with_fake_file_reader(rig)
+    video = tmp_path / "Weekly sync – ہفتہ وار.mp4"
+    video.write_bytes(b"fake")
+
+    stream = rig.events()
+    assert rig.call("POST", "/api/meetings/files", {"path": str(video), "language": "ur"})[0] == 202
+    events: list[dict[str, Any]] = []
+    while not events or events[-1]["type"] != "saved":
+        events.append(stream.until("meeting"))
+    stream.close()
+
+    started = next(event for event in events if event["type"] == "started")
+    assert started["source"] == "Weekly sync – ہفتہ وار.mp4"
+    assert any(event["type"] == "entry" for event in events)
+    meetings = rig.call("GET", "/api/meetings")[1]["meetings"]
+    assert [m["id"] for m in meetings] == ["2026-10-29 14-05 Weekly sync – ہفتہ وار"]
+    assert rig.call("GET", "/api/meetings/live")[1] == {"meeting": None}
+
+
+@pytest.mark.parametrize(("body", "message"), [
+    ({"language": "en"}, "Say which file to transcribe and in which language."),
+    ({"path": "notes.mp4", "language": "en"}, "notes.mp4 isn't there any more."),
+    ({"path": r"C:\nowhere\gone.mp4", "language": "en"}, "gone.mp4 isn't there any more."),
+])
+def test_a_file_request_that_doesnt_name_a_file_on_disk_is_refused(rig: MeetingRig, body: dict, message: str) -> None:
+    status, error = rig.call("POST", "/api/meetings/files", body)
+
+    assert status == 400 and message in json.dumps(error, ensure_ascii=False)
+
+
+def test_a_file_in_a_language_skryb_doesnt_offer_is_refused(rig: MeetingRig, tmp_path: Path) -> None:
+    _with_fake_file_reader(rig)
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"fake")
+
+    status, error = rig.call("POST", "/api/meetings/files", {"path": str(video), "language": "fr"})
+
+    assert status == 400 and "Pick English or Urdu for the file." in json.dumps(error)
