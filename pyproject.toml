@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skryb"
-version = "0.5.1"
+version = "0.6.0"
 description = "Local, offline speech-to-text dictation for Windows on NVIDIA, AMD or CPU"
 readme = "README.md"
 license = "Apache-2.0"
