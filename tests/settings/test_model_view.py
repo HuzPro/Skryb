@@ -7,7 +7,7 @@ from skryb.transcription.model_info import ModelInfo
 class TestModelViewFromInfo:
     def test_should_copy_name_description_and_display_size(self):
         info = ModelInfo(
-            name="parakeet-tdt-0.6b-v3",
+            name="parakeet-ultra",
             size_mb=2510,
             description="Best accuracy",
             repo_id="nvidia/parakeet-tdt-0.6b-v3",
@@ -15,7 +15,7 @@ class TestModelViewFromInfo:
 
         view = ModelView.from_info(info, installed=True)
 
-        assert view.name == "parakeet-tdt-0.6b-v3"
+        assert view.name == "parakeet-ultra"
         assert view.description == "Best accuracy"
         assert view.display_size == "2.5 GB"
 

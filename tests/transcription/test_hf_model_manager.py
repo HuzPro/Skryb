@@ -12,7 +12,6 @@ from skryb.transcription.hf_model_manager import HuggingFaceModelManager
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import (
     CRISPERWHISPER_MODELS,
-    DEFAULT_MODEL,
     PARAKEET_MODELS,
     ModelInfo,
 )
@@ -26,6 +25,12 @@ _PINNED_MODEL = ModelInfo(
     name="pinned-example", size_mb=10, description="Example",
     repo_id="example/pinned", revision=_PINNED_SHA,
     compatible_engines=("nano_parakeet",),
+)
+
+# Unpinned, so it tracks main, and saved as one .nemo file.
+_NEMO_MODEL = ModelInfo(
+    name="example-nemo", size_mb=10, description="Example",
+    repo_id="example/nemo", compatible_engines=("nano_parakeet",),
 )
 
 _GATED_MODEL_NAME = "crisperwhisper-2.0-turbo"
@@ -46,7 +51,7 @@ def _make_manager(
     *,
     download_manager: MagicMock | None = None,
     resolver: MagicMock | None = None,
-    models: dict[str, ModelInfo] = PARAKEET_MODELS,
+    models: dict[str, ModelInfo] | None = None,
     license_policy: LicensePolicy | None = None,
 ) -> HuggingFaceModelManager:
     return HuggingFaceModelManager(
@@ -54,13 +59,13 @@ def _make_manager(
         download_manager=download_manager or MagicMock(),
         resolver=resolver or MagicMock(),
         file_downloader=MagicMock(),
-        models=models,
+        models=models or {_NEMO_MODEL.name: _NEMO_MODEL},
         license_policy=license_policy or AllowAllLicensePolicy(),
     )
 
 
 def _model_dir(root: Path) -> Path:
-    return root / "models--nvidia--parakeet-tdt-0.6b-v3"
+    return root / "models--example--nemo"
 
 
 def _write_refs_main(model_dir: Path, sha: str = "abc123") -> None:
@@ -136,12 +141,12 @@ def _write_pinned_snapshot(
 
 class TestHuggingFaceModelManagerCatalog:
     def test_should_list_supplied_models(self, tmp_path: Path) -> None:
-        manager = _make_manager(tmp_path)
+        manager = _make_manager(tmp_path, models=PARAKEET_MODELS)
 
         assert [model.name for model in manager.list_models()] == [
-            DEFAULT_MODEL, "parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro",
+            "parakeet-ultra", "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro",
         ]
-        assert manager.has_model(DEFAULT_MODEL) is True
+        assert manager.has_model("parakeet-ultra") is True
         assert manager.has_model("unknown") is False
 
 
@@ -149,26 +154,26 @@ class TestHuggingFaceModelManagerInstallation:
     def test_should_return_false_when_model_is_not_downloaded(
         self, tmp_path: Path,
     ) -> None:
-        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
+        assert _make_manager(tmp_path).is_installed(_NEMO_MODEL.name) is False
 
     def test_should_accept_nemo_snapshot(self, tmp_path: Path) -> None:
         _write_nemo_snapshot(tmp_path)
 
-        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is True
+        assert _make_manager(tmp_path).is_installed(_NEMO_MODEL.name) is True
 
     def test_should_reject_snapshot_without_refs_main(
         self, tmp_path: Path,
     ) -> None:
         _write_nemo_snapshot(tmp_path, with_ref=False)
 
-        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
+        assert _make_manager(tmp_path).is_installed(_NEMO_MODEL.name) is False
 
     def test_should_reject_ref_to_missing_snapshot(self, tmp_path: Path) -> None:
         model_dir = _model_dir(tmp_path)
         model_dir.mkdir(parents=True)
         _write_refs_main(model_dir, "missing")
 
-        assert _make_manager(tmp_path).is_installed(DEFAULT_MODEL) is False
+        assert _make_manager(tmp_path).is_installed(_NEMO_MODEL.name) is False
 
     def test_should_accept_single_file_safetensors_layout(
         self, tmp_path: Path,
@@ -319,10 +324,10 @@ class TestHuggingFaceModelManagerOperations:
     def test_get_model_path_should_reflect_installation(
         self, tmp_path: Path,
     ) -> None:
-        assert _make_manager(tmp_path).get_model_path(DEFAULT_MODEL) is None
+        assert _make_manager(tmp_path).get_model_path(_NEMO_MODEL.name) is None
         model_dir = _write_nemo_snapshot(tmp_path)
 
-        assert _make_manager(tmp_path).get_model_path(DEFAULT_MODEL) == model_dir
+        assert _make_manager(tmp_path).get_model_path(_NEMO_MODEL.name) == model_dir
 
     def test_download_should_resolve_and_enqueue(self, tmp_path: Path) -> None:
         resolver = MagicMock()
@@ -334,8 +339,8 @@ class TestHuggingFaceModelManagerOperations:
                     filename="model.nemo",
                     size=100,
                     url=(
-                        "https://huggingface.co/nvidia/"
-                        "parakeet-tdt-0.6b-v3/resolve/sha123/model.nemo"
+                        "https://huggingface.co/example/"
+                        "nemo/resolve/sha123/model.nemo"
                     ),
                 ),
             ],
@@ -347,14 +352,12 @@ class TestHuggingFaceModelManagerOperations:
             tmp_path, resolver=resolver, download_manager=download_manager,
         )
 
-        handle = manager.download(DEFAULT_MODEL)
+        handle = manager.download(_NEMO_MODEL.name)
 
-        resolver.resolve.assert_called_once_with(
-            "nvidia/parakeet-tdt-0.6b-v3", "",
-        )
+        resolver.resolve.assert_called_once_with("example/nemo", "")
         job = download_manager.enqueue.call_args.args[0]
-        assert job.job_id == DEFAULT_MODEL
-        assert job.repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+        assert job.job_id == _NEMO_MODEL.name
+        assert job.repo_id == "example/nemo"
         assert job.commit_sha == "sha123"
         assert handle is expected_handle
 
@@ -384,7 +387,7 @@ class TestHuggingFaceModelManagerOperations:
         model_dir = _write_nemo_snapshot(tmp_path)
         manager = _make_manager(tmp_path)
 
-        manager.delete(DEFAULT_MODEL)
+        manager.delete(_NEMO_MODEL.name)
 
         assert model_dir.exists() is False
 
@@ -467,6 +470,6 @@ class TestLicenceGatedDownload:
             license_policy=LicensePolicy(FakeConfig()),
         )
 
-        manager.download(DEFAULT_MODEL)
+        manager.download(_NEMO_MODEL.name)
 
         assert download_manager.enqueue.called is True

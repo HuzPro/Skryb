@@ -15,9 +15,9 @@ class TestDownloadCoordinatorStart:
         manager.download.return_value = handle
         coord = _make_coordinator(manager)
 
-        coord.start("parakeet-tdt-0.6b-v3")
+        coord.start("parakeet-ultra")
 
-        manager.download.assert_called_once_with("parakeet-tdt-0.6b-v3")
+        manager.download.assert_called_once_with("parakeet-ultra")
 
     def test_should_track_handle_for_later_pause(self):
         manager = MagicMock()
@@ -25,8 +25,8 @@ class TestDownloadCoordinatorStart:
         manager.download.return_value = handle
         coord = _make_coordinator(manager)
 
-        coord.start("parakeet-tdt-0.6b-v3")
-        coord.pause("parakeet-tdt-0.6b-v3")
+        coord.start("parakeet-ultra")
+        coord.pause("parakeet-ultra")
 
         handle.pause.assert_called_once()
 
@@ -37,9 +37,9 @@ class TestDownloadCoordinatorStart:
         manager.download.side_effect = [first, second]
         coord = _make_coordinator(manager)
 
-        coord.start("parakeet-tdt-0.6b-v3")
-        coord.start("parakeet-tdt-0.6b-v3")  # resume scenario - re-enqueue
-        coord.cancel("parakeet-tdt-0.6b-v3")
+        coord.start("parakeet-ultra")
+        coord.start("parakeet-ultra")  # resume scenario - re-enqueue
+        coord.cancel("parakeet-ultra")
 
         first.cancel.assert_not_called()
         second.cancel.assert_called_once()
@@ -50,7 +50,7 @@ class TestDownloadCoordinatorPause:
         coord = _make_coordinator()
 
         with pytest.raises(LookupError):
-            coord.pause("parakeet-tdt-0.6b-v3")
+            coord.pause("parakeet-ultra")
 
     def test_should_forward_pause_to_handle(self):
         manager = MagicMock()
@@ -58,8 +58,8 @@ class TestDownloadCoordinatorPause:
         manager.download.return_value = handle
         coord = _make_coordinator(manager)
 
-        coord.start("parakeet-tdt-0.6b-v3")
-        coord.pause("parakeet-tdt-0.6b-v3")
+        coord.start("parakeet-ultra")
+        coord.pause("parakeet-ultra")
 
         handle.pause.assert_called_once()
 
@@ -70,12 +70,12 @@ class TestDownloadCoordinatorResume:
         manager.download.return_value = MagicMock()
         coord = _make_coordinator(manager)
 
-        coord.start("parakeet-tdt-0.6b-v3")
-        coord.resume("parakeet-tdt-0.6b-v3")
+        coord.start("parakeet-ultra")
+        coord.resume("parakeet-ultra")
 
         assert manager.download.call_count == 2
-        assert manager.download.call_args_list[0].args == ("parakeet-tdt-0.6b-v3",)
-        assert manager.download.call_args_list[1].args == ("parakeet-tdt-0.6b-v3",)
+        assert manager.download.call_args_list[0].args == ("parakeet-ultra",)
+        assert manager.download.call_args_list[1].args == ("parakeet-ultra",)
 
 
 class TestDownloadCoordinatorCancel:
@@ -83,7 +83,7 @@ class TestDownloadCoordinatorCancel:
         coord = _make_coordinator()
 
         with pytest.raises(LookupError):
-            coord.cancel("parakeet-tdt-0.6b-v3")
+            coord.cancel("parakeet-ultra")
 
     def test_should_forward_cancel_and_drop_handle(self):
         manager = MagicMock()
@@ -91,10 +91,10 @@ class TestDownloadCoordinatorCancel:
         manager.download.return_value = handle
         coord = _make_coordinator(manager)
 
-        coord.start("parakeet-tdt-0.6b-v3")
-        coord.cancel("parakeet-tdt-0.6b-v3")
+        coord.start("parakeet-ultra")
+        coord.cancel("parakeet-ultra")
 
         handle.cancel.assert_called_once()
         # After cancel, the handle should be gone - second cancel is a LookupError.
         with pytest.raises(LookupError):
-            coord.cancel("parakeet-tdt-0.6b-v3")
+            coord.cancel("parakeet-ultra")

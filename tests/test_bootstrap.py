@@ -88,7 +88,7 @@ def fresh_paste_memory(monkeypatch):
 
 
 def _provider_config(
-    model_size: str = "parakeet-tdt-0.6b-v3", engine: str = "auto",
+    model_size: str = "parakeet-ultra", engine: str = "auto",
 ) -> MagicMock:
     config = MagicMock()
     values = {
@@ -109,7 +109,7 @@ class TestActiveEngineProvider:
 
     def test_should_resolve_parakeet_model_to_nano_parakeet(self, tmp_path):
         provider = _make_active_engine_provider(
-            _provider_config(model_size="parakeet-tdt-0.6b-v3"), _ROCM_DETECTOR,
+            _provider_config(model_size="parakeet-ultra"), _ROCM_DETECTOR,
             build_engine_registry(), tmp_path,
         )
 
@@ -375,7 +375,7 @@ class TestLoadEngineAndAttachFailureSurface:
         bus = SimpleEventBus()
         state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
         config = MagicMock()
-        config.get.return_value = "parakeet-tdt-0.6b-v3"
+        config.get.return_value = "parakeet-ultra"
         broken = MagicMock()
         broken.load_model.side_effect = EngineDependencyMissingError(
             "nano-parakeet not installed: pip install nano-parakeet"
@@ -397,7 +397,7 @@ class TestLoadEngineAndAttachFailureSurface:
 
         assert len(received) == 1
         assert "nano-parakeet not installed" in received[0].error
-        assert received[0].model_name == "parakeet-tdt-0.6b-v3"
+        assert received[0].model_name == "parakeet-ultra"
 
     @patch("skryb.bootstrap.create_engine_for_active_model")
     def test_should_publish_event_before_entering_error_then_recover(
@@ -408,7 +408,7 @@ class TestLoadEngineAndAttachFailureSurface:
         bus = SimpleEventBus()
         state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
         config = MagicMock()
-        config.get.return_value = "parakeet-tdt-0.6b-v3"
+        config.get.return_value = "parakeet-ultra"
         broken = MagicMock()
         broken.load_model.side_effect = RuntimeError("VRAM exhausted")
         mock_create.side_effect = [broken, broken]
@@ -1050,7 +1050,7 @@ class TestPipelineModeForVerbatimTranscription:
         assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
 
     def test_should_ignore_a_stale_verbatim_value_on_another_model(self) -> None:
-        config = self._config("parakeet-tdt-0.6b-v3", "verbatim")
+        config = self._config("parakeet-ultra", "verbatim")
 
         assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
 

@@ -8,7 +8,7 @@ from skryb.settings.transcription_mode import TranscriptionMode
 
 def _make_draft(**overrides) -> SettingsDraft:
     base = dict(
-        model_size="parakeet-tdt-0.6b-v3",
+        model_size="parakeet-ultra",
         language="en",
         device="auto",
         engine="auto",
@@ -22,7 +22,7 @@ class TestSettingsDraftConstruction:
     def test_should_hold_all_seven_fields(self):
         draft = _make_draft()
 
-        assert draft.model_size == "parakeet-tdt-0.6b-v3"
+        assert draft.model_size == "parakeet-ultra"
         assert draft.language == "en"
         assert draft.device == "auto"
         assert draft.engine == "auto"
@@ -53,7 +53,7 @@ class TestChangeSetFromDrafts:
     def test_should_reload_and_rebuild_output_when_model_size_differs(self):
         # Only a CrisperWhisper model can put the pipeline in passthrough, so
         # switching model can silently leave the dictionary off.
-        original = _make_draft(model_size="parakeet-tdt-0.6b-v3")
+        original = _make_draft(model_size="parakeet-ultra")
         updated = _make_draft(model_size="nemotron-speech-streaming-en-0.6b")
 
         changes = ChangeSet.between(original, updated)
@@ -179,7 +179,7 @@ class TestLeavingVerbatimTranscription:
             model_size="crisperwhisper-2.0-turbo", crisperwhisper_mode="verbatim",
         )
         updated = _make_draft(
-            model_size="parakeet-tdt-0.6b-v3", crisperwhisper_mode="verbatim",
+            model_size="parakeet-ultra", crisperwhisper_mode="verbatim",
         )
 
         changes = ChangeSet.between(original, updated)
@@ -188,7 +188,7 @@ class TestLeavingVerbatimTranscription:
 
     def test_should_rebuild_output_when_arriving_at_a_verbatim_model(self):
         original = _make_draft(
-            model_size="parakeet-tdt-0.6b-v3", crisperwhisper_mode="verbatim",
+            model_size="parakeet-ultra", crisperwhisper_mode="verbatim",
         )
         updated = _make_draft(
             model_size="crisperwhisper-2.0-turbo", crisperwhisper_mode="verbatim",

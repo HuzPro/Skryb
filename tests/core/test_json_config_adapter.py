@@ -81,7 +81,7 @@ class TestJsonConfigAdapterPersistence:
         assert config.has_persisted_value("transcription.model_size") is False
 
         config.load()
-        config.set("transcription.model_size", "parakeet-tdt-0.6b-v3")
+        config.set("transcription.model_size", "parakeet-ultra")
         config.save()
 
         assert config.has_persisted_value("transcription.model_size") is True

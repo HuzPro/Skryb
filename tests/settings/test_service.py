@@ -48,7 +48,7 @@ from skryb.settings.settings_draft import SettingsDraft
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import ALL_MODELS
 
-_PARAKEET = "parakeet-tdt-0.6b-v3"
+_PARAKEET = "parakeet-ultra"
 _BARK = ("underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro")
 
 
@@ -181,7 +181,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, "parakeet-ultra", *_BARK, "phonon-2", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, *_BARK, "phonon-2", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_should_mark_installed_status_on_view(self):
@@ -250,18 +250,18 @@ class TestDeleteModel:
 
     def test_should_raise_value_error_when_deleting_active_model(self):
         service, _, manager, *_ = _build_service(
-            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
-            installed={"parakeet-tdt-0.6b-v3": True},
+            config_overrides={"transcription.model_size": _PARAKEET},
+            installed={_PARAKEET: True},
         )
 
         with pytest.raises(ValueError, match="active"):
-            service.delete_model("parakeet-tdt-0.6b-v3")
+            service.delete_model(_PARAKEET)
 
         assert manager.delete_calls == []
 
     def test_should_invalidate_cache_entry_after_delete(self):
         service, _, _manager, *_ = _build_service(
-            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+            config_overrides={"transcription.model_size": _PARAKEET},
             installed={"test-model": True},
         )
         # Prime cache
@@ -274,7 +274,7 @@ class TestDeleteModel:
 
     def test_should_publish_model_deleted_event_on_successful_delete(self):
         service, _, _, bus, _ = _build_service(
-            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
+            config_overrides={"transcription.model_size": _PARAKEET},
             installed={"test-model": True},
         )
         received: list[ModelDeletedEvent] = []
@@ -287,14 +287,14 @@ class TestDeleteModel:
 
     def test_should_not_publish_event_when_delete_rejected_for_active_model(self):
         service, _, _, bus, _ = _build_service(
-            config_overrides={"transcription.model_size": "parakeet-tdt-0.6b-v3"},
-            installed={"parakeet-tdt-0.6b-v3": True},
+            config_overrides={"transcription.model_size": _PARAKEET},
+            installed={_PARAKEET: True},
         )
         received: list[ModelDeletedEvent] = []
         bus.subscribe(ModelDeletedEvent, received.append)
 
         with pytest.raises(ValueError):
-            service.delete_model("parakeet-tdt-0.6b-v3")
+            service.delete_model(_PARAKEET)
 
         assert received == []
 
@@ -369,7 +369,7 @@ class TestApplyDraft:
     def test_should_persist_language_exactly_as_given(self):
         service, config, *_ = _build_service()
         draft = SettingsDraft(
-            model_size="parakeet-tdt-0.6b-v3",
+            model_size=_PARAKEET,
             language="de",
             device="auto",
             engine="auto",
@@ -384,7 +384,7 @@ class TestApplyDraft:
         service, *_ = _build_service()
 
         draft = SettingsDraft(
-            model_size="nemotron-speech-streaming-en-0.6b",  # changed from "parakeet-tdt-0.6b-v3"
+            model_size="nemotron-speech-streaming-en-0.6b",  # changed from _PARAKEET
             language="en",
             device="auto",
             engine="auto",
@@ -400,14 +400,14 @@ class TestApplyDraft:
     def test_should_clear_install_cache_when_engine_changes(self):
         service, _, manager, *_ = _build_service(
             config_overrides={"transcription.engine": "nemotron_streaming"},
-            installed={"parakeet-tdt-0.6b-v3": True},
+            installed={_PARAKEET: True},
         )
         # Prime the cache so a stale True would survive a non-clearing apply.
-        assert service.is_installed("parakeet-tdt-0.6b-v3") is True
-        manager._installed["parakeet-tdt-0.6b-v3"] = False
+        assert service.is_installed(_PARAKEET) is True
+        manager._installed[_PARAKEET] = False
 
         draft = SettingsDraft(
-            model_size="parakeet-tdt-0.6b-v3",
+            model_size=_PARAKEET,
             language="en",
             device="auto",
             engine="nano_parakeet",
@@ -415,18 +415,18 @@ class TestApplyDraft:
         )
         service.apply_draft(draft)
 
-        assert service.is_installed("parakeet-tdt-0.6b-v3") is False
+        assert service.is_installed(_PARAKEET) is False
 
     def test_should_preserve_install_cache_when_engine_unchanged(self):
         service, _, manager, *_ = _build_service(
             config_overrides={"transcription.engine": "nano_parakeet"},
-            installed={"parakeet-tdt-0.6b-v3": True},
+            installed={_PARAKEET: True},
         )
-        assert service.is_installed("parakeet-tdt-0.6b-v3") is True
-        manager._installed["parakeet-tdt-0.6b-v3"] = False  # simulate stale disk read
+        assert service.is_installed(_PARAKEET) is True
+        manager._installed[_PARAKEET] = False  # simulate stale disk read
 
         draft = SettingsDraft(
-            model_size="parakeet-tdt-0.6b-v3",
+            model_size=_PARAKEET,
             language="en",
             device="auto",
             engine="nano_parakeet",
@@ -435,7 +435,7 @@ class TestApplyDraft:
         service.apply_draft(draft)
 
         # Cache preserved → stale True still returned.
-        assert service.is_installed("parakeet-tdt-0.6b-v3") is True
+        assert service.is_installed(_PARAKEET) is True
 
 
 class TestSettingsTransfer:
@@ -638,7 +638,7 @@ class TestListenerFanout:
 
         bus.publish(
             DownloadProgressEvent(
-                job_id="parakeet-tdt-0.6b-v3",
+                job_id=_PARAKEET,
                 bytes_done=100,
                 bytes_total=1000,
                 speed_bps=50.0,
@@ -647,14 +647,14 @@ class TestListenerFanout:
         )
 
         assert len(listener.progress) == 1
-        assert listener.progress[0].job_id == "parakeet-tdt-0.6b-v3"
+        assert listener.progress[0].job_id == _PARAKEET
 
     def test_should_forward_download_state_changes(self):
         service, _, _, bus, _ = _build_service()
         listener = _RecordingListener()
         service.subscribe_downloads(listener)
 
-        bus.publish(DownloadStateChangedEvent(job_id="parakeet-tdt-0.6b-v3", state="paused"))
+        bus.publish(DownloadStateChangedEvent(job_id=_PARAKEET, state="paused"))
 
         assert len(listener.state) == 1
 
@@ -663,7 +663,7 @@ class TestListenerFanout:
         listener = _RecordingListener()
         service.subscribe_downloads(listener)
 
-        bus.publish(DownloadCompletedEvent(job_id="parakeet-tdt-0.6b-v3"))
+        bus.publish(DownloadCompletedEvent(job_id=_PARAKEET))
 
         assert len(listener.completed) == 1
 
@@ -672,7 +672,7 @@ class TestListenerFanout:
         listener = _RecordingListener()
         service.subscribe_downloads(listener)
 
-        bus.publish(DownloadFailedEvent(job_id="parakeet-tdt-0.6b-v3", error="disk full"))
+        bus.publish(DownloadFailedEvent(job_id=_PARAKEET, error="disk full"))
 
         assert len(listener.failed) == 1
         assert listener.failed[0].error == "disk full"
@@ -696,7 +696,7 @@ class TestListenerFanout:
         service.subscribe_downloads(listener)
         service.unsubscribe_downloads(listener)
 
-        bus.publish(DownloadCompletedEvent(job_id="parakeet-tdt-0.6b-v3"))
+        bus.publish(DownloadCompletedEvent(job_id=_PARAKEET))
 
         assert len(listener.completed) == 0
 
@@ -704,11 +704,11 @@ class TestListenerFanout:
 class TestIsEngineSwapping:
     def test_should_reflect_hot_swap_coordinator_busy_state(self):
         config = FakeConfig({
-            "transcription.model_size": "parakeet-tdt-0.6b-v3",
+            "transcription.model_size": _PARAKEET,
             "transcription.device": "auto",
             "output.mode": "direct_paste",
         })
-        manager = FakeModelManager(installed={"parakeet-tdt-0.6b-v3": True})
+        manager = FakeModelManager(installed={_PARAKEET: True})
         bus = SimpleEventBus()
         cache = ModelInstallationCache(manager, bus)
         downloads = DownloadCoordinator(manager)

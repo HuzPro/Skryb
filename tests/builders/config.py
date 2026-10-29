@@ -3,7 +3,7 @@ from skryb.core.config import ConfigValue
 
 
 _DEFAULTS: dict[str, ConfigValue] = {
-    "transcription.model_size": "parakeet-tdt-0.6b-v3",
+    "transcription.model_size": "parakeet-ultra",
     "transcription.language": "en",
     "transcription.device": "auto",
     "hotkey.bindings": [

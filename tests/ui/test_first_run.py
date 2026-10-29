@@ -20,7 +20,7 @@ from skryb.ui.api_server import ApiServer
 from skryb.ui.event_hub import EventHub
 from skryb.ui.launcher import SHELL_NOT_BUILT, SHELL_WOULD_NOT_START, ShellLauncher
 
-_PARAKEET = "parakeet-tdt-0.6b-v3"
+_PARAKEET = "parakeet-ultra"
 # Generous: the point is that setup returns at all, not how fast.
 _RETURNS_WITHIN_SECONDS = 10.0
 

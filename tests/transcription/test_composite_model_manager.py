@@ -7,7 +7,7 @@ from skryb.transcription.model_info import ModelInfo
 from skryb.transcription.model_manager import ModelManager
 
 
-def _info(name: str = "parakeet-tdt-0.6b-v3") -> ModelInfo:
+def _info(name: str = "parakeet-ultra") -> ModelInfo:
     return ModelInfo(
         name=name, size_mb=2510, description="test",
         repo_id=f"example/{name}", compatible_engines=("nano_parakeet",),

@@ -9,7 +9,7 @@ def _config(mode: str) -> FakeConfig:
     return FakeConfig(
         {
             "transcription.mode": mode,
-            "transcription.model_size": "parakeet-tdt-0.6b-v3",
+            "transcription.model_size": "parakeet-ultra",
         }
     )
 

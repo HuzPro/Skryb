@@ -106,7 +106,7 @@ class TestEventInheritance:
             TranscriptionCompletedEvent(text="hi", transcription_seconds=1.0),
             TranscriptionFailedEvent(error="fail"),
             TranscriptionEmptyEvent(transcription_seconds=0.5),
-            EngineLoadFailedEvent(model_name="parakeet-tdt-0.6b-v3", error="missing"),
+            EngineLoadFailedEvent(model_name="parakeet-ultra", error="missing"),
             ErrorOccurredEvent(error="oops"),
         ]
 

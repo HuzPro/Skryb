@@ -21,7 +21,7 @@ from skryb.transcription.model_info import ALL_MODELS
 
 
 _GATED_COMBO = BenchmarkCombo("crisperwhisper-2.0-turbo", "crisperwhisper", "cpu")
-_UNGATED_COMBO = BenchmarkCombo("parakeet-tdt-0.6b-v3", "nano_parakeet", "cpu")
+_UNGATED_COMBO = BenchmarkCombo("parakeet-ultra", "nano_parakeet", "cpu")
 
 
 def _refusing_policy() -> LicensePolicy:

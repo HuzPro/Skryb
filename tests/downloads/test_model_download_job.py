@@ -38,7 +38,7 @@ class TestModelDownloadJobHappyPath:
         payloads = {"config.json": b"{}\n", "model.safetensors": b"WGHT"}
         downloader = _FakeDownloader(payloads=payloads)
         job = ModelDownloadJob(
-            job_id="parakeet-tdt-0.6b-v3",
+            job_id="parakeet-ultra",
             repo_id="nvidia/parakeet-tdt-0.6b-v3",
             commit_sha="sha123",
             files=resolved,
@@ -72,7 +72,7 @@ class TestModelDownloadJobHappyPath:
         payloads = {"a.json": b"A" * 100, "b.json": b"B" * 200}
         downloader = _FakeDownloader(payloads=payloads)
         job = ModelDownloadJob(
-            job_id="parakeet-tdt-0.6b-v3",
+            job_id="parakeet-ultra",
             repo_id="r",
             commit_sha="sha",
             files=resolved,

@@ -147,8 +147,8 @@ class TestModelCatalog:
             | set(QWEN3_ASR_MODELS)
         )
 
-    def test_default_should_be_current_parakeet(self) -> None:
-        assert DEFAULT_MODEL == "parakeet-tdt-0.6b-v3"
+    def test_default_is_parakeet_ultra(self) -> None:
+        assert DEFAULT_MODEL == "parakeet-ultra"
 
     def test_should_return_known_model(self) -> None:
         assert get_model_info(DEFAULT_MODEL) is PARAKEET_MODELS[DEFAULT_MODEL]
@@ -211,6 +211,18 @@ class TestRemovedModelMigration:
         migrate_removed_models(config)
 
         assert config.get("transcription.model_size") == DEFAULT_MODEL
+
+    def test_a_config_naming_the_original_parakeet_v3_moves_to_parakeet_ultra(
+        self, tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "config.json"
+        config = _saved_config(path, "transcription.model_size", "parakeet-tdt-0.6b-v3")
+
+        migrate_removed_models(config)
+
+        persisted = JsonConfigAdapter(path)
+        persisted.load()
+        assert persisted.get("transcription.model_size") == "parakeet-ultra"
 
 
 class TestRemovedEngineMigration:

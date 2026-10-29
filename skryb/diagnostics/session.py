@@ -30,6 +30,7 @@ from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine_factory import (
     probed_hardware_kind,
     resolve_device,
+    resolve_engine_id,
     selectable_engine_ids,
 )
 from skryb.transcription.engine_registry import EngineRegistry
@@ -370,12 +371,12 @@ class SessionDiagnostics:
         configured_engine = self._config.get("transcription.engine", "auto")
         if isinstance(configured_engine, str) and configured_engine != "auto":
             return model, configured_engine
-        engine = (
-            model_info.compatible_engines[0]
-            if model_info.compatible_engines
-            else "unknown"
+        if not model_info.compatible_engines:
+            return model, "unknown"
+        # The engine auto-selection would run here, not merely the first one listed.
+        return model, resolve_engine_id(
+            self._config, model_info, self._hardware_detector, self._registry,
         )
-        return model, engine
 
     def _configured_device(self) -> str:
         return resolve_device(

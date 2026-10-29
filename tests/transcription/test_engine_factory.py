@@ -75,6 +75,13 @@ _DUAL_ENGINE_MODEL = ModelInfo(
     engine_priorities={"nano_parakeet": 100, "nemotron_streaming": 50},
 )
 
+# Saved only in NeMo's layout, the way NVIDIA ships Parakeet: nano_parakeet
+# is its one engine, and it tracks main.
+_NEMO_ONLY_MODEL = ModelInfo(
+    name="nemo-only", size_mb=1, description="test", repo_id="example/nemo-only",
+    compatible_engines=("nano_parakeet",),
+)
+
 _PINNED_SHA = "1e28271b79edc97635783bea65abc89195a09ed3"
 _PINNED_MODEL = ModelInfo(
     name="pinned", size_mb=1, description="test", repo_id="example/pinned",
@@ -86,16 +93,16 @@ class TestTheNpuEngine:
     """Bark and parakeet-ultra put the encoder on the NPU on a GPU-less laptop."""
 
     @staticmethod
-    def _ranked(kind: str, openvino_installed: bool, model: str = "underdog-bark-3.0") -> list[str]:
+    def _ranked(kind: str, openvino_installed: bool, model: str | ModelInfo = "underdog-bark-3.0") -> list[str]:
         from skryb.transcription.engine_selector import rank_engines
-        from skryb.transcription.model_info import get_model_info
 
+        info = model if isinstance(model, ModelInfo) else get_model_info(model)
         descriptors = [
             replace(d, available=openvino_installed) if d.engine_id == "openvino_parakeet" else d
             for d in build_engine_registry().all_descriptors()
         ]
         hardware = HardwareProfile(kind=kind, device_name="test", gfx_arch=None)
-        return [c.engine_id for c in rank_engines(get_model_info(model), hardware, descriptors)]
+        return [c.engine_id for c in rank_engines(info, hardware, descriptors)]
 
     @pytest.mark.parametrize(
         "model",
@@ -114,8 +121,8 @@ class TestTheNpuEngine:
     def test_a_computer_with_a_gpu_keeps_it_on_pytorch(self, kind: str) -> None:
         assert self._ranked(kind, openvino_installed=True) == ["nano_parakeet"]
 
-    def test_parakeet_v3_has_no_transformers_weights_so_it_never_goes_to_the_npu(self) -> None:
-        assert self._ranked("cpu", True, model="parakeet-tdt-0.6b-v3") == ["nano_parakeet"]
+    def test_a_model_without_transformers_weights_never_goes_to_the_npu(self) -> None:
+        assert self._ranked("cpu", True, model=_NEMO_ONLY_MODEL) == ["nano_parakeet"]
 
     def test_the_npu_engine_shares_the_parakeet_downloads(self, tmp_path: Path) -> None:
         from skryb.transcription.engine_registry import EngineSpec
@@ -214,11 +221,9 @@ class TestEnginesWithModelOnDisk:
     def test_should_detect_loadable_parakeet_snapshot(
         self, tmp_path: Path,
     ) -> None:
-        _fake_snapshot(tmp_path, "nvidia/parakeet-tdt-0.6b-v3")
+        _fake_snapshot(tmp_path, _NEMO_ONLY_MODEL.repo_id)
 
-        result = engines_with_model_on_disk(
-            PARAKEET_MODELS[DEFAULT_MODEL], tmp_path,
-        )
+        result = engines_with_model_on_disk(_NEMO_ONLY_MODEL, tmp_path)
 
         assert result == frozenset(["nano_parakeet"])
 
@@ -252,7 +257,7 @@ class TestCreateEngineForActiveModel:
         )
 
         assert isinstance(engine, NanoParakeetAdapter)
-        assert engine._repo_id == "nvidia/parakeet-tdt-0.6b-v3"
+        assert engine._repo_id == "moondream/parakeet-ultra"
 
     def test_device_override_should_force_cpu(self, tmp_path: Path) -> None:
         engine = create_engine_for_active_model(
@@ -508,8 +513,7 @@ class TestEngineResolutionSkipsTheProbe:
         detector = FakeHardwareDetector()
 
         engine_id = resolve_engine_id(
-            _config(), PARAKEET_MODELS[DEFAULT_MODEL], detector,
-            build_engine_registry(),
+            _config(), _NEMO_ONLY_MODEL, detector, build_engine_registry(),
         )
 
         assert engine_id == "nano_parakeet"

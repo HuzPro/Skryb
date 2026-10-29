@@ -61,7 +61,7 @@ class TestEngineHotSwap:
         new_engine.will_return(a_transcription_result().build())
         voice_to_text_app.next_engine_will_be(new_engine)
 
-        voice_to_text_app.trigger_engine_swap("parakeet-tdt-0.6b-v3")
+        voice_to_text_app.trigger_engine_swap("parakeet-ultra")
 
         assert old_engine.dispose_called is True
 

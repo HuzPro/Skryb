@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 
 
 _EMPTY_PRIORITIES: Mapping[EngineId, int] = MappingProxyType({})
-DEFAULT_MODEL = "parakeet-tdt-0.6b-v3"
+DEFAULT_MODEL = "parakeet-ultra"
 
 
 @dataclass(frozen=True)
@@ -58,10 +58,6 @@ _BARK_PLUS_DESCRIPTION = (
 )
 
 
-_PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"nano_parakeet": 100},
-)
-
 # Transformers-layout checkpoints can also put the encoder on an Intel NPU.
 _NPU_PARAKEET_ENGINES: tuple[EngineId, ...] = ("openvino_parakeet", "nano_parakeet")
 _NPU_PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
@@ -70,14 +66,6 @@ _NPU_PARAKEET_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
 
 
 PARAKEET_MODELS: dict[str, ModelInfo] = {
-    "parakeet-tdt-0.6b-v3": ModelInfo(
-        name="parakeet-tdt-0.6b-v3",
-        size_mb=2510,
-        description="NVIDIA's original, built-in punctuation (25 languages)",
-        repo_id="nvidia/parakeet-tdt-0.6b-v3",
-        compatible_engines=("nano_parakeet",),
-        engine_priorities=_PARAKEET_ENGINE_PRIORITIES,
-    ),
     # Moondream's post-trained v3: the same network saved in transformers'
     # layout. Pinned because the loader's key renames are written against
     # this exact file.
@@ -326,6 +314,8 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "granite-speech-5.0-470m-turboctc": DEFAULT_MODEL,
     "ark-asr-3b": DEFAULT_MODEL,
     "parakeet-tdt-0.6b-v2": DEFAULT_MODEL,
+    # Parakeet Ultra is NVIDIA's v3 retrained by Moondream: smaller and more accurate.
+    "parakeet-tdt-0.6b-v3": DEFAULT_MODEL,
     "nemotron-streaming-compare": "nemotron-speech-streaming-en-0.6b",
 }
 

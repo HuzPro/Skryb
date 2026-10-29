@@ -218,7 +218,7 @@ class TestEngineHotSwapCoordinatorStartSwap:
         null = NullEngineHotSwap()
 
         with pytest.raises(EngineSwapError, match="first-run"):
-            null.start_swap("parakeet-tdt-0.6b-v3")
+            null.start_swap("parakeet-ultra")
 
     def test_should_publish_failed_event_when_loader_exceeds_timeout(self):
         bus = SimpleEventBus()

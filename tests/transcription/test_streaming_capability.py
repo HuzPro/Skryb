@@ -49,7 +49,7 @@ class TestRegistryStreamingDescriptors:
 class TestModelSupportsStreaming:
     def test_should_report_parakeet_streaming_capable(self):
         assert model_supports_streaming(
-            get_model_info("parakeet-tdt-0.6b-v3"), _descriptors(),
+            get_model_info("parakeet-ultra"), _descriptors(),
         ) is True
 
 
@@ -79,7 +79,7 @@ class TestModelSupportsBatch:
 
     def test_should_report_parakeet_batch_capable(self):
         assert model_supports_batch(
-            get_model_info("parakeet-tdt-0.6b-v3"), _descriptors(),
+            get_model_info("parakeet-ultra"), _descriptors(),
         ) is True
 
 class TestSelectorUnaffectedByStreamingFlag:

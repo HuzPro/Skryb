@@ -33,7 +33,7 @@ def _transcription(index: int, text: str, at: datetime, **overrides) -> dict:
         "audio_path": f"audio/{index:04d}.wav",
         "text": text,
         "transcript_path": f"transcripts/{index:04d}.txt",
-        "model": "parakeet-tdt-0.6b-v3",
+        "model": "parakeet-ultra",
         "engine": "nano_parakeet",
         "is_empty": not text.strip(),
         "error": None,
@@ -49,7 +49,7 @@ def _cancelled(index: int, at: datetime, **overrides) -> dict:
         "at": _iso(at),
         "audio_seconds": 4.2,
         "audio_path": f"audio/{index:04d}.wav",
-        "model": "parakeet-tdt-0.6b-v3",
+        "model": "parakeet-ultra",
         "engine": "nano_parakeet",
     }
     event.update(overrides)

@@ -5,7 +5,7 @@ class ModelInfoBuilder:
     """Fluent builder for :class:`ModelInfo`."""
 
     def __init__(self) -> None:
-        self._name = "parakeet-tdt-0.6b-v3"
+        self._name = "parakeet-ultra"
         self._size_mb = 2510
         self._description = "Best accuracy"
         self._repo_id = "nvidia/parakeet-tdt-0.6b-v3"
