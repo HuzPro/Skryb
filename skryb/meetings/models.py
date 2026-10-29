@@ -11,6 +11,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from skryb.meetings.capture import RATE
+from skryb.meetings.diarization import DiarizerStream
 from skryb.meetings.segmenter import SILENCE
 from skryb.transcription.model_info import ModelInfo
 
@@ -86,63 +87,36 @@ class Vad:
 
 
 class Diarizer:
-    """Nemotron 3 Diarization in streaming mode: who is talking, one label per 10 ms.
+    """Nemotron 3 Diarization in streaming mode on PyTorch: who is talking, one label per 10 ms.
 
     Speakers stay numbered the same for the whole meeting through the model's
-    speaker cache. fp32: bf16 hangs MIOpen's kernel search on RDNA 4.
+    speaker cache. fp32: bf16 hangs MIOpen's kernel search on RDNA 4. The chunks
+    and features come from ``DiarizerStream``, so the app needs no librosa.
     """
 
     frame_seconds = 0.01
 
     def __init__(self, snapshot: Path) -> None:
         torch = import_torch()
-        from transformers import AutoModelForAudioFrameClassification, AutoProcessor
+        from transformers import AutoModelForAudioFrameClassification
 
         self._torch = torch
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._processor: Any = AutoProcessor.from_pretrained(snapshot)
         model = AutoModelForAudioFrameClassification.from_pretrained(snapshot, dtype=torch.float32)
         self._model: Any = model.to(self._device).eval()
-        self._audio = np.zeros(0, np.float32)
-        self._offset = 0  # samples dropped from the front of self._audio
-        self._step = 0
         self._cache: Any = None
+        self._stream = DiarizerStream(snapshot, self._model_step)
 
     def push(self, audio: np.ndarray, last: bool = False) -> list[int]:
-        self._audio = np.concatenate([self._audio, audio])
-        labels: list[int] = []
-        while True:
-            start, length = self._chunk_bounds()
-            if start - self._offset + length > len(self._audio):
-                break
-            labels += self._run(self._audio[start - self._offset:start - self._offset + length], last=False)
-        if last:
-            start, _ = self._chunk_bounds()
-            tail = self._audio[start - self._offset:]
-            if len(tail) > self._processor.feature_extractor.win_length:
-                labels += self._run(tail, last=True)
-        return labels
+        return self._stream.push(audio, last)
 
-    def _chunk_bounds(self) -> tuple[int, int]:
-        p = self._processor
-        if self._step == 0:
-            return 0, int(p.num_samples_first_audio_chunk)
-        return int(p.audio_chunk_start(self._step * p.num_mel_frames_per_step)), int(p.num_samples_per_audio_chunk)
-
-    def _run(self, chunk: np.ndarray, last: bool) -> list[int]:
-        inputs = self._processor(
-            chunk, sampling_rate=RATE, is_streaming=True,
-            is_first_audio_chunk=self._step == 0, is_last_audio_chunk=last, return_tensors="pt",
-        ).to(self._device)
-        if last:
-            inputs["num_lookahead_frames"] = 0
-        with self._torch.no_grad():
-            out = self._model(**inputs, speaker_cache=self._cache)
+    def _model_step(self, features: np.ndarray, lookahead: int) -> np.ndarray:
+        torch = self._torch
+        input_features = torch.from_numpy(features)[None].to(self._device)
+        mask = torch.ones(input_features.shape[:2], dtype=torch.long, device=self._device)
+        with torch.no_grad():
+            out = self._model(input_features=input_features, attention_mask=mask, num_lookahead_frames=lookahead,
+                              speaker_cache=self._cache)
         self._cache = out.speaker_cache
-        self._step += 1
-        next_start, _ = self._chunk_bounds()
-        drop = max(0, next_start - self._offset)
-        self._audio, self._offset = self._audio[drop:], self._offset + drop
-        best = out.logits[0].sigmoid().max(dim=-1)
-        labels: list[int] = self._torch.where(best.values > _SPEECH, best.indices, SILENCE).tolist()
-        return labels
+        logits: np.ndarray = out.logits[0].float().cpu().numpy()
+        return logits

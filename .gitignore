@@ -51,3 +51,4 @@ ui/src-tauri/gen/
 skryb/transcription/qasr.dll
 skryb/transcription/npk.dll
 skryb/transcription/cw.dll
+skryb/transcription/nd.dll

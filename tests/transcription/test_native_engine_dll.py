@@ -86,3 +86,15 @@ def test_the_crisperwhisper_engine_is_found_the_same_way(tmp_path, monkeypatch):
     _make(shipped)
     assert finder.native_whisper_dll({}) == shipped
     assert finder.native_whisper_dll({"NPK_DLL": str(dev)}) == shipped
+
+
+def test_the_diarizer_engine_is_found_the_same_way(tmp_path, monkeypatch):
+    shipped = tmp_path / "site-packages" / "skryb" / "transcription" / "nd.dll"
+    dev = _make(tmp_path / "checkout" / "native" / "diar" / "build" / "nd.dll")
+    monkeypatch.setattr(finder, "SHIPPED_DIARIZER_DLL", shipped)
+    monkeypatch.setattr(finder, "DEV_BUILD_DIARIZER_DLL", dev)
+
+    assert finder.native_diarizer_dll({}) == dev
+    assert finder.native_diarizer_dll({"ND_DLL": str(tmp_path / "missing.dll")}) is None
+    _make(shipped)
+    assert finder.native_diarizer_dll({}) == shipped

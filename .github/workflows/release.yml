@@ -134,7 +134,8 @@ jobs:
         shell: pwsh
         run: ./scripts/build_ui.ps1
 
-      # The native engines (qasr.dll for Qwen3-ASR, npk.dll for Parakeet, cw.dll for CrisperWhisper; gfx1200) ship inside the app
+      # The native engines (qasr.dll for Qwen3-ASR, npk.dll for Parakeet, cw.dll for CrisperWhisper, nd.dll for
+      # the meeting diarizer; gfx1200) ship inside the app
       # wheel too, and the installer build refuses to run without it. AMD's
       # ROCm SDK wheels carry hipcc, clang and the HIP headers; the runner's
       # Visual Studio supplies the C runtime headers. Compiling needs no GPU.
@@ -145,6 +146,7 @@ jobs:
           bash native/engine/build.sh
           bash native/parakeet/build.sh
           bash native/whisper/build.sh
+          bash native/diar/build.sh
 
       # Bundle a relocatable CPython 3.12 (python-build-standalone). AMD's
       # Windows ROCm wheels are cp312-only, so the bundled runtime is 3.12.

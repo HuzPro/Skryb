@@ -53,6 +53,8 @@ _NATIVE_PARAKEET_BUILD = Path("native") / "parakeet" / "build" / "npk.dll"
 _NATIVE_PARAKEET_IN_WHEEL = "skryb/transcription/npk.dll"
 _NATIVE_WHISPER_BUILD = Path("native") / "whisper" / "build" / "cw.dll"
 _NATIVE_WHISPER_IN_WHEEL = "skryb/transcription/cw.dll"
+_NATIVE_DIARIZER_BUILD = Path("native") / "diar" / "build" / "nd.dll"
+_NATIVE_DIARIZER_IN_WHEEL = "skryb/transcription/nd.dll"
 
 
 def iss_defines(version: str, payload_dir: Path, wheel_filename: str) -> dict[str, str]:
@@ -201,7 +203,10 @@ def _build_app_wheel(python_dir: Path, repo_root: Path, wheels_dir: Path) -> str
 def _require_built_files_in_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
-    for member in (_UI_SHELL_IN_WHEEL, _NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_WHISPER_IN_WHEEL):
+    for member in (
+        _UI_SHELL_IN_WHEEL, _NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_WHISPER_IN_WHEEL,
+        _NATIVE_DIARIZER_IN_WHEEL,
+    ):
         if member not in names:
             raise InstallerBuildError(
                 f"{wheel.name} is missing {member}; check "
@@ -245,6 +250,7 @@ def _copy_native_engine(repo_root: Path, destination: Path) -> None:
         ("Qwen3-ASR", _NATIVE_ENGINE_BUILD),
         ("Parakeet", _NATIVE_PARAKEET_BUILD),
         ("CrisperWhisper", _NATIVE_WHISPER_BUILD),
+        ("diarizer", _NATIVE_DIARIZER_BUILD),
     ):
         built = repo_root / build
         if not built.exists():

@@ -652,6 +652,7 @@ void log_mel(hipStream_t s, const float* pcm, int n, int frames, int fpad, const
 void layer_norm(hipStream_t s, const bf16* x, const bf16* w, const bf16* bb, bf16* y, int rows, int d) {
     if (d == 1024) layer_norm_kernel<1024><<<rows, 256, 0, s>>>(x, w, bb, y);
     else if (d == 1280) layer_norm_kernel<1280><<<rows, 256, 0, s>>>(x, w, bb, y);
+    else if (d == 512) layer_norm_kernel<512><<<rows, 256, 0, s>>>(x, w, bb, y);
 }
 
 void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int rows, int d) {

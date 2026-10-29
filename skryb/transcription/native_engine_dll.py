@@ -1,5 +1,5 @@
-"""Where the native engines are on this machine: ``qasr.dll`` (Qwen3-ASR), ``npk.dll`` (Parakeet TDT) and
-``cw.dll`` (CrisperWhisper).
+"""Where the native engines are on this machine: ``qasr.dll`` (Qwen3-ASR), ``npk.dll`` (Parakeet TDT),
+``cw.dll`` (CrisperWhisper) and ``nd.dll`` (the meeting diarizer).
 
 Kept free of heavy imports: the engine registry asks at startup.
 """
@@ -24,6 +24,10 @@ WHISPER_DLL_ENV = "CW_DLL"
 SHIPPED_WHISPER_DLL = Path(__file__).with_name("cw.dll")
 DEV_BUILD_WHISPER_DLL = Path(__file__).resolve().parents[2] / "native" / "whisper" / "build" / "cw.dll"
 
+DIARIZER_DLL_ENV = "ND_DLL"
+SHIPPED_DIARIZER_DLL = Path(__file__).with_name("nd.dll")
+DEV_BUILD_DIARIZER_DLL = Path(__file__).resolve().parents[2] / "native" / "diar" / "build" / "nd.dll"
+
 
 def native_engine_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
     """The DLL to load, or None when there is none. ``QASR_DLL`` wins and never falls back."""
@@ -38,6 +42,11 @@ def native_parakeet_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
 def native_whisper_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
     """The same for ``cw.dll``. ``CW_DLL`` wins and never falls back."""
     return _find_dll(environ, WHISPER_DLL_ENV, SHIPPED_WHISPER_DLL, DEV_BUILD_WHISPER_DLL)
+
+
+def native_diarizer_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
+    """The same for ``nd.dll``. ``ND_DLL`` wins and never falls back."""
+    return _find_dll(environ, DIARIZER_DLL_ENV, SHIPPED_DIARIZER_DLL, DEV_BUILD_DIARIZER_DLL)
 
 
 def rocm_runtime_dir() -> Path | None:

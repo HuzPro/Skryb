@@ -17,7 +17,7 @@ import sys
 os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 # Registries built when a test module is imported (before any fixture runs) must not find a native
 # engine this checkout happens to have built; _no_native_engines below keeps it so for each test.
-for _variable in ("NPK_DLL", "CW_DLL"):
+for _variable in ("NPK_DLL", "CW_DLL", "ND_DLL"):
     os.environ[_variable] = os.path.join(os.path.dirname(__file__), "native engines are not used in tests", _variable)
 
 import pytest
@@ -79,6 +79,7 @@ def _no_native_engines(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest
     """Engine choice in tests can't depend on what this checkout has built (npk.dll, cw.dll); a test that wants one says so."""
     monkeypatch.setenv("NPK_DLL", str(tmp_path_factory.getbasetemp() / "npk.dll not built"))
     monkeypatch.setenv("CW_DLL", str(tmp_path_factory.getbasetemp() / "cw.dll not built"))
+    monkeypatch.setenv("ND_DLL", str(tmp_path_factory.getbasetemp() / "nd.dll not built"))
 
 
 @pytest.fixture()
