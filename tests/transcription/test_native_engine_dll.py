@@ -60,3 +60,16 @@ def test_a_blank_qasr_dll_counts_as_unset(places, blank):
     _make(shipped)
 
     assert finder.native_engine_dll({"QASR_DLL": blank}) == shipped
+
+
+def test_the_parakeet_engine_is_found_the_same_way(tmp_path, monkeypatch):
+    shipped = tmp_path / "site-packages" / "skryb" / "transcription" / "npk.dll"
+    dev = _make(tmp_path / "checkout" / "native" / "parakeet" / "build" / "npk.dll")
+    monkeypatch.setattr(finder, "SHIPPED_PARAKEET_DLL", shipped)
+    monkeypatch.setattr(finder, "DEV_BUILD_PARAKEET_DLL", dev)
+
+    assert finder.native_parakeet_dll({}) == dev
+    assert finder.native_parakeet_dll({"NPK_DLL": str(tmp_path / "missing.dll")}) is None
+    _make(shipped)
+    assert finder.native_parakeet_dll({}) == shipped
+    assert finder.native_parakeet_dll({"QASR_DLL": str(dev)}) == shipped

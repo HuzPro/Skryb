@@ -130,6 +130,92 @@ class TestTheNpuEngine:
         assert engine.is_model_loaded() is False
 
 
+_TRANSFORMERS_LAYOUT_PARAKEETS = [
+    "underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean",
+    "underdog-bark-3.0-pro", "parakeet-ultra",
+]
+
+
+class TestTheNativeParakeetEngine:
+    """Parakeet Ultra and Bark run on the hand-written gfx1200 engine when its DLL is there."""
+
+    @staticmethod
+    def _ranked(gfx_arch: str | None, dll_installed: bool, model: str) -> list[str]:
+        from skryb.transcription.engine_selector import rank_engines
+
+        descriptors = [
+            replace(d, available=dll_installed) if d.engine_id == "native_parakeet" else d
+            for d in build_engine_registry().all_descriptors()
+        ]
+        hardware = HardwareProfile(kind="amd_rocm", device_name="AMD Radeon", gfx_arch=gfx_arch)
+        return [c.engine_id for c in rank_engines(get_model_info(model), hardware, descriptors)]
+
+    @pytest.mark.parametrize("model", _TRANSFORMERS_LAYOUT_PARAKEETS)
+    def test_an_rx_9060_xt_runs_it_on_the_native_engine_first(self, model: str) -> None:
+        assert self._ranked("gfx1200", dll_installed=True, model=model) == ["native_parakeet", "nano_parakeet"]
+
+    @pytest.mark.parametrize("gfx_arch", ["gfx1100", "gfx1201", None])
+    def test_another_amd_gpu_stays_on_pytorch(self, gfx_arch: str | None) -> None:
+        assert self._ranked(gfx_arch, dll_installed=True, model="parakeet-ultra") == ["nano_parakeet"]
+
+    def test_without_the_dll_it_stays_on_pytorch(self) -> None:
+        assert self._ranked("gfx1200", dll_installed=False, model="parakeet-ultra") == ["nano_parakeet"]
+
+    def test_it_shares_the_parakeet_downloads(self, tmp_path: Path) -> None:
+        from skryb.transcription.engine_registry import EngineSpec
+        from skryb.transcription.native_parakeet_adapter import NativeParakeetAdapter
+
+        engine = build_engine_registry().build("native_parakeet", EngineSpec(
+            model_name="parakeet-ultra", repo_id="moondream/parakeet-ultra",
+            device="cuda", language="en", beam_size=1, model_dir=tmp_path,
+        ))
+        manager = build_composite_model_manager(
+            tmp_path, MagicMock(), lambda: "native_parakeet", AllowAllLicensePolicy(),
+        )
+
+        assert isinstance(engine, NativeParakeetAdapter)
+        assert engine.is_model_loaded() is False
+        assert "parakeet-ultra" in {m.name for m in manager.list_models()}
+
+    def test_startup_skips_torch_when_an_earlier_launch_found_an_rx_9060_xt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("skryb.transcription.engine_factory.native_parakeet_dll", lambda: tmp_path / "npk.dll")
+        monkeypatch.setattr(
+            "skryb.transcription.win32_display_adapters.display_adapter_fingerprint",
+            lambda: "AMD Radeon RX 9060 XT",
+        )
+        config = FakeConfig({
+            "transcription.model_size": "parakeet-ultra",
+            "transcription.engine": "auto",
+            "hardware.probe.kind": "amd_rocm",
+            "hardware.probe.device_name": "AMD Radeon RX 9060 XT",
+            "hardware.probe.gfx_arch": "gfx1200",
+            "hardware.probe.fingerprint": "AMD Radeon RX 9060 XT",
+        })
+
+        assert selectable_engine_ids(config, build_engine_registry(), tmp_path) == ("native_parakeet",)
+        assert startup_requires_torch(config, build_engine_registry(), tmp_path) is False
+
+    def test_startup_still_warms_torch_after_the_gpu_was_swapped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("skryb.transcription.engine_factory.native_parakeet_dll", lambda: tmp_path / "npk.dll")
+        monkeypatch.setattr(
+            "skryb.transcription.win32_display_adapters.display_adapter_fingerprint",
+            lambda: "NVIDIA GeForce RTX 5090",
+        )
+        config = FakeConfig({
+            "transcription.model_size": "parakeet-ultra",
+            "transcription.engine": "auto",
+            "hardware.probe.kind": "amd_rocm",
+            "hardware.probe.gfx_arch": "gfx1200",
+            "hardware.probe.fingerprint": "AMD Radeon RX 9060 XT",
+        })
+
+        assert startup_requires_torch(config, build_engine_registry(), tmp_path) is True
+
+
 class TestBuildEngineRegistry:
     def test_should_register_only_surviving_engines(self) -> None:
         registry = build_engine_registry()
@@ -137,6 +223,7 @@ class TestBuildEngineRegistry:
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
             "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr", "openvino_parakeet",
+            "native_parakeet",
         }
 
     def test_should_declare_the_ct2_engine_torch_free(self) -> None:

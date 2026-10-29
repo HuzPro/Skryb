@@ -134,15 +134,16 @@ jobs:
         shell: pwsh
         run: ./scripts/build_ui.ps1
 
-      # The native Qwen3-ASR engine (qasr.dll, gfx1200) ships inside the app
+      # The native engines (qasr.dll for Qwen3-ASR, npk.dll for Parakeet; gfx1200) ship inside the app
       # wheel too, and the installer build refuses to run without it. AMD's
       # ROCm SDK wheels carry hipcc, clang and the HIP headers; the runner's
       # Visual Studio supplies the C runtime headers. Compiling needs no GPU.
-      - name: Build native Qwen3-ASR engine
+      - name: Build native engines
         shell: bash
         run: |
           python -m pip install --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 rocm-sdk-devel==7.2.1
           bash native/engine/build.sh
+          bash native/parakeet/build.sh
 
       # Bundle a relocatable CPython 3.12 (python-build-standalone). AMD's
       # Windows ROCm wheels are cp312-only, so the bundled runtime is 3.12.
