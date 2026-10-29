@@ -71,6 +71,27 @@ USB_MICROPHONE = {"name": "USB Microphone (Røde NT-USB Mi", "label": "USB Micro
                   "connected": True, "is_default": False}
 HOT_PLUG_AFTER_SECONDS = 45.0
 
+MEETINGS_FOLDER = "D:\\Meetings"
+MEETING_LINE_SECONDS = 1.6
+MEETING_MODELS = [
+    {"name": "nemotron-3-diarization", "label": "Speaker labels", "display_size": "397 MB", "size": 397_000_000,
+     "description": "Tells up to 8 speakers apart as they talk (NVIDIA Nemotron 3 Diarization)"},
+    {"name": "qwen3-asr-1.7b", "label": "Qwen3-ASR speech-to-text", "display_size": "4.1 GB", "size": 4_080_000_000,
+     "description": "Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, PyTorch elsewhere"},
+]
+MEETING_LINES = [
+    ("them:0", "All right, let's jump in. Launch Board first, then the order intake."),
+    ("them:1", "Sounds good. I pulled the numbers from QuoteDesk this morning."),
+    ("them:2", "So the estimator connects to LedgerLine first, and then we push the quote back into Slack?"),
+    ("me:0", "Yeah, exactly. Northwind handles the routing, BRIGHTLINE just sees the finished quote."),
+    ("them:1", "Haan theek hai, main kal tak woh sheet bhej dunga."),
+    ("them:0", "Perfect. Marta, can you check whether the FormDeck fields still match?"),
+    ("them:2", "I'll look tonight. About a dozen a day is what we see right now."),
+    ("me:0", "Ek do ghante mein main bhi dekh leta hoon."),
+    ("them:3", "Quick one from me: are rush orders in scope for the pilot?"),
+    ("them:0", "Not yet. Let's keep the pilot to the first two products."),
+]
+
 ENGINES = {
     "parakeet-tdt-0.6b-v3": [("nano_parakeet", "Parakeet (ONNX Runtime)", "Runs on the CPU with ONNX Runtime; no GPU needed.")],
     "nemotron-speech-streaming-en-0.6b": [("nemotron_streaming", "Nemotron streaming (NeMo)", "Needs a CUDA GPU.")],
@@ -117,6 +138,7 @@ def _default_settings():
         "history_retention_days": 90,
         "paste_method_overrides": [["notepad.exe", "shift_insert"], ["windowsterminal.exe", "ctrl_shift_v"]],
         "check_for_updates": True,
+        "meetings": {"folder": MEETINGS_FOLDER, "record_microphone": True, "language": "en"},
     }
 
 
@@ -150,6 +172,37 @@ def _history():
     return entries
 
 
+def _saved_meetings():
+    """Folders like the ones in D:\\Meetings: named by hand or by the minute they started."""
+    now = datetime.now().replace(second=0, microsecond=0)
+    folders = [
+        ("{:%Y-%m-%d} 22-45 Marta email tool setup", 1, 4357.7, {"them:0": "Priya Nair", "them:1": "Omar Haddad", "them:2": "Marta Lindgren", "them:3": "Theo Carver"}),
+        ("{:%Y-%m-%d %H-%M}", 2, 1830.0, {}),
+        ("{:%Y-%m-%d} Harbor scoping call", 8, 3720.5, {"them:0": "Leo Brandt", "them:1": "نادیہ رحمان"}),
+        ("{:%Y-%m-%d} Ops Onboarding", 13, 3065.0, {"them:0": "Leo Brandt"}),
+        ("{:%Y-%m-%d} 22-53", 9, 2410.0, {}),
+        ("{:%Y-%m-%d} Cedar F&B", 43, 2988.0, {"them:4": "Cedar"}),
+    ]
+    rng = random.Random(11)
+    meetings = {}
+    for pattern, days_ago, seconds, names in folders:
+        started = now - timedelta(days=days_ago, hours=rng.randint(0, 5))
+        entries, at, index = [], 2.0, 0
+        while at < seconds:
+            key, text = MEETING_LINES[index % len(MEETING_LINES)]
+            length = round(1.2 + rng.random() * 9, 2)
+            entries.append({"id": index, "track": key.split(":")[0], "speaker": int(key.split(":")[1]),
+                            "start": round(at, 2), "end": round(at + length, 2), "text": text, "key": key})
+            at += length + rng.random() * 2
+            index += 1
+        meeting_id = pattern.format(started)
+        keys = sorted({entry["key"] for entry in entries})
+        shown = {key: names.get(key) or ("Me" if key.startswith("me:") else f"Speaker {int(key[5:]) + 1}") for key in keys}
+        meetings[meeting_id] = {"folder": f"{MEETINGS_FOLDER}\\{meeting_id}", "started": started.isoformat(timespec="seconds"),
+                                "names": shown, "entries": entries}
+    return meetings
+
+
 class Core:
     def __init__(self, first_run: bool, gpu: bool) -> None:
         self.lock = threading.RLock()
@@ -165,7 +218,8 @@ class Core:
                                "model": "" if first_run else "parakeet-tdt-0.6b-v3"},
                     "first_run": first_run, "diagnostics_directory": "D:\\VoiceToText_logs",
                     "history_directory": "D:\\VoiceToText_logs", "pill_default_position": [0.5, 1.0],
-                    "update": {"state": "up_to_date", "version": "", "bytes_done": 0, "bytes_total": 0, "error": ""}}
+                    "update": {"state": "up_to_date", "version": "", "bytes_done": 0, "bytes_total": 0, "error": ""},
+                    "meeting_recording": False}
         self.gpu = gpu
         self.hardware = {"probe_pending": True, "streaming_supported": False, "kind": "", "device_name": ""}
         self.microphones = [
@@ -188,6 +242,9 @@ class Core:
             ],
         }
         self.history = _history()
+        self.meeting_models = [dict(model, installed=not first_run, download=None) for model in MEETING_MODELS]
+        self.meetings = _saved_meetings()
+        self.live_meeting = None
         self.meter_on = False
         self.capturing = False
         # The in-app update rehearsal (--updates-dir): while down, the core answers nothing.
@@ -239,7 +296,7 @@ class Core:
                 self._advance_downloads()
 
     def _advance_downloads(self) -> None:
-        for model in self.models:
+        for model in self.models + self.meeting_models:
             download = model["download"]
             if not download or download["state"] != "downloading":
                 continue
@@ -322,6 +379,71 @@ class Core:
             if not any(mic["name"].startswith("USB") for mic in self.microphones):
                 self.microphones.append(dict(USB_MICROPHONE))
         self.emit("microphones", {"name": USB_MICROPHONE["label"], "will_be_used": False})
+
+    # -- meetings -----------------------------------------------------------
+    def meeting_summary(self, meeting_id: str) -> dict:
+        meeting = self.meetings[meeting_id]
+        entries = meeting["entries"]
+        return {"id": meeting_id, "started": meeting["started"], "seconds": max((e["end"] for e in entries), default=0.0),
+                "speakers": len({e["key"] for e in entries}), "lines": len(entries),
+                "words": sum(len(e["text"].split()) for e in entries), "has_audio": True}
+
+    def meeting_status(self, status: str, warning=None) -> None:
+        live = self.live_meeting
+        live["status"], live["warning"] = status, warning or live["warning"]
+        live["recording"] = status != "Saved"
+        self.emit("meeting", {"type": "status", "id": live["id"], "status": status, "folder": live["folder"],
+                              "device": live["device"], "warning": live["warning"]})
+
+    def start_meeting(self) -> None:
+        started = datetime.now().replace(microsecond=0)
+        meeting_id = f"{started:%Y-%m-%d %H-%M}"
+        self.live_meeting = {"id": meeting_id, "recording": True, "status": "Loading models", "device": "Headset Earphone (Jabra Evolve2 65)",
+                             "warning": None, "folder": f"{self.settings['meetings']['folder']}\\{meeting_id}",
+                             "started": started.isoformat(), "names": {}, "entries": []}
+        self.app["meeting_recording"] = True
+        self.emit("meeting", {"type": "started", **{k: v for k, v in self.live_meeting.items() if k != "recording"}})
+        self.emit("app", self.app)
+        self.later(1.2, lambda: self._with_lock(lambda: self.meeting_status("Recording")))
+        threading.Thread(target=self._talk, args=(meeting_id,), daemon=True).start()
+
+    def _with_lock(self, action) -> None:
+        with self.lock:
+            action()
+
+    def _talk(self, meeting_id: str) -> None:
+        rng = random.Random(3)
+        index, at = 0, 1.5
+        while True:
+            time.sleep(MEETING_LINE_SECONDS)
+            with self.lock:
+                live = self.live_meeting
+                if live is None or live["id"] != meeting_id or not live["recording"]:
+                    return
+                key, text = MEETING_LINES[index % len(MEETING_LINES)]
+                length = round(1.5 + rng.random() * 6, 2)
+                entry = {"id": index, "track": key.split(":")[0], "speaker": int(key.split(":")[1]),
+                         "start": round(at, 2), "end": round(at + length, 2), "text": text, "key": key}
+                live["entries"].append(entry)
+                keys = sorted({e["key"] for e in live["entries"]} | set(live["names"]))
+                live["names"] = {k: live["names"].get(k) or ("Me" if k.startswith("me:") else f"Speaker {int(k[5:]) + 1}") for k in keys}
+                self.emit("meeting", {"type": "entry", "id": meeting_id, "entry": entry})
+                at += length + rng.random()
+                index += 1
+
+    def stop_meeting(self) -> None:
+        live = self.live_meeting
+        self.meeting_status("Finishing")
+        self.app["meeting_recording"] = False
+        self.emit("app", self.app)
+
+        def saved() -> None:
+            with self.lock:
+                self.meeting_status("Saved")
+                self.meetings[live["id"]] = {key: live[key] for key in ("folder", "started", "names", "entries")}
+                self.emit("meeting", {"type": "saved", "id": live["id"]})
+
+        self.later(1.5, saved)
 
     def heartbeat(self) -> None:
         while True:
@@ -618,6 +740,57 @@ class Handler(BaseHTTPRequestHandler):
     def _setup(self, method, rest, query) -> None:
         self.core.app["first_run"] = False
         self._send(204)
+
+    def _meetings(self, method, rest, query) -> None:
+        core = self.core
+        live = core.live_meeting
+        if not rest and method == "GET":
+            ready = all(model["installed"] for model in core.meeting_models)
+            ids = sorted(core.meetings, key=lambda meeting_id: core.meetings[meeting_id]["started"], reverse=True)
+            self._send(200, {"recording": core.app["meeting_recording"], "folder": core.settings["meetings"]["folder"],
+                             "models_ready": ready,
+                             "models": [{k: v for k, v in model.items() if k != "size"} for model in core.meeting_models],
+                             "meetings": [core.meeting_summary(meeting_id) for meeting_id in ids]})
+        elif rest == ["live"]:
+            self._send(200, {"meeting": live})
+        elif rest == ["start"]:
+            if not all(model["installed"] for model in core.meeting_models):
+                self._error(400, "Download the meeting models first: Speaker labels, Qwen3-ASR speech-to-text.")
+                return
+            if not core.app["meeting_recording"]:
+                core.start_meeting()
+            self._send(202)
+        elif rest == ["stop"]:
+            if live and live["recording"]:
+                core.stop_meeting()
+            self._send(202)
+        elif rest == ["models", "download"]:
+            for model in core.meeting_models:
+                if not model["installed"] and not model["download"]:
+                    model["download"] = {"state": "downloading", "bytes_done": 0, "bytes_total": model["size"], "error": ""}
+            self._send(202)
+        elif rest in (["vocabulary", "open"], ["folder", "open"]):
+            self._send(204)
+        elif len(rest) == 1 and method == "GET":
+            meeting = live if live and live["id"] == rest[0] else core.meetings.get(rest[0])
+            if meeting is None:
+                self._error(404, "That meeting is no longer in the meetings folder.")
+                return
+            self._send(200, {key: meeting[key] for key in ("folder", "started", "names", "entries")})
+        elif len(rest) == 2 and rest[1] == "rename":
+            meeting = live if live and live["id"] == rest[0] else core.meetings.get(rest[0])
+            body = self._body() or {}
+            key, name = str(body.get("key", "")), str(body.get("name", ""))[:60].strip()
+            if meeting is None or ":" not in key:
+                self._error(400, "That is not a speaker in this meeting.")
+                return
+            meeting["names"][key] = name or ("Me" if key.startswith("me:") else f"Speaker {int(key.split(':')[1]) + 1}")
+            core.emit("meeting", {"type": "names", "id": rest[0], "names": meeting["names"]})
+            self._send(204)
+        elif len(rest) == 2 and rest[1] == "open":
+            self._send(204)
+        else:
+            self._error(404, "Not found.")
 
     def _updates(self, method, rest, query) -> None:
         """A check finds 9.9.9, downloads its 31 MB in five steps, and offers it; install only says so."""

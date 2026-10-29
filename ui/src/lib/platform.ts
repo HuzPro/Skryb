@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
-export type Page = "settings" | "history" | "setup" | "updates";
+export type Page = "settings" | "history" | "setup" | "updates" | "meetings";
 
 export interface LaunchArgs {
   port: number;

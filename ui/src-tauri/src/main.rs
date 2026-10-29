@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{webview::PageLoadEvent, Emitter, Manager, PhysicalPosition};
 
-const PAGES: [&str; 4] = ["settings", "history", "setup", "updates"];
+const PAGES: [&str; 5] = ["settings", "history", "setup", "updates", "meetings"];
 // Shown on first page load; this only covers a page that never finishes loading.
 const SHOW_ANYWAY_AFTER: Duration = Duration::from_secs(4);
 // In the updates folder: the installer's progress during an in-app update,
@@ -246,6 +246,12 @@ mod tests {
     fn reads_port_token_and_page_from_the_command_line() {
         let args = parse_args(&argv(&["ui.exe", "--port", "12345", "--token", "a-b_c", "--page", "history"]));
         assert_eq!((args.port, args.token.as_str(), args.page.as_str()), (12345, "a-b_c", "history"));
+    }
+
+    #[test]
+    fn the_tray_can_open_the_meetings_page() {
+        let args = parse_args(&argv(&["ui.exe", "--port", "1", "--token", "t", "--page", "meetings"]));
+        assert_eq!(args.page.as_str(), "meetings");
     }
 
     #[test]

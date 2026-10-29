@@ -38,6 +38,16 @@
   --destructive: #d92d20;
   --success: #15803d;
   --warning: #b45309;
+  /* Meeting speakers: eight voices on the speakers, and the microphone. */
+  --speaker-0: #2563eb;
+  --speaker-1: #c026d3;
+  --speaker-2: #0d9488;
+  --speaker-3: #d97706;
+  --speaker-4: #7c3aed;
+  --speaker-5: #db2777;
+  --speaker-6: #059669;
+  --speaker-7: #b45309;
+  --speaker-me: #475569;
   color-scheme: light;
 }
 
@@ -59,6 +69,15 @@
     --destructive: #f26b5f;
     --success: #4ade80;
     --warning: #f5b544;
+    --speaker-0: #60a5fa;
+    --speaker-1: #e879f9;
+    --speaker-2: #2dd4bf;
+    --speaker-3: #fbbf24;
+    --speaker-4: #a78bfa;
+    --speaker-5: #f472b6;
+    --speaker-6: #34d399;
+    --speaker-7: #f59e0b;
+    --speaker-me: #94a3b8;
     color-scheme: dark;
   }
 }
