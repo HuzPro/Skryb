@@ -251,6 +251,13 @@ _REMOVED_MODEL_REPLACEMENTS: dict[str, str] = {
     "underdog-bark-3.0-clean": CPU_DEFAULT_MODEL,
     "underdog-bark-3.0-pro": CPU_DEFAULT_MODEL,
 }
+# Live mode needs a model that streams; Phonon only transcribes whole clips.
+_REMOVED_MODEL_STREAMING_REPLACEMENTS: dict[str, str] = {
+    "underdog-bark-3.0": DEFAULT_MODEL,
+    "underdog-bark-3.0-plus": DEFAULT_MODEL,
+    "underdog-bark-3.0-clean": DEFAULT_MODEL,
+    "underdog-bark-3.0-pro": DEFAULT_MODEL,
+}
 
 
 def migrate_removed_models(config: ConfigurationStore) -> None:
@@ -258,6 +265,8 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
     replacement = _REMOVED_MODEL_REPLACEMENTS.get(current)
     if replacement is None:
         return
+    if config.get("transcription.mode", "batch") == "streaming":
+        replacement = _REMOVED_MODEL_STREAMING_REPLACEMENTS.get(current, replacement)
     _logger.warning(
         "Model '%s' has been removed; switching to '%s'.", current, replacement
     )

@@ -194,6 +194,21 @@ def _loaded_config(path: Path) -> JsonConfigAdapter:
 
 class TestRemovedModelMigration:
     @pytest.mark.parametrize(
+        "bark", ["underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro"],
+    )
+    def test_a_bark_user_in_live_mode_moves_to_a_model_that_streams(self, tmp_path: Path, bark: str) -> None:
+        path = tmp_path / "config.json"
+        config = _saved_config(path, "transcription.model_size", bark)
+        config.set("transcription.mode", "streaming")
+
+        migrate_removed_models(config)
+
+        persisted = JsonConfigAdapter(path)
+        persisted.load()
+        assert persisted.get("transcription.model_size") == DEFAULT_MODEL
+        assert persisted.get("transcription.mode") == "streaming"
+
+    @pytest.mark.parametrize(
         ("removed_model", "replacement"), _REMOVED_MODEL_EXPECTATIONS,
     )
     def test_each_removed_model_should_migrate_to_a_surviving_model(
