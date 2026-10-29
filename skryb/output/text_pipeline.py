@@ -165,6 +165,46 @@ def _no_caret_context() -> CaretContext:
     return NO_CONTEXT
 
 
+def _no_target_app() -> str:
+    return ""
+
+
+# A few words said into a browser or Skryb's own window are a search, an
+# address or a form entry far more often than a sentence: Huz deleted the
+# full stop from 9 of 20 such dictations in Zen, and almost never in chat
+# apps (4 of 118).
+_SEARCH_FIELD_APPS = frozenset({
+    "zen.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe",
+    "vivaldi.exe", "arc.exe", "librewolf.exe", "floorp.exe", "waterfox.exe", "skryb-ui.exe",
+})
+_SEARCH_ENTRY_MAX_WORDS = 4
+
+
+def drop_search_entry_stop(text: str, process: str) -> str:
+    """No full stop or trailing space after a short entry in a browser or Skryb's own window.
+
+    One sentence of up to four words ("Open data. ") becomes "Open data".
+    A question or exclamation keeps its mark, and anything longer is prose.
+    """
+    if process.strip().lower() not in _SEARCH_FIELD_APPS:
+        return text
+    core = text.rstrip()
+    if not core.endswith(".") or core.endswith(".."):
+        return text
+    entry = core[:-1]
+    words = len(entry.split())
+    if not words or words > _SEARCH_ENTRY_MAX_WORDS or re.search(r"[.!?](?:\s|$)", entry):
+        return text
+    return text[:len(text) - len(text.lstrip())] + entry.strip()
+
+
+def _search_entry_stage(target_app: Callable[[], str]) -> Callable[[str], str]:
+    def drop(text: str) -> str:
+        return drop_search_entry_stop(text, target_app())
+
+    return drop
+
+
 def _caret_stage(caret_context: Callable[[], CaretContext]) -> Callable[[str], str]:
     def fit(text: str) -> str:
         return fit_to_context(text, caret_context())
@@ -183,6 +223,7 @@ class TextPipeline:
         punctuation_backend: PunctuationBackend | None = None,
         models_dir: Path | None = None,
         caret_context: Callable[[], CaretContext] = _no_caret_context,
+        target_app: Callable[[], str] = _no_target_app,
     ) -> "TextPipeline":
         stages: list[Callable[[str], str]] = []
         if config.options.punctuation_model:
@@ -206,6 +247,7 @@ class TextPipeline:
         stages.append(_RuleStage(config.rules).apply)
         if config.options.numbers:
             stages.append(format_numbers)
+        stages.append(_search_entry_stage(target_app))
         return cls(tuple(stages))
 
     @classmethod
@@ -238,13 +280,14 @@ def build_pipeline(
     punctuation_backend: PunctuationBackend | None = None,
     models_dir: Path | None = None,
     caret_context: Callable[[], CaretContext] = _no_caret_context,
+    target_app: Callable[[], str] = _no_target_app,
 ) -> TextPipeline:
     if mode is PipelineMode.VERBATIM:
         return TextPipeline.passthrough()
     if mode is PipelineMode.STREAMING:
         return TextPipeline.for_streaming(config)
     return TextPipeline.for_batch(
-        config, punctuation_backend, models_dir, caret_context,
+        config, punctuation_backend, models_dir, caret_context, target_app,
     )
 
 

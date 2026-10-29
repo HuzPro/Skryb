@@ -412,8 +412,13 @@ def _build_output(
                 _paste_memory,
                 functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
             ),
+            target_app=_foreground_process,
         ),
     )
+
+
+def _foreground_process() -> str:
+    return foreground_window().process
 
 
 def _start_once_idle(event_bus: EventBus, *starters: Callable[[], None]) -> None:
