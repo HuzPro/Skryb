@@ -77,7 +77,7 @@ def _startup(
     await_torch_prewarm: Callable[[], None] = lambda: None,
 ) -> _Startup:
     config = MagicMock()
-    config.get.return_value = "parakeet-tdt-0.6b-v3"
+    config.get.return_value = "parakeet-ultra"
     return _Startup(
         config=config,
         model_was_configured=True,
@@ -150,7 +150,7 @@ class TestStartingTheEnginePreload:
     def test_a_torch_engine_leaves_the_load_to_the_tray(self, tmp_path) -> None:
         result, start = self._start(
             {
-                "transcription.model_size": "parakeet-tdt-0.6b-v3",
+                "transcription.model_size": "parakeet-ultra",
                 "transcription.engine": "nano_parakeet",
             },
             tmp_path,
@@ -175,13 +175,13 @@ class TestStartingTheEnginePreload:
 class TestConfiguredModelInstalled:
     def test_should_return_true_when_model_present_on_disk(self):
         config = MagicMock()
-        config.get.return_value = "parakeet-tdt-0.6b-v3"
+        config.get.return_value = "parakeet-ultra"
         model_manager = MagicMock()
         model_manager.is_installed.return_value = True
 
         assert _configured_model_installed(config, model_manager) is True
         model_manager.is_installed.assert_called_once_with(
-            "parakeet-tdt-0.6b-v3",
+            "parakeet-ultra",
         )
 
     def test_should_return_false_when_model_missing_from_disk(self):
@@ -204,7 +204,7 @@ class TestConfiguredModelInstalled:
         _configured_model_installed(config, model_manager)
 
         model_manager.is_installed.assert_called_once_with(
-            "parakeet-tdt-0.6b-v3",
+            "parakeet-ultra",
         )
 
 

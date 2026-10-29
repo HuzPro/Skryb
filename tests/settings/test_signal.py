@@ -7,9 +7,9 @@ class TestSignal:
         signal = Signal()
         signal.connect(lambda *args: received.append(args))
 
-        signal.emit("parakeet-tdt-0.6b-v3", 42)
+        signal.emit("parakeet-ultra", 42)
 
-        assert received == [("parakeet-tdt-0.6b-v3", 42)]
+        assert received == [("parakeet-ultra", 42)]
 
     def test_should_invoke_every_connected_subscriber(self) -> None:
         first: list = []

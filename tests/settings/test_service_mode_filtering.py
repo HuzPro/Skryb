@@ -9,8 +9,7 @@ from skryb.transcription.engine_factory import build_engine_registry
 from skryb.transcription.engine_types import HardwareProfile
 from skryb.transcription.model_info import ALL_MODELS
 
-_PARAKEET = "parakeet-tdt-0.6b-v3"
-_PARAKEET_ULTRA = "parakeet-ultra"
+_PARAKEET = "parakeet-ultra"
 _BARK = ("underdog-bark-3.0", "underdog-bark-3.0-plus", "underdog-bark-3.0-clean", "underdog-bark-3.0-pro")
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _CRISPERWHISPER = {
@@ -74,7 +73,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2", *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, *_BARK, "phonon-2", *_CRISPERWHISPER, "qwen3-asr-1.7b",
         }
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):
@@ -87,7 +86,6 @@ class TestServiceModeFiltering:
 
         assert names == {
             _PARAKEET,
-            _PARAKEET_ULTRA,
             *_BARK,
             _NEMOTRON,
         }
@@ -133,7 +131,7 @@ class TestServiceModeFiltering:
 
         names = {view.name for view in service.list_models()}
 
-        assert names == {_PARAKEET, _PARAKEET_ULTRA, *_BARK, "phonon-2", *_CRISPERWHISPER}
+        assert names == {_PARAKEET, *_BARK, "phonon-2", *_CRISPERWHISPER}
 
     def test_gpu_streaming_should_list_parakeet_and_nemotron(self):
         service, *_ = _build_service(
@@ -147,7 +145,6 @@ class TestServiceModeFiltering:
 
         assert names == {
             _PARAKEET,
-            _PARAKEET_ULTRA,
             *_BARK,
             _NEMOTRON,
         }
@@ -201,7 +198,7 @@ class TestQwen3OnlyWhereItsEngineRuns:
         names = self._listed(monkeypatch, tmp_path, gfx_arch)
 
         assert "qwen3-asr-1.7b" not in names
-        assert {_PARAKEET, _PARAKEET_ULTRA, "phonon-2", *_CRISPERWHISPER} <= names
+        assert {_PARAKEET, "phonon-2", *_CRISPERWHISPER} <= names
 
     def test_is_hidden_when_its_engine_is_not_installed(self, monkeypatch, tmp_path):
         assert "qwen3-asr-1.7b" not in self._listed(monkeypatch, tmp_path, "gfx1200", dll_installed=False)

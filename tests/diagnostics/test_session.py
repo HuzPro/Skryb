@@ -172,7 +172,7 @@ class TestSessionEvents:
             "app_stopped",
         ]
         started = events[0]
-        assert started["model"] == "parakeet-tdt-0.6b-v3"
+        assert started["model"] == "parakeet-ultra"
         assert started["engine"] == "nano_parakeet"
         assert started["device"] == "cuda"
         assert started["hardware_kind"] == "amd_rocm"
@@ -242,7 +242,7 @@ class TestSessionEvents:
 
         event = _events(paths)[-1]
         assert event["event"] == "engine_load_failed"
-        assert event["model"] == "parakeet-tdt-0.6b-v3"
+        assert event["model"] == "parakeet-ultra"
         assert event["engine"] == "nano_parakeet"
         assert event["device"] == "cuda"
         assert event["seconds"] == 3.5

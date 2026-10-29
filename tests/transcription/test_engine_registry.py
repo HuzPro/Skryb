@@ -34,7 +34,7 @@ class _FakeEngine(TranscriptionEngine):
 
 def _spec(*, repo_id: str = "nvidia/parakeet-tdt-0.6b-v3") -> EngineSpec:
     return EngineSpec(
-        model_name="parakeet-tdt-0.6b-v3", repo_id=repo_id,
+        model_name="parakeet-ultra", repo_id=repo_id,
         device="cpu", language="en",
         beam_size=5, model_dir=Path("/tmp/models"),
     )
@@ -82,7 +82,7 @@ class TestEngineRegistry:
 class TestEngineSpec:
     def test_should_carry_engine_specific_repo_id(self):
         spec = EngineSpec(
-            model_name="parakeet-tdt-0.6b-v3",
+            model_name="parakeet-ultra",
             repo_id="nvidia/parakeet-tdt-0.6b-v3",
             device="cuda", language="en", beam_size=5, model_dir=Path("/m"),
         )

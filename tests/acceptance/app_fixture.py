@@ -149,7 +149,7 @@ class SkrybApp:
         self._use_case.on_cancel()
 
     def trigger_engine_swap(
-        self, model_name: str = "parakeet-tdt-0.6b-v3",
+        self, model_name: str = "parakeet-ultra",
     ) -> None:
         self._hot_swap.start_swap(model_name)
 

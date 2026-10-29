@@ -35,7 +35,7 @@ from skryb.ui.api_handlers import CoreApi, ShortcutCapture
 from skryb.ui.api_server import ApiServer
 from skryb.ui.event_hub import EventHub
 
-PARAKEET = "parakeet-tdt-0.6b-v3"
+PARAKEET = "parakeet-ultra"
 TURBO = "crisperwhisper-2.0-turbo"
 NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 CRISPERWHISPER_LICENCE = "crisperwhisper-nc"

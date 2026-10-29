@@ -51,9 +51,8 @@ first thing to include in a bug report.
   to 5. The default is `Ctrl+Alt+M`. Double-tap a hold shortcut to go
   hands-free. The shortcut's last key never reaches the focused app, and your
   clipboard is preserved.
-- **Local models.** Parakeet (`parakeet-tdt-0.6b-v3`) is the default on a GPU.
-  `parakeet-ultra` is an optional download with fewer errors, and
-  CrisperWhisper is there too, under a non-commercial license.
+- **Local models.** Parakeet Ultra (`parakeet-ultra`) is the default on a GPU,
+  and CrisperWhisper is there too, under a non-commercial license.
 - **Live streaming mode (experimental).** Text appears while you speak, using
   Parakeet or the cache-aware `nemotron-speech-streaming-en-0.6b`. GPU only.
 - **GPU first, CPU works too.** CUDA and ROCm, Windows ROCm included, are
