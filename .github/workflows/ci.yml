@@ -17,7 +17,9 @@ permissions:
 jobs:
   test:
     name: Tests (Ubuntu, CPU)
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
+    # sounddevice fails test collection.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
