@@ -39,6 +39,8 @@ class ModelInfo:
     license_url: str = ""
     compatible_engines: tuple[EngineId, ...] = ()
     engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
+    # Overrides for a computer with an Intel NPU the NPU engine was tuned on (``intel_npu``).
+    npu_engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
 
     @property
     def display_size(self) -> str:
@@ -77,10 +79,13 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
 
 # Phonon is Parakeet v3's network, so the native Parakeet engine runs it on an
 # RX 9060 XT, packed once from Fermion's dense expansion. The NPU engine runs
-# it too; it ranks below Fermion's CPU engine until it is measured on a real
-# Intel NPU; pick it in Settings to try it.
+# it too. On the Intel NPUs it was measured on it beats Fermion's CPU engine
+# and leads; elsewhere it ranks below it, and Settings can still pick it.
 _PHONON2_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"native_parakeet": 120, "phonon2_cpu": 100, "openvino_parakeet": 90},
+)
+_PHONON2_NPU_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"openvino_parakeet": 110},
 )
 
 
@@ -96,6 +101,7 @@ PHONON2_MODELS: dict[str, ModelInfo] = {
         revision="da200358d638886bc96c758c672ad5568828b119",
         compatible_engines=("phonon2_cpu", "native_parakeet", "openvino_parakeet"),
         engine_priorities=_PHONON2_ENGINE_PRIORITIES,
+        npu_engine_priorities=_PHONON2_NPU_ENGINE_PRIORITIES,
     ),
 }
 

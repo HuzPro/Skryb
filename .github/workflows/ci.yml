@@ -17,7 +17,9 @@ permissions:
 jobs:
   test:
     name: Tests (Ubuntu, CPU)
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
+    # sounddevice fails test collection.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
@@ -41,12 +43,13 @@ jobs:
 
       # CPU PyTorch from the dedicated index (skips the large CUDA wheels),
       # then the project with its test deps and the parakeet engine (the
-      # cache-aware streaming tests import nano_parakeet directly).
+      # cache-aware streaming tests import nano_parakeet directly), plus
+      # OpenVINO so the NPU engine's CPU-device tests run instead of skipping.
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          pip install -e ".[dev]"
+          pip install -e ".[dev,npu]"
 
       # `python -m pytest` puts the repo root on sys.path (the `tests`
       # package imports need it). `-m "not slow"` (pyproject.toml addopts)

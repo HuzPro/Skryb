@@ -76,7 +76,9 @@ jobs:
     name: Tests (Ubuntu, CPU)
     needs: gate
     if: needs.gate.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
+    # sounddevice fails test collection.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -95,7 +97,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          pip install -e ".[dev]"
+          pip install -e ".[dev,npu]"
 
       - name: Run tests
         run: xvfb-run -a python -m pytest -q

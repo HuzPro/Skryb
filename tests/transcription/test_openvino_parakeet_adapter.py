@@ -166,13 +166,15 @@ class _FakeCore:
     def __init__(self, behaviour: dict[str, str]) -> None:
         self._behaviour = behaviour
         self.compiled: list[tuple[str, dict | None]] = []
+        self.configs: list[dict] = []
 
     def read_model(self, path: str) -> _FakeModel:
         return _FakeModel()
 
     def compile_model(self, model: _FakeModel, device: str, config: dict) -> _FakeCompiled:
-        assert config["CACHE_DIR"].endswith("compiled")
+        assert config["CACHE_DIR"].endswith("compiled-int8")
         self.compiled.append((device, model.shapes))
+        self.configs.append(config)
         if self._behaviour[device] == "refuse":
             raise RuntimeError(f"{device} cannot compile this graph")
         return _FakeCompiled(value=np.nan if self._behaviour[device] == "nan" else 1.0)
@@ -194,8 +196,17 @@ class TestChoosingADevice:
 
         assert encoder.device == "NPU"
         assert [shapes["features"] for _, shapes in openvino.core.compiled] == [
-            [1, 128, 1001], [1, 128, 3001],
+            [1, 128, 501], [1, 128, 1001], [1, 128, 1501], [1, 128, 3001],
         ]
+
+    def test_the_npu_is_kept_at_full_clock_and_high_priority_and_the_cpu_is_left_alone(self, tmp_path) -> None:
+        openvino = _FakeOpenVino({"NPU": "refuse", "CPU": "ok"})
+
+        compile_encoder(openvino, tmp_path / "encoder.xml", ["NPU", "CPU"])
+
+        npu, cpu = openvino.core.configs[0], openvino.core.configs[-1]
+        assert npu["NPU_TURBO"] == "YES" and npu["MODEL_PRIORITY"] == "HIGH"
+        assert "NPU_TURBO" not in cpu and "MODEL_PRIORITY" not in cpu
 
     def test_an_npu_that_refuses_the_graph_falls_back_to_the_cpu(self, tmp_path) -> None:
         openvino = _FakeOpenVino({"NPU": "refuse", "CPU": "ok"})
@@ -231,3 +242,62 @@ def test_openvinos_usage_reporting_is_replaced_by_its_no_op_stub() -> None:
     )
 
     assert completed.stdout.strip().endswith("telemetry_stub")
+
+
+class TestUpgradingFrom090:
+    def test_a_read_only_cache_folder_is_deleted_whole(self, tmp_path) -> None:
+        import os
+        import stat
+
+        from skryb.transcription.openvino_parakeet_adapter import delete_cache_directory
+
+        cache = tmp_path / "compiled"
+        (cache / "nested").mkdir(parents=True)
+        for blob in (cache / "123.blob", cache / "nested" / "456.blob"):
+            blob.write_bytes(b"blob")
+            os.chmod(blob, stat.S_IREAD)
+
+        delete_cache_directory(cache)
+
+        assert not cache.exists()
+
+    def test_a_missing_cache_folder_is_fine(self, tmp_path) -> None:
+        from skryb.transcription.openvino_parakeet_adapter import delete_cache_directory
+
+        delete_cache_directory(tmp_path / "compiled")
+
+    @pytest.mark.skipif(importlib.util.find_spec("openvino") is None, reason="openvino is not installed")
+    def test_the_fp16_encoder_and_its_old_blobs_give_way_to_the_int8_encoder(self, tmp_path) -> None:
+        import os
+        import stat
+
+        from skryb.transcription.openvino_parakeet_adapter import _write_int8_encoder, import_openvino
+        from skryb.transcription.openvino_int8_weights import opset
+
+        openvino = import_openvino()
+        ops = opset(openvino)
+        features = ops.parameter([1, 128, -1], np.float32, name="features")
+        weight = np.random.default_rng(0).standard_normal((64, 128)).astype(np.float32)
+        out = ops.matmul(ops.transpose(features, ops.constant(np.array([0, 2, 1]))), ops.constant(weight), False, True)
+        exported, int8 = tmp_path / "encoder.xml", tmp_path / "encoder-int8.xml"
+        openvino.save_model(openvino.Model([out], [features], "tiny"), str(exported))
+        (tmp_path / "compiled").mkdir()
+        old_blob = tmp_path / "compiled" / "999.blob"
+        old_blob.write_bytes(b"0.9.0")
+        os.chmod(old_blob, stat.S_IREAD)
+
+        _write_int8_encoder(openvino, exported, int8)
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["encoder-int8.bin", "encoder-int8.xml"]
+
+
+def test_numpys_blas_threads_can_be_lowered_and_put_back() -> None:
+    from skryb.transcription.openvino_parakeet_adapter import set_numpy_blas_threads
+
+    before = set_numpy_blas_threads(1)
+    if before is None:
+        pytest.skip("this NumPy build has no reachable OpenBLAS")
+    try:
+        assert set_numpy_blas_threads(before) == 1
+    finally:
+        set_numpy_blas_threads(before)

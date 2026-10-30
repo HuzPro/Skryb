@@ -5,6 +5,7 @@ GreedyTDTInfer), so an engine that runs only the encoder elsewhere (OpenVINO on 
 """
 
 import importlib.util
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 
@@ -21,8 +22,10 @@ _BLANK = 8192
 _DURATIONS = (0, 1, 2, 3, 4)
 _MAX_SYMBOLS_PER_FRAME = 10
 # Frames scored per joint call: the prediction only changes when a token is emitted, so the walk over
-# blank frames reuses one batched product.
+# blank frames reuses one batched product. Right after a token one frame is scored, and the window doubles
+# over each run of blanks up to the most: rows scored past the next token are thrown away.
 _WINDOW = 16
+_FIRST_WINDOW = 1
 
 # The decoder and joint tensors, under nano-parakeet's names.
 DECODING_TENSORS = (
@@ -106,33 +109,8 @@ class TdtDecoder:
 
     def decode(self, encoded: np.ndarray) -> list[int]:
         """Token ids for ``[frames, 1024]`` encoder output."""
-        frames = encoded.shape[0]
         enc = encoded.astype(np.float32) @ self._enc[0] + self._enc[1]
-        state = self._initial_state()
-        candidate = self._step(_BLANK, state)
-        scored_from, scored = -1, None
-        tokens: list[int] = []
-        t = 0
-        while t < frames:
-            frame_start, symbols, need_loop = t, 0, True
-            while need_loop and symbols < _MAX_SYMBOLS_PER_FRAME and t < frames:
-                if scored is None or not scored_from <= t < scored_from + len(scored):
-                    scored_from, scored = t, self._score(enc[t:t + _WINDOW], candidate[0])
-                token, duration = scored[t - scored_from]
-                skip = _DURATIONS[duration]
-                if token == _BLANK:
-                    need_loop = False
-                else:
-                    tokens.append(token)
-                    state = candidate[1]
-                    candidate = self._step(token, state)
-                    scored = None
-                symbols += 1
-                t += skip
-                need_loop = need_loop and skip == 0
-            if t <= frame_start:
-                t = frame_start + 1
-        return tokens
+        return greedy_tdt_walk(enc, self._step, self._score, self._initial_state())
 
     def _initial_state(self) -> list[tuple[np.ndarray, np.ndarray]]:
         zeros = np.zeros(self._embed.shape[1], np.float32)
@@ -156,6 +134,46 @@ class TdtDecoder:
         tokens = logits[:, :-len(_DURATIONS)].argmax(axis=1)
         durations = logits[:, -len(_DURATIONS):].argmax(axis=1)
         return list(zip(tokens.tolist(), durations.tolist()))
+
+
+def greedy_tdt_walk(
+    enc: np.ndarray,
+    step: Callable[[int, object], tuple[np.ndarray, object]],
+    score: Callable[[np.ndarray, np.ndarray], list[tuple[int, int]]],
+    state: object,
+) -> list[int]:
+    """GreedyTDTInfer's walk over joint-projected encoder frames *enc*.
+
+    *step* gives the prediction for a label and the state it leads to; *score* gives the best token and
+    duration index for each frame of a window, against one prediction.
+    """
+    frames = enc.shape[0]
+    candidate = step(_BLANK, state)
+    scored_from, scored, window = -1, None, _WINDOW
+    tokens: list[int] = []
+    t = 0
+    while t < frames:
+        frame_start, symbols, need_loop = t, 0, True
+        while need_loop and symbols < _MAX_SYMBOLS_PER_FRAME and t < frames:
+            if scored is None or not scored_from <= t < scored_from + len(scored):
+                if scored is not None:
+                    window = min(window * 2, _WINDOW)
+                scored_from, scored = t, score(enc[t:t + window], candidate[0])
+            token, duration = scored[t - scored_from]
+            skip = _DURATIONS[duration]
+            if token == _BLANK:
+                need_loop = False
+            else:
+                tokens.append(token)
+                state = candidate[1]
+                candidate = step(token, state)
+                scored, window = None, _FIRST_WINDOW
+            symbols += 1
+            t += skip
+            need_loop = need_loop and skip == 0
+        if t <= frame_start:
+            t = frame_start + 1
+    return tokens
 
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
