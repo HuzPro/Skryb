@@ -39,7 +39,7 @@ def test_the_cpu_graphs_decode_the_same_tokens_as_numpy_given_the_same_weights(s
     _, _, tensors = _random_decoding_parts(seed, encoded)
 
     expected = TdtDecoder(_as_the_cpu_sees_them(tensors)).decode(encoded.numpy())
-    tokens = OpenVinoTdtDecoder(openvino, tensors).decode(encoded.numpy())
+    tokens = OpenVinoTdtDecoder(openvino, tensors, exact=True).decode(encoded.numpy())
 
     assert len(expected) > 20
     assert tokens == expected
@@ -49,3 +49,14 @@ def test_an_empty_encoding_decodes_to_nothing() -> None:
     _, _, tensors = _random_decoding_parts(0)
 
     assert OpenVinoTdtDecoder(openvino, tensors).decode(np.zeros((0, 1024), np.float32)) == []
+
+
+def test_the_exact_decoder_turns_activation_rounding_off_and_the_default_keeps_the_plugins_choice() -> None:
+    _, _, tensors = _random_decoding_parts(0)
+    key = "DYNAMIC_QUANTIZATION_GROUP_SIZE"
+
+    default = OpenVinoTdtDecoder(openvino, tensors)._score_request.get_compiled_model()
+    exact = OpenVinoTdtDecoder(openvino, tensors, exact=True)._score_request.get_compiled_model()
+
+    assert exact.get_property(key) == 0
+    assert default.get_property(key) == openvino.Core().get_property("CPU", key)

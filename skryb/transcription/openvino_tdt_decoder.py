@@ -3,8 +3,12 @@
 Decoding is one small step per token, so it is bound by reading weights: the LSTM, the prediction
 projection and the joint's output layer are about 34 MB at fp32, read once per token. OpenVINO's CPU
 plugin keeps symmetric per-channel int8 weights compressed and expands them as it multiplies, which
-reads a quarter of that. On a Core 5 320 this decodes 3 s of dictation in about 25 ms where NumPy took 70.
+reads a quarter of that. On a Core 5 320 this decodes 3 s of dictation in about 20 ms where NumPy took 70.
 The walk over frames is ``parakeet_numpy``'s; only the two products it calls per token run here.
+
+The plugin also rounds the activations to int8 on the fly. On random weights that drifts from
+NumPy's tokens after a few dozen, so the tests run with it off (``exact``); on 100 real dictations
+(4,896 tokens) it changed none, and it decodes 1.24x faster.
 """
 
 import numpy as np
@@ -21,18 +25,17 @@ _CPU_CONFIG = {
     "INFERENCE_NUM_THREADS": 2,
     # The CPU may offer bf16 or fp16 maths; the NumPy decoder these tokens must match is fp32.
     "INFERENCE_PRECISION_HINT": "f32",
-    # By default the plugin also rounds the activations to int8 on the fly, which drifts from NumPy's
-    # tokens after a few dozen on random weights. Off, it matches exactly and is still 2-3x faster.
-    "DYNAMIC_QUANTIZATION_GROUP_SIZE": 0,
 }
+_EXACT_CONFIG = {"DYNAMIC_QUANTIZATION_GROUP_SIZE": 0}
 _STATE_NAMES = ("h0", "c0", "h1", "c1")
 
 
 class OpenVinoTdtDecoder:
     """``parakeet_numpy.TdtDecoder``'s decoding, with each token's products compiled for the CPU."""
 
-    def __init__(self, openvino: object, tensors: dict[str, np.ndarray]) -> None:
+    def __init__(self, openvino: object, tensors: dict[str, np.ndarray], exact: bool = False) -> None:
         ops = opset(openvino)
+        config = {**_CPU_CONFIG, **(_EXACT_CONFIG if exact else {})}
         self._embed = np.ascontiguousarray(tensors["decoder.embed.weight"], np.float32)
         self._enc = (
             np.ascontiguousarray(tensors["joint.enc.weight"], np.float32).T.copy(),
@@ -40,10 +43,10 @@ class OpenVinoTdtDecoder:
         )
         core = openvino.Core()
         self._step_request = core.compile_model(
-            _step_model(openvino, ops, tensors), "CPU", _CPU_CONFIG,
+            _step_model(openvino, ops, tensors), "CPU", config,
         ).create_infer_request()
         self._score_request = core.compile_model(
-            _score_model(openvino, ops, tensors), "CPU", _CPU_CONFIG,
+            _score_model(openvino, ops, tensors), "CPU", config,
         ).create_infer_request()
 
     def decode(self, encoded: np.ndarray) -> list[int]:
