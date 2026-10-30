@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from typing import cast
 
 from skryb.core.config import ConfigurationStore
@@ -24,7 +25,8 @@ class CachedHardwareDetector(HardwareDetector):
     A cold probe imports torch, which takes up to ~19 s on a ROCm install,
     yet the answer only changes when the GPU does. The display-adapter
     fingerprint stands in for "same GPU as last time"; an empty one means
-    that cannot be told, so nothing is remembered or reused.
+    that cannot be told, so nothing is remembered or reused. The NPU is
+    read fresh every time: a registry lookup, cheaper than remembering it.
     """
 
     def __init__(
@@ -32,23 +34,29 @@ class CachedHardwareDetector(HardwareDetector):
         inner: HardwareDetector,
         config: ConfigurationStore,
         fingerprint: Callable[[], str],
+        npu: Callable[[], str | None],
     ) -> None:
         self._inner = inner
         self._config = config
         self._fingerprint = fingerprint
+        self._npu = npu
 
     def detect(self) -> HardwareProfile:
         fingerprint = self._fingerprint()
         remembered = self._remembered(fingerprint)
         if remembered is not None:
-            return remembered
+            return self._with_npu(remembered)
         profile = self._inner.detect()
         if fingerprint:
             self._remember(profile, fingerprint)
-        return profile
+        return self._with_npu(profile)
 
     def peek(self) -> HardwareProfile | None:
-        return self._inner.peek() or self._remembered(self._fingerprint())
+        profile = self._inner.peek() or self._remembered(self._fingerprint())
+        return None if profile is None else self._with_npu(profile)
+
+    def _with_npu(self, profile: HardwareProfile) -> HardwareProfile:
+        return replace(profile, npu=self._npu())
 
     def _remembered(self, fingerprint: str) -> HardwareProfile | None:
         if not fingerprint or self._config.get(_FINGERPRINT_KEY) != fingerprint:

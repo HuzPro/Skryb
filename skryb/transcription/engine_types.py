@@ -17,6 +17,8 @@ class HardwareProfile:
     kind: HardwareKind
     device_name: str
     gfx_arch: str | None
+    # PCI device ID of an Intel NPU the NPU engine was tuned on, such as "FD3E".
+    npu: str | None = None
 
 
 @dataclass(frozen=True)

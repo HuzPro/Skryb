@@ -359,10 +359,13 @@ def _nothing_to_await() -> None:
 def _remembered_hardware(config: ConfigurationStore) -> HardwareProfile | None:
     """The GPU probe a past launch saved, read without importing torch."""
     from skryb.transcription.cached_hardware_detector import CachedHardwareDetector
+    from skryb.transcription.intel_npu import tuned_intel_npu
     from skryb.transcription.torch_hardware_detector import TorchHardwareDetector
     from skryb.transcription.win32_display_adapters import display_adapter_fingerprint
 
-    return CachedHardwareDetector(TorchHardwareDetector(), config, display_adapter_fingerprint).peek()
+    return CachedHardwareDetector(
+        TorchHardwareDetector(), config, display_adapter_fingerprint, tuned_intel_npu,
+    ).peek()
 
 
 def _run(paths: AppPaths, startup: _Startup, *, restarted: bool = False) -> None:
@@ -395,6 +398,7 @@ def _run(paths: AppPaths, startup: _Startup, *, restarted: bool = False) -> None
     from skryb.transcription.cached_hardware_detector import (
         CachedHardwareDetector,
     )
+    from skryb.transcription.intel_npu import tuned_intel_npu
     from skryb.transcription.torch_hardware_detector import (
         TorchHardwareDetector,
     )
@@ -405,7 +409,7 @@ def _run(paths: AppPaths, startup: _Startup, *, restarted: bool = False) -> None
     # Held, not called: the GPU probe imports torch, so only the code
     # that actually needs an answer gets to pay for one.
     hardware_detector = CachedHardwareDetector(
-        TorchHardwareDetector(), config, display_adapter_fingerprint,
+        TorchHardwareDetector(), config, display_adapter_fingerprint, tuned_intel_npu,
     )
     from skryb.transcription.model_info import default_model_for
 

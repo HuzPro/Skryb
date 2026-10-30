@@ -68,11 +68,15 @@ into the snapshot's `.phonon2` folder.
 
 On a computer with an Intel NPU and no GPU, `pip install -e .[npu]` adds
 OpenVINO (the CPU requirements file already includes it). `parakeet-ultra`
-then runs its encoder on the NPU, and the rest of the model on the CPU. The
+then runs its encoder on the NPU, and the rest of the model on the CPU. On a
+Core Series 3 (Wildcat Lake) NPU, the one it was tuned and measured on,
+`phonon-2.5-english` runs there too by default instead of on Fermion's CPU
+engine; on other NPUs pick "Parakeet on the NPU" in Settings to try it. The
 first load exports the encoder to OpenVINO IR in the snapshot's `.openvino`
-folder and compiles it, which takes a minute or two; later loads reuse the
-compiled copy. The NPU needs Intel's NPU driver 32.0.100.5540 or
-newer. Without a working NPU the same engine runs the encoder on the CPU.
+folder, rewrites it with int8 weights and compiles it at four lengths, which
+takes a few minutes once; later loads reuse the compiled copies. The NPU
+needs Intel's NPU driver 32.0.100.5540 or newer. Without a working NPU the
+same engine runs the encoder on the CPU.
 `python scripts\check_npu.py` reports which device it got and how fast it is.
 OpenVINO's model converter reports usage to Intel unless you opt out; Skryb
 keeps its telemetry package from loading.

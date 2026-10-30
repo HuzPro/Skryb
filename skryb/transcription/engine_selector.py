@@ -28,7 +28,7 @@ def rank_engines(
     surviving = _filter_compatible(model, hardware, descriptors)
     if not surviving:
         return ()
-    scored = _score(model, surviving)
+    scored = _score(model, hardware, surviving)
     ordered = sorted(scored, key=lambda pair: pair[1], reverse=True)
     return _to_candidates(ordered, hardware)
 
@@ -86,12 +86,11 @@ def _base_arch(gfx_arch: str | None) -> str:
 
 def _score(
     model: ModelInfo,
+    hardware: HardwareProfile,
     descriptors: Sequence[EngineDescriptor],
 ) -> list[tuple[EngineDescriptor, int]]:
-    return [
-        (d, model.engine_priorities.get(d.engine_id, d.base_priority))
-        for d in descriptors
-    ]
+    priorities = {**model.engine_priorities, **(model.npu_engine_priorities if hardware.npu else {})}
+    return [(d, priorities.get(d.engine_id, d.base_priority)) for d in descriptors]
 
 
 def _to_candidates(
@@ -104,13 +103,15 @@ def _to_candidates(
             display_name=d.display_name,
             score=score,
             is_recommended=(idx == 0),
-            reason=_reason_for(hardware) if idx == 0 else "",
+            reason=_reason_for(hardware, d.engine_id) if idx == 0 else "",
         )
         for idx, (d, score) in enumerate(ordered)
     )
 
 
-def _reason_for(hardware: HardwareProfile) -> str:
+def _reason_for(hardware: HardwareProfile, engine_id: str) -> str:
+    if hardware.npu and engine_id == "openvino_parakeet":
+        return "Recommended for your Intel NPU"
     label = _HARDWARE_LABELS[hardware.kind]
     if hardware.gfx_arch:
         return f"Recommended for your {label} ({hardware.gfx_arch})"

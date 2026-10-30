@@ -776,7 +776,7 @@ class TestPhonon2OnTheCpuEngine:
         return snapshot
 
     @pytest.mark.parametrize("hardware", [_CPU, _GPU])
-    def test_auto_keeps_it_on_fermions_engine_until_the_npu_engine_is_measured(self, hardware) -> None:
+    def test_auto_keeps_it_on_fermions_engine_without_a_tuned_npu(self, hardware) -> None:
         engine_id = resolve_engine_id(
             _config(model_size="phonon-2.5-english"), get_model_info("phonon-2.5-english"),
             hardware, build_engine_registry(),
@@ -784,17 +784,41 @@ class TestPhonon2OnTheCpuEngine:
 
         assert engine_id == "phonon2_cpu"
 
-    def test_a_computer_without_a_gpu_can_choose_the_npu_engine_for_it(self) -> None:
+    def _ranked_with_openvino(self, hardware: HardwareProfile) -> tuple:
         from skryb.transcription.engine_selector import rank_engines
 
         descriptors = [
             replace(d, available=True) if d.engine_id == "openvino_parakeet" else d
             for d in build_engine_registry().all_descriptors()
         ]
-        hardware = HardwareProfile(kind="cpu", device_name="Intel Core 5 320", gfx_arch=None)
+        return rank_engines(get_model_info("phonon-2.5-english"), hardware, descriptors)
+
+    def test_a_computer_without_a_gpu_or_a_tuned_npu_can_still_choose_the_npu_engine(self) -> None:
+        hardware = HardwareProfile(kind="cpu", device_name="Intel Core Ultra 7 268V", gfx_arch=None)
+
+        assert [c.engine_id for c in self._ranked_with_openvino(hardware)] == ["phonon2_cpu", "openvino_parakeet"]
+
+    def test_a_core_series_3_npu_puts_the_npu_engine_first(self) -> None:
+        hardware = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None, npu="FD3E")
+
+        ranked = self._ranked_with_openvino(hardware)
+
+        assert [c.engine_id for c in ranked] == ["openvino_parakeet", "phonon2_cpu"]
+        assert ranked[0].reason == "Recommended for your Intel NPU"
+
+    def test_a_tuned_npu_without_openvino_installed_stays_on_fermions_engine(self) -> None:
+        from skryb.transcription.engine_selector import rank_engines
+
+        descriptors = [
+            replace(d, available=False) if d.engine_id == "openvino_parakeet" else d
+            for d in build_engine_registry().all_descriptors()
+        ]
+        hardware = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None, npu="FD3E")
+
         ranked = rank_engines(get_model_info("phonon-2.5-english"), hardware, descriptors)
 
-        assert [c.engine_id for c in ranked] == ["phonon2_cpu", "openvino_parakeet"]
+        assert [c.engine_id for c in ranked] == ["phonon2_cpu"]
+        assert ranked[0].reason == "Recommended for your CPU"
 
     @pytest.mark.parametrize("hardware", [_CPU, _GPU])
     def test_the_engine_opens_the_pinned_snapshot_on_any_hardware(

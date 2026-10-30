@@ -16,6 +16,12 @@ _RTX_4090 = HardwareProfile(
 )
 _AMD_DESKTOP = "AMD Radeon RX 9060 XT|AMD Radeon(TM) Graphics"
 _NVIDIA_DESKTOP = "NVIDIA GeForce RTX 4090|Écran Radeon™ intégré"
+_CORE_5_320 = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
+_LAPTOP = "Intel(R) Graphics"
+
+
+def _no_npu() -> None:
+    return None
 
 
 def _launch(
@@ -23,7 +29,7 @@ def _launch(
 ) -> CachedHardwareDetector:
     config = JsonConfigAdapter(config_path)
     config.load()
-    return CachedHardwareDetector(probe, config, lambda: fingerprint)
+    return CachedHardwareDetector(probe, config, lambda: fingerprint, _no_npu)
 
 
 def test_a_probe_is_reused_after_a_restart_while_the_display_adapters_are_unchanged(
@@ -69,7 +75,7 @@ def test_an_empty_fingerprint_never_remembers_or_reuses_a_probe() -> None:
         "hardware.probe.fingerprint": "",
     })
     probe = FakeHardwareDetector(_RTX_4090, probed=False)
-    detector = CachedHardwareDetector(probe, config, lambda: "")
+    detector = CachedHardwareDetector(probe, config, lambda: "", _no_npu)
 
     assert detector.peek() is None
     assert detector.detect() == _RTX_4090
@@ -86,7 +92,7 @@ def test_a_hand_edited_hardware_kind_is_probed_again() -> None:
     })
     probe = FakeHardwareDetector(_RX_9060, probed=False)
 
-    assert CachedHardwareDetector(probe, config, lambda: _AMD_DESKTOP).detect() == (
+    assert CachedHardwareDetector(probe, config, lambda: _AMD_DESKTOP, _no_npu).detect() == (
         _RX_9060
     )
     assert probe.detect_calls == 1
@@ -100,7 +106,36 @@ class _ReadOnlyConfig(FakeConfig):
 
 def test_the_probe_still_answers_when_the_config_cannot_be_saved() -> None:
     probe = FakeHardwareDetector(_RX_9060, probed=False)
-    detector = CachedHardwareDetector(probe, _ReadOnlyConfig(), lambda: _AMD_DESKTOP)
+    detector = CachedHardwareDetector(probe, _ReadOnlyConfig(), lambda: _AMD_DESKTOP, _no_npu)
 
     assert detector.detect() == _RX_9060
     assert detector.peek() == _RX_9060
+
+
+def test_a_tuned_npu_is_reported_on_a_fresh_probe_and_on_a_remembered_one(tmp_path: Path) -> None:
+    config = JsonConfigAdapter(tmp_path / "config.json")
+    config.load()
+    fresh = CachedHardwareDetector(
+        FakeHardwareDetector(_CORE_5_320, probed=False), config, lambda: _LAPTOP, lambda: "FD3E",
+    )
+
+    assert fresh.detect().npu == "FD3E"
+
+    remembered = CachedHardwareDetector(
+        FakeHardwareDetector(_CORE_5_320, probed=False), config, lambda: _LAPTOP, lambda: "FD3E",
+    )
+    assert remembered.peek().npu == "FD3E"
+    assert remembered.detect().npu == "FD3E"
+
+
+def test_the_npu_is_read_fresh_each_time_and_never_saved_in_the_config(tmp_path: Path) -> None:
+    config = JsonConfigAdapter(tmp_path / "config.json")
+    config.load()
+    CachedHardwareDetector(
+        FakeHardwareDetector(_CORE_5_320, probed=False), config, lambda: _LAPTOP, lambda: "FD3E",
+    ).detect()
+
+    later = CachedHardwareDetector(FakeHardwareDetector(_CORE_5_320, probed=False), config, lambda: _LAPTOP, _no_npu)
+
+    assert later.detect().npu is None
+    assert "FD3E" not in (tmp_path / "config.json").read_text(encoding="utf-8")
