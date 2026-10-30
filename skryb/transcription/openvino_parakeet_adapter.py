@@ -249,8 +249,9 @@ def delete_cache_directory(directory: Path) -> None:
 def _delete_read_only_tree(directory: Path) -> None:
     if not directory.is_dir():
         return
+    # Adds the write bit only: a directory that lost its execute bit could no longer be emptied.
     for path in directory.rglob("*"):
-        path.chmod(stat.S_IWRITE | stat.S_IREAD)
+        path.chmod(path.stat().st_mode | stat.S_IWRITE)
     shutil.rmtree(directory)
 
 
