@@ -76,8 +76,10 @@ class TorchHardwareDetector(HardwareDetector):
 
     @staticmethod
     def _cuda_profile(torch: object) -> HardwareProfile:
+        props = torch.cuda.get_device_properties(0)
         return HardwareProfile(
             kind="nvidia_cuda",
             device_name=str(torch.cuda.get_device_name(0)),
-            gfx_arch=None,
+            # The compute capability as nvcc names it: an RTX 5060 is "sm_120".
+            gfx_arch=f"sm_{props.major}{props.minor}",
         )

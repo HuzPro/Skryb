@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from skryb.core.exceptions import ConfigurationError, TranscriptionError
+from skryb.core.exceptions import ConfigurationError, GpuEngineError, TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
 from skryb.transcription.hf_model_manager import loadable_snapshot_dir
@@ -46,10 +46,11 @@ def packed_model_path(weights: Path) -> Path:
 class NativeParakeetAdapter(TranscriptionEngine):
     """Batch Parakeet TDT through ``npk.dll``. One call at a time, like every adapter here."""
 
-    def __init__(self, model_dir: Path, repo_id: str, dll_path: Path | None = None) -> None:
+    def __init__(self, model_dir: Path, repo_id: str, dll_path: Path | None = None, cuda: bool = False) -> None:
         self._model_dir = model_dir
         self._repo_id = repo_id
-        self._dll_path = dll_path or native_parakeet_dll() or Path("npk.dll")
+        self._dll_path = dll_path or native_parakeet_dll(cuda=cuda) or Path("npk_cuda.dll" if cuda else "npk.dll")
+        self._cuda = cuda
         self._lib: ctypes.CDLL | None = None
         self._handle: int | None = None
         self._text = ctypes.create_string_buffer(_TEXT_BUFFER_BYTES)
@@ -57,11 +58,13 @@ class NativeParakeetAdapter(TranscriptionEngine):
     def load_model(self) -> None:
         started_at = time.perf_counter()
         packed = self._packed_model()
+        if self._cuda:
+            _logger.warning("Running the experimental NVIDIA build of the native engine: %s", self._dll_path.name)
         self._lib = _open_library(self._dll_path)
         error = ctypes.create_string_buffer(_ERROR_BUFFER_BYTES)
         handle = self._lib.npk_load(str(packed).encode(), error, _ERROR_BUFFER_BYTES)
         if not handle:
-            raise TranscriptionError(f"Native Parakeet failed to load: {error.value.decode(errors='replace')}")
+            raise GpuEngineError(f"Native Parakeet failed to load: {error.value.decode(errors='replace')}")
         self._handle = handle
         _logger.info(
             "[load_model native parakeet] complete in %.2fs | %s", time.perf_counter() - started_at, self._stats(),
@@ -159,9 +162,9 @@ def _pack_snapshot(packed: Path, state: Callable[[], dict[str, np.ndarray]]) -> 
 
 def _open_library(dll_path: Path) -> ctypes.CDLL:
     if not dll_path.exists():
-        raise TranscriptionError(
+        raise GpuEngineError(
             f"The native Parakeet engine isn't installed ({dll_path} is missing). "
-            "Reinstall Skryb, or in a source checkout run native/parakeet/build.sh."
+            "Reinstall Skryb, or in a source checkout run native/parakeet/build.sh (native/cuda/build.py for NVIDIA)."
         )
     hip_bin = _rocm_runtime_dir()
     if hip_bin is not None:

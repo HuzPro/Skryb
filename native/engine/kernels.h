@@ -1,7 +1,7 @@
 #pragma once
-#include <hip/hip_runtime.h>
+#include "gpu.h"
 
-typedef __bf16 bf16;
+#include <string>
 
 enum { ACT_NONE = 0, ACT_GELU = 1, ACT_SILU = 2, ACT_RELU = 3 };
 
@@ -39,7 +39,7 @@ struct AttnArgs {
 };
 
 // 4-bit weights for the speculative draft: per row, groups of 32 along K, nibble = q + 8, fp16 scale.
-struct Q4 { const uint4* q; const _Float16* s; };
+struct Q4 { const uint4* q; const f16* s; };
 
 // C[M][N] = A[M][K] * W[N][K]^T, K a multiple of 32 (8 when M <= 8).
 void gemm(hipStream_t s, const bf16* A, int lda, const bf16* W, int M, int N, int K, const Epi& e);
@@ -60,7 +60,7 @@ void qk_norm_rope(hipStream_t s, bf16* qkv, const bf16* qn, const bf16* kn, bf16
 void attention(hipStream_t s, const AttnArgs& a, int head_dim);
 // Merges split-key partials for rows [0, rows) into a.o.
 void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits, int head_dim = 128);
-void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, _Float16* scale);
+void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, f16* scale);
 // One activation row times 4-bit weights, same epilogue rules as gemm.
 void gemv_q4(hipStream_t s, const bf16* x, const Q4& w, int N, int K, const Epi& e);
 void silu_mul(hipStream_t s, const bf16* gu, bf16* out, int rows, int d);
@@ -69,3 +69,7 @@ void embed(hipStream_t s, const int* ids, const bf16* table, const bf16* audio, 
 void argmax_ids(hipStream_t s, const unsigned long long* keys, int* ids, int rows);
 // fp32 logits of two tokens for each of M normalised rows (d = 2048): out[2 m + j] = x[m] . W[id_j].
 void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out);
+// Runs the GEMM paths and attention on small random inputs against a CPU reference; empty when they agree,
+// else what was off. Engines call it at load, so a GPU these kernels misbehave on refuses to load instead of
+// transcribing nonsense.
+std::string gpu_self_check(hipStream_t s);

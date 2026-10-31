@@ -8,6 +8,7 @@ from skryb.transcription.engine_types import (
     CrisperWhisperMode,
     EngineDescriptor,
     EngineId,
+    HardwareKind,
 )
 
 
@@ -33,6 +34,8 @@ class EngineSpec:
     crisperwhisper_mode: CrisperWhisperMode = "intended"
     # A full stop the engine nearly made a question mark becomes one (engines that can tell).
     question_marks: bool = True
+    # The probed GPU's kind, for the native engines: it picks their AMD or NVIDIA build.
+    hardware_kind: HardwareKind | None = None
 
 
 class EngineBuilder(Protocol):

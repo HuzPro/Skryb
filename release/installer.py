@@ -47,6 +47,7 @@ _UI_SHELL_IN_WHEEL = "skryb/ui-bin/skryb-ui.exe"
 
 # The native engines (Qwen3-ASR, Parakeet) as their build.sh leaves them, and
 # where skryb.transcription.native_engine_dll looks for them when installed.
+# native/cuda/build.py puts each one's NVIDIA build beside it (qasr_cuda.dll).
 _NATIVE_ENGINE_BUILD = Path("native") / "engine" / "build" / "qasr.dll"
 _NATIVE_ENGINE_IN_WHEEL = "skryb/transcription/qasr.dll"
 _NATIVE_PARAKEET_BUILD = Path("native") / "parakeet" / "build" / "npk.dll"
@@ -203,10 +204,8 @@ def _build_app_wheel(python_dir: Path, repo_root: Path, wheels_dir: Path) -> str
 def _require_built_files_in_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
-    for member in (
-        _UI_SHELL_IN_WHEEL, _NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_WHISPER_IN_WHEEL,
-        _NATIVE_DIARIZER_IN_WHEEL,
-    ):
+    native = (_NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_WHISPER_IN_WHEEL, _NATIVE_DIARIZER_IN_WHEEL)
+    for member in (_UI_SHELL_IN_WHEEL, *native, *(dll.replace(".dll", "_cuda.dll") for dll in native)):
         if member not in names:
             raise InstallerBuildError(
                 f"{wheel.name} is missing {member}; check "
@@ -252,13 +251,16 @@ def _copy_native_engine(repo_root: Path, destination: Path) -> None:
         ("CrisperWhisper", _NATIVE_WHISPER_BUILD),
         ("diarizer", _NATIVE_DIARIZER_BUILD),
     ):
-        built = repo_root / build
-        if not built.exists():
-            raise InstallerBuildError(
-                f"the native {name} engine is not built ({built} is missing); "
-                f"run {build.parent.parent.as_posix()}/build.sh first"
-            )
-        shutil.copyfile(built, destination / built.name)
+        for built, script in (
+            (repo_root / build, f"{build.parent.parent.as_posix()}/build.sh"),
+            (repo_root / build.with_name(f"{build.stem}_cuda.dll"), "native/cuda/build.py"),
+        ):
+            if not built.exists():
+                raise InstallerBuildError(
+                    f"the native {name} engine is not built ({built} is missing); run {script} first"
+                )
+            shutil.copyfile(built, destination / built.name)
+
 
 
 def _require_standalone_runtime(python_dir: Path) -> None:

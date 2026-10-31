@@ -30,7 +30,7 @@ from skryb.transcription.hardware_detector import HardwareDetector
 from skryb.transcription.hf_model_manager import loadable_snapshot_dir
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import get_model_info
-from skryb.transcription.native_engine_dll import native_diarizer_dll
+from skryb.transcription.native_engine_dll import NATIVE_GPU_ARCHS, native_diarizer_dll
 from skryb.transcription.qwen3_asr_prompt import PromptedTranscriber
 from skryb.transcription.roman_urdu import urdu_spelling
 
@@ -50,14 +50,14 @@ _logger = logging.getLogger(__name__)
 def build_meeting_asr(
     paths: AppPaths, registry: EngineRegistry, hardware_detector: HardwareDetector, license_policy: LicensePolicy,
 ) -> TranscriptionEngine:
-    """Qwen3-ASR on the best engine for this computer: the native one on an RX 9060 XT."""
+    """Qwen3-ASR on the best engine for this computer: the native one on an RX 9060 XT or an RTX 30-50 card."""
     info = get_model_info(QWEN3_ASR)
     license_policy.assert_accepted(info)
     hardware = hardware_detector.detect()
     engine_id = rank_engines(info, hardware, registry.all_descriptors())[0].engine_id
     return registry.build(engine_id, EngineSpec(
         model_name=info.name, repo_id=info.repo_id, device="cpu" if hardware.kind == "cpu" else "cuda",
-        language="en", beam_size=1, model_dir=paths.models_dir, revision=info.revision,
+        language="en", beam_size=1, model_dir=paths.models_dir, revision=info.revision, hardware_kind=hardware.kind,
     ))
 
 
@@ -79,9 +79,13 @@ def reads_as_urdu(line: str) -> bool:
     return line.strip().lower() != "nan" and not _LOOP.search(line) and len(_URDU_WORDS.findall(line)) >= 2
 
 
-def native_diarizer_usable(hardware_detector: HardwareDetector) -> bool:
-    """The native diarizer runs on an RX 9060 XT (gfx1200), once its DLL is installed."""
-    return native_diarizer_dll() is not None and hardware_detector.detect().gfx_arch == "gfx1200"
+def native_diarizer_for(hardware_detector: HardwareDetector) -> Path | None:
+    """The native diarizer's DLL for this GPU: an RX 9060 XT, or the NVIDIA build on an RTX 30-50 card. None when
+    the GPU is another one or the DLL isn't installed."""
+    hardware = hardware_detector.detect()
+    if hardware.gfx_arch not in NATIVE_GPU_ARCHS:
+        return None
+    return native_diarizer_dll(cuda=hardware.kind == "nvidia_cuda")
 
 
 class MeetingModels:
@@ -96,7 +100,7 @@ class MeetingModels:
         build_asr: Callable[[], TranscriptionEngine],
         diarizer_snapshot: Callable[[], Path],
         roman_urdu_snapshot: Callable[[], Path],
-        native_diarizer: Callable[[], bool] = lambda: False,
+        native_diarizer: Callable[[], Path | None] = lambda: None,
     ) -> None:
         self._urdu = language in URDU_LANGUAGES
         self._dictation_engine = dictation_engine
@@ -118,9 +122,10 @@ class MeetingModels:
             self._own_engine()
         if self._urdu:
             self._roman_urdu_engine()
-        if self._native_diarizer():
+        native_dll = self._native_diarizer()
+        if native_dll is not None:
             try:
-                self._diarizer = NativeDiarizer(self._diarizer_snapshot())
+                self._diarizer = NativeDiarizer(self._diarizer_snapshot(), native_dll)
                 return self._diarizer, None
             except TranscriptionError as error:
                 _logger.warning("The native diarizer didn't load, so the PyTorch one runs: %s", error)

@@ -1,8 +1,9 @@
 # One-shot install for NVIDIA GPU machines (fresh venv, no torch yet).
-# Pulls torch from PyTorch's CUDA 12.6 wheel index, then
-# everything else. If you have a different CUDA version, change cu126 to
-# cu124 / cu121 / cu118 to match your driver. PyTorch wheels bundle the
-# CUDA runtime, so only the driver version matters.
---extra-index-url https://download.pytorch.org/whl/cu126
+# Pulls torch from PyTorch's CUDA 13.0 wheel index, then everything else.
+# CUDA 13.0 builds run on the RTX 20 series through the RTX 50 series (the
+# 12.6 ones stop before the RTX 50) and need NVIDIA driver 580 or newer. On a
+# GTX 10-series card or older, change cu130 to cu126. PyTorch wheels bundle
+# the CUDA runtime, so only the driver version matters.
+--extra-index-url https://download.pytorch.org/whl/cu130
 -r requirements-all.txt
 torch>=2.5

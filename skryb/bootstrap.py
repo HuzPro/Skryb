@@ -118,7 +118,7 @@ from skryb.output.win32_modifier_key_state_reader import (
 from skryb.output.word_learning import WordLearner, learns_words
 from skryb.history.retention import HistoryPruner, history_retention_days
 from skryb.meetings.asr import (
-    MeetingModels, build_meeting_asr, diarizer_snapshot, native_diarizer_usable, roman_urdu_snapshot,
+    MeetingModels, build_meeting_asr, diarizer_snapshot, native_diarizer_for, roman_urdu_snapshot,
 )
 from skryb.meetings.capture import Capture
 from skryb.meetings.model_files import MeetingModelFiles
@@ -990,7 +990,7 @@ def _build_meetings(
             ),
             diarizer_snapshot=functools.partial(diarizer_snapshot, paths.models_dir),
             roman_urdu_snapshot=functools.partial(roman_urdu_snapshot, paths.models_dir),
-            native_diarizer=functools.partial(native_diarizer_usable, hardware_detector),
+            native_diarizer=functools.partial(native_diarizer_for, hardware_detector),
         ),
         make_capture=Capture,
         publish=publish,

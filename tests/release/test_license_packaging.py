@@ -52,6 +52,8 @@ def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     (stand_ins / "npk.dll").write_bytes(b"MZ")
     (stand_ins / "cw.dll").write_bytes(b"MZ")
     (stand_ins / "nd.dll").write_bytes(b"MZ")
+    for name in ("qasr", "npk", "cw", "nd"):
+        (stand_ins / f"{name}_cuda.dll").write_bytes(b"MZ")
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(installer, "_UI_SHELL_BUILD", stand_ins / "skryb-ui.exe")
         patch.setattr(installer, "_NATIVE_ENGINE_BUILD", stand_ins / "qasr.dll")

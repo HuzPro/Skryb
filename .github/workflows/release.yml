@@ -150,6 +150,14 @@ jobs:
           bash native/whisper/build.sh
           bash native/diar/build.sh
 
+      # Their NVIDIA builds (qasr_cuda.dll and the rest, for the RTX 30-50 series) from the same sources:
+      # nvcc and the CUDA runtime from NVIDIA's redistributable archives, and the runner's Visual Studio. No GPU.
+      - name: Build native engines for NVIDIA
+        shell: bash
+        run: |
+          python native/cuda/fetch_toolkit.py
+          python native/cuda/build.py
+
       # Bundle a relocatable CPython 3.12 (python-build-standalone). AMD's
       # Windows ROCm wheels are cp312-only, so the bundled runtime is 3.12.
       - name: Fetch standalone CPython 3.12

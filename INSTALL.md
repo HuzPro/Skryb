@@ -178,7 +178,8 @@ launch about 9 s slower.
 
 ### NVIDIA
 
-- The CUDA wheel index defaults to `cu126`. Edit the first line of `requirements-nvidia.txt` to `cu124` / `cu121` / `cu118` if you want a different CUDA runtime. PyTorch wheels bundle the CUDA runtime, so only the host driver version matters - no CUDA Toolkit install required.
+- The CUDA wheel index defaults to `cu130`, which covers the RTX 20 series through the RTX 50 series and needs NVIDIA driver 580 or newer. On a GTX 10-series card or older, change it to `cu126` in `requirements-nvidia.txt` (those builds don't run on an RTX 50). PyTorch wheels bundle the CUDA runtime, so only the host driver version matters - no CUDA Toolkit install required.
+- The native engines (Parakeet, CrisperWhisper, Qwen3-ASR and the meeting diarizer) have an experimental NVIDIA build for the RTX 30, 40 and 50 series, picked automatically. It checks its own kernels when it loads and falls back to the CPU if they disagree.
 
 ### "I already have a custom torch installed"
 

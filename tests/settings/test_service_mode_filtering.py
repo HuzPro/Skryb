@@ -179,7 +179,7 @@ class TestQwen3RunsOnEveryComputer:
     def _service(monkeypatch, tmp_path, gfx_arch, *, dll_installed=True, kind="amd_rocm"):
         dll = tmp_path / "qasr.dll"
         monkeypatch.setattr(
-            engine_factory, "native_engine_dll", lambda: dll if dll_installed else None,
+            engine_factory, "native_engine_dll", lambda cuda=False: dll if dll_installed and not cuda else None,
         )
         hardware = None if kind is None else HardwareProfile(kind=kind, device_name="GPU", gfx_arch=gfx_arch)
         service, *_ = _build_service(

@@ -277,11 +277,11 @@ def test_loading_the_speech_detector_leaves_torch_on_every_thread_it_had() -> No
 
 
 class _FakeNativeDiarizer(LevelLabeller):
-    def __init__(self, snapshot: Path, fail: bool = False) -> None:
+    def __init__(self, snapshot: Path, dll: Path | None = None, fail: bool = False) -> None:
         if fail:
             raise asr.TranscriptionError("hipMalloc: out of memory")
         super().__init__(0.01)
-        self.snapshot, self.disposed = snapshot, False
+        self.snapshot, self.dll, self.disposed = snapshot, dll, False
 
     def dispose(self) -> None:
         self.disposed = True
@@ -291,18 +291,19 @@ def test_on_an_rx_9060_xt_the_native_diarizer_tells_the_speakers_apart(monkeypat
     monkeypatch.setattr(asr, "NativeDiarizer", _FakeNativeDiarizer)
     monkeypatch.setattr(asr, "gpu_available", lambda: pytest.fail("the GPU check imports torch"))
     models, _built = _models(FakeQwen())
-    models._native_diarizer = lambda: True
+    models._native_diarizer = lambda: Path("nd.dll")
 
     labeller, warning = models.speaker_labeller()
 
     assert isinstance(labeller, _FakeNativeDiarizer) and labeller.snapshot == Path("snapshot")
+    assert labeller.dll == Path("nd.dll")
     assert warning is None
 
 
 def test_a_native_diarizer_that_fails_to_load_leaves_the_pytorch_one_to_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(asr, "NativeDiarizer", lambda snapshot: _FakeNativeDiarizer(snapshot, fail=True))
+    monkeypatch.setattr(asr, "NativeDiarizer", lambda snapshot, dll: _FakeNativeDiarizer(snapshot, dll, fail=True))
     models, _built = _models(FakeQwen())
-    models._native_diarizer = lambda: True
+    models._native_diarizer = lambda: Path("nd.dll")
 
     labeller, warning = models.speaker_labeller()
 
@@ -313,7 +314,7 @@ def test_a_native_diarizer_that_fails_to_load_leaves_the_pytorch_one_to_run(monk
 def test_the_native_diarizer_lets_go_of_the_gpu_when_the_meeting_ends(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(asr, "NativeDiarizer", _FakeNativeDiarizer)
     models, _built = _models(FakeQwen())
-    models._native_diarizer = lambda: True
+    models._native_diarizer = lambda: Path("nd.dll")
     labeller, _ = models.speaker_labeller()
 
     models.release()
@@ -321,14 +322,25 @@ def test_the_native_diarizer_lets_go_of_the_gpu_when_the_meeting_ends(monkeypatc
     assert labeller.disposed
 
 
-@pytest.mark.parametrize(("dll", "gfx_arch", "usable"), [(True, "gfx1200", True), (True, "gfx1100", False), (False, "gfx1200", False)])
-def test_the_native_diarizer_is_used_only_on_an_rx_9060_xt_with_its_dll(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dll: bool, gfx_arch: str, usable: bool,
+@pytest.mark.parametrize(("kind", "gfx_arch", "installed", "chosen"), [
+    ("amd_rocm", "gfx1200", True, "nd.dll"),
+    ("amd_rocm", "gfx1100", True, None),
+    ("amd_rocm", "gfx1200", False, None),
+    ("nvidia_cuda", "sm_120", True, "nd_cuda.dll"),
+    ("nvidia_cuda", "sm_86", True, "nd_cuda.dll"),
+    ("nvidia_cuda", "sm_75", True, None),
+    ("nvidia_cuda", "sm_120", False, None),
+])
+def test_the_native_diarizer_runs_on_an_rx_9060_xt_or_an_rtx_30_to_50_card_with_its_dll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, gfx_arch: str, installed: bool, chosen: str | None,
 ) -> None:
     from skryb.transcription.engine_types import HardwareProfile
     from tests.fakes.hardware import FakeHardwareDetector
 
-    monkeypatch.setattr(asr, "native_diarizer_dll", lambda: tmp_path / "nd.dll" if dll else None)
-    detector = FakeHardwareDetector(HardwareProfile(kind="amd_rocm", device_name="AMD Radeon", gfx_arch=gfx_arch))
+    def installed_dll(cuda: bool = False) -> Path | None:
+        return tmp_path / ("nd_cuda.dll" if cuda else "nd.dll") if installed else None
 
-    assert asr.native_diarizer_usable(detector) is usable
+    monkeypatch.setattr(asr, "native_diarizer_dll", installed_dll)
+    detector = FakeHardwareDetector(HardwareProfile(kind=kind, device_name="GPU", gfx_arch=gfx_arch))
+
+    assert asr.native_diarizer_for(detector) == (None if chosen is None else tmp_path / chosen)

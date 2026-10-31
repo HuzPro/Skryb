@@ -7,6 +7,8 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include "../engine/stream_load.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -119,6 +121,7 @@ void NpkEngine::load(const char* path) {
     const auto t0 = Clock::now();
     HIP_OK(hipSetDevice(0));
     HIP_OK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+    if (const std::string bad = gpu_self_check(s); !bad.empty()) throw std::runtime_error("GPU self-check failed: " + bad);
     HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) throw std::runtime_error(std::string("cannot open ") + path);
     std::vector<char> head(kHeader);
@@ -137,19 +140,10 @@ void NpkEngine::load(const char* path) {
         table[std::string(p, strnlen(p, 64))] = e;
         if (!e.host) dev_end = std::max(dev_end, e.off + e.bytes);
     }
-    // The device image is small (about 1.2 GB): one read into host memory, one copy.
+    // Reading and copying overlap, as in the other engines.
     const uint64_t dev_bytes = dev_end - kHeader;
-    std::vector<char> host(dev_bytes);
-    LARGE_INTEGER at;
-    at.QuadPart = (LONGLONG)kHeader;
-    SetFilePointerEx(f, at, nullptr, FILE_BEGIN);
-    for (uint64_t done = 0; done < dev_bytes;) {
-        const DWORD want = (DWORD)std::min<uint64_t>(dev_bytes - done, 1ull << 30);
-        if (!ReadFile(f, host.data() + done, want, &got, nullptr) || got == 0) throw std::runtime_error("short read");
-        done += got;
-    }
     HIP_OK(hipMalloc(&dev, dev_bytes));
-    HIP_OK(hipMemcpy(dev, host.data(), dev_bytes, hipMemcpyHostToDevice));
+    stream_to_device(path, kHeader, false, 4, dev, dev_bytes);
     auto read_host = [&](const char* name, void* dst) {
         const Entry& e = table.at(name);
         LARGE_INTEGER pos;

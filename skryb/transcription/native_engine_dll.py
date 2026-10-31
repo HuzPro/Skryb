@@ -1,5 +1,6 @@
 """Where the native engines are on this machine: ``qasr.dll`` (Qwen3-ASR), ``npk.dll`` (Parakeet TDT),
-``cw.dll`` (CrisperWhisper) and ``nd.dll`` (the meeting diarizer).
+``cw.dll`` (CrisperWhisper) and ``nd.dll`` (the meeting diarizer), each with an NVIDIA build beside it
+(``qasr_cuda.dll`` and so on, from ``native/cuda/build.py``).
 
 Kept free of heavy imports: the engine registry asks at startup.
 """
@@ -28,25 +29,34 @@ DIARIZER_DLL_ENV = "ND_DLL"
 SHIPPED_DIARIZER_DLL = Path(__file__).with_name("nd.dll")
 DEV_BUILD_DIARIZER_DLL = Path(__file__).resolve().parents[2] / "native" / "diar" / "build" / "nd.dll"
 
-
-def native_engine_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
-    """The DLL to load, or None when there is none. ``QASR_DLL`` wins and never falls back."""
-    return _find_dll(environ, DLL_ENV, SHIPPED_DLL, DEV_BUILD_DLL)
-
-
-def native_parakeet_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
-    """The same for ``npk.dll``. ``NPK_DLL`` wins and never falls back."""
-    return _find_dll(environ, PARAKEET_DLL_ENV, SHIPPED_PARAKEET_DLL, DEV_BUILD_PARAKEET_DLL)
+# GPU architectures the kernels are compiled for: the RX 9060 XT, and NVIDIA's RTX 30 (sm_86, and the sm_87
+# that runs its code), 40 (sm_89) and 50 (sm_120, sm_121) series.
+NATIVE_GPU_ARCHS = ("gfx1200", "sm_86", "sm_87", "sm_89", "sm_120", "sm_121")
 
 
-def native_whisper_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
-    """The same for ``cw.dll``. ``CW_DLL`` wins and never falls back."""
-    return _find_dll(environ, WHISPER_DLL_ENV, SHIPPED_WHISPER_DLL, DEV_BUILD_WHISPER_DLL)
+def native_engine_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
+    """The DLL to load, or None when there is none. ``QASR_DLL`` (``QASR_CUDA_DLL``) wins and never falls back."""
+    return _find_dll(environ, DLL_ENV, SHIPPED_DLL, DEV_BUILD_DLL, cuda)
 
 
-def native_diarizer_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
-    """The same for ``nd.dll``. ``ND_DLL`` wins and never falls back."""
-    return _find_dll(environ, DIARIZER_DLL_ENV, SHIPPED_DIARIZER_DLL, DEV_BUILD_DIARIZER_DLL)
+def native_parakeet_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
+    """The same for ``npk.dll``. ``NPK_DLL`` (``NPK_CUDA_DLL``) wins and never falls back."""
+    return _find_dll(environ, PARAKEET_DLL_ENV, SHIPPED_PARAKEET_DLL, DEV_BUILD_PARAKEET_DLL, cuda)
+
+
+def native_whisper_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
+    """The same for ``cw.dll``. ``CW_DLL`` (``CW_CUDA_DLL``) wins and never falls back."""
+    return _find_dll(environ, WHISPER_DLL_ENV, SHIPPED_WHISPER_DLL, DEV_BUILD_WHISPER_DLL, cuda)
+
+
+def native_diarizer_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
+    """The same for ``nd.dll``. ``ND_DLL`` (``ND_CUDA_DLL``) wins and never falls back."""
+    return _find_dll(environ, DIARIZER_DLL_ENV, SHIPPED_DIARIZER_DLL, DEV_BUILD_DIARIZER_DLL, cuda)
+
+
+def cuda_dll_name(dll: Path) -> Path:
+    """``npk.dll`` -> ``npk_cuda.dll``: where the NVIDIA build of a native engine sits."""
+    return dll.with_name(f"{dll.stem}_cuda{dll.suffix}")
 
 
 def rocm_runtime_dir() -> Path | None:
@@ -57,7 +67,12 @@ def rocm_runtime_dir() -> Path | None:
     return Path(next(iter(spec.submodule_search_locations))) / "bin"
 
 
-def _find_dll(environ: Mapping[str, str], variable: str, shipped: Path, dev_build: Path) -> Path | None:
+def _find_dll(
+    environ: Mapping[str, str], variable: str, shipped: Path, dev_build: Path, cuda: bool,
+) -> Path | None:
+    if cuda:
+        variable = variable.replace("_DLL", "_CUDA_DLL")
+        shipped, dev_build = cuda_dll_name(shipped), cuda_dll_name(dev_build)
     configured = environ.get(variable, "").strip()
     candidates = [Path(configured)] if configured else [shipped, dev_build]
     return next((path for path in candidates if path.is_file()), None)

@@ -4,7 +4,8 @@ Ported to NumPy from transformers 5.20: the processor's streaming chunks and log
 (``NemotronAsrStreamingFeatureExtractor``, which there needs librosa), used by both diarizers. The native one
 (``NativeDiarizer``, ``native/diar``) also keeps the frame-stacking projection and the speaker cache
 (``Nemotron3DiarizationSpeakerCache``) here, and runs each step's encoder, upsampler and classifier on an
-RX 9060 XT (gfx1200) without torch. The PyTorch one (``skryb.meetings.models.Diarizer``) runs on any GPU.
+RX 9060 XT (gfx1200) or an RTX 30-50 card without torch. The PyTorch one (``skryb.meetings.models.Diarizer``) runs
+on any GPU.
 """
 
 import ctypes
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from skryb.core.exceptions import TranscriptionError
+from skryb.core.exceptions import GpuEngineError, TranscriptionError
 from skryb.meetings.segmenter import SILENCE
 from skryb.transcription.native_engine_dll import native_diarizer_dll, rocm_runtime_dir
 
@@ -303,7 +304,7 @@ class SpeakerCache:
 class _Engine:
     def __init__(self, dll_path: Path, weights: Path, header: dict, data_start: int, layers: int) -> None:
         if not dll_path.exists():
-            raise TranscriptionError(f"The native diarizer isn't installed ({dll_path} is missing).")
+            raise GpuEngineError(f"The native diarizer isn't installed ({dll_path} is missing).")
         hip_bin = rocm_runtime_dir()
         if hip_bin is not None:
             os.add_dll_directory(str(hip_bin))
@@ -329,7 +330,7 @@ class _Engine:
                              (ctypes.c_uint64 * len(offsets))(*offsets), len(names), layers,
                              self._error, _ERROR_BUFFER_BYTES)
         if not handle:
-            raise TranscriptionError(f"The native diarizer failed to load: {self._error.value.decode(errors='replace')}")
+            raise GpuEngineError(f"The native diarizer failed to load: {self._error.value.decode(errors='replace')}")
         self._lib, self._handle = lib, handle
         _logger.info("[load_model native diarizer] complete in %.2fs | %s",
                      time.perf_counter() - started_at, lib.nd_stats(handle).decode())

@@ -98,3 +98,27 @@ def test_the_diarizer_engine_is_found_the_same_way(tmp_path, monkeypatch):
     assert finder.native_diarizer_dll({"ND_DLL": str(tmp_path / "missing.dll")}) is None
     _make(shipped)
     assert finder.native_diarizer_dll({}) == shipped
+
+
+def test_the_nvidia_build_sits_beside_the_amd_one_and_is_asked_for_by_name(tmp_path, monkeypatch):
+    shipped = tmp_path / "site-packages" / "skryb" / "transcription" / "npk.dll"
+    monkeypatch.setattr(finder, "SHIPPED_PARAKEET_DLL", shipped)
+    monkeypatch.setattr(finder, "DEV_BUILD_PARAKEET_DLL", tmp_path / "checkout" / "npk.dll")
+    _make(shipped)
+
+    assert finder.native_parakeet_dll({}, cuda=True) is None
+    nvidia = _make(shipped.with_name("npk_cuda.dll"))
+    assert finder.native_parakeet_dll({}, cuda=True) == nvidia
+    assert finder.native_parakeet_dll({}) == shipped
+
+
+def test_each_build_has_its_own_override(tmp_path, places):
+    shipped, _ = places
+    _make(shipped)
+    _make(shipped.with_name("qasr_cuda.dll"))
+    chosen = _make(tmp_path / "mine" / "qasr_cuda.dll")
+
+    assert finder.native_engine_dll({"QASR_CUDA_DLL": str(chosen)}, cuda=True) == chosen
+    assert finder.native_engine_dll({"QASR_CUDA_DLL": str(chosen)}) == shipped
+    assert finder.native_engine_dll({"QASR_DLL": str(chosen)}, cuda=True) == shipped.with_name("qasr_cuda.dll")
+

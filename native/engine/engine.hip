@@ -7,6 +7,8 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include "stream_load.h"
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -46,79 +48,6 @@ double ms_since(Clock::time_point t) { return std::chrono::duration<double, std:
 int cdiv(int a, int b) { return (a + b - 1) / b; }
 
 struct Entry { uint64_t off, bytes; uint32_t host; };
-
-// Reader threads fill a ring of ordinary (pageable) buffers and the calling thread copies each one to
-// VRAM in order. Pinning host memory costs ~230 ms on first use on this stack, while pageable copies
-// still run at ~20 GB/s, well above what the disk or the page cache delivers, so reading is the only
-// cost left. Unbuffered reads skip the page cache: steady disk speed, but they never warm the cache.
-void stream_to_device(const char* path, bool unbuffered, int readers, char* dev, uint64_t bytes) {
-    constexpr uint64_t kStep = 16ull << 20;
-    constexpr int kSlots = 16;
-    const uint64_t chunks = (bytes + kStep - 1) / kStep;
-    char* ring = (char*)VirtualAlloc(nullptr, kSlots * kStep, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!ring) throw std::runtime_error("cannot allocate the read ring");
-    std::mutex mu;
-    std::condition_variable cv;
-    std::vector<int64_t> filled(kSlots, -1);  // chunk each slot holds, -1 when free
-    uint64_t consumed = 0;
-    std::string error;
-    auto fail = [&](const std::string& why) {
-        std::lock_guard<std::mutex> lk(mu);
-        if (error.empty()) error = why;
-        cv.notify_all();
-    };
-    auto reader = [&](int r) {
-        HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                               unbuffered ? FILE_FLAG_NO_BUFFERING : FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return fail(std::string("cannot open ") + path);
-        for (uint64_t c = r; c < chunks; c += readers) {
-            {
-                std::unique_lock<std::mutex> lk(mu);
-                cv.wait(lk, [&] { return c < consumed + kSlots || !error.empty(); });
-                if (!error.empty()) break;
-            }
-            const int slot = (int)(c % kSlots);
-            const uint64_t at = kHeader + c * kStep, want = std::min(kStep, bytes - c * kStep);
-            OVERLAPPED ov{};
-            ov.Offset = (DWORD)at;
-            ov.OffsetHigh = (DWORD)(at >> 32);
-            DWORD got = 0;
-            const DWORD ask = (DWORD)(unbuffered ? (want + 4095) / 4096 * 4096 : want);
-            if (!ReadFile(h, ring + slot * kStep, ask, &got, &ov) || got < want) {
-                fail("short read");
-                break;
-            }
-            std::lock_guard<std::mutex> lk(mu);
-            filled[slot] = (int64_t)c;
-            cv.notify_all();
-        }
-        CloseHandle(h);
-    };
-    std::vector<std::thread> pool;
-    for (int r = 0; r < readers; r++) pool.emplace_back(reader, r);
-    for (uint64_t c = 0; c < chunks; c++) {
-        const int slot = (int)(c % kSlots);
-        {
-            std::unique_lock<std::mutex> lk(mu);
-            cv.wait(lk, [&] { return filled[slot] == (int64_t)c || !error.empty(); });
-            if (!error.empty()) break;
-        }
-        const hipError_t e = hipMemcpy(dev + c * kStep, ring + slot * kStep, std::min(kStep, bytes - c * kStep),
-                                       hipMemcpyHostToDevice);
-        if (e != hipSuccess) {
-            fail(std::string("hipMemcpy: ") + hipGetErrorString(e));
-            break;
-        }
-        std::lock_guard<std::mutex> lk(mu);
-        filled[slot] = -1;
-        consumed = c + 1;
-        cv.notify_all();
-    }
-    for (auto& t : pool) t.join();
-    VirtualFree(ring, 0, MEM_RELEASE);
-    if (!error.empty()) throw std::runtime_error(error);
-}
-
 
 // Whisper / transformers mel_filter_bank(201 bins, 128 mels, 0-8000 Hz, slaney scale and norm), as [201][128].
 std::vector<float> mel_filters() {
@@ -175,7 +104,7 @@ std::u32string utf8_decode(const std::string& s) {
             if ((cc >> 6) != 2) ok = false;
             else cp = (cp << 6) | (cc & 0x3f);
         }
-        if (!ok) { out += U'�'; i += 1; continue; }
+        if (!ok) { out += char32_t(0xFFFD); i += 1; continue; }
         out += cp;
         i += len;
     }
@@ -346,6 +275,7 @@ void QasrEngine::load(const char* path) {
     HIP_OK(hipSetDevice(0));
     HIP_OK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
     const double hip_ms = ms_since(t0);
+    if (const std::string bad = gpu_self_check(s); !bad.empty()) throw std::runtime_error("GPU self-check failed: " + bad);
 
     HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) throw std::runtime_error(std::string("cannot open ") + path);
@@ -373,7 +303,8 @@ void QasrEngine::load(const char* path) {
     const auto t_read = Clock::now();
     const char* io = std::getenv("QASR_IO");
     const char* readers = std::getenv("QASR_READERS");
-    stream_to_device(path, io && std::string(io) == "unbuffered", readers ? std::max(1, std::atoi(readers)) : 4, dev, dev_bytes);
+    stream_to_device(path, kHeader, io && std::string(io) == "unbuffered", readers ? std::max(1, std::atoi(readers)) : 4, dev,
+                     dev_bytes);
 
     auto host_entry = [&](const char* name) -> const Entry& { return table.at(name); };
     vocab_off.resize(host_entry("vocab.offsets").bytes / 4);
@@ -505,7 +436,7 @@ void QasrEngine::prepare_decoder() {
     for (auto& m : mats) {
         uint4* q = (uint4*)at;
         at += (size_t)m.N * m.K / 2;
-        _Float16* sc = (_Float16*)at;
+        f16* sc = (f16*)at;
         at += ((size_t)m.N * (m.K / 32) * 2 + 255) / 256 * 256;
         quantize_q4(s, m.src, m.N, m.K, q, sc);
         *m.dst = Q4{q, sc};

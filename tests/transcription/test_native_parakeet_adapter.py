@@ -30,6 +30,18 @@ def test_loading_a_model_that_is_not_downloaded_says_so(tmp_path: Path) -> None:
     assert adapter.is_model_loaded() is False
 
 
+def test_an_engine_that_cannot_start_is_an_error_the_loader_retries_on_the_cpu(tmp_path: Path) -> None:
+    # The loader's CPU retry catches RuntimeError, as it does for torch's GPU errors.
+    with pytest.raises(RuntimeError, match="native/cuda/build.py for NVIDIA"):
+        adapter_module._open_library(tmp_path / "npk_cuda.dll")
+
+
+def test_on_nvidia_it_looks_for_the_nvidia_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NPK_CUDA_DLL", str(tmp_path / "missing.dll"))
+
+    assert NativeParakeetAdapter(tmp_path, "moondream/parakeet-ultra", cuda=True)._dll_path == Path("npk_cuda.dll")
+
+
 def test_transcribing_before_loading_is_refused(tmp_path: Path) -> None:
     adapter = NativeParakeetAdapter(tmp_path, "moondream/parakeet-ultra")
 

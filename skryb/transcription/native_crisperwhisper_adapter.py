@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from skryb.core.exceptions import TranscriptionError
+from skryb.core.exceptions import GpuEngineError, TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
 from skryb.transcription.engine_types import CrisperWhisperMode
@@ -52,11 +52,13 @@ class NativeCrisperWhisperAdapter(TranscriptionEngine):
         language: str,
         mode: CrisperWhisperMode = "intended",
         dll_path: Path | None = None,
+        cuda: bool = False,
     ) -> None:
         self._model_dir = model_dir
         self._language = language
         self._mode = mode
-        self._dll_path = dll_path or native_whisper_dll() or Path("cw.dll")
+        self._dll_path = dll_path or native_whisper_dll(cuda=cuda) or Path("cw_cuda.dll" if cuda else "cw.dll")
+        self._cuda = cuda
         self._lib: ctypes.CDLL | None = None
         self._handle: int | None = None
         self._tokens: WhisperTokens | None = None
@@ -71,6 +73,8 @@ class NativeCrisperWhisperAdapter(TranscriptionEngine):
         names, offsets, vocab = _tensor_offsets(weights)
         config = _engine_config(self._model_dir, vocab)
         suppress = _suppressed_tokens(self._model_dir)
+        if self._cuda:
+            _logger.warning("Running the experimental NVIDIA build of the native engine: %s", self._dll_path.name)
         self._lib = _open_library(self._dll_path)
         encoded = [name.encode() for name in names]
         handle = self._lib.cw_load(
@@ -85,7 +89,7 @@ class NativeCrisperWhisperAdapter(TranscriptionEngine):
             _ERROR_BUFFER_BYTES,
         )
         if not handle:
-            raise TranscriptionError(f"Native CrisperWhisper failed to load: {self._error_text()}")
+            raise GpuEngineError(f"Native CrisperWhisper failed to load: {self._error_text()}")
         self._handle = handle
         self._tokens = tokens
         _logger.info(
@@ -191,9 +195,9 @@ def _suppressed_tokens(model_dir: Path) -> list[int]:
 
 def _open_library(dll_path: Path) -> ctypes.CDLL:
     if not dll_path.exists():
-        raise TranscriptionError(
+        raise GpuEngineError(
             f"The native CrisperWhisper engine isn't installed ({dll_path} is missing). "
-            "Reinstall Skryb, or in a source checkout run native/whisper/build.sh."
+            "Reinstall Skryb, or in a source checkout run native/whisper/build.sh (native/cuda/build.py for NVIDIA)."
         )
     hip_bin = rocm_runtime_dir()
     if hip_bin is not None:

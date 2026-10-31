@@ -12,7 +12,7 @@ _RX_9060 = HardwareProfile(
     kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
 )
 _RTX_4090 = HardwareProfile(
-    kind="nvidia_cuda", device_name="NVIDIA GeForce RTX 4090", gfx_arch=None,
+    kind="nvidia_cuda", device_name="NVIDIA GeForce RTX 4090", gfx_arch="sm_89",
 )
 _AMD_DESKTOP = "AMD Radeon RX 9060 XT|AMD Radeon(TM) Graphics"
 _NVIDIA_DESKTOP = "NVIDIA GeForce RTX 4090|Écran Radeon™ intégré"
@@ -97,6 +97,21 @@ def test_a_hand_edited_hardware_kind_is_probed_again() -> None:
     )
     assert probe.detect_calls == 1
     assert config.get("hardware.probe.kind") == "amd_rocm"
+
+
+def test_an_nvidia_probe_remembered_without_its_compute_capability_is_probed_again() -> None:
+    config = FakeConfig({
+        "hardware.probe.kind": "nvidia_cuda",
+        "hardware.probe.device_name": "NVIDIA GeForce RTX 5060",
+        "hardware.probe.gfx_arch": None,
+        "hardware.probe.fingerprint": _NVIDIA_DESKTOP,
+    })
+    rtx_5060 = HardwareProfile(kind="nvidia_cuda", device_name="NVIDIA GeForce RTX 5060", gfx_arch="sm_120")
+    probe = FakeHardwareDetector(rtx_5060, probed=False)
+
+    assert CachedHardwareDetector(probe, config, lambda: _NVIDIA_DESKTOP, _no_npu).detect() == rtx_5060
+    assert probe.detect_calls == 1
+    assert config.get("hardware.probe.gfx_arch") == "sm_120"
 
 
 class _ReadOnlyConfig(FakeConfig):

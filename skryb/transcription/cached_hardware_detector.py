@@ -65,6 +65,8 @@ class CachedHardwareDetector(HardwareDetector):
         if kind not in ALL_HARDWARE_KINDS:
             return None
         gfx_arch = self._config.get(_GFX_ARCH_KEY)
+        if kind == "nvidia_cuda" and gfx_arch is None:
+            return None  # remembered before NVIDIA probes recorded the compute capability
         return HardwareProfile(
             kind=cast(HardwareKind, kind),
             device_name=str(self._config.get(_DEVICE_NAME_KEY, "")),

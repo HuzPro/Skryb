@@ -7,6 +7,8 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include "../engine/stream_load.h"
+
 #include <algorithm>
 #include <chrono>
 #include <climits>
@@ -41,74 +43,6 @@ constexpr float kScale = 0.125f;  // head_dim ** -0.5
 using Clock = std::chrono::steady_clock;
 double ms_since(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
 int cdiv(int a, int b) { return (a + b - 1) / b; }
-
-// Reader threads fill a ring of pageable buffers and the calling thread copies each one to VRAM in order
-// (the Qwen3-ASR engine's loader, from a start offset instead of a fixed header).
-void stream_to_device(const char* path, uint64_t start, int readers, char* dev, uint64_t bytes) {
-    constexpr uint64_t kStep = 16ull << 20;
-    constexpr int kSlots = 16;
-    const uint64_t chunks = (bytes + kStep - 1) / kStep;
-    char* ring = (char*)VirtualAlloc(nullptr, kSlots * kStep, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!ring) throw std::runtime_error("cannot allocate the read ring");
-    std::mutex mu;
-    std::condition_variable cv;
-    std::vector<int64_t> filled(kSlots, -1);
-    uint64_t consumed = 0;
-    std::string error;
-    auto fail = [&](const std::string& why) {
-        std::lock_guard<std::mutex> lk(mu);
-        if (error.empty()) error = why;
-        cv.notify_all();
-    };
-    auto reader = [&](int r) {
-        HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return fail(std::string("cannot open ") + path);
-        for (uint64_t c = r; c < chunks; c += readers) {
-            {
-                std::unique_lock<std::mutex> lk(mu);
-                cv.wait(lk, [&] { return c < consumed + kSlots || !error.empty(); });
-                if (!error.empty()) break;
-            }
-            const int slot = (int)(c % kSlots);
-            const uint64_t at = start + c * kStep, want = std::min(kStep, bytes - c * kStep);
-            OVERLAPPED ov{};
-            ov.Offset = (DWORD)at;
-            ov.OffsetHigh = (DWORD)(at >> 32);
-            DWORD got = 0;
-            if (!ReadFile(h, ring + slot * kStep, (DWORD)want, &got, &ov) || got < want) {
-                fail("short read");
-                break;
-            }
-            std::lock_guard<std::mutex> lk(mu);
-            filled[slot] = (int64_t)c;
-            cv.notify_all();
-        }
-        CloseHandle(h);
-    };
-    std::vector<std::thread> pool;
-    for (int r = 0; r < readers; r++) pool.emplace_back(reader, r);
-    for (uint64_t c = 0; c < chunks; c++) {
-        const int slot = (int)(c % kSlots);
-        {
-            std::unique_lock<std::mutex> lk(mu);
-            cv.wait(lk, [&] { return filled[slot] == (int64_t)c || !error.empty(); });
-            if (!error.empty()) break;
-        }
-        const hipError_t e = hipMemcpy(dev + c * kStep, ring + slot * kStep, std::min(kStep, bytes - c * kStep),
-                                       hipMemcpyHostToDevice);
-        if (e != hipSuccess) {
-            fail(std::string("hipMemcpy: ") + hipGetErrorString(e));
-            break;
-        }
-        std::lock_guard<std::mutex> lk(mu);
-        filled[slot] = -1;
-        consumed = c + 1;
-        cv.notify_all();
-    }
-    for (auto& t : pool) t.join();
-    VirtualFree(ring, 0, MEM_RELEASE);
-    if (!error.empty()) throw std::runtime_error(error);
-}
 
 // transformers' mel_filter_bank(201 bins, n_mels, 0-8000 Hz, slaney scale and norm), as [201][n_mels].
 std::vector<float> mel_filters(int nm) {
@@ -229,6 +163,7 @@ void CwEngine::load(const char* path, const char* const* names, const uint64_t* 
         throw std::runtime_error("unsupported model shape");
     HIP_OK(hipSetDevice(0));
     HIP_OK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+    if (const std::string bad = gpu_self_check(s); !bad.empty()) throw std::runtime_error("GPU self-check failed: " + bad);
     dev_start = UINT64_MAX;
     for (int i = 0; i < count; i++) {
         table[names[i]] = offsets[i];
@@ -243,7 +178,7 @@ void CwEngine::load(const char* path, const char* const* names, const uint64_t* 
     if (count == 0 || dev_start >= (uint64_t)size.QuadPart) throw std::runtime_error("no tensors");
     const uint64_t bytes = (uint64_t)size.QuadPart - dev_start;
     HIP_OK(hipMalloc(&dev, bytes));
-    stream_to_device(path, dev_start, 4, dev, bytes);
+    stream_to_device(path, dev_start, false, 4, dev, bytes);
     const double weights_ms = ms_since(t0);
 
     const std::string E = "model.encoder.", Dn = "model.decoder.";
@@ -355,7 +290,7 @@ void CwEngine::prepare_draft() {
     for (auto& m : mats) {
         uint4* q = (uint4*)at;
         at += (size_t)m.N * m.K / 2;
-        _Float16* sc = (_Float16*)at;
+        f16* sc = (f16*)at;
         at += ((size_t)m.N * (m.K / 32) * 2 + 255) / 256 * 256;
         quantize_q4(s, m.src, m.N, m.K, q, sc);
         *m.dst = Q4{q, sc};

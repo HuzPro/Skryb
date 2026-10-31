@@ -17,10 +17,10 @@ from pathlib import Path
 
 import numpy as np
 
-from skryb.core.exceptions import TranscriptionError
+from skryb.core.exceptions import GpuEngineError, TranscriptionError
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
-from skryb.transcription.native_engine_dll import SHIPPED_DLL, native_engine_dll
+from skryb.transcription.native_engine_dll import SHIPPED_DLL, cuda_dll_name, native_engine_dll
 from skryb.transcription.qwen3_asr_prompt import prompt_text
 from skryb.transcription.result import TranscriptionResult
 from skryb.transcription.roman_urdu import romanize
@@ -49,9 +49,11 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 
     def __init__(
         self, snapshot: Path, dll_path: Path | None = None, question_threshold: float | None = QUESTION_THRESHOLD,
+        cuda: bool = False,
     ) -> None:
         self._snapshot = snapshot
-        self._dll_path = dll_path or native_engine_dll() or SHIPPED_DLL
+        self._dll_path = dll_path or native_engine_dll(cuda=cuda) or (cuda_dll_name(SHIPPED_DLL) if cuda else SHIPPED_DLL)
+        self._cuda = cuda
         self._question_threshold = question_threshold
         self._lib: ctypes.CDLL | None = None
         self._handle: int | None = None
@@ -64,11 +66,13 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         packed = packed_model_path(self._snapshot)
         if not packed.exists():
             self._pack_snapshot(packed)
+        if self._cuda:
+            _logger.warning("Running the experimental NVIDIA build of the native engine: %s", self._dll_path.name)
         self._lib = _open_library(self._dll_path)
         error = ctypes.create_string_buffer(_ERROR_BUFFER_BYTES)
         handle = self._lib.qasr_load(str(packed).encode(), error, _ERROR_BUFFER_BYTES)
         if not handle:
-            raise TranscriptionError(f"Native Qwen3-ASR failed to load: {error.value.decode(errors='replace')}")
+            raise GpuEngineError(f"Native Qwen3-ASR failed to load: {error.value.decode(errors='replace')}")
         self._handle = handle
         _logger.info(
             "[load_model native qwen3-asr] complete in %.2fs | %s",
@@ -174,9 +178,9 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 
 def _open_library(dll_path: Path) -> ctypes.CDLL:
     if not dll_path.exists():
-        raise TranscriptionError(
+        raise GpuEngineError(
             f"The native Qwen3-ASR engine isn't installed ({dll_path} is missing). "
-            "Reinstall Skryb, or in a source checkout run native/engine/build.sh."
+            "Reinstall Skryb, or in a source checkout run native/engine/build.sh (native/cuda/build.py for NVIDIA)."
         )
     hip_bin = _rocm_runtime_dir()
     if hip_bin is not None:

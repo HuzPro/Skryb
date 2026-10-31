@@ -1,8 +1,6 @@
-// Device kernels particular to Parakeet TDT on RDNA 4 (gfx1200, wave32, WMMA bf16).
+// Device kernels particular to Parakeet TDT: RDNA 4 (gfx1200) and NVIDIA RTX 30-50 through ../engine/tile.h.
 #include "pk_kernels.h"
-
-typedef __bf16 bf16x8 __attribute__((ext_vector_type(8)));
-typedef float f32x8 __attribute__((ext_vector_type(8)));
+#include "../engine/tile.h"
 
 #define NEG_INF (-__builtin_huge_valf())
 
@@ -15,10 +13,6 @@ constexpr int PRED = 640, VOCAB_OUT = 8198, BLANK = 8192, DURATIONS = 5;
 __device__ __forceinline__ float f(bf16 x) { return (float)x; }
 __device__ __forceinline__ bf16 b(float x) { return (bf16)x; }
 __device__ __forceinline__ float sigm(float x) { return 1.f / (1.f + expf(-x)); }
-__device__ __forceinline__ f32x8 wmma(bf16x8 a, bf16x8 bb, f32x8 c) {
-    return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, bb, c);
-}
-__device__ __forceinline__ bf16x8 as_bf8(uint4 v) { return __builtin_bit_cast(bf16x8, v); }
 __device__ __forceinline__ float wave_sum(float v) {
     for (int m = 16; m; m >>= 1) v += __shfl_xor(v, m, 32);
     return v;
@@ -132,77 +126,74 @@ __global__ __launch_bounds__(32) void relpos_attn_kernel(const bf16* __restrict_
                                                          const bf16* __restrict__ u, const bf16* __restrict__ vb, int T,
                                                          bf16* out) {
     constexpr int KS = DK / 16;
-    __shared__ __attribute__((aligned(16))) bf16 Ps[16][24];
-    __shared__ __attribute__((aligned(16))) bf16 Vs[16][DK + 8];
+    __shared__ alignas(16) bf16 Ps[16][24];
+    __shared__ alignas(16) bf16 Vs[16][DK + 8];
     __shared__ float Bd[16][33];
-    const int lane = threadIdx.x, h = blockIdx.y, q0 = blockIdx.x * 16, hl = lane >> 4, col = lane & 15;
+    const int lane = threadIdx.x, h = blockIdx.y, q0 = blockIdx.x * 16;
     const int npos = 2 * T - 1;
-    bf16x8 qu[KS], qv[KS];
-    {
-        const int qrow = q0 + col;
-        for (int ks = 0; ks < KS; ks++)
-            for (int e = 0; e < 8; e++) {
-                const int d = ks * 16 + hl * 8 + e;
-                const float q = qrow < T ? f(qkv[(size_t)qrow * QKV + h * DK + d]) : 0.f;
-                qu[ks][e] = qrow < T ? b(q + f(u[h * DK + d])) : b(0.f);
-                qv[ks][e] = qrow < T ? b(q + f(vb[h * DK + d])) : b(0.f);
-            }
+    Frag qu[KS], qv[KS];
+    for (int ks = 0; ks < KS; ks++) {
+        auto q = [&](const bf16* bias, int r, int k) {
+            const int qrow = q0 + r, d = ks * 16 + k;
+            return qrow < T ? b(f(qkv[(size_t)qrow * QKV + h * DK + d]) + f(bias[h * DK + d])) : b(0.f);
+        };
+        qu[ks] = frag_at(lane, [&](int r, int k) { return q(u, r, k); });
+        qv[ks] = frag_at(lane, [&](int r, int k) { return q(vb, r, k); });
     }
-    f32x8 o[KS];
-    for (int nt = 0; nt < KS; nt++) o[nt] = f32x8{};
+    Acc o[KS];
+    for (int nt = 0; nt < KS; nt++) o[nt] = Acc{};
     float m[8], l[8];
     for (int i = 0; i < 8; i++) { m[i] = NEG_INF; l[i] = 0.f; }
     const float scale = 0.08838834764831845f;  // 1 / sqrt(128)
     for (int kb = 0; kb < T; kb += 16) {
-        const int key = kb + col;
-        f32x8 sc = f32x8{}, b0 = f32x8{}, b1 = f32x8{};
+        Acc sc = Acc{}, b0 = Acc{}, b1 = Acc{};
         const int base = T - 1 - (q0 + 15) + kb;
-        const int r0 = base + col, r1 = base + 16 + col;
         for (int ks = 0; ks < KS; ks++) {
-            const int off = h * DK + ks * 16 + hl * 8;
-            const bf16x8 kf = as_bf8(key < T ? *(const uint4*)(qkv + (size_t)key * QKV + D + off) : uint4{0, 0, 0, 0});
-            sc = wmma(qu[ks], kf, sc);
-            const bf16x8 p0 = as_bf8(r0 >= 0 && r0 < npos ? *(const uint4*)(p + (size_t)r0 * D + off) : uint4{0, 0, 0, 0});
-            const bf16x8 p1 = as_bf8(r1 >= 0 && r1 < npos ? *(const uint4*)(p + (size_t)r1 * D + off) : uint4{0, 0, 0, 0});
-            b0 = wmma(qv[ks], p0, b0);
-            b1 = wmma(qv[ks], p1, b1);
+            const int off = h * DK + ks * 16;
+            auto pos = [&](int r) -> const bf16* { return r >= 0 && r < npos ? p + (size_t)r * D + off : nullptr; };
+            const Frag kf = frag_rows(lane, [&](int r) { return kb + r < T ? qkv + (size_t)(kb + r) * QKV + D + off : nullptr; });
+            sc = mma(qu[ks], kf, sc);
+            b0 = mma(qv[ks], frag_rows(lane, [&](int r) { return pos(base + r); }), b0);
+            b1 = mma(qv[ks], frag_rows(lane, [&](int r) { return pos(base + 16 + r); }), b1);
         }
         for (int i = 0; i < 8; i++) {
-            Bd[hl * 8 + i][col] = b0[i];
-            Bd[hl * 8 + i][16 + col] = b1[i];
+            Bd[acc_row(lane, i)][acc_col(lane, i)] = b0[i];
+            Bd[acc_row(lane, i)][16 + acc_col(lane, i)] = b1[i];
         }
         for (int j = lane; j < 16 * DK / 8; j += 32) {
             const int kr = j / (DK / 8), dv = (j - kr * (DK / 8)) * 8, kk = kb + kr;
             *(uint4*)&Vs[kr][dv] = kk < T ? *(const uint4*)(qkv + (size_t)kk * QKV + 2 * D + h * DK + dv) : uint4{0, 0, 0, 0};
         }
         __syncthreads();
+        Acc v;
         for (int i = 0; i < 8; i++) {
-            const int li = hl * 8 + i, qr = q0 + li;
-            const bool ok = key < T && qr < T;
-            const float v = ok ? (sc[i] + Bd[li][col - li + 15]) * scale : NEG_INF;
-            float mx = v;
-            for (int x = 1; x < 16; x <<= 1) mx = fmaxf(mx, __shfl_xor(mx, x, 32));
-            const float mn = fmaxf(m[i], mx);
-            const float pr = mn == NEG_INF ? 0.f : expf(v - mn);
-            const float alpha = mn == NEG_INF ? 1.f : expf(m[i] - mn);
-            float ps = pr;
-            for (int x = 1; x < 16; x <<= 1) ps += __shfl_xor(ps, x, 32);
-            l[i] = l[i] * alpha + ps;
+            const int li = acc_row(lane, i), col = acc_col(lane, i);
+            const bool ok = kb + col < T && q0 + li < T;
+            v[i] = ok ? (sc[i] + Bd[li][col - li + 15]) * scale : NEG_INF;
+        }
+        const Acc mx = row_max(v);
+        Acc pr;
+        float alpha[8];
+        for (int i = 0; i < 8; i++) {
+            const float mn = fmaxf(m[i], mx[i]);
+            pr[i] = mn == NEG_INF ? 0.f : expf(v[i] - mn);
+            alpha[i] = mn == NEG_INF ? 1.f : expf(m[i] - mn);
             m[i] = mn;
-            for (int nt = 0; nt < KS; nt++) o[nt][i] *= alpha;
-            Ps[li][col] = b(pr);
+        }
+        const Acc ps = row_sum(pr);
+        for (int i = 0; i < 8; i++) {
+            l[i] = l[i] * alpha[i] + ps[i];
+            for (int nt = 0; nt < KS; nt++) o[nt][i] *= alpha[i];
+            Ps[acc_row(lane, i)][acc_col(lane, i)] = b(pr[i]);
         }
         __syncthreads();
-        const bf16x8 pf = as_bf8(*(const uint4*)&Ps[col][hl * 8]);
-        for (int nt = 0; nt < KS; nt++) {
-            bf16x8 vf;
-            for (int j = 0; j < 8; j++) vf[j] = Vs[hl * 8 + j][nt * 16 + col];
-            o[nt] = wmma(pf, vf, o[nt]);
-        }
+        const Frag pf = frag_lds(&Ps[0][0], 24, lane);
+        for (int nt = 0; nt < KS; nt++)
+            o[nt] = mma(pf, frag_at(lane, [&](int r, int k) { return Vs[k][nt * 16 + r]; }), o[nt]);
         __syncthreads();
     }
     for (int i = 0; i < 8; i++) {
-        const int row = q0 + hl * 8 + i;
+        const int row = q0 + acc_row(lane, i), col = acc_col(lane, i);
         if (row >= T) continue;
         const float inv = l[i] > 0.f ? 1.f / l[i] : 0.f;
         for (int nt = 0; nt < KS; nt++) out[(size_t)row * D + h * DK + nt * 16 + col] = b(o[nt][i] * inv);

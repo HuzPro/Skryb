@@ -102,6 +102,7 @@ void NdEngine::load(const char* path, const char* const* names, const uint64_t* 
     if (layers <= 0 || count <= 0) throw std::runtime_error("no model");
     HIP_OK(hipSetDevice(0));
     HIP_OK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+    if (const std::string bad = gpu_self_check(s); !bad.empty()) throw std::runtime_error("GPU self-check failed: " + bad);
     uint64_t start = UINT64_MAX;
     for (int i = 0; i < count; i++) start = std::min(start, offsets[i]);
     for (int i = 0; i < count; i++)

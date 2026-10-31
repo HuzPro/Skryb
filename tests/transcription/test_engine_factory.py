@@ -295,6 +295,64 @@ class TestTheNativeCrisperWhisperEngine:
         assert startup_requires_torch(config, build_engine_registry(), tmp_path, remembered) is False
 
 
+class TestTheNativeEnginesOnNvidia:
+    """The native engines run their NVIDIA build on an RTX 30, 40 or 50 series card."""
+
+    _RTX_5060 = HardwareProfile(kind="nvidia_cuda", device_name="NVIDIA GeForce RTX 5060", gfx_arch="sm_120")
+
+    @staticmethod
+    def _ranked(gfx_arch: str | None, model: str) -> list[str]:
+        from skryb.transcription.engine_selector import rank_engines
+
+        descriptors = [replace(d, available=True) for d in build_engine_registry().all_descriptors()]
+        hardware = HardwareProfile(kind="nvidia_cuda", device_name="NVIDIA GeForce RTX", gfx_arch=gfx_arch)
+        return [c.engine_id for c in rank_engines(get_model_info(model), hardware, descriptors)]
+
+    @pytest.mark.parametrize("gfx_arch", ["sm_120", "sm_89", "sm_86"])
+    @pytest.mark.parametrize(("model", "native"), [
+        ("parakeet-ultra", "native_parakeet"),
+        ("crisperwhisper-2.0-large", "native_crisperwhisper"),
+        ("qwen3-asr-1.7b", "native_qwen3_asr"),
+    ])
+    def test_an_rtx_30_40_or_50_card_runs_each_model_on_the_native_engine_first(
+        self, gfx_arch: str, model: str, native: str,
+    ) -> None:
+        assert self._ranked(gfx_arch, model)[0] == native
+
+    @pytest.mark.parametrize("gfx_arch", ["sm_75", "sm_80", None])
+    def test_an_older_or_unprobed_nvidia_card_stays_on_pytorch(self, gfx_arch: str | None) -> None:
+        assert self._ranked(gfx_arch, "parakeet-ultra") == ["nano_parakeet"]
+
+    def test_the_nvidia_build_alone_makes_the_engine_available(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "npk_cuda.dll").write_bytes(b"MZ")
+        monkeypatch.setenv("NPK_CUDA_DLL", str(tmp_path / "npk_cuda.dll"))
+
+        assert build_engine_registry().descriptor("native_parakeet").available
+
+    @pytest.mark.parametrize(("hardware", "dll"), [
+        (_RTX_5060, "npk_cuda.dll"),
+        (HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200"), "npk.dll"),
+    ])
+    def test_the_adapter_loads_the_build_for_the_gpu_it_was_picked_for(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware: HardwareProfile, dll: str,
+    ) -> None:
+        from skryb.transcription.native_parakeet_adapter import NativeParakeetAdapter
+
+        for name, variable in (("npk.dll", "NPK_DLL"), ("npk_cuda.dll", "NPK_CUDA_DLL")):
+            (tmp_path / name).write_bytes(b"MZ")
+            monkeypatch.setenv(variable, str(tmp_path / name))
+
+        engine = create_engine_for_active_model(
+            _config(model_size="parakeet-ultra"), _paths(tmp_path), build_engine_registry(),
+            FakeHardwareDetector(hardware), license_policy=AllowAllLicensePolicy(),
+        )
+
+        assert isinstance(engine, NativeParakeetAdapter)
+        assert engine._dll_path == tmp_path / dll
+
+
 class TestBuildEngineRegistry:
     def test_should_register_only_surviving_engines(self) -> None:
         registry = build_engine_registry()

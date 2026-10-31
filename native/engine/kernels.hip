@@ -1,11 +1,15 @@
-// Device kernels for Qwen3-ASR on RDNA 4 (gfx1200, wave32, WMMA bf16).
+// Device kernels for Qwen3-ASR, shared by the other native engines: RDNA 4 (gfx1200, wave32, WMMA bf16) and
+// NVIDIA RTX 30-50 (warp32, mma.sync bf16) through tile.h.
 #include "kernels.h"
+#include "tile.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
-
-typedef __bf16 bf16x8 __attribute__((ext_vector_type(8)));
-typedef float f32x8 __attribute__((ext_vector_type(8)));
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #define NEG_INF (-__builtin_huge_valf())
 
@@ -20,10 +24,6 @@ __device__ __forceinline__ unsigned fkey(float v) {
 }
 __device__ __forceinline__ float unkey(unsigned k) {
     return __uint_as_float((k & 0x80000000u) ? (k & 0x7fffffffu) : ~k);
-}
-__device__ __forceinline__ bf16x8 as_bf8(uint4 v) { return __builtin_bit_cast(bf16x8, v); }
-__device__ __forceinline__ f32x8 wmma(bf16x8 a, bf16x8 bb, f32x8 c) {
-    return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, bb, c);
 }
 __device__ __forceinline__ float lo(unsigned w) { return __uint_as_float(w << 16); }
 __device__ __forceinline__ float hi(unsigned w) { return __uint_as_float(w & 0xffff0000u); }
@@ -109,13 +109,13 @@ __global__ __launch_bounds__(256) void gemm_kernel(AL A, const bf16* __restrict_
                                                    int swap_mn, Epi e, float* ws) {
     constexpr int PAD = BK + 8, WM = BM / 2, WN = BN / 4, TM = WM / 16, TN = WN / 16;
     constexpr int KV = BK / 8, AV = BM * KV / 256, BV = BN * KV / 256;
-    __shared__ __attribute__((aligned(16))) bf16 As[2][BM][PAD];
-    __shared__ __attribute__((aligned(16))) bf16 Bs[2][BN][PAD];
+    __shared__ alignas(16) bf16 As[2][BM][PAD];
+    __shared__ alignas(16) bf16 Bs[2][BN][PAD];
     const int tid = threadIdx.x, lane = tid & 31, wave = tid >> 5, wm = wave >> 2, wn = wave & 3;
     const int m0 = (swap_mn ? blockIdx.x : blockIdx.y) * BM, n0 = (swap_mn ? blockIdx.y : blockIdx.x) * BN;
     const int k_begin = blockIdx.z * k_split, k_end = min(K, k_begin + k_split);
-    f32x8 acc[TM][TN];
-    for (int i = 0; i < TM; i++) for (int j = 0; j < TN; j++) acc[i][j] = f32x8{};
+    Acc acc[TM][TN];
+    for (int i = 0; i < TM; i++) for (int j = 0; j < TN; j++) acc[i][j] = Acc{};
     uint4 ra[AV], rb[BV];
     auto gload = [&](int k0) {
         for (int j = 0; j < AV; j++) {
@@ -145,24 +145,20 @@ __global__ __launch_bounds__(256) void gemm_kernel(AL A, const bf16* __restrict_
         const int buf = kt & 1;
         if (kt + 1 < nk) gload(k_begin + (kt + 1) * BK);
         for (int kk = 0; kk < BK; kk += 16) {
-            bf16x8 af[TM], bfr[TN];
+            Frag af[TM], bfr[TN];
+            for (int i = 0; i < TM; i++) af[i] = frag_lds(&As[buf][wm * WM + i * 16][kk], PAD, lane);
+            for (int j = 0; j < TN; j++) bfr[j] = frag_lds(&Bs[buf][wn * WN + j * 16][kk], PAD, lane);
             for (int i = 0; i < TM; i++)
-                af[i] = as_bf8(*(const uint4*)&As[buf][wm * WM + i * 16 + (lane & 15)][kk + (lane >> 4) * 8]);
-            for (int j = 0; j < TN; j++)
-                bfr[j] = as_bf8(*(const uint4*)&Bs[buf][wn * WN + j * 16 + (lane & 15)][kk + (lane >> 4) * 8]);
-            for (int i = 0; i < TM; i++)
-                for (int j = 0; j < TN; j++) acc[i][j] = wmma(af[i], bfr[j], acc[i][j]);
+                for (int j = 0; j < TN; j++) acc[i][j] = mma(af[i], bfr[j], acc[i][j]);
         }
         if (kt + 1 < nk) sstore(buf ^ 1);
         __syncthreads();
     }
     for (int i = 0; i < TM; i++)
         for (int j = 0; j < TN; j++) {
-            const int col = n0 + wn * WN + j * 16 + (lane & 15);
-            if (col >= N) continue;
             for (int t = 0; t < 8; t++) {
-                const int row = m0 + wm * WM + i * 16 + (lane >> 4) * 8 + t;
-                if (row >= M) continue;
+                const int row = m0 + wm * WM + i * 16 + acc_row(lane, t), col = n0 + wn * WN + j * 16 + acc_col(lane, t);
+                if (row >= M || col >= N) continue;
                 if (ws) {
                     ws[((size_t)blockIdx.z * M + row) * N + col] = acc[i][j][t];
                     continue;
@@ -381,73 +377,71 @@ __global__ __launch_bounds__(128) void qk_norm_rope_kernel(bf16* qkv, const bf16
 template <int D>
 __global__ __launch_bounds__(32) void attn_kernel(AttnArgs a) {
     constexpr int KS = D / 16;
-    __shared__ __attribute__((aligned(16))) bf16 Ps[16][24];
-    __shared__ __attribute__((aligned(16))) bf16 Vs[16][D + 8];
+    __shared__ alignas(16) bf16 Ps[16][24];
+    __shared__ alignas(16) bf16 Vs[16][D + 8];
     const int lane = threadIdx.x, h = blockIdx.y, kvh = h / a.group;
     const AttnTile t = a.tiles[blockIdx.x];
     const bf16* Q = a.q + h * a.q_hs;
     const bf16* Kp = a.k + kvh * a.k_hs;
     const bf16* Vp = a.v + kvh * a.v_hs;
-    const int half = lane >> 4, col = lane & 15;
-    bf16x8 qf[KS];
-    {
-        const int qrow = t.q0 + col;
-        for (int ks = 0; ks < KS; ks++)
-            qf[ks] = as_bf8(qrow < t.q1 ? *(const uint4*)(Q + (size_t)qrow * a.q_rs + ks * 16 + half * 8) : uint4{0, 0, 0, 0});
-    }
-    f32x8 o[KS];
-    for (int ks = 0; ks < KS; ks++) o[ks] = f32x8{};
+    Frag qf[KS];
+    for (int ks = 0; ks < KS; ks++)
+        qf[ks] = frag_rows(lane, [&](int r) { return t.q0 + r < t.q1 ? Q + (size_t)(t.q0 + r) * a.q_rs + ks * 16 : nullptr; });
+    Acc o[KS];
+    for (int ks = 0; ks < KS; ks++) o[ks] = Acc{};
     float m[8], l[8];
     for (int i = 0; i < 8; i++) { m[i] = NEG_INF; l[i] = 0.f; }
     int kend = t.k1;
     if (a.causal) kend = min(kend, t.q1 + a.pos_off);
     for (int kb = t.k0; kb < kend; kb += 16) {
-        const int key = kb + col;
-        f32x8 s = f32x8{};
+        Acc s = Acc{};
         for (int ks = 0; ks < KS; ks++) {
-            bf16x8 kf = as_bf8(key < kend ? *(const uint4*)(Kp + (size_t)key * a.k_rs + ks * 16 + half * 8) : uint4{0, 0, 0, 0});
-            s = wmma(qf[ks], kf, s);
+            const Frag kf = frag_rows(lane, [&](int r) { return kb + r < kend ? Kp + (size_t)(kb + r) * a.k_rs + ks * 16 : nullptr; });
+            s = mma(qf[ks], kf, s);
         }
         for (int j = lane; j < 16 * D / 8; j += 32) {
             int kr = j / (D / 8), dv = (j - kr * (D / 8)) * 8, kk = kb + kr;
             *(uint4*)&Vs[kr][dv] = kk < kend ? *(const uint4*)(Vp + (size_t)kk * a.v_rs + dv) : uint4{0, 0, 0, 0};
         }
+        Acc v;
         for (int i = 0; i < 8; i++) {
-            const int qr = t.q0 + half * 8 + i;
+            const int qr = t.q0 + acc_row(lane, i), key = kb + acc_col(lane, i);
             const bool ok = key < kend && (!a.causal || key <= qr + a.pos_off);
-            const float v = ok ? s[i] * a.scale : NEG_INF;
-            float mx = v;
-            for (int x = 1; x < 16; x <<= 1) mx = fmaxf(mx, __shfl_xor(mx, x, 32));
-            const float mn = fmaxf(m[i], mx);
-            const float p = mn == NEG_INF ? 0.f : expf(v - mn);
-            const float alpha = mn == NEG_INF ? 1.f : expf(m[i] - mn);
-            float ps = p;
-            for (int x = 1; x < 16; x <<= 1) ps += __shfl_xor(ps, x, 32);
-            l[i] = l[i] * alpha + ps;
+            v[i] = ok ? s[i] * a.scale : NEG_INF;
+        }
+        const Acc mx = row_max(v);
+        Acc p;
+        float alpha[8];
+        for (int i = 0; i < 8; i++) {
+            const float mn = fmaxf(m[i], mx[i]);
+            p[i] = mn == NEG_INF ? 0.f : expf(v[i] - mn);
+            alpha[i] = mn == NEG_INF ? 1.f : expf(m[i] - mn);
             m[i] = mn;
-            for (int ks = 0; ks < KS; ks++) o[ks][i] *= alpha;
-            Ps[half * 8 + i][col] = b(p);
+        }
+        const Acc ps = row_sum(p);
+        for (int i = 0; i < 8; i++) {
+            l[i] = l[i] * alpha[i] + ps[i];
+            for (int ks = 0; ks < KS; ks++) o[ks][i] *= alpha[i];
+            Ps[acc_row(lane, i)][acc_col(lane, i)] = b(p[i]);
         }
         __syncthreads();
-        const bf16x8 pf = as_bf8(*(const uint4*)&Ps[col][half * 8]);
-        for (int nt = 0; nt < KS; nt++) {
-            bf16x8 vf;
-            for (int j = 0; j < 8; j++) vf[j] = Vs[half * 8 + j][nt * 16 + col];
-            o[nt] = wmma(pf, vf, o[nt]);
-        }
+        const Frag pf = frag_lds(&Ps[0][0], 24, lane);
+        for (int nt = 0; nt < KS; nt++)
+            o[nt] = mma(pf, frag_at(lane, [&](int r, int k) { return Vs[k][nt * 16 + r]; }), o[nt]);
         __syncthreads();
     }
     if (a.part_o) {
         const size_t base = ((size_t)blockIdx.x * a.n_heads + h) * 16;
         for (int i = 0; i < 8; i++) {
-            const size_t r = base + half * 8 + i;
+            const size_t r = base + acc_row(lane, i);
+            const int col = acc_col(lane, i);
             for (int nt = 0; nt < KS; nt++) a.part_o[r * D + nt * 16 + col] = o[nt][i];
             if (col == 0) { a.part_ml[r * 2] = m[i]; a.part_ml[r * 2 + 1] = l[i]; }
         }
         return;
     }
     for (int i = 0; i < 8; i++) {
-        const int row = t.q0 + half * 8 + i;
+        const int row = t.q0 + acc_row(lane, i), col = acc_col(lane, i);
         if (row >= t.q1) continue;
         const float inv = l[i] > 0.f ? 1.f / l[i] : 0.f;
         for (int nt = 0; nt < KS; nt++) a.o[(size_t)row * a.o_rs + h * a.o_hs + nt * 16 + col] = b(o[nt][i] * inv);
@@ -475,13 +469,13 @@ __global__ __launch_bounds__(D) void attn_combine_kernel(AttnArgs a, int splits)
 }
 
 // One thread per (row, group of 32).
-__global__ void quantize_q4_kernel(const bf16* __restrict__ w, int N, int K, uint4* q, _Float16* scale) {
+__global__ void quantize_q4_kernel(const bf16* __restrict__ w, int N, int K, uint4* q, f16* scale) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x, groups = K / 32;
     if (i >= N * groups) return;
     const bf16* src = w + (size_t)i * 32;
     float amax = 0.f;
     for (int j = 0; j < 32; j++) amax = fmaxf(amax, fabsf(f(src[j])));
-    const _Float16 sh = (_Float16)(amax > 0.f ? amax / 7.f : 1.f);
+    const f16 sh = (f16)(amax > 0.f ? amax / 7.f : 1.f);
     const float inv = 1.f / (float)sh;
     unsigned words[4] = {0, 0, 0, 0};
     for (int j = 0; j < 32; j++) {
@@ -518,7 +512,7 @@ __global__ __launch_bounds__(256) void gemv_q4_kernel(const bf16* __restrict__ X
     for (int c = 0; c < 2; c++) {
         const int n = min(n0 + c, N - 1);
         const uint4* qr = w.q + (size_t)n * groups;
-        const _Float16* sr = w.s + (size_t)n * groups;
+        const f16* sr = w.s + (size_t)n * groups;
         for (int g = lane; g < groups; g += 32) acc[c] = fmaf((float)sr[g], dot32_q4(qr[g], xs + g * 4), acc[c]);
         acc[c] = wave_sum(acc[c]);
     }
@@ -595,8 +589,18 @@ float* split_workspace(size_t floats) {
     return ws;
 }
 
+// 128, as tuned on the RX 9060 XT (which HIP counts as 16 units), or four per SM on a bigger RTX card.
+int busy_blocks() {
+    static const int blocks = [] {
+        int units = 0;
+        (void)hipDeviceGetAttribute(&units, hipDeviceAttributeMultiprocessorCount, 0);
+        return std::max(128, 4 * units);
+    }();
+    return blocks;
+}
+
 // Long inputs: 128x128 tiles with M on grid.x. Short ones (dictation prefill): 64-wide column tiles so
-// each weight is read once, and K split until at least 128 blocks keep all 32 CUs busy.
+// each weight is read once, and K split until enough blocks keep every compute unit busy.
 template <class AL>
 void launch_gemm(hipStream_t s, const AL& a, const bf16* W, int M, int N, int K, const Epi& e) {
     if (M >= 512 || K % 64) {
@@ -605,11 +609,16 @@ void launch_gemm(hipStream_t s, const AL& a, const bf16* W, int M, int N, int K,
     }
     const int bm = M > 64 ? 128 : 64, tiles = cdiv(M, bm) * cdiv(N, 64);
     int splits = 1;
-    while (tiles * splits < 128 && K % (splits * 2 * 64) == 0 && K / (splits * 2) >= 512) splits *= 2;
+    while (tiles * splits < busy_blocks() && K % (splits * 2 * 64) == 0 && K / (splits * 2) >= 512) splits *= 2;
     float* ws = splits > 1 ? split_workspace((size_t)splits * M * N) : nullptr;
     if (splits > 1 && !ws) splits = 1;
     const dim3 g(cdiv(N, 64), cdiv(M, bm), splits);
+#ifdef __CUDACC__
+    // Its 64-deep K step needs 54 KB of shared memory; CUDA caps a block's static share at 48 KB.
+    if (bm == 128) gemm_kernel<128, 64, 32><<<g, 256, 0, s>>>(a, W, M, N, K, K / splits, 0, e, ws);
+#else
     if (bm == 128) gemm_kernel<128, 64, 64><<<g, 256, 0, s>>>(a, W, M, N, K, K / splits, 0, e, ws);
+#endif
     else gemm_kernel<64, 64, 64><<<g, 256, 0, s>>>(a, W, M, N, K, K / splits, 0, e, ws);
     if (ws) gemm_finish_kernel<<<cdiv(M * N, 256), 256, 0, s>>>(ws, splits, M, N, e);
 }
@@ -675,7 +684,7 @@ void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits, i
     else attn_combine_kernel<128><<<dim3(rows, a.n_heads), 128, 0, s>>>(a, splits);
 }
 
-void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, _Float16* scale) {
+void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, f16* scale) {
     quantize_q4_kernel<<<cdiv(N * (K / 32), 256), 256, 0, s>>>(w, N, K, q, scale);
 }
 
@@ -697,4 +706,157 @@ void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, in
 
 void argmax_ids(hipStream_t s, const unsigned long long* keys, int* ids, int rows) {
     argmax_ids_kernel<<<1, 32, 0, s>>>(keys, ids, rows);
+}
+
+// ---- self-check ----
+
+namespace {
+
+struct Bf16Data {
+    std::vector<uint16_t> bits;
+    std::vector<float> values;
+};
+
+// Uniform in [-1, 1), as bf16, from a fixed seed.
+Bf16Data random_bf16(size_t n, uint32_t seed) {
+    Bf16Data d{std::vector<uint16_t>(n), std::vector<float>(n)};
+    for (size_t i = 0; i < n; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        const float v = (float)(seed >> 8) / 8388608.f - 1.f;
+        uint32_t u;
+        std::memcpy(&u, &v, 4);
+        d.bits[i] = (uint16_t)((u + 0x7fff + ((u >> 16) & 1)) >> 16);
+        u = (uint32_t)d.bits[i] << 16;
+        std::memcpy(&d.values[i], &u, 4);
+    }
+    return d;
+}
+
+// Largest |gpu - ref| over the largest |ref|: rounding stays near 1/256, a wrong tile layout near 1.
+float relative_error(const std::vector<uint16_t>& gpu, const std::vector<double>& ref) {
+    double worst = 0, scale = 1e-30;
+    for (size_t i = 0; i < ref.size(); i++) {
+        const uint32_t u = (uint32_t)gpu[i] << 16;
+        float g;
+        std::memcpy(&g, &u, 4);
+        worst = std::max(worst, std::fabs(g - ref[i]));
+        scale = std::max(scale, std::fabs(ref[i]));
+    }
+    return (float)(worst / scale);
+}
+
+void gpu_ok(hipError_t e, const char* what) {
+    if (e != hipSuccess) throw std::runtime_error(std::string(what) + ": " + hipGetErrorString(e));
+}
+
+struct DeviceScratch {
+    hipStream_t s;
+    std::vector<void*> blocks;
+    ~DeviceScratch() {
+        (void)hipStreamSynchronize(s);
+        for (void* p : blocks) (void)hipFree(p);
+    }
+    template <class T>
+    T* zeros(size_t n) {
+        void* p = nullptr;
+        gpu_ok(hipMalloc(&p, n * sizeof(T)), "hipMalloc");
+        blocks.push_back(p);
+        gpu_ok(hipMemsetAsync(p, 0, n * sizeof(T), s), "hipMemsetAsync");
+        return (T*)p;
+    }
+    template <class T>
+    T* upload(const std::vector<T>& host) {
+        T* p = zeros<T>(host.size());
+        gpu_ok(hipMemcpyAsync(p, host.data(), host.size() * sizeof(T), hipMemcpyHostToDevice, s), "hipMemcpyAsync");
+        gpu_ok(hipStreamSynchronize(s), "upload");
+        return p;
+    }
+    std::vector<uint16_t> download(const bf16* p, size_t n) {
+        std::vector<uint16_t> host(n);
+        gpu_ok(hipMemcpyAsync(host.data(), p, n * 2, hipMemcpyDeviceToHost, s), "hipMemcpyAsync");
+        gpu_ok(hipStreamSynchronize(s), "the checked kernels");
+        return host;
+    }
+};
+
+float gemm_error(DeviceScratch& dev, int M, int N, int K) {
+    const Bf16Data a = random_bf16((size_t)M * K, 1 + M), w = random_bf16((size_t)N * K, 2 + N), bias = random_bf16(N, 3 + K);
+    Epi e;
+    e.bias = (const bf16*)dev.upload(bias.bits);
+    e.out = dev.zeros<bf16>((size_t)M * N);
+    e.ldo = N;
+    gemm(dev.s, (const bf16*)dev.upload(a.bits), K, (const bf16*)dev.upload(w.bits), M, N, K, e);
+    std::vector<double> ref((size_t)M * N);
+    for (int m = 0; m < M; m++)
+        for (int n = 0; n < N; n++) {
+            double acc = bias.values[n];
+            for (int k = 0; k < K; k++) acc += (double)a.values[(size_t)m * K + k] * w.values[(size_t)n * K + k];
+            ref[(size_t)m * N + n] = acc;
+        }
+    return relative_error(dev.download(e.out, (size_t)M * N), ref);
+}
+
+// Grouped heads over two query tiles, the second one partial; causal leaves a ragged key edge.
+float attention_error(DeviceScratch& dev, int D, bool causal) {
+    const int heads = 4, group = 2, rows = 20, keys = 37, pos_off = causal ? keys - rows : 0;
+    const Bf16Data q = random_bf16((size_t)rows * heads * D, 7 + D), k = random_bf16((size_t)keys * heads / group * D, 8 + D),
+                   v = random_bf16((size_t)keys * heads / group * D, 9 + D);
+    AttnArgs a{};
+    a.q = (const bf16*)dev.upload(q.bits); a.q_rs = heads * D; a.q_hs = D;
+    a.k = (const bf16*)dev.upload(k.bits); a.k_rs = heads / group * D; a.k_hs = D;
+    a.v = (const bf16*)dev.upload(v.bits); a.v_rs = heads / group * D; a.v_hs = D;
+    a.o = dev.zeros<bf16>((size_t)rows * heads * D); a.o_rs = heads * D; a.o_hs = D;
+    a.group = group;
+    a.tiles = dev.upload(std::vector<AttnTile>{{0, 16, 0, keys}, {16, rows, 0, keys}});
+    a.n_tiles = 2; a.n_heads = heads;
+    a.causal = causal; a.pos_off = pos_off;
+    a.scale = 1.f / std::sqrt((float)D);
+    attention(dev.s, a, D);
+    std::vector<double> ref((size_t)rows * heads * D);
+    for (int h = 0; h < heads; h++)
+        for (int r = 0; r < rows; r++) {
+            const int kvh = h / group, last = causal ? std::min(keys - 1, r + pos_off) : keys - 1;
+            std::vector<double> p(last + 1);
+            double mx = -1e300, sum = 0;
+            for (int j = 0; j <= last; j++) {
+                double dot = 0;
+                for (int d = 0; d < D; d++)
+                    dot += (double)q.values[(size_t)r * a.q_rs + h * D + d] * k.values[(size_t)j * a.k_rs + kvh * D + d];
+                p[j] = dot * a.scale;
+                mx = std::max(mx, p[j]);
+            }
+            for (double& x : p) sum += (x = std::exp(x - mx));
+            for (int d = 0; d < D; d++) {
+                double o = 0;
+                for (int j = 0; j <= last; j++) o += p[j] * v.values[(size_t)j * a.v_rs + kvh * D + d];
+                ref[(size_t)r * a.o_rs + h * D + d] = o / sum;
+            }
+        }
+    return relative_error(dev.download(a.o, ref.size()), ref);
+}
+
+std::string run_self_checks(hipStream_t s) {
+    DeviceScratch dev{s};
+    std::string failed;
+    auto expect = [&](const std::string& what, float error, float tolerance) {
+        if (!(error <= tolerance)) failed += (failed.empty() ? "" : ", ") + what + " off by " + std::to_string(error);
+    };
+    // The split-K, 128-row, 64-row and GEMV paths, each with ragged edges.
+    expect("gemm 40x96x2048", gemm_error(dev, 40, 96, 2048), 1e-2f);
+    expect("gemm 600x64x64", gemm_error(dev, 600, 64, 64), 1e-2f);
+    expect("gemm 100x80x192", gemm_error(dev, 100, 80, 192), 1e-2f);
+    expect("gemv 3x50x256", gemm_error(dev, 3, 50, 256), 1e-2f);
+    expect("attention 128 causal", attention_error(dev, 128, true), 2e-2f);
+    expect("attention 64", attention_error(dev, 64, false), 2e-2f);
+    return failed;
+}
+
+}  // namespace
+
+std::string gpu_self_check(hipStream_t s) {
+    try {
+        return run_self_checks(s);
+    } catch (const std::exception& x) {
+        return x.what();
+    }
 }

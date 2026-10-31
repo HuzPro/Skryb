@@ -1,4 +1,4 @@
-# Native Qwen3-ASR engine (RX 9060 XT, gfx1200)
+# Native engines (RX 9060 XT, gfx1200; NVIDIA RTX 30-50, experimental)
 
 Hand-written HIP kernels behind `qasr.dll`, loaded by
 `skryb/transcription/native_qwen3_asr_adapter.py` for the `qwen3-asr-1.7b` model. No torch.
@@ -30,3 +30,22 @@ venv/Scripts/python.exe native/bench/app_engine_check.py
 ```
 
 `QASR_DRAFT=0` turns off speculative decoding; `QASR_PROFILE=1` adds per-op prefill times to the stats.
+
+## NVIDIA build
+
+The same sources build for NVIDIA through `engine/gpu.h` (HIP's runtime names mapped onto CUDA's) and `engine/tile.h`
+(the 16x16x16 bf16 tile product: gfx12 WMMA on AMD, two `mma.sync` m16n8k16 on NVIDIA). One DLL per engine
+(`qasr_cuda.dll`, `npk_cuda.dll`, `cw_cuda.dll`, `nd_cuda.dll`) carries code for sm_86 (RTX 30), sm_89 (RTX 40) and
+sm_120 (RTX 50) plus PTX, with the CUDA runtime linked in: users need only the NVIDIA driver. No GPU needed to build:
+
+```bash
+python native/cuda/fetch_toolkit.py   # nvcc, the runtime and CCCL from NVIDIA's archives, into native/cuda/build
+python native/cuda/build.py           # all four, next to the AMD ones in native/*/build
+```
+
+Every engine runs `gpu_self_check` at load: the GEMM paths and attention on small random inputs against a CPU
+reference. A GPU the kernels misbehave on fails to load (and Skryb retries on the CPU) instead of writing nonsense.
+
+`-DMMA_NV_LAYOUT` builds the NVIDIA tile layout for AMD, with the matrix product done by shuffles, so everything but
+the two NVIDIA instructions can be checked on the RX 9060 XT. On the bench corpus it matches the AMD build to bf16
+rounding.

@@ -10,6 +10,13 @@ class TranscriptionError(SkrybError):
     pass
 
 
+class GpuEngineError(TranscriptionError, RuntimeError):
+    """A native GPU engine would not start on this GPU (driver, memory, or its self-check failed).
+
+    A RuntimeError like torch's GPU errors, so the engine loader retries on the CPU.
+    """
+
+
 class EngineDependencyMissingError(TranscriptionError):
     """The Python package backing an engine is not installed.
 

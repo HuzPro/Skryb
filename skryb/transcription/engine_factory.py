@@ -37,6 +37,7 @@ from skryb.transcription.model_info import (
 )
 from skryb.transcription.model_manager import ModelManager
 from skryb.transcription.native_engine_dll import (
+    NATIVE_GPU_ARCHS,
     native_engine_dll,
     native_parakeet_dll,
     native_whisper_dll,
@@ -84,39 +85,39 @@ _CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
 )
 
 
-# Hand-written kernels compiled for gfx1200 only (the RX 9060 XT they were
-# tuned and checked on), behind a DLL: no torch import.
+# Hand-written kernels behind a DLL, no torch import: tuned and checked on the
+# RX 9060 XT (gfx1200), with an experimental NVIDIA build for the RTX 30-50 series.
 _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
     engine_id="native_qwen3_asr",
-    display_name="Qwen3-ASR (native HIP engine)",
-    supported_hardware=("amd_rocm",),
+    display_name="Qwen3-ASR (native GPU engine)",
+    supported_hardware=("amd_rocm", "nvidia_cuda"),
     base_priority=95,
     requires_torch=False,
-    supported_gfx=("gfx1200",),
+    supported_gfx=NATIVE_GPU_ARCHS,
 )
 
 
-# Parakeet TDT on the same kind of hand-written gfx1200 kernels: loads in
-# about a second where nano-parakeet takes ten, and no torch import.
+# Parakeet TDT on the same kind of hand-written kernels: loads in about a
+# second where nano-parakeet takes ten, and no torch import.
 _NATIVE_PARAKEET_DESCRIPTOR = EngineDescriptor(
     engine_id="native_parakeet",
-    display_name="Parakeet (native HIP engine)",
-    supported_hardware=("amd_rocm",),
+    display_name="Parakeet (native GPU engine)",
+    supported_hardware=("amd_rocm", "nvidia_cuda"),
     base_priority=95,
     requires_torch=False,
-    supported_gfx=("gfx1200",),
+    supported_gfx=NATIVE_GPU_ARCHS,
 )
 
 
-# CrisperWhisper on the same gfx1200 kernels: about 2 s to load where the
+# CrisperWhisper on the same kernels: about 2 s to load where the
 # Transformers engine takes 20-60, and no torch or Transformers import.
 _NATIVE_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
     engine_id="native_crisperwhisper",
-    display_name="CrisperWhisper 2.0 (native HIP engine)",
-    supported_hardware=("amd_rocm",),
+    display_name="CrisperWhisper 2.0 (native GPU engine)",
+    supported_hardware=("amd_rocm", "nvidia_cuda"),
     base_priority=95,
     requires_torch=False,
-    supported_gfx=("gfx1200",),
+    supported_gfx=NATIVE_GPU_ARCHS,
 )
 
 
@@ -167,9 +168,9 @@ def build_engine_registry() -> EngineRegistry:
             _PHONON2_CPU_DESCRIPTOR,
             _CRISPERWHISPER_DESCRIPTOR,
             _CRISPERWHISPER_CT2_DESCRIPTOR,
-            replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=native_engine_dll() is not None),
-            replace(_NATIVE_PARAKEET_DESCRIPTOR, available=native_parakeet_dll() is not None),
-            replace(_NATIVE_CRISPERWHISPER_DESCRIPTOR, available=native_whisper_dll() is not None),
+            replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=_either_build(native_engine_dll)),
+            replace(_NATIVE_PARAKEET_DESCRIPTOR, available=_either_build(native_parakeet_dll)),
+            replace(_NATIVE_CRISPERWHISPER_DESCRIPTOR, available=_either_build(native_whisper_dll)),
             _QWEN3_ASR_DESCRIPTOR,
             replace(
                 _OPENVINO_PARAKEET_DESCRIPTOR,
@@ -189,6 +190,16 @@ def build_engine_registry() -> EngineRegistry:
             "qwen3_asr": _build_qwen3_asr_engine,
         },
     )
+
+
+def _either_build(find: Callable[..., Path | None]) -> bool:
+    """Whether the AMD or the NVIDIA build of a native engine is installed."""
+    return find() is not None or find(cuda=True) is not None
+
+
+def _on_nvidia(spec: EngineSpec) -> bool:
+    """Whether a native engine runs its NVIDIA build here."""
+    return spec.hardware_kind == "nvidia_cuda"
 
 
 def _build_nemotron_streaming_engine(spec: EngineSpec) -> TranscriptionEngine:
@@ -223,7 +234,7 @@ def _build_openvino_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
 def _build_native_parakeet_engine(spec: EngineSpec) -> TranscriptionEngine:
     from skryb.transcription.native_parakeet_adapter import NativeParakeetAdapter
 
-    return NativeParakeetAdapter(model_dir=spec.model_dir, repo_id=spec.repo_id)
+    return NativeParakeetAdapter(model_dir=spec.model_dir, repo_id=spec.repo_id, cuda=_on_nvidia(spec))
 
 
 def _build_phonon2_cpu_engine(spec: EngineSpec) -> TranscriptionEngine:
@@ -249,6 +260,7 @@ def _build_native_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
     return NativeQwen3AsrAdapter(
         loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
         question_threshold=QUESTION_THRESHOLD if spec.question_marks else None,
+        cuda=_on_nvidia(spec),
     )
 
 
@@ -292,6 +304,7 @@ def _build_native_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine
         model_dir=loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
         language=spec.language,
         mode=spec.crisperwhisper_mode,
+        cuda=_on_nvidia(spec),
     )
 
 
@@ -598,6 +611,9 @@ def create_engine_for_active_model(
         revision=model_info.revision,
         crisperwhisper_mode=_resolve_crisperwhisper_mode(config, engine_id),
         question_marks=config.get("transcription.question_marks", True) is not False,
+        hardware_kind=(
+            hardware_detector.detect().kind if registry.descriptor(engine_id).supported_gfx else None
+        ),
     )
     return registry.build(engine_id, spec)
 
