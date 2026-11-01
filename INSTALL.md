@@ -73,12 +73,24 @@ Core Series 3 (Wildcat Lake) NPU, the one it was tuned and measured on,
 `phonon-2.5-english` runs there too by default instead of on Fermion's CPU
 engine; on other NPUs pick "Parakeet on the NPU" in Settings to try it. The
 first load exports the encoder to OpenVINO IR in the snapshot's `.openvino`
-folder, rewrites it with int8 weights and compiles it at four lengths, which
+folder, rewrites it with int8 weights and compiles it at five lengths, which
 takes a few minutes once; for Phonon, its CPU engine takes dictation
 meanwhile and the NPU takes over when every length is up. Later loads reuse
 the compiled copies and take dictation in under a second. The NPU needs
 Intel's NPU driver 32.0.100.5540 or newer. Without a working NPU the same
 engine runs the encoder on the CPU, and Settings says so and why.
+
+The NPU also runs `qwen3-asr-1.7b` (dictation and meetings), CrisperWhisper
+2.0 and the meeting-only models, all without torch. Their OpenVINO graphs are
+built from `model.safetensors` in the snapshot's `.openvino` folder the first
+time, in seconds, and compiled once (under a minute each). Qwen3-ASR's decoder
+runs with int8 weights in the NPU plugin's LLM pipeline, and in meetings it
+checks Phonon's transcript of each line as a draft, up to 16 tokens a pass,
+which keeps the text exactly what Qwen3-ASR alone writes and cuts a 10 s line
+from about 2.5 s to 0.6 s. Whisper models (CrisperWhisper, and Whisper
+Hindi2Hinglish Apex for Urdu meetings) run their encoder on the NPU and their
+decoder on the CPU. The diarizer's model step runs on the NPU, so meetings on
+a laptop without a GPU tell speakers apart.
 `python scripts\check_npu.py` proves the work reaches the NPU with Windows'
 own NPU counters, and races it against the Intel GPU and the CPU.
 OpenVINO's model converter reports usage to Intel unless you opt out; Skryb

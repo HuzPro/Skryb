@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from tests.fakes.installs import without_openvino
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
 from skryb.core.events import DownloadProgressEvent
@@ -471,7 +472,8 @@ def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(m
 def test_engines_answer_before_the_gpu_probe_and_the_probe_reports_later(make_rig) -> None:
     profile = HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200")
     detector = FakeHardwareDetector(profile, probed=False)
-    rig = make_rig(hardware=detector)
+    with without_openvino():
+        rig = make_rig(hardware=detector)
     stream = rig.events()
 
     status, engines = rig.call("GET", f"/api/engines?model={TURBO}")

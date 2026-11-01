@@ -360,7 +360,7 @@ class TestBuildEngineRegistry:
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
             "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr", "openvino_parakeet",
-            "native_parakeet", "native_crisperwhisper", "qwen3_asr",
+            "native_parakeet", "native_crisperwhisper", "qwen3_asr", "openvino_qwen3_asr", "openvino_crisperwhisper",
         }
 
     def test_should_declare_the_ct2_engine_torch_free(self) -> None:
@@ -779,11 +779,29 @@ class TestAutoPrefersTheTorchFreeEngine:
             "transcription.engine": "auto",
         })
         registry = build_engine_registry()
+        cpu = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
 
-        assert selectable_engine_ids(config, registry, tmp_path) == (
+        assert selectable_engine_ids(config, registry, tmp_path, cpu) == (
             "crisperwhisper_ct2",
         )
-        assert startup_requires_torch(config, registry, tmp_path) is False
+        assert startup_requires_torch(config, registry, tmp_path, cpu) is False
+
+    def test_with_an_intel_npu_it_selects_the_npu_engine_and_skips_torch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "skryb.transcription.engine_factory._ctranslate2_installed",
+            lambda: True,
+        )
+        self._turbo_installed(tmp_path)
+        config = FakeConfig({
+            "transcription.model_size": "crisperwhisper-2.0-turbo",
+            "transcription.engine": "auto",
+        })
+        npu = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None, npu="FD3E")
+
+        assert selectable_engine_ids(config, build_engine_registry(), tmp_path, npu) == ("openvino_crisperwhisper",)
+        assert startup_requires_torch(config, build_engine_registry(), tmp_path, npu) is False
 
     def test_should_fall_back_to_transformers_without_ctranslate2(
         self, tmp_path: Path,
@@ -794,16 +812,17 @@ class TestAutoPrefersTheTorchFreeEngine:
             "transcription.engine": "auto",
         })
         registry = build_engine_registry()
+        cpu = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
 
         with patch(
             "skryb.transcription.engine_factory."
             "_ctranslate2_installed",
             return_value=False,
         ):
-            assert selectable_engine_ids(config, registry, tmp_path) == (
+            assert selectable_engine_ids(config, registry, tmp_path, cpu) == (
                 "crisperwhisper",
             )
-            assert startup_requires_torch(config, registry, tmp_path) is True
+            assert startup_requires_torch(config, registry, tmp_path, cpu) is True
 
     def test_should_keep_an_explicit_engine_choice(
         self, tmp_path: Path,
@@ -937,13 +956,20 @@ class TestQwen3StartupStaysTorchFreeOnTheRx9060Xt:
     @pytest.mark.parametrize("hardware", [
         HardwareProfile(kind="nvidia_cuda", device_name="NVIDIA GeForce RTX 4070", gfx_arch=None),
         HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 7900 XTX", gfx_arch="gfx1100"),
-        HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None),
     ])
-    def test_on_any_other_computer_it_runs_on_transformers_and_warms_torch(self, tmp_path: Path, hardware: HardwareProfile) -> None:
+    def test_on_any_other_gpu_it_runs_on_transformers_and_warms_torch(self, tmp_path: Path, hardware: HardwareProfile) -> None:
         registry = build_engine_registry()
 
         assert selectable_engine_ids(self._config(), registry, tmp_path, hardware) == ("qwen3_asr",)
         assert startup_requires_torch(self._config(), registry, tmp_path, hardware) is True
+
+    @pytest.mark.parametrize("npu", [None, "FD3E"])
+    def test_on_a_computer_without_a_gpu_it_runs_on_openvino_and_skips_torch(self, tmp_path: Path, npu: str | None) -> None:
+        registry = build_engine_registry()
+        hardware = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None, npu=npu)
+
+        assert selectable_engine_ids(self._config(), registry, tmp_path, hardware) == ("openvino_qwen3_asr",)
+        assert startup_requires_torch(self._config(), registry, tmp_path, hardware) is False
 
     def test_before_any_probe_has_been_saved_it_plans_for_torch(self, tmp_path: Path) -> None:
         assert startup_requires_torch(self._config(), build_engine_registry(), tmp_path) is True

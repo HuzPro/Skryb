@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
+from tests.fakes.installs import gpu_install_registry
 from tests.fakes.licensing import AllowAllLicensePolicy
 from tests.fakes.model_manager import FakeModelManager
 from skryb.core.event_bus import SimpleEventBus
@@ -17,7 +18,6 @@ from skryb.settings.download_coordinator import DownloadCoordinator
 from skryb.settings.engine_hot_swap import NullEngineHotSwap
 from skryb.settings.model_installation_cache import ModelInstallationCache
 from skryb.settings.service import SettingsService
-from skryb.transcription.engine_factory import build_engine_registry
 from skryb.transcription.engine_types import HardwareProfile
 
 _TURBO = "crisperwhisper-2.0-turbo"
@@ -52,7 +52,7 @@ def _service(
         state_machine=AppStateMachine(bus),
         dictionary_path=tmp_path / "dictionary.json",
         license_policy=AllowAllLicensePolicy(),
-        registry=build_engine_registry(),
+        registry=gpu_install_registry(),
         hardware_detector=detector,
     )
 

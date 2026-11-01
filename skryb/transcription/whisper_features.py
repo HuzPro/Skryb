@@ -25,7 +25,6 @@ _MEL_BIN_COUNT = 128
 # split rather than silently losing their tail.
 _ENCODER_WINDOW_SECONDS = 30.0
 _ENCODER_WINDOW_SAMPLES = int(_ENCODER_WINDOW_SECONDS * _SAMPLE_RATE)
-_ENCODER_WINDOW_FRAMES = _ENCODER_WINDOW_SAMPLES // _HOP_LENGTH
 
 # Boundaries are nudged onto the quietest frame in this trailing slice of
 # the window so a split lands between words instead of inside one.
@@ -208,7 +207,12 @@ def log_mel_spectrogram(audio: AudioSegment) -> np.ndarray:
             f"Whisper features need {_SAMPLE_RATE} Hz audio, "
             f"got {audio.sample_rate}"
         )
-    magnitudes = _power_spectrogram(_padded_to_window(audio.data))
+    return log_mel_features(_padded_to_window(audio.data))
+
+
+def log_mel_features(samples: np.ndarray) -> np.ndarray:
+    """``(128, len // 160)`` float32 log-mel of 16 kHz *samples*, unpadded: Qwen3-ASR's front end too."""
+    magnitudes = _power_spectrogram(samples)
     mel_power = _mel_filter_bank() @ magnitudes
     log_mel = np.log10(np.clip(mel_power, _MEL_POWER_FLOOR, None))
     log_mel = np.maximum(log_mel, log_mel.max() - _LOG_DYNAMIC_RANGE)
@@ -221,10 +225,10 @@ def _padded_to_window(samples: np.ndarray) -> np.ndarray:
 
 
 def _power_spectrogram(samples: np.ndarray) -> np.ndarray:
-    """Windowed power spectra, ``(201, 3000)``, one column per hop."""
+    """Windowed power spectra, ``(201, len // 160)``, one column per hop."""
     centred = np.pad(samples, _N_FFT // 2, mode="reflect")
     frames = np.lib.stride_tricks.sliding_window_view(centred, _N_FFT)
-    frames = frames[::_HOP_LENGTH][:_ENCODER_WINDOW_FRAMES]
+    frames = frames[::_HOP_LENGTH][:samples.size // _HOP_LENGTH]
     spectra = np.fft.rfft(frames * _hann_window(), axis=-1)
     return np.abs(spectra).T ** 2
 

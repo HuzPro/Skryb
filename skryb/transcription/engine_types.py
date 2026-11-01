@@ -5,7 +5,7 @@ EngineId = Literal[
     "crisperwhisper", "crisperwhisper_ct2", "nano_parakeet",
     "nemotron_streaming", "phonon2_cpu", "native_qwen3_asr", "openvino_parakeet",
     "native_parakeet", "native_crisperwhisper",
-    "qwen3_asr",
+    "qwen3_asr", "openvino_qwen3_asr", "openvino_crisperwhisper",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 ALL_HARDWARE_KINDS: frozenset[HardwareKind] = frozenset(get_args(HardwareKind))

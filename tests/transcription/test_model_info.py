@@ -170,7 +170,7 @@ class TestModelCatalog:
             # PyTorch is the engine every machine has; the others only add speed where they run.
             assert "crisperwhisper" in model.compatible_engines
             assert set(model.compatible_engines) <= {
-                "native_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2",
+                "native_crisperwhisper", "openvino_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2",
             }
 
     def test_crisperwhisper_should_not_replace_default_model(self) -> None:

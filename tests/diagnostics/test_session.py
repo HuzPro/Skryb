@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from tests.fakes.config import FakeConfig
+from tests.fakes.installs import gpu_install_registry
 from tests.fakes.hardware import FakeHardwareDetector
 from skryb.core.paths import AppPaths
 from skryb.core.startup_log import SESSION_MARKER
@@ -92,7 +93,7 @@ class TestSessionEvents:
         })
         detector = FakeHardwareDetector()
 
-        diagnostics = SessionDiagnostics(paths, config, _REGISTRY, detector)
+        diagnostics = SessionDiagnostics(paths, config, gpu_install_registry(), detector)
         diagnostics.dispose()
 
         started = _events(paths)[0]

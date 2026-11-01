@@ -110,7 +110,7 @@ def _to_candidates(
 
 
 def _reason_for(hardware: HardwareProfile, engine_id: str) -> str:
-    if hardware.npu and engine_id == "openvino_parakeet":
+    if hardware.npu and engine_id in ("openvino_parakeet", "openvino_qwen3_asr", "openvino_crisperwhisper"):
         return "Recommended for your Intel NPU"
     label = _HARDWARE_LABELS[hardware.kind]
     if hardware.gfx_arch:

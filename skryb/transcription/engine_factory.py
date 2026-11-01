@@ -144,6 +144,30 @@ _OPENVINO_PARAKEET_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# Qwen3-ASR on an Intel NPU through OpenVINO, int8 decoder, no torch: built from the
+# safetensors in seconds. Without an NPU it runs on OpenVINO's CPU device, still
+# about 3x faster than transformers there.
+_OPENVINO_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="openvino_qwen3_asr",
+    display_name="Qwen3-ASR on the NPU (OpenVINO)",
+    supported_hardware=("cpu",),
+    base_priority=90,
+    requires_torch=False,
+)
+
+
+# CrisperWhisper with its encoder on an Intel NPU, its decoder on the CPU, through
+# OpenVINO, no torch. Without an NPU the encoder would run on the CPU, where the
+# CTranslate2 engine is the better pick, so it only leads on NPU machines.
+_OPENVINO_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
+    engine_id="openvino_crisperwhisper",
+    display_name="CrisperWhisper 2.0 on the NPU (OpenVINO)",
+    supported_hardware=("cpu",),
+    base_priority=30,
+    requires_torch=False,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
@@ -155,6 +179,8 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "openvino_parakeet": 1,
     "native_parakeet": 1,
     "qwen3_asr": 1,
+    "openvino_qwen3_asr": 1,
+    "openvino_crisperwhisper": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -176,6 +202,14 @@ def build_engine_registry() -> EngineRegistry:
                 _OPENVINO_PARAKEET_DESCRIPTOR,
                 available=importlib.util.find_spec("openvino") is not None,
             ),
+            replace(
+                _OPENVINO_QWEN3_ASR_DESCRIPTOR,
+                available=importlib.util.find_spec("openvino") is not None,
+            ),
+            replace(
+                _OPENVINO_CRISPERWHISPER_DESCRIPTOR,
+                available=importlib.util.find_spec("openvino") is not None,
+            ),
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
@@ -188,6 +222,8 @@ def build_engine_registry() -> EngineRegistry:
             "native_parakeet": _build_native_parakeet_engine,
             "native_crisperwhisper": _build_native_crisperwhisper_engine,
             "qwen3_asr": _build_qwen3_asr_engine,
+            "openvino_qwen3_asr": _build_openvino_qwen3_asr_engine,
+            "openvino_crisperwhisper": _build_openvino_crisperwhisper_engine,
         },
     )
 
@@ -274,6 +310,23 @@ def _build_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
         loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
         device=spec.device,
         language=spec.language,
+    )
+
+
+def _build_openvino_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.openvino_qwen3_asr_adapter import OpenVinoQwen3AsrAdapter
+
+    return OpenVinoQwen3AsrAdapter(spec.model_dir, spec.repo_id, spec.revision, language=spec.language)
+
+
+def _build_openvino_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.hf_model_manager import loadable_snapshot_dir
+    from skryb.transcription.openvino_crisperwhisper_adapter import OpenVinoCrisperWhisperAdapter
+
+    return OpenVinoCrisperWhisperAdapter(
+        loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
+        language=spec.language,
+        mode=spec.crisperwhisper_mode,
     )
 
 
@@ -763,8 +816,10 @@ def build_composite_model_manager(
             "crisperwhisper": crisperwhisper_manager,
             "crisperwhisper_ct2": crisperwhisper_manager,
             "native_crisperwhisper": crisperwhisper_manager,
+            "openvino_crisperwhisper": crisperwhisper_manager,
             "native_qwen3_asr": qwen3_asr_manager,
             "qwen3_asr": qwen3_asr_manager,
+            "openvino_qwen3_asr": qwen3_asr_manager,
         },
         active_engine_provider=active_engine_provider,
     )

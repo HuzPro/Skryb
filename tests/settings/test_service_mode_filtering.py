@@ -172,8 +172,8 @@ class TestStreamingHardwareGate:
 
 
 class TestQwen3RunsOnEveryComputer:
-    """The native engine's kernels are compiled for gfx1200 and live in qasr.dll;
-    everywhere else Qwen3-ASR runs on its transformers engine."""
+    """The native engine's kernels are compiled for gfx1200 and live in qasr.dll; other GPUs run Qwen3-ASR on
+    its transformers engine, and a computer without a GPU on OpenVINO first."""
 
     @staticmethod
     def _service(monkeypatch, tmp_path, gfx_arch, *, dll_installed=True, kind="amd_rocm"):
@@ -203,9 +203,11 @@ class TestQwen3RunsOnEveryComputer:
     def test_without_the_native_dll_it_runs_on_transformers(self, monkeypatch, tmp_path):
         assert self._engines(monkeypatch, tmp_path, "gfx1200", dll_installed=False) == ["qwen3_asr"]
 
-    @pytest.mark.parametrize("kind", ["cpu", "nvidia_cuda"])
-    def test_nvidia_and_cpu_run_it_on_transformers(self, monkeypatch, tmp_path, kind):
-        assert self._engines(monkeypatch, tmp_path, None, kind=kind) == ["qwen3_asr"]
+    def test_nvidia_runs_it_on_transformers(self, monkeypatch, tmp_path):
+        assert self._engines(monkeypatch, tmp_path, None, kind="nvidia_cuda") == ["qwen3_asr"]
+
+    def test_a_computer_without_a_gpu_runs_it_on_openvino_before_transformers(self, monkeypatch, tmp_path):
+        assert self._engines(monkeypatch, tmp_path, None, kind="cpu") == ["openvino_qwen3_asr", "qwen3_asr"]
 
     def test_every_model_is_listed_before_the_hardware_is_known(self, monkeypatch, tmp_path):
         service = self._service(monkeypatch, tmp_path, None, dll_installed=False, kind=None)

@@ -2,11 +2,13 @@
 
 Speech-to-text is Qwen3-ASR. When dictation already has it loaded, the
 meeting borrows that instance between dictations; otherwise it loads its
-own, on the engine Skryb picks for this computer. Urdu and Auto meetings
-hear each line with Whisper Hindi2Hinglish Apex first, since Qwen3-ASR has
-no Urdu, and keep Qwen3-ASR for the lines that come out English.
+own, on the engine Skryb picks for this computer, with dictation's engine
+drafting its text when it can use a draft (the NPU one). Urdu and Auto
+meetings hear each line with Whisper Hindi2Hinglish Apex first, since
+Qwen3-ASR has no Urdu, and keep Qwen3-ASR for the lines that come out English.
 """
 
+import importlib.util
 import logging
 import re
 from collections.abc import Callable
@@ -18,8 +20,9 @@ from skryb.core.exceptions import TranscriptionError
 from skryb.core.paths import AppPaths
 from skryb.meetings.capture import RATE
 from skryb.meetings.diarization import NativeDiarizer
+from skryb.meetings.openvino_diarizer import OpenVinoDiarizer
 from skryb.meetings.models import (
-    DIARIZER, ROMAN_URDU, Diarizer, Labeller, RomanUrduAsr, Vad, gpu_available, release_gpu,
+    DIARIZER, ROMAN_URDU, Diarizer, Labeller, NpuRomanUrduAsr, RomanUrduAsr, Vad, gpu_available, release_gpu,
 )
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
@@ -42,7 +45,7 @@ _URDU_WORDS = re.compile(
     r"\b(hai|hain|nahin|nahi|kya|ke|ki|ka|aur|main|mein|tha|thi|hum|ham|aap|aapka|yah|vah|yeh|woh|kar|raha|rahi|rahe"
     r"|bhi|se|ko|par)\b", re.IGNORECASE)
 _LOOP = re.compile(r"\b(\w+)( \1\b){5,}")
-NO_GPU_WARNING = "No GPU found, so speakers are not told apart: everyone on the call is Speaker 1."
+NO_GPU_WARNING = "No GPU or NPU found, so speakers are not told apart: everyone on the call is Speaker 1."
 
 _logger = logging.getLogger(__name__)
 
@@ -111,7 +114,7 @@ class MeetingModels:
         self._native_diarizer = native_diarizer
         self._own: TranscriptionEngine | None = None
         self._diarizer: Labeller | None = None
-        self._roman_urdu: RomanUrduAsr | None = None
+        self._roman_urdu: RomanUrduAsr | NpuRomanUrduAsr | None = None
 
     def voice_detector(self) -> Labeller:
         return Vad()
@@ -130,9 +133,23 @@ class MeetingModels:
             except TranscriptionError as error:
                 _logger.warning("The native diarizer didn't load, so the PyTorch one runs: %s", error)
         if not gpu_available():
-            # ponytail: on the CPU the diarizer falls far behind live audio; add it back for CPUs if one keeps up.
-            return Vad(), NO_GPU_WARNING
+            return self._npu_diarizer()
         self._diarizer = Diarizer(self._diarizer_snapshot())
+        return self._diarizer, None
+
+    def _npu_diarizer(self) -> tuple[Labeller, str | None]:
+        """Without a GPU the model step runs on an Intel NPU through OpenVINO; on the CPU alone it falls far
+        behind live audio, so then everyone on the call is one speaker."""
+        if importlib.util.find_spec("openvino") is None:
+            return Vad(), NO_GPU_WARNING
+        try:
+            self._diarizer = OpenVinoDiarizer(self._diarizer_snapshot())
+        except Exception:
+            _logger.warning("The NPU diarizer didn't load, so speakers are not told apart", exc_info=True)
+            return Vad(), NO_GPU_WARNING
+        if self._diarizer.device != "NPU":
+            self._diarizer = None
+            return Vad(), NO_GPU_WARNING
         return self._diarizer, None
 
     def transcribe(self, audio: np.ndarray, context: str | None) -> str:
@@ -150,9 +167,11 @@ class MeetingModels:
         return self._own_engine().transcribe_prompted(clip, context, "en").text
 
     def release(self) -> None:
-        if isinstance(self._diarizer, NativeDiarizer):
+        if isinstance(self._diarizer, (NativeDiarizer, OpenVinoDiarizer)):
             self._diarizer.dispose()
         self._diarizer = None
+        if isinstance(self._roman_urdu, NpuRomanUrduAsr):
+            self._roman_urdu.dispose()
         self._roman_urdu = None
         if self._own is not None:
             self._own.dispose()
@@ -166,13 +185,31 @@ class MeetingModels:
         if self._own is None:
             engine = self._build_asr()
             engine.load_model()
+            # The NPU engine checks a draft a pass at a time; dictation's engine writes one in a fraction of that.
+            if hasattr(engine, "drafter"):
+                engine.drafter = self._dictation_draft
             self._own = engine
             _logger.info("Loaded Qwen3-ASR for the meeting: dictation uses another model.")
         assert isinstance(self._own, PromptedTranscriber)
         return self._own
 
-    def _roman_urdu_engine(self) -> RomanUrduAsr:
+    def _dictation_draft(self, clip: AudioSegment) -> str:
+        with self._turns.meeting():
+            return self._dictation_engine().transcribe(clip).text
+
+    def _roman_urdu_engine(self) -> RomanUrduAsr | NpuRomanUrduAsr:
         if self._roman_urdu is None:
-            self._roman_urdu = RomanUrduAsr(self._roman_urdu_snapshot())
+            self._roman_urdu = self._load_roman_urdu(self._roman_urdu_snapshot())
             _logger.info("Loaded Whisper Hindi2Hinglish Apex for an Urdu meeting.")
         return self._roman_urdu
+
+    @staticmethod
+    def _load_roman_urdu(snapshot: Path) -> RomanUrduAsr | NpuRomanUrduAsr:
+        """On the GPU through PyTorch; without one, its encoder on the NPU, 4-6x faster than PyTorch on the CPU."""
+        if gpu_available() or importlib.util.find_spec("openvino") is None:
+            return RomanUrduAsr(snapshot)
+        try:
+            return NpuRomanUrduAsr(snapshot)
+        except Exception:
+            _logger.warning("Whisper Hindi2Hinglish Apex didn't load on the NPU; it runs on PyTorch", exc_info=True)
+            return RomanUrduAsr(snapshot)

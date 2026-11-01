@@ -114,22 +114,27 @@ def default_model_for(hardware: HardwareKind) -> str:
 
 
 _QWEN3_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"native_qwen3_asr": 100, "qwen3_asr": 50},
+    {"native_qwen3_asr": 100, "openvino_qwen3_asr": 90, "qwen3_asr": 50},
+)
+_QWEN3_ASR_NPU_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"openvino_qwen3_asr": 110},
 )
 
 # The most accurate open model on the Open ASR Leaderboard as of Oct 2026,
-# run by this repo's own HIP engine (native/engine) on the RX 9060 XT and
-# by transformers everywhere else. Pinned because the packer's tensor
+# run by this repo's own HIP engine (native/engine) on the RX 9060 XT, by
+# OpenVINO on machines without a GPU (on the NPU when there is one) and by
+# transformers everywhere else. Pinned because the packer's tensor
 # layout is written against this exact checkpoint.
 QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
     "qwen3-asr-1.7b": ModelInfo(
         name="qwen3-asr-1.7b",
         size_mb=4080,
-        description="Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, PyTorch elsewhere",
+        description="Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, the NPU on Intel, PyTorch elsewhere",
         repo_id="Qwen/Qwen3-ASR-1.7B-hf",
         revision="bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
-        compatible_engines=("native_qwen3_asr", "qwen3_asr"),
+        compatible_engines=("native_qwen3_asr", "openvino_qwen3_asr", "qwen3_asr"),
         engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
+        npu_engine_priorities=_QWEN3_ASR_NPU_ENGINE_PRIORITIES,
     ),
 }
 
@@ -152,7 +157,10 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 
 
 _CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"crisperwhisper": 40, "crisperwhisper_ct2": 45, "native_crisperwhisper": 120},
+    {"crisperwhisper": 40, "crisperwhisper_ct2": 45, "native_crisperwhisper": 120, "openvino_crisperwhisper": 30},
+)
+_CRISPERWHISPER_NPU_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"openvino_crisperwhisper": 110},
 )
 
 # One licence covers both variants: the LICENSE.md bytes at the two
@@ -176,8 +184,9 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
             "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/"
             "de0369c8a68025b7f6e86387b6eb5a3b369787c8/LICENSE.md"
         ),
-        compatible_engines=("native_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2"),
+        compatible_engines=("native_crisperwhisper", "openvino_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2"),
         engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
+        npu_engine_priorities=_CRISPERWHISPER_NPU_ENGINE_PRIORITIES,
     ),
     "crisperwhisper-2.0-large": ModelInfo(
         name="crisperwhisper-2.0-large",
@@ -193,8 +202,9 @@ CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
             "https://huggingface.co/nyralabs/CrisperWhisper2.0_large/blob/"
             "f4334f6e8193f2691212d49b20fa12d370e13896/LICENSE.md"
         ),
-        compatible_engines=("native_crisperwhisper", "crisperwhisper"),
+        compatible_engines=("native_crisperwhisper", "openvino_crisperwhisper", "crisperwhisper"),
         engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
+        npu_engine_priorities=_CRISPERWHISPER_NPU_ENGINE_PRIORITIES,
     ),
 }
 

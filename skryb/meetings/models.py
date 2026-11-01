@@ -154,3 +154,31 @@ class RomanUrduAsr:
         with self._torch.inference_mode():
             ids = self._model.generate(features.to(self._device, self._dtype), task="transcribe", language="en")
         return str(self._processor.batch_decode(ids, skip_special_tokens=True)[0]).strip()
+
+
+class NpuRomanUrduAsr:
+    """Whisper Hindi2Hinglish Apex with its encoder on an Intel NPU (``openvino_whisper``), no torch.
+
+    Decodes as ``RomanUrduAsr`` asks transformers to: English, no timestamps, the model's suppressed tokens,
+    and a blank or end-of-text first token ruled out.
+    """
+
+    def __init__(self, snapshot: Path) -> None:
+        from tokenizers import Tokenizer
+
+        from skryb.transcription.openvino_whisper import OpenVinoWhisper
+
+        self._whisper = OpenVinoWhisper(snapshot)
+        self._whisper.load()
+        self.device = self._whisper.encoder_device
+        self._tokenizer = Tokenizer.from_file(str(snapshot / "tokenizer.json"))
+        marks = ("<|startoftranscript|>", "<|en|>", "<|transcribe|>", "<|notimestamps|>")
+        self._prompt = [self._tokenizer.token_to_id(mark) for mark in marks]
+        self._begin_suppress = self._whisper.begin_suppress_tokens()
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        ids = self._whisper.generate(audio, self._prompt, self._begin_suppress)
+        return str(self._tokenizer.decode(ids, skip_special_tokens=True)).strip()
+
+    def dispose(self) -> None:
+        self._whisper.dispose()

@@ -121,6 +121,34 @@ def test_when_dictation_uses_another_model_the_meeting_loads_its_own_and_unloads
     assert built[0].disposed
 
 
+class FakeDraftingQwen(FakeQwen):
+    """Like the NPU engine: takes a drafter, and asks it for a draft of each clip."""
+
+    def __init__(self) -> None:
+        super().__init__("own copy")
+        self.drafter = None
+        self.drafts: list[str] = []
+
+    def transcribe_prompted(self, audio: AudioSegment, context: str | None, language: str | None) -> TranscriptionResult:
+        self.drafts.append(self.drafter(audio))
+        return super().transcribe_prompted(audio, context, language)
+
+
+def test_a_meetings_own_npu_engine_drafts_each_clip_with_dictations_engine_in_its_turn() -> None:
+    turns = EngineTurns()
+    dictation = FakeParakeet()
+    dictation.transcribe = lambda audio: (TranscriptionResult("dictated", "en", 1.0, 0.01) if turns._busy else
+                                          pytest.fail("drafted outside the meeting's turn"))
+    own = FakeDraftingQwen()
+    models, _ = _models(dictation, own=own, turns=turns)
+
+    models.speaker_labeller()
+    text = models.transcribe(_CLIP, None)
+
+    assert text == "own copy"
+    assert own.drafts == ["dictated"]
+
+
 @pytest.mark.parametrize("setting", ["en", "ur", "auto", "klingon"])
 def test_qwen3_asr_is_always_asked_for_english_since_urdu_lines_come_from_the_roman_urdu_model(setting: str) -> None:
     dictation = FakeQwen()
@@ -252,8 +280,37 @@ def test_a_meeting_with_its_own_copy_never_holds_up_dictation() -> None:
     assert waited < 0.5
 
 
-def test_without_a_gpu_voices_on_the_speakers_are_not_told_apart_and_the_window_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+class _FakeNpuDiarizer(LevelLabeller):
+    def __init__(self, snapshot: Path, device: str = "NPU", fail: bool = False) -> None:
+        if fail:
+            raise RuntimeError("the NPU driver is too old")
+        super().__init__(0.01)
+        self.snapshot, self.device, self.disposed = snapshot, device, False
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+def test_without_a_gpu_the_npu_diarizer_tells_the_speakers_apart(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(asr, "gpu_available", lambda: False)
+    monkeypatch.setattr(asr, "OpenVinoDiarizer", _FakeNpuDiarizer)
+    models, _built = _models(FakeQwen())
+
+    labeller, warning = models.speaker_labeller()
+
+    assert isinstance(labeller, _FakeNpuDiarizer) and labeller.snapshot == Path("snapshot")
+    assert warning is None
+    models.release()
+    assert labeller.disposed
+
+
+@pytest.mark.parametrize("npu", [
+    lambda snapshot: _FakeNpuDiarizer(snapshot, fail=True),
+    lambda snapshot: _FakeNpuDiarizer(snapshot, device="CPU"),
+])
+def test_without_a_gpu_or_a_working_npu_voices_are_not_told_apart_and_the_window_says_so(monkeypatch: pytest.MonkeyPatch, npu) -> None:
+    monkeypatch.setattr(asr, "gpu_available", lambda: False)
+    monkeypatch.setattr(asr, "OpenVinoDiarizer", npu)
     models, _built = _models(FakeQwen())
 
     labeller, warning = models.speaker_labeller()
@@ -344,3 +401,47 @@ def test_the_native_diarizer_runs_on_an_rx_9060_xt_or_an_rtx_30_to_50_card_with_
     detector = FakeHardwareDetector(HardwareProfile(kind=kind, device_name="GPU", gfx_arch=gfx_arch))
 
     assert asr.native_diarizer_for(detector) == (None if chosen is None else tmp_path / chosen)
+
+
+class _FakeNpuApex(FakeApex):
+    def __init__(self, snapshot: Path) -> None:
+        super().__init__(snapshot)
+        self.disposed = False
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+def _without_a_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(asr, "gpu_available", lambda: False)
+    monkeypatch.setattr(asr, "OpenVinoDiarizer", _FakeNpuDiarizer)
+
+
+def test_without_a_gpu_an_urdu_meeting_runs_the_roman_urdu_model_on_the_npu_and_lets_go_of_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    _without_a_gpu(monkeypatch)
+    monkeypatch.setattr(asr, "NpuRomanUrduAsr", _FakeNpuApex)
+    monkeypatch.setattr(asr, "RomanUrduAsr", lambda snapshot: pytest.fail("loaded PyTorch's copy"))
+    FakeApex.lines = ["Haan theek hai, kal milte hain."]
+    models, _built = _models(FakeQwen(), language="ur")
+
+    models.speaker_labeller()
+    models.transcribe(_CLIP, None)
+    npu = FakeApex.built[0]
+    models.release()
+
+    assert isinstance(npu, _FakeNpuApex) and npu.heard == [3.0] and npu.disposed
+
+
+def test_a_roman_urdu_model_that_fails_on_the_npu_runs_on_pytorch_instead(monkeypatch: pytest.MonkeyPatch) -> None:
+    _without_a_gpu(monkeypatch)
+
+    def refuse(snapshot: Path) -> None:
+        raise RuntimeError("NPU compiler crashed")
+
+    monkeypatch.setattr(asr, "NpuRomanUrduAsr", refuse)
+    FakeApex.lines = ["Haan theek hai, kal milte hain."]
+    models, _built = _models(FakeQwen(), language="ur")
+
+    models.speaker_labeller()
+
+    assert len(FakeApex.built) == 1 and type(FakeApex.built[0]) is FakeApex
