@@ -787,13 +787,14 @@ class TestFramePixels:
 
 
 class TestWin32Window:
-    def _window(self) -> Win32LayeredOverlayWindow:
+    def _window(self, scale: float = 1.0) -> Win32LayeredOverlayWindow:
         window = Win32LayeredOverlayWindow.__new__(Win32LayeredOverlayWindow)
         window._user32 = MagicMock()
         window._kernel32 = MagicMock()
         window._mouse_handler = None
         window._hand_cursor = False
         window._origin = (0, 0)
+        window._scale = scale
         return window
 
     def test_is_layered_topmost_and_never_activates_but_does_take_clicks(self):
@@ -836,6 +837,30 @@ class TestWin32Window:
         assert flags & 0x0001
         assert flags & 0x0004
         assert window._origin == (-40, 300)
+
+    def test_at_150_percent_it_moves_and_takes_clicks_in_screen_pixels_while_callers_keep_design_pixels(self):
+        window = self._window(scale=1.5)
+        window._hwnd = 7
+        clicks = []
+        window.set_mouse_handler(lambda *args: clicks.append(args))
+
+        window.move_to(100, 200)
+        window.handle_message(0x0201, (60 << 16) | 30)
+
+        assert window._user32.SetWindowPos.call_args.args[2:4] == (150, 300)
+        assert clicks == [(True, 20, 40)]
+
+    def test_at_150_percent_the_work_area_comes_back_in_design_pixels(self):
+        window = self._window(scale=1.5)
+
+        def fill(_monitor, info):
+            work = info._obj.rcWork
+            work.left, work.top, work.right, work.bottom = -2880, 0, 2880, 1752
+            return True
+
+        window._user32.GetMonitorInfoW.side_effect = fill
+
+        assert window.work_area_for_foreground() == (-1920, 0, 1920, 1168)
 
     @pytest.mark.parametrize(("swapped", "button"), [(0, 0x01), (1, 0x02)])
     def test_reads_the_primary_button_even_when_the_buttons_are_swapped(
@@ -1037,6 +1062,7 @@ class TestWindowPixels:
         window = Win32LayeredOverlayWindow.__new__(Win32LayeredOverlayWindow)
         target = numpy.zeros(CANVAS_WIDTH * CANVAS_HEIGHT * 4, dtype=numpy.uint8)
         window._pixels = target
+        window._scale = 1.0
         window._user32 = MagicMock()
         window._hwnd = 1
         window._screen_dc = window._memory_dc = 0

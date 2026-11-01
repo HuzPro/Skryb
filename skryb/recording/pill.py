@@ -15,6 +15,7 @@ import numpy
 from PIL import Image, ImageDraw, ImageFont
 
 from skryb.core.brand_mark import EMERALD_DEEP, EMERALD_LIGHT
+from skryb.core.screen_scaling import scaled_size
 
 CANVAS_WIDTH = 248
 CANVAS_HEIGHT = 72
@@ -317,7 +318,8 @@ def shimmered(pixels: numpy.ndarray, frame: Frame) -> numpy.ndarray:
         return pixels
     left, _top, right, _bottom = pill_box(frame.width, frame.height)
     centre = left - _SHIMMER_WIDTH / 2 + (right - left + _SHIMMER_WIDTH) * frame.shimmer
-    x = numpy.arange(pixels.shape[1], dtype=numpy.float32) + 0.5
+    scale = pixels.shape[1] / CANVAS_WIDTH
+    x = (numpy.arange(pixels.shape[1], dtype=numpy.float32) + 0.5) / scale
     distance = numpy.clip(numpy.abs(x - centre) / (_SHIMMER_WIDTH / 2), 0.0, 1.0)
     weight = (numpy.cos(distance * math.pi) * 0.5 + 0.5) * (_SHIMMER_STRENGTH * frame.label)
     columns = numpy.nonzero(weight > 0.002)[0]
@@ -351,14 +353,15 @@ def is_settled_label(frame: Frame) -> bool:
     )
 
 
-def render(frame: Frame) -> Image.Image:
+def render(frame: Frame, screen_scale: float = 1.0) -> Image.Image:
+    """The canvas with ``frame`` drawn on it, ``screen_scale`` screen pixels to each of the design's."""
     scale = _SUPERSAMPLE
     image = Image.new(
         "RGBA", (CANVAS_WIDTH * scale, CANVAS_HEIGHT * scale), (0, 0, 0, 0),
     )
     if frame.opacity > 0.004 and frame.width > 1 and frame.height > 1:
         _draw_pill(image, frame)
-    return image.resize((CANVAS_WIDTH, CANVAS_HEIGHT), Image.Resampling.LANCZOS)
+    return image.resize(scaled_size(CANVAS_WIDTH, CANVAS_HEIGHT, screen_scale), Image.Resampling.LANCZOS)
 
 
 def _draw_pill(image: Image.Image, frame: Frame) -> None:
@@ -645,7 +648,7 @@ def notice_target(layout: NoticeLayout, x: float, y: float) -> int | None:
     return None
 
 
-def render_notice(layout: NoticeLayout, hovered: int | None = None) -> Image.Image:
+def render_notice(layout: NoticeLayout, hovered: int | None = None, screen_scale: float = 1.0) -> Image.Image:
     scale = _SUPERSAMPLE
     image = Image.new("RGBA", (layout.width * scale, layout.height * scale), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -694,7 +697,7 @@ def render_notice(layout: NoticeLayout, hovered: int | None = None) -> Image.Ima
         fill=(*fill, 255),
     )
     _draw_glyph(draw, Button.CANCEL, cx, cy, radius, paused=False)
-    return image.resize((layout.width, layout.height), Image.Resampling.LANCZOS)
+    return image.resize(scaled_size(layout.width, layout.height, screen_scale), Image.Resampling.LANCZOS)
 
 
 def _wrapped(text: str, size: int, width: int) -> tuple[str, ...]:

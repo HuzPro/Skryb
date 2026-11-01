@@ -24,6 +24,7 @@ from skryb.core.events import (
     StateChangedEvent,
     TextPastedEvent,
 )
+from skryb.core.screen_scaling import display_scale, scaled_size
 from skryb.core.state_machine import AppState
 from skryb.output.gui_thread_dispatcher import GuiThreadDispatcher
 from skryb.recording.input_devices import short_microphone_name
@@ -257,6 +258,10 @@ class Win32LayeredOverlayWindow:
     ``MA_NOACTIVATE`` keep the caret in the app the dictation will paste
     into. Fully transparent pixels still pass clicks to the window
     beneath, so only the drawn pill is clickable.
+
+    Callers work in the design's pixels; only this class sees the screen's,
+    ``display_scale`` of them to each, so the frames it is given are drawn
+    at that scale.
     """
 
     # The pill's canvas unless resized; the notice above it uses one too.
@@ -270,6 +275,7 @@ class Win32LayeredOverlayWindow:
         self._mouse_handler: MouseHandler | None = None
         self._hand_cursor = False
         self._origin = (0, 0)
+        self._scale = display_scale()
         self._register_class()
         self._hwnd = self._create_window()
         _WINDOWS[self._hwnd] = self
@@ -396,7 +402,7 @@ class Win32LayeredOverlayWindow:
             _WS_POPUP,
             0,
             0,
-            *self._size,
+            *self._screen_size(),
             None,
             None,
             self._kernel32.GetModuleHandleW(None),
@@ -415,12 +421,10 @@ class Win32LayeredOverlayWindow:
         info.cbSize = ctypes.sizeof(info)
         if not self._user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
             raise OSError("GetMonitorInfoW failed")
-        return (
-            info.rcWork.left,
-            info.rcWork.top,
-            info.rcWork.right,
-            info.rcWork.bottom,
-        )
+        work = info.rcWork
+        left, top = self._in_design(work.left, work.top)
+        right, bottom = self._in_design(work.right, work.bottom)
+        return left, top, right, bottom
 
     def show_at(self, x: int, y: int) -> None:
         if not self._bitmap:
@@ -429,9 +433,9 @@ class Win32LayeredOverlayWindow:
             # needs. Asked for only while the pill is on screen.
             self._winmm.timeBeginPeriod(1)
         self._acquire_surface()
-        self._origin = (x, y)
+        self._origin = self._on_screen(x, y)
         self._user32.SetWindowPos(
-            self._hwnd, _HWND_TOPMOST, x, y, *self._size,
+            self._hwnd, _HWND_TOPMOST, *self._origin, *self._screen_size(),
             _SWP_NOACTIVATE,
         )
         self._user32.ShowWindow(self._hwnd, _SW_SHOWNOACTIVATE)
@@ -442,7 +446,7 @@ class Win32LayeredOverlayWindow:
         # A numpy copy into the DIB stays inside Python, where memmove
         # would give the GIL away and have to wait to win it back.
         self._pixels[:] = numpy.frombuffer(pixels, dtype=numpy.uint8)
-        size = wintypes.SIZE(*self._size)
+        size = wintypes.SIZE(*self._screen_size())
         source = wintypes.POINT(0, 0)
         blend = BlendFunction(_AC_SRC_OVER, 0, 255, _AC_SRC_ALPHA)
         if not self._user32.UpdateLayeredWindow(
@@ -492,15 +496,15 @@ class Win32LayeredOverlayWindow:
         point = wintypes.POINT()
         if not self._user32.GetCursorPos(ctypes.byref(point)):
             return None
-        return point.x - self._origin[0], point.y - self._origin[1]
+        return self._in_design(point.x - self._origin[0], point.y - self._origin[1])
 
     def set_hand_cursor(self, hand: bool) -> None:
         self._hand_cursor = hand
 
     def move_to(self, x: int, y: int) -> None:
-        self._origin = (x, y)
+        self._origin = self._on_screen(x, y)
         self._user32.SetWindowPos(
-            self._hwnd, None, x, y, 0, 0,
+            self._hwnd, None, *self._origin, 0, 0,
             _SWP_NOACTIVATE | _SWP_NOSIZE | _SWP_NOZORDER,
         )
 
@@ -524,10 +528,19 @@ class Win32LayeredOverlayWindow:
             return 1
         if message in (_WM_LBUTTONDOWN, _WM_LBUTTONUP):
             if self._mouse_handler is not None:
-                x, y = _client_point(l_param)
+                x, y = self._in_design(*_client_point(l_param))
                 self._mouse_handler(message == _WM_LBUTTONDOWN, x, y)
             return 0
         return None
+
+    def _screen_size(self) -> tuple[int, int]:
+        return scaled_size(*self._size, self._scale)
+
+    def _on_screen(self, x: int, y: int) -> tuple[int, int]:
+        return round(x * self._scale), round(y * self._scale)
+
+    def _in_design(self, x: int, y: int) -> tuple[int, int]:
+        return round(x / self._scale), round(y / self._scale)
 
     def _acquire_surface(self) -> None:
         if self._bitmap:
@@ -536,7 +549,7 @@ class Win32LayeredOverlayWindow:
         self._memory_dc = self._gdi32.CreateCompatibleDC(self._screen_dc)
         info = BitmapInfo()
         info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
-        width, height = self._size
+        width, height = self._screen_size()
         info.bmiHeader.biWidth = width
         # Negative height selects a top-down DIB, matching PIL's row order.
         info.bmiHeader.biHeight = -height
@@ -642,7 +655,7 @@ class RecordingOverlay:
         # Kept across recordings: it has learnt how loud this speaker is.
         self._voice = VoiceHistory(_HISTORY_SLICES)
         self._transcribing_since = 0.0
-        self._settled_label = premultiplied_array(render(settled_label_frame()))
+        self._settled_label = premultiplied_array(render(settled_label_frame(), display_scale()))
         self._switch_interval: float | None = None
         self._pressed: Button | None = None
         self._work_area = (0, 0, 0, 0)
@@ -881,7 +894,7 @@ class RecordingOverlay:
         self._frame = self._current_frame(hovered)
         base = (
             self._settled_label if is_settled_label(self._frame)
-            else premultiplied_array(render(self._frame))
+            else premultiplied_array(render(self._frame, display_scale()))
         )
         self._window_api.push_frame(shimmered(base, self._frame).tobytes())
         if self._mode is Mode.CLOSED and self._opacity.value < 0.01:

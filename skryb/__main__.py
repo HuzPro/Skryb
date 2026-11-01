@@ -99,8 +99,10 @@ def _parse_cli(arguments: list[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> None:
+    from skryb.core.screen_scaling import become_dpi_aware
     from skryb.core.startup_log import begin_startup_timing
 
+    become_dpi_aware()
     begin_startup_timing()
     _start_library_prewarm()
     options = _parse_cli()

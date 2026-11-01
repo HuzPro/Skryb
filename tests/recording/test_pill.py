@@ -20,10 +20,12 @@ from skryb.recording.pill import (
     countdown_text,
     hit_test,
     is_settled_label,
+    notice_layout,
     pill_box,
     pill_origin,
     pill_position,
     render,
+    render_notice,
     settled_label_frame,
     shimmer_position,
     shimmered,
@@ -77,6 +79,39 @@ def _settled_pixels():
 
 def _shimmer_at(position: float) -> Frame:
     return Frame(**{**settled_label_frame().__dict__, "shimmer": position})
+
+
+def _opaque_bounds(image, scale: float) -> tuple[float, float, float, float]:
+    rows, columns = numpy.nonzero(numpy.asarray(image)[:, :, 3] > 128)
+    return columns.min() / scale, rows.min() / scale, (columns.max() + 1) / scale, (rows.max() + 1) / scale
+
+
+class TestDrawnForTheScreensScaling:
+    def test_at_150_percent_the_pill_gets_half_again_as_many_pixels_each_way(self):
+        assert render(_recording_frame(), 1.5).size == (round(CANVAS_WIDTH * 1.5), round(CANVAS_HEIGHT * 1.5))
+
+    def test_the_pill_covers_the_same_part_of_its_canvas_at_any_scaling(self):
+        plain = _opaque_bounds(render(_recording_frame()), 1.0)
+
+        for scale in (1.25, 1.5, 2.0):
+            assert _opaque_bounds(render(_recording_frame(), scale), scale) == pytest.approx(plain, abs=1.0)
+
+    def test_the_shimmer_band_crosses_the_same_part_of_a_scaled_pill(self):
+        from skryb.recording.overlay import premultiplied_array
+
+        centres = []
+        for scale in (1.0, 1.5):
+            base = premultiplied_array(render(settled_label_frame(), scale))
+            lift = (shimmered(base, _shimmer_at(0.3)).astype(float) - base).sum(axis=(0, 2))
+            x = (numpy.arange(lift.size) + 0.5) / scale
+            centres.append((x * lift).sum() / lift.sum())
+
+        assert centres[1] == pytest.approx(centres[0], abs=0.5)
+
+    def test_a_notice_at_150_percent_gets_half_again_as_many_pixels_each_way(self):
+        layout = notice_layout("Skryb 0.13.0 is ready to install.", ["Restart and update"], False)
+
+        assert render_notice(layout, None, 1.5).size == (round(layout.width * 1.5), round(layout.height * 1.5))
 
 
 class TestShimmer:

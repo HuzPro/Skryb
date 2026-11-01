@@ -7,6 +7,7 @@ from typing import Protocol
 
 import numpy
 
+from skryb.core.screen_scaling import display_scale
 from skryb.recording.overlay import (
     MouseHandler,
     Win32LayeredOverlayWindow,
@@ -300,12 +301,13 @@ class Notice:
             return
         pixels = self._pixels.get(self._hovered)
         if pixels is None:
-            pixels = premultiplied_array(render_notice(self._layout, self._hovered))
+            pixels = premultiplied_array(render_notice(self._layout, self._hovered, display_scale()))
             self._pixels[self._hovered] = pixels
         faded = pixels if level >= 255 else (pixels.astype(numpy.uint16) * level // 255).astype(numpy.uint8)
         if hidden is not None:
+            rows = faded.shape[0] / self._layout.height
             faded = faded.copy()
-            faded[hidden[0]:hidden[1]] = 0
+            faded[round(hidden[0] * rows):round(hidden[1] * rows)] = 0
         self._api().push_frame(faded.tobytes())
         self._pushed = (self._hovered, level, hidden)
 

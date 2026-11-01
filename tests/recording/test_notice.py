@@ -3,6 +3,7 @@ from collections.abc import Callable
 import numpy
 import pytest
 
+import skryb.recording.notice as notice_module
 from skryb.recording.notice import Notice
 from skryb.recording.pill import (
     CANVAS_HEIGHT,
@@ -64,6 +65,8 @@ class FakeNoticeWindow:
     def __init__(self, root: FakeRoot) -> None:
         self._root = root
         self.size = (0, 0)
+        # Screen pixels per design pixel the frames come drawn at, as display_scale says.
+        self.scale = 1.0
         self.shown: list[tuple[int, int, int, int]] = []
         self.moves: list[tuple[int, int]] = []
         self.frames: list[bytes] = []
@@ -89,7 +92,8 @@ class FakeNoticeWindow:
         return self.moves[-1][1] if self.moves else self.shown[-1][1]
 
     def push_frame(self, pixels: bytes) -> None:
-        assert len(pixels) == self.size[0] * self.size[1] * 4
+        width, height = (round(side * self.scale) for side in self.size)
+        assert len(pixels) == width * height * 4
         self.frames.append(pixels)
 
     def hide(self) -> None:
@@ -371,6 +375,19 @@ class TestWhileThePillIsUp:
         pixels = numpy.frombuffer(setup.window.frames[-1], numpy.uint8).reshape(height, width, 4)
         _left, top, _right, _bottom = setup.pill_box_on_screen()
         cut = round(top) - setup.window.top
+        assert 0 < cut < height
+        assert pixels[:cut, :, 3].any()
+        assert not pixels[cut:].any()
+
+    def test_at_150_percent_scaling_still_only_the_strip_past_the_pills_edge_is_drawn(self, setup, monkeypatch) -> None:
+        monkeypatch.setattr(notice_module, "display_scale", lambda: 1.5)
+        setup.window.scale = 1.5
+        self._tucked(setup)
+
+        width, height = (round(side * 1.5) for side in setup.window.size)
+        pixels = numpy.frombuffer(setup.window.frames[-1], numpy.uint8).reshape(height, width, 4)
+        _left, top, _right, _bottom = setup.pill_box_on_screen()
+        cut = round((round(top) - setup.window.top) * 1.5)
         assert 0 < cut < height
         assert pixels[:cut, :, 3].any()
         assert not pixels[cut:].any()
