@@ -1072,6 +1072,21 @@ def _device_of(engine: TranscriptionEngine) -> tuple[str | None, str | None]:
     return getattr(engine, "encoder_device", None), getattr(engine, "device_note", None)
 
 
+def _publish_device_changes(
+    device: Callable[[], tuple[str | None, str | None]],
+    publish: Callable[[], None],
+    stop: threading.Event,
+    every: float = 1.0,
+) -> None:
+    """Tell the shell when dictation moves by itself, as when the NPU takes over from Phonon's CPU stand-in."""
+    seen = device()
+    while not stop.wait(every):
+        now = device()
+        if now != seen:
+            seen = now
+            publish()
+
+
 def _toggle_meeting(meetings: MeetingRecorder, explain: Callable[[str], None]) -> None:
     """Start or stop from the tray; a meeting that cannot start says why and opens the Meetings page."""
     try:
@@ -1528,6 +1543,12 @@ def build_app(
     # Only once the tray app exists: saving settings and recording a
     # shortcut both reach it.
     api.serve_on(api_server)
+    threading.Thread(
+        target=_publish_device_changes,
+        args=(lambda: _device_of(record_and_transcribe_use_case.current_engine()), api.publish_app_info, threading.Event()),
+        daemon=True,
+        name="engine-device-watch",
+    ).start()
     config.save()
     model_name = config.get("transcription.model_size")
     _logger.info(

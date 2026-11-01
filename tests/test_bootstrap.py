@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -1466,3 +1467,20 @@ def _draft(**overrides):
     }
     fields.update(overrides)
     return SettingsDraft(**fields)
+
+
+def test_the_settings_window_is_told_once_when_dictation_moves_to_the_npu_by_itself() -> None:
+    stop = threading.Event()
+    readings = iter([("CPU", "Preparing the NPU"), ("CPU", "Preparing the NPU"), ("NPU", None), ("NPU", None), ("NPU", None)])
+    published: list[str] = []
+
+    def device() -> tuple[str | None, str | None]:
+        reading = next(readings, None)
+        if reading is None:
+            stop.set()
+            return "NPU", None
+        return reading
+
+    bootstrap._publish_device_changes(device, lambda: published.append("app"), stop, every=0)
+
+    assert published == ["app"]
