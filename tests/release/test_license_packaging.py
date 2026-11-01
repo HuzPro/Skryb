@@ -52,6 +52,7 @@ def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     (stand_ins / "npk.dll").write_bytes(b"MZ")
     (stand_ins / "cw.dll").write_bytes(b"MZ")
     (stand_ins / "nd.dll").write_bytes(b"MZ")
+    (stand_ins / "tdt_cpu.dll").write_bytes(b"MZ")
     for name in ("qasr", "npk", "cw", "nd"):
         (stand_ins / f"{name}_cuda.dll").write_bytes(b"MZ")
     with pytest.MonkeyPatch.context() as patch:
@@ -60,6 +61,7 @@ def staged_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
         patch.setattr(installer, "_NATIVE_PARAKEET_BUILD", stand_ins / "npk.dll")
         patch.setattr(installer, "_NATIVE_WHISPER_BUILD", stand_ins / "cw.dll")
         patch.setattr(installer, "_NATIVE_DIARIZER_BUILD", stand_ins / "nd.dll")
+        patch.setattr(installer, "_NATIVE_TDT_BUILD", stand_ins / "tdt_cpu.dll")
         return _stage_wheel_source(_REPO_ROOT, tmp_path_factory.mktemp("stage"))
 
 
