@@ -20,6 +20,7 @@ import logging
 import shutil
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -67,6 +68,9 @@ _CPU = "CPU"
 # from queueing ahead of dictation.
 _NPU_CONFIG = {"NPU_TURBO": "YES", "MODEL_PRIORITY": "HIGH"}
 _INSTALL_HINT = "The NPU engine needs OpenVINO. Install it with: pip install openvino"
+# A settings change during the startup load starts a second load. Converting the same files from both at
+# once failed with "Access is denied": Windows can't replace a file OpenVINO already has open.
+_ONE_LOAD_AT_A_TIME = threading.Lock()
 
 
 class OpenVinoParakeetAdapter(TranscriptionEngine):
@@ -79,6 +83,10 @@ class OpenVinoParakeetAdapter(TranscriptionEngine):
         self._blas_threads_before: int | None = None
 
     def load_model(self) -> None:
+        with _ONE_LOAD_AT_A_TIME:
+            self._convert_once_then_compile()
+
+    def _convert_once_then_compile(self) -> None:
         started_at = time.monotonic()
         openvino = import_openvino()
         export_dir = loadable_snapshot_dir(self._model_dir, self._repo_id) / _IR_DIRECTORY_NAME

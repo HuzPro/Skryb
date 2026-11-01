@@ -809,20 +809,88 @@ def _load_engine_and_attach(
     :class:`EngineLoadFailedEvent` and recover to ``IDLE`` (via ``ERROR``)
     so the app stays swappable - see :func:`_recover_from_failed_load`.
     Exceptions never escape - daemon threads silently drop them.
+
+    A settings swap that finishes first has already ended ``LOADING`` with
+    the engine the user picked, so this one is discarded, and a failure
+    is only logged.
     """
     milestone("engine-load-started")
     try:
-        installer = _load_active_engine_installer(
+        attached = _load_and_attach_startup_engine(
             config, paths, registry, hardware_detector, license_policy, diagnostics,
-            preload,
+            use_case=use_case, state_machine=state_machine, preload=preload,
         )
-        installer(use_case)
     except Exception as exc:
-        _recover_from_failed_load(exc, config, state_machine, event_bus)
+        _recover_unless_replaced(exc, config, state_machine, event_bus)
+        return
+    if not attached:
+        _logger.info("A settings change replaced the startup engine; discarded it.")
         return
     milestone("warm-ready")
-    state_machine.transition_to(AppState.IDLE)
     _logger.info("Engine ready.")
+
+
+# Held while the startup load or a settings swap installs its engine and ends
+# LOADING, so whichever finishes later can't undo the other.
+_ENGINE_INSTALL = threading.Lock()
+
+
+def _load_and_attach_startup_engine(
+    config: JsonConfigAdapter,
+    paths: AppPaths,
+    registry: EngineRegistry,
+    hardware_detector: HardwareDetector,
+    license_policy: LicensePolicy,
+    diagnostics: SessionDiagnostics,
+    *,
+    use_case: RecordAndTranscribeUseCase,
+    state_machine: AppStateMachine,
+    preload: EnginePreload | None,
+) -> bool:
+    """Load the startup engine and attach it, unless a swap ended LOADING first; whether it was attached."""
+    installer = _load_active_engine_installer(
+        config, paths, registry, hardware_detector, license_policy, diagnostics,
+        preload,
+    )
+    with _ENGINE_INSTALL:
+        if state_machine.state is not AppState.LOADING:
+            installer.discard()
+            return False
+        installer(use_case)
+        state_machine.transition_to(AppState.IDLE)
+    return True
+
+
+def _recover_unless_replaced(
+    exc: Exception,
+    config: JsonConfigAdapter,
+    state_machine: AppStateMachine,
+    event_bus: EventBus,
+) -> None:
+    with _ENGINE_INSTALL:
+        if state_machine.state is AppState.LOADING:
+            _recover_from_failed_load(exc, config, state_machine, event_bus)
+            return
+    _logger.warning("The startup engine failed after a settings change replaced it: %s", exc)
+
+
+def _ending_startup_load(
+    installer: EngineInstaller, state_machine: AppStateMachine,
+) -> EngineInstaller:
+    """*installer*, which also ends LOADING when the startup load is still running.
+
+    The NPU engine's first startup load takes minutes. An engine the user
+    picks in settings meanwhile goes live at once, and a shortcut pressed
+    while loading fires on it.
+    """
+
+    def install(use_case: object) -> None:
+        with _ENGINE_INSTALL:
+            installer(use_case)
+            if state_machine.state is AppState.LOADING:
+                state_machine.transition_to(AppState.IDLE)
+
+    return install
 
 
 def _recover_from_failed_load(
@@ -1007,7 +1075,8 @@ def _toggle_meeting(meetings: MeetingRecorder, explain: Callable[[str], None]) -
         explain(str(exc))
 
 
-_ENGINE_LOAD_TIMEOUT_SECONDS = 120.0
+# The NPU engine's first load converts and compiles the model, about five minutes on a Core 5 320.
+_ENGINE_LOAD_TIMEOUT_SECONDS = 600.0
 # A restart onto newer code waits while either is under way.
 _DICTATING = (AppState.RECORDING, AppState.TRANSCRIBING)
 
@@ -1030,8 +1099,11 @@ def _build_settings_service(
     hot_swap = EngineHotSwapCoordinator(
         use_case=use_case,
         event_bus=event_bus,
-        loader=lambda: _load_active_engine_installer(
-            config, paths, registry, hardware_detector, license_policy, diagnostics,
+        loader=lambda: _ending_startup_load(
+            _load_active_engine_installer(
+                config, paths, registry, hardware_detector, license_policy, diagnostics,
+            ),
+            state_machine,
         ),
         action_dispatcher=action_dispatcher,
         timeout_seconds=_ENGINE_LOAD_TIMEOUT_SECONDS,

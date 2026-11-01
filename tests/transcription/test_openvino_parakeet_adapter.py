@@ -301,3 +301,45 @@ def test_numpys_blas_threads_can_be_lowered_and_put_back() -> None:
         assert set_numpy_blas_threads(before) == 1
     finally:
         set_numpy_blas_threads(before)
+
+
+def test_a_second_load_during_the_first_conversion_waits_for_it_and_reuses_its_files(tmp_path, monkeypatch) -> None:
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from skryb.transcription import openvino_parakeet_adapter as adapter
+
+    exports, int8_writes, exporting = [], [], threading.Event()
+
+    def slow_export(self, openvino, encoder_path, decoder_path) -> None:
+        exports.append(encoder_path)
+        exporting.set()
+        time.sleep(0.3)
+        encoder_path.parent.mkdir(parents=True, exist_ok=True)
+        encoder_path.write_text("fp16")
+        np.savez(decoder_path, weight=np.zeros(1))
+
+    def write_int8(openvino, exported, ir_path) -> None:
+        int8_writes.append(ir_path)
+        ir_path.write_text("int8")
+
+    monkeypatch.setattr(adapter, "import_openvino", lambda: None)
+    monkeypatch.setattr(adapter, "loadable_snapshot_dir", lambda model_dir, repo_id: tmp_path)
+    monkeypatch.setattr(adapter.OpenVinoParakeetAdapter, "_export", slow_export)
+    monkeypatch.setattr(adapter, "_write_int8_encoder", write_int8)
+    monkeypatch.setattr(adapter, "_devices_to_try", lambda openvino: ["CPU"])
+    monkeypatch.setattr(adapter, "compile_encoder", lambda openvino, ir_path, devices: SimpleNamespace(device="CPU"))
+    monkeypatch.setattr(adapter, "OpenVinoTdtDecoder", lambda openvino, tensors: None)
+    monkeypatch.setattr(adapter, "bundled_tokenizer", lambda: None)
+    monkeypatch.setattr(adapter, "set_numpy_blas_threads", lambda count: None)
+    startup, swap = (adapter.OpenVinoParakeetAdapter(tmp_path, "FermionResearch/Phonon-2.5-English") for _ in range(2))
+
+    first = threading.Thread(target=startup.load_model)
+    first.start()
+    exporting.wait(timeout=5)
+    swap.load_model()
+    first.join(timeout=5)
+
+    assert startup.is_model_loaded() and swap.is_model_loaded()
+    assert len(exports) == 1 and len(int8_writes) == 1

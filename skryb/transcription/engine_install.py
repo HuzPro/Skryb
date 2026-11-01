@@ -6,6 +6,7 @@ from skryb.core.exceptions import EngineSwapError
 # An installer attaches a freshly-loaded engine to the use case. The
 # loader returns one of these instead of a bare engine so the hot-swap
 # coordinator stays ignorant of whether the engine is batch or streaming.
+# ``installer.discard()`` disposes the engine without installing it.
 EngineInstaller = Callable[[object], None]
 _InstallStep = Callable[[object, object], None]
 
@@ -27,4 +28,5 @@ def make_engine_installer(
             engine.dispose()
             raise
 
+    installer.discard = engine.dispose
     return installer

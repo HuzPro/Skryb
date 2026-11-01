@@ -62,6 +62,7 @@ from skryb.output.text_pipeline import PipelineMode
 from skryb.output.tk_gui_thread_dispatcher import TkGuiThreadDispatcher
 from skryb.settings.settings_draft import ChangeSet
 from skryb.transcription.engine_factory import build_engine_registry
+from skryb.transcription.engine_install import make_engine_installer
 from skryb.transcription.engine_types import HardwareProfile
 from skryb.transcription.license_policy import LicensePolicy
 
@@ -359,6 +360,78 @@ class TestLoadEngineAndAttach:
             state_machine=state_machine,
             event_bus=bus,
         )
+
+
+class TestASettingsSwapDuringTheStartupLoad:
+    """The NPU engine's first startup load takes minutes. An engine picked
+    in settings meanwhile must go live at once, and the startup engine
+    must not replace it when it finally finishes."""
+
+    def test_the_swapped_in_engine_ends_loading_so_a_queued_shortcut_fires_on_it(self):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.LOADING)
+        cpu_engine, use_case = MagicMock(), MagicMock()
+
+        bootstrap._ending_startup_load(
+            make_engine_installer(cpu_engine, lambda uc, engine: uc.set_engine(engine)),
+            state_machine,
+        )(use_case)
+
+        use_case.set_engine.assert_called_once_with(cpu_engine)
+        assert state_machine.state == AppState.IDLE
+
+    def test_a_swap_after_startup_leaves_the_state_alone(self):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.IDLE)
+        visited: list[str] = []
+        bus.subscribe(StateChangedEvent, lambda e: visited.append(e.new_state))
+
+        bootstrap._ending_startup_load(
+            make_engine_installer(MagicMock(), lambda uc, engine: uc.set_engine(engine)),
+            state_machine,
+        )(MagicMock())
+
+        assert visited == []
+
+    @patch("skryb.bootstrap.create_engine_for_active_model")
+    def test_the_startup_engine_is_disposed_unused_when_a_swap_finished_first(self, mock_create):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.IDLE)
+        npu_engine, use_case = MagicMock(), MagicMock()
+        mock_create.return_value = npu_engine
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
+            use_case=use_case,
+            state_machine=state_machine,
+            event_bus=bus,
+        )
+
+        use_case.set_engine.assert_not_called()
+        npu_engine.dispose.assert_called_once_with()
+        assert state_machine.state == AppState.IDLE
+
+    @patch("skryb.bootstrap.create_engine_for_active_model")
+    def test_a_startup_load_that_fails_after_a_swap_replaced_it_shows_no_error(self, mock_create):
+        bus = SimpleEventBus()
+        state_machine = AppStateMachine(bus, initial_state=AppState.RECORDING)
+        broken = MagicMock()
+        broken.load_model.side_effect = OSError(5, "Access is denied")
+        mock_create.side_effect = [broken, broken]
+        failures: list[EngineLoadFailedEvent] = []
+        bus.subscribe(EngineLoadFailedEvent, failures.append)
+
+        _load_engine_and_attach(
+            MagicMock(), MagicMock(), _REGISTRY, _HARDWARE,
+            _ALLOW_ALL_LICENCES, _DIAGNOSTICS,
+            use_case=MagicMock(),
+            state_machine=state_machine,
+            event_bus=bus,
+        )
+
+        assert failures == []
+        assert state_machine.state == AppState.RECORDING
 
 
 class TestLoadEngineAndAttachFailureSurface:
