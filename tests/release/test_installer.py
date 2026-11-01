@@ -127,6 +127,9 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
         diarizer.write_bytes(b"MZ native diarizer")
         for amd in (dll, parakeet, whisper, diarizer):
             amd.with_name(f"{amd.stem}_cuda.dll").write_bytes(b"MZ nvidia " + amd.name.encode())
+        decoder = repo / "native" / "tdt" / "build" / "tdt_cpu.dll"
+        decoder.parent.mkdir(parents=True)
+        decoder.write_bytes(b"MZ cpu decoder")
     (repo / "skryb" / "transcription").mkdir()
     (root / "scratch").mkdir()
     return repo
@@ -162,6 +165,7 @@ class TestStageWheelSource:
         assert (source / "skryb" / "transcription" / "npk.dll").read_bytes() == b"MZ native parakeet"
         assert (source / "skryb" / "transcription" / "cw.dll").read_bytes() == b"MZ native whisper"
         assert (source / "skryb" / "transcription" / "nd.dll").read_bytes() == b"MZ native diarizer"
+        assert (source / "skryb" / "transcription" / "tdt_cpu.dll").read_bytes() == b"MZ cpu decoder"
 
     def test_puts_each_engines_nvidia_build_beside_it(self, tmp_path):
         repo = _fake_repo(tmp_path)
@@ -190,6 +194,13 @@ class TestStageWheelSource:
         (repo / "native" / "whisper" / "build" / "cw.dll").unlink()
 
         with pytest.raises(InstallerBuildError, match=r"native/whisper/build\.sh"):
+            _stage_wheel_source(repo, tmp_path / "scratch")
+
+    def test_refuses_to_build_an_installer_without_the_npu_engines_cpu_decoder(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        (repo / "native" / "tdt" / "build" / "tdt_cpu.dll").unlink()
+
+        with pytest.raises(InstallerBuildError, match=r"native/tdt/build\.py"):
             _stage_wheel_source(repo, tmp_path / "scratch")
 
     def test_refuses_to_build_an_installer_without_the_native_engine(self, tmp_path):

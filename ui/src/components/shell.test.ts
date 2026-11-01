@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { fitSidebar, saveSidebarWidth, savedSidebarWidth, SIDEBAR } from "./shell";
+import type { AppInfo } from "../lib/types";
+import { engineStatus, fitSidebar, saveSidebarWidth, savedSidebarWidth, SIDEBAR } from "./shell";
+
+function ready(device?: string | null, device_note?: string | null): AppInfo {
+  return { state: "idle", engine: { ready: true, loading: false, error: null, model: "phonon-2.5-english", device, device_note } } as AppInfo;
+}
+
+describe("the engine status", () => {
+  it("says the NPU is doing the work when it is", () => {
+    expect(engineStatus(ready("NPU", null), false)).toEqual({ tone: "success", label: "Ready on NPU" });
+  });
+
+  it("warns when the CPU has taken over from the NPU", () => {
+    expect(engineStatus(ready("CPU", "The NPU stopped working, so the CPU took over."), false)).toEqual({ tone: "warning", label: "Ready on CPU" });
+  });
+
+  it("stays a plain Ready for engines that don't say where they run", () => {
+    expect(engineStatus(ready(), false)).toEqual({ tone: "success", label: "Ready" });
+    expect(engineStatus(ready(null, null), false)).toEqual({ tone: "success", label: "Ready" });
+  });
+});
 
 function memory(start: Record<string, string> = {}) {
   const saved = new Map(Object.entries(start));

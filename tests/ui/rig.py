@@ -101,6 +101,7 @@ class Rig:
         heartbeat_seconds: float = 15.0,
         on_save: Callable[[ChangeSet], None] | None = None,
         updates: Any = None,
+        engine_device: Callable[[], tuple[str | None, str | None]] = lambda: (None, None),
     ) -> None:
         self.config = FakeConfig({
             "transcription.model_size": PARAKEET,
@@ -173,6 +174,7 @@ class Rig:
             on_setup_done=self.setup_done.set,
             open_path=self.opened.append,
             updates=updates,
+            engine_device=engine_device,
             preview_sound=lambda cue, volume: self.previewed.append((cue, volume)),
         ).serve_on(self.server)
 

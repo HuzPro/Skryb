@@ -104,7 +104,7 @@ def test_the_app_and_its_settings_answer_in_the_contracts_shapes(rig: Rig) -> No
     assert status == 200
     assert app["state"] == "idle"
     assert app["first_run"] is False
-    assert set(app["engine"]) == {"ready", "loading", "error", "model"}
+    assert set(app["engine"]) == {"ready", "loading", "error", "model", "device", "device_note"}
     assert app["engine"]["model"] == PARAKEET
     assert app["history_directory"] == str(rig.history_dir)
     assert app["pill_default_position"] == list(DEFAULT_PILL_POSITION)
@@ -188,7 +188,7 @@ def test_a_gated_model_is_refused_until_its_licence_is_accepted_then_it_loads(ma
     stream.close()
     assert [changes.engine_reload_required for changes in rig.saved] == [True]
     assert rig.call("GET", "/api/app")[1]["engine"] == {
-        "loading": False, "ready": True, "error": None, "model": TURBO,
+        "loading": False, "ready": True, "error": None, "model": TURBO, "device": None, "device_note": None,
     }
 
 
@@ -804,3 +804,28 @@ def test_automatic_checks_take_only_true_or_false(rig: Rig, value: object) -> No
     assert body["detail"] == "settings.check_for_updates must be true or false."
     assert rig.config.get("updates.check_automatically") is None
 
+
+def test_the_app_info_says_which_device_runs_dictation_and_why_when_it_is_not_the_npu(make_rig) -> None:
+    note = "Preparing the NPU for its first start, so the CPU takes dictation meanwhile."
+    rig = make_rig(engine_device=lambda: ("CPU", note))
+
+    engine = rig.call("GET", "/api/app")[1]["engine"]
+
+    assert engine["device"] == "CPU" and engine["device_note"] == note
+
+
+def test_the_app_info_follows_the_device_as_it_changes(make_rig) -> None:
+    device = [("CPU", "Preparing the NPU")]
+    rig = make_rig(engine_device=lambda: device[0])
+
+    first = rig.call("GET", "/api/app")[1]["engine"]
+    device[0] = ("NPU", None)
+    then = rig.call("GET", "/api/app")[1]["engine"]
+
+    assert (first["device"], then["device"], then["device_note"]) == ("CPU", "NPU", None)
+
+
+def test_an_engine_that_does_not_say_where_it_runs_leaves_the_device_empty(rig: Rig) -> None:
+    engine = rig.call("GET", "/api/app")[1]["engine"]
+
+    assert engine["device"] is None and engine["device_note"] is None

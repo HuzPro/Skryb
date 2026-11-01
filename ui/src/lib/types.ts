@@ -143,6 +143,10 @@ export interface EngineInfo {
   loading: boolean;
   error: string | null;
   model: string;
+  /** Where dictation runs, for an engine that can say: "NPU" or "CPU". */
+  device?: string | null;
+  /** Why dictation is not on the NPU, when it isn't. */
+  device_note?: string | null;
 }
 
 export interface AppInfo {

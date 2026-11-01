@@ -211,7 +211,8 @@ class Core:
                 model["installed"] = False
         self.app = {"version": "0.9.0", "state": "idle",
                     "engine": {"ready": not first_run, "loading": False, "error": None,
-                               "model": "" if first_run else "parakeet-tdt-0.6b-v3"},
+                               "model": "" if first_run else "parakeet-tdt-0.6b-v3",
+                               "device": None if first_run else "NPU", "device_note": None},
                     "first_run": first_run, "diagnostics_directory": "D:\\VoiceToText_logs",
                     "history_directory": "D:\\VoiceToText_logs", "pill_default_position": [0.5, 1.0],
                     "update": {"state": "up_to_date", "version": "", "bytes_done": 0, "bytes_total": 0, "error": ""},
@@ -270,7 +271,7 @@ class Core:
 
     # -- engine -----------------------------------------------------------
     def load_engine(self, model: str) -> None:
-        self.app["engine"] = {"ready": False, "loading": True, "error": None, "model": model}
+        self.app["engine"] = {"ready": False, "loading": True, "error": None, "model": model, "device": None, "device_note": None}
         self.app["state"] = "loading"
         self.emit("engine", {"state": "loading", "loading": True, "ready": False, "error": None, "model": model})
         self.emit("app", self.app)

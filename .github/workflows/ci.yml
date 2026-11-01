@@ -51,6 +51,10 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
           pip install -e ".[dev,npu]"
 
+      # The NPU engine's CPU decoder is plain C; its tests load this build.
+      - name: Build the CPU TDT decoder
+        run: python native/tdt/build.py
+
       # `python -m pytest` puts the repo root on sys.path (the `tests`
       # package imports need it). `-m "not slow"` (pyproject.toml addopts)
       # and the Windows-only module exclusions (tests/conftest.py) apply

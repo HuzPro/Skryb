@@ -101,6 +101,10 @@ def _silent(_cue: str, _volume: float) -> None:
     return None
 
 
+def _no_device() -> tuple[str | None, str | None]:
+    return None, None
+
+
 def _never() -> bool:
     return False
 
@@ -254,6 +258,7 @@ class CoreApi:
         updates: ReleaseUpdater | None = None,
         preview_sound: Callable[[str, float], None] = _silent,
         meetings: MeetingApi | None = None,
+        engine_device: Callable[[], tuple[str | None, str | None]] = _no_device,
     ) -> None:
         self._service = service
         self._hub = hub
@@ -261,6 +266,7 @@ class CoreApi:
         self._capture = capture
         self._diagnostics_dir = diagnostics_dir
         self._state = state
+        self._engine_device = engine_device
         self._on_save = on_save
         self._learner = learner
         self._history = history
@@ -342,7 +348,7 @@ class CoreApi:
         return {
             "version": app_version(),
             "state": self._state().value,
-            "engine": self._hub.engine_status(),
+            "engine": {**self._hub.engine_status(), **_device_json(*self._engine_device())},
             "first_run": self._first_run,
             "diagnostics_directory": str(self._diagnostics_dir),
             "history_directory": str(self._diagnostics_dir),
@@ -846,3 +852,8 @@ def _ignoring_missing_download(command: Callable[[str], None], name: str) -> Non
         command(name)
     except LookupError:
         _logger.info("No download of '%s' to change.", name)
+
+
+def _device_json(device: str | None, note: str | None) -> Json:
+    """Where dictation runs (an engine that can say, such as "NPU") and why, when it is not where it should be."""
+    return {"device": device, "device_note": note}

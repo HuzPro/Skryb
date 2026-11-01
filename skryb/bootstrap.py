@@ -1067,6 +1067,11 @@ def _build_meetings(
     return recorder, files
 
 
+def _device_of(engine: TranscriptionEngine) -> tuple[str | None, str | None]:
+    """The device an engine that can say (the NPU engine) runs dictation on, and why when it is not the NPU."""
+    return getattr(engine, "encoder_device", None), getattr(engine, "device_note", None)
+
+
 def _toggle_meeting(meetings: MeetingRecorder, explain: Callable[[str], None]) -> None:
     """Start or stop from the tray; a meeting that cannot start says why and opens the Meetings page."""
     try:
@@ -1434,6 +1439,7 @@ def build_app(
         ),
         diagnostics_dir=paths.diagnostics_dir,
         state=lambda: state_machine.state,
+        engine_device=lambda: _device_of(record_and_transcribe_use_case.current_engine()),
         on_save=lambda changes: gui_dispatcher.dispatch(
             lambda: apply_saved_settings(changes),
         ),

@@ -149,6 +149,7 @@ jobs:
           bash native/parakeet/build.sh
           bash native/whisper/build.sh
           bash native/diar/build.sh
+          python native/tdt/build.py
 
       # Their NVIDIA builds (qasr_cuda.dll and the rest, for the RTX 30-50 series) from the same sources:
       # nvcc and the CUDA runtime from NVIDIA's redistributable archives, and the runner's Visual Studio. No GPU.

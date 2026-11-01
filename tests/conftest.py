@@ -77,7 +77,9 @@ if sys.platform != "win32":
 @pytest.fixture(autouse=True)
 def _no_native_engines(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
     """Engine choice in tests can't depend on what this checkout has built (npk.dll, cw.dll); a test that wants one says so."""
-    for variable in ("NPK_DLL", "CW_DLL", "ND_DLL", "QASR_CUDA_DLL", "NPK_CUDA_DLL", "CW_CUDA_DLL", "ND_CUDA_DLL"):
+    for variable in (
+        "NPK_DLL", "CW_DLL", "ND_DLL", "QASR_CUDA_DLL", "NPK_CUDA_DLL", "CW_CUDA_DLL", "ND_CUDA_DLL", "TDT_CPU_DLL",
+    ):
         monkeypatch.setenv(variable, str(tmp_path_factory.getbasetemp() / f"{variable} not built"))
 
 

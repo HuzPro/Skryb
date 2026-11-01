@@ -49,3 +49,17 @@ reference. A GPU the kernels misbehave on fails to load (and Skryb retries on th
 `-DMMA_NV_LAYOUT` builds the NVIDIA tile layout for AMD, with the matrix product done by shuffles, so everything but
 the two NVIDIA instructions can be checked on the RX 9060 XT. On the bench corpus it matches the AMD build to bf16
 rounding.
+
+## CPU TDT decoder (`native/tdt`)
+
+`tdt_cpu.dll` decodes for the NPU engine (`openvino_parakeet_adapter`): the greedy TDT walk, the prediction
+LSTM and the joint in one call per clip, as int8 dot products (AVX-VNNI-INT8, else AVX2, else plain C, picked
+at run time), with each product's rows split among three threads. Plain C, so no GPU, ROCm or CUDA:
+
+```bash
+python native/tdt/build.py   # MSVC on Windows (found through vswhere), gcc elsewhere; into native/tdt/build
+```
+
+The app loads `skryb/transcription/tdt_cpu.dll` when installed, then the build folder; `TDT_CPU_DLL` overrides
+both, and without it the engine decodes through OpenVINO. On a Core 5 320 it decodes 10 s of speech in about
+17 ms against OpenVINO's 44, with the same tokens as NumPy's fp32 decoder on the clips it was checked on.

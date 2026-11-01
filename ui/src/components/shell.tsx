@@ -44,6 +44,9 @@ export function engineStatus(app: AppInfo | undefined, lost: boolean, updating =
   if (app.state === "transcribing") return { tone: "primary", label: "Transcribing" };
   if (app.engine.error) return { tone: "destructive", label: "Failed" };
   if (app.engine.loading || app.state === "loading") return { tone: "warning", label: "Loading" };
+  if (app.engine.ready && app.engine.device) {
+    return { tone: app.engine.device_note ? "warning" : "success", label: `Ready on ${app.engine.device}` };
+  }
   if (app.engine.ready) return { tone: "success", label: "Ready" };
   return { tone: "muted", label: "Not loaded" };
 }
@@ -308,6 +311,7 @@ export function Sidebar({ items, mode, onMode, meetings }: { items: NavItem[]; m
           <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground" title={app?.engine.model}>
             {app?.engine.model || settings?.saved.model_size || "No model"}
           </div>
+          {app?.engine.device_note ? <p className="mt-1 text-[11.5px] text-warning">{app.engine.device_note}</p> : null}
         </div>
         <div className="flex items-center justify-between pl-1">
           <span className="text-[11.5px] text-muted-foreground">{app ? `Version ${app.version}` : ""}</span>

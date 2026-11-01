@@ -56,6 +56,9 @@ _NATIVE_WHISPER_BUILD = Path("native") / "whisper" / "build" / "cw.dll"
 _NATIVE_WHISPER_IN_WHEEL = "skryb/transcription/cw.dll"
 _NATIVE_DIARIZER_BUILD = Path("native") / "diar" / "build" / "nd.dll"
 _NATIVE_DIARIZER_IN_WHEEL = "skryb/transcription/nd.dll"
+# The NPU engine's CPU decoder, from native/tdt/build.py. Plain C, so there is no NVIDIA build of it.
+_NATIVE_TDT_BUILD = Path("native") / "tdt" / "build" / "tdt_cpu.dll"
+_NATIVE_TDT_IN_WHEEL = "skryb/transcription/tdt_cpu.dll"
 
 
 def iss_defines(version: str, payload_dir: Path, wheel_filename: str) -> dict[str, str]:
@@ -205,7 +208,9 @@ def _require_built_files_in_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
     native = (_NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_WHISPER_IN_WHEEL, _NATIVE_DIARIZER_IN_WHEEL)
-    for member in (_UI_SHELL_IN_WHEEL, *native, *(dll.replace(".dll", "_cuda.dll") for dll in native)):
+    for member in (
+        _UI_SHELL_IN_WHEEL, *native, *(dll.replace(".dll", "_cuda.dll") for dll in native), _NATIVE_TDT_IN_WHEEL,
+    ):
         if member not in names:
             raise InstallerBuildError(
                 f"{wheel.name} is missing {member}; check "
@@ -260,6 +265,10 @@ def _copy_native_engine(repo_root: Path, destination: Path) -> None:
                     f"the native {name} engine is not built ({built} is missing); run {script} first"
                 )
             shutil.copyfile(built, destination / built.name)
+    decoder = repo_root / _NATIVE_TDT_BUILD
+    if not decoder.exists():
+        raise InstallerBuildError(f"the NPU engine's CPU decoder is not built ({decoder} is missing); run native/tdt/build.py first")
+    shutil.copyfile(decoder, destination / decoder.name)
 
 
 

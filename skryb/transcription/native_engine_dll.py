@@ -7,6 +7,7 @@ Kept free of heavy imports: the engine registry asks at startup.
 
 import importlib.util
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -28,6 +29,12 @@ DEV_BUILD_WHISPER_DLL = Path(__file__).resolve().parents[2] / "native" / "whispe
 DIARIZER_DLL_ENV = "ND_DLL"
 SHIPPED_DIARIZER_DLL = Path(__file__).with_name("nd.dll")
 DEV_BUILD_DIARIZER_DLL = Path(__file__).resolve().parents[2] / "native" / "diar" / "build" / "nd.dll"
+
+# The CPU decoder behind the NPU engine (native/tdt): plain C, so it needs no GPU and has no NVIDIA twin.
+TDT_DLL_ENV = "TDT_CPU_DLL"
+_TDT_LIBRARY = "tdt_cpu.dll" if sys.platform == "win32" else "libtdt_cpu.so"
+SHIPPED_TDT_DLL = Path(__file__).with_name(_TDT_LIBRARY)
+DEV_BUILD_TDT_DLL = Path(__file__).resolve().parents[2] / "native" / "tdt" / "build" / _TDT_LIBRARY
 
 # GPU architectures the kernels are compiled for: the RX 9060 XT, and NVIDIA's RTX 30 (sm_86, and the sm_87
 # that runs its code), 40 (sm_89) and 50 (sm_120, sm_121) series.
@@ -52,6 +59,11 @@ def native_whisper_dll(environ: Mapping[str, str] = os.environ, cuda: bool = Fal
 def native_diarizer_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
     """The same for ``nd.dll``. ``ND_DLL`` (``ND_CUDA_DLL``) wins and never falls back."""
     return _find_dll(environ, DIARIZER_DLL_ENV, SHIPPED_DIARIZER_DLL, DEV_BUILD_DIARIZER_DLL, cuda)
+
+
+def native_tdt_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
+    """The same for the CPU TDT decoder. ``TDT_CPU_DLL`` wins and never falls back."""
+    return _find_dll(environ, TDT_DLL_ENV, SHIPPED_TDT_DLL, DEV_BUILD_TDT_DLL, cuda=False)
 
 
 def cuda_dll_name(dll: Path) -> Path:

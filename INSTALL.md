@@ -74,10 +74,13 @@ Core Series 3 (Wildcat Lake) NPU, the one it was tuned and measured on,
 engine; on other NPUs pick "Parakeet on the NPU" in Settings to try it. The
 first load exports the encoder to OpenVINO IR in the snapshot's `.openvino`
 folder, rewrites it with int8 weights and compiles it at four lengths, which
-takes a few minutes once; later loads reuse the compiled copies. The NPU
-needs Intel's NPU driver 32.0.100.5540 or newer. Without a working NPU the
-same engine runs the encoder on the CPU.
-`python scripts\check_npu.py` reports which device it got and how fast it is.
+takes a few minutes once; for Phonon, its CPU engine takes dictation
+meanwhile and the NPU takes over when every length is up. Later loads reuse
+the compiled copies and take dictation in under a second. The NPU needs
+Intel's NPU driver 32.0.100.5540 or newer. Without a working NPU the same
+engine runs the encoder on the CPU, and Settings says so and why.
+`python scripts\check_npu.py` proves the work reaches the NPU with Windows'
+own NPU counters, and races it against the Intel GPU and the CPU.
 OpenVINO's model converter reports usage to Intel unless you opt out; Skryb
 keeps its telemetry package from loading.
 
