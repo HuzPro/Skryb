@@ -46,6 +46,14 @@ def _make_result(
     )
 
 
+def _plain_engine() -> MagicMock:
+    """An engine that takes no names list; on Python 3.11 a bare MagicMock passes for Qwen3-ASR or Phonon."""
+    engine = MagicMock()
+    engine.transcribe_prompted = None
+    engine.set_hotwords = None
+    return engine
+
+
 def _build_use_case(
     dispatcher: ActionDispatcher | None = None,
     initial_state: AppState = AppState.IDLE,
@@ -55,7 +63,7 @@ def _build_use_case(
     event_bus = SimpleEventBus()
     state_machine = AppStateMachine(event_bus, initial_state=initial_state)
     recorder = MagicMock()
-    engine = MagicMock()
+    engine = _plain_engine()
     output = MagicMock()
     use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
@@ -342,7 +350,7 @@ class TestClipboardWriteFailure:
 class TestHotSwapEngine:
     def test_should_swap_engine_when_idle(self):
         use_case, recorder, engine, _, _, _ = _build_use_case()
-        new_engine = MagicMock()
+        new_engine = _plain_engine()
         new_engine.transcribe.return_value = _make_result("from new engine")
         recorder.stop_recording.return_value = _make_audio()
 
@@ -358,7 +366,7 @@ class TestHotSwapEngine:
         use_case.on_hotkey_activated()
 
         with pytest.raises(EngineSwapError, match="idle"):
-            use_case.set_engine(MagicMock())
+            use_case.set_engine(_plain_engine())
 
     def test_should_allow_swap_after_recovering_from_a_failed_load(self):
         # Bug 7: a failed load used to strand the machine in ERROR, where
@@ -369,7 +377,7 @@ class TestHotSwapEngine:
         use_case, _, old_engine, _, _, state_machine = _build_use_case()
         state_machine.transition_to(AppState.ERROR)
         state_machine.transition_to(AppState.IDLE)
-        new_engine = MagicMock()
+        new_engine = _plain_engine()
 
         use_case.set_engine(new_engine)  # must not raise
 
@@ -377,7 +385,7 @@ class TestHotSwapEngine:
 
     def test_should_dispose_old_engine_when_swapped_out(self):
         use_case, _, old_engine, _, _, _ = _build_use_case()
-        new_engine = MagicMock()
+        new_engine = _plain_engine()
 
         use_case.set_engine(new_engine)
 
@@ -386,7 +394,7 @@ class TestHotSwapEngine:
     def test_should_not_dispose_new_engine_when_swap_rejected(self):
         use_case, _, old_engine, _, _, _ = _build_use_case()
         use_case.on_hotkey_activated()
-        new_engine = MagicMock()
+        new_engine = _plain_engine()
 
         with pytest.raises(EngineSwapError):
             use_case.set_engine(new_engine)
@@ -410,7 +418,7 @@ def _build_waking_use_case(
 ):
     event_bus = SimpleEventBus()
     recorder = MagicMock()
-    engine = MagicMock()
+    engine = _plain_engine()
     use_case = RecordAndTranscribeUseCase(
         recorder=recorder,
         engine=engine,
@@ -500,7 +508,7 @@ class TestLoadingStateBehaviour:
         use_case, _, old_engine, _, _, _ = _build_use_case(
             initial_state=AppState.LOADING,
         )
-        new_engine = MagicMock()
+        new_engine = _plain_engine()
 
         use_case.set_engine(new_engine)
 
@@ -750,7 +758,7 @@ class TestRecordingLimitWarning:
         recorder.stop_recording.return_value = None
         use_case = RecordAndTranscribeUseCase(
             recorder=recorder,
-            engine=MagicMock(),
+            engine=_plain_engine(),
             output=MagicMock(),
             state_machine=AppStateMachine(event_bus),
             event_bus=event_bus,
