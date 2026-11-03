@@ -46,6 +46,10 @@ class NanoParakeetAdapter(TranscriptionEngine):
         self._model_dir = model_dir
         self._model: _ParakeetModel | None = None
 
+    @property
+    def encoder_device(self) -> str:
+        return "CPU" if self._device == "cpu" else "GPU"
+
     def load_model(self) -> None:
         self._log_phase("load_model", f"start device={self._device}")
         started_at = time.monotonic()

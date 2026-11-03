@@ -44,6 +44,10 @@ class Qwen3AsrAdapter(TranscriptionEngine):
         self._model: Any = None
         self._dtype: Any = None
 
+    @property
+    def encoder_device(self) -> str:
+        return "CPU" if self._device == _CPU_DEVICE else "GPU"
+
     def load_model(self) -> None:
         started_at = time.monotonic()
         torch, transformers = _import_backend()

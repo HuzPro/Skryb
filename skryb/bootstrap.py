@@ -1078,7 +1078,7 @@ def _build_meetings(
 
 
 def _device_of(engine: TranscriptionEngine) -> tuple[str | None, str | None]:
-    """The device an engine that can say (the NPU engine) runs dictation on, and why when it is not the NPU."""
+    """The device an engine that can say runs dictation on, GPU, NPU or CPU, and why when it is not the NPU."""
     return getattr(engine, "encoder_device", None), getattr(engine, "device_note", None)
 
 
