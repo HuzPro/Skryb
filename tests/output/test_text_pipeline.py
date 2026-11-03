@@ -100,21 +100,21 @@ class TestFillerRemoval:
 
     @pytest.mark.parametrize(("spoken", "expected"), [
         ("Ah.", ""),
-        ("Ahh, can we deploy now?", "Can we deploy now? "),
-        ("Look at this wall of text. Ah, this is the thing.", "Look at this wall of text. This is the thing. "),
-        ("Use your, ah. Desktop environment", "Use your desktop environment"),
-        ("Okay. Ah. You probably used stubs.", "Okay. You probably used stubs. "),
-        ("Check the latest, ah Theo video.", "Check the latest, Theo video. "),
+        ("Ahh, can the parcel go today?", "Can the parcel go today? "),
+        ("The oven is hot. Ah, put the tray in.", "The oven is hot. Put the tray in. "),
+        ("Water the, ah. Garden plants", "Water the garden plants"),
+        ("Fine. Ah. The bus was late.", "Fine. The bus was late. "),
+        ("Paint the fence, ah blue.", "Paint the fence, blue. "),
     ])
     def test_ah_set_off_by_a_comma_or_a_sentence_edge_is_a_filler(self, spoken: str, expected: str) -> None:
         assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == expected
 
     @pytest.mark.parametrize("spoken", [
-        "But ah yeah, ship it",
+        "Tea or ah coffee, please",
         "Aha, found it",
         "Ahmed said hi",
         "Ah-ha, there it is",
-        "Check in with Ah Andrew",
+        "Ask Ah Lin for the keys",
     ])
     def test_ah_inside_a_sentence_or_a_word_stays(self, spoken: str) -> None:
         assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == spoken
@@ -122,27 +122,27 @@ class TestFillerRemoval:
     def test_a_filler_that_is_a_sentence_of_its_own_goes_with_its_full_stop(self) -> None:
         options = DictionaryOptions(remove_fillers=True)
         assert _batch("Um. Yeah. Just um continue.", options=options) == "Yeah. Just continue. "
-        assert _batch("Hey so. Um. What now?", options=options) == "Hey so. What now? "
+        assert _batch("Right then. Um. Who brought cake?", options=options) == "Right then. Who brought cake? "
 
     @pytest.mark.parametrize(("spoken", "expected"), [
-        ("Figure out the the pill.", "Figure out the pill. "),
+        ("Close the the gate.", "Close the gate. "),
         ("I I think so.", "I think so. "),
-        ("You you, it it it it asks you.", "You, it asks you. "),
-        ("This, this, this, this is fine.", "This is fine. "),
-        ("What What should I send?", "What should I send? "),
-        ("In, in Jellyfin, sure.", "In Jellyfin, sure. "),
+        ("We we, it it it it rained.", "We, it rained. "),
+        ("This, this, this, this one fits.", "This one fits. "),
+        ("Where Where are the scissors?", "Where are the scissors? "),
+        ("In, in Lisbon, sure.", "In Lisbon, sure. "),
     ])
     def test_a_short_word_said_twice_by_accident_is_kept_once(self, spoken: str, expected: str) -> None:
         assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == expected
 
     @pytest.mark.parametrize("spoken", [
         "He had had enough.",
-        "All the information that that we need.",
+        "He said that that was fine.",
         "What it is is a plan.",
         "Give her her keys.",
         "Blah blah blah.",
-        "Super super concise.",
-        "October twenty twenty six.",
+        "Very very quiet.",
+        "Born in nineteen nineteen.",
         "The plug-in in the box.",
         "Bora Bora.",
     ])
@@ -150,11 +150,11 @@ class TestFillerRemoval:
         assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == spoken + " "
 
     def test_stutters_stay_with_filler_removal_off(self) -> None:
-        assert _batch("the the pill") == "the the pill"
+        assert _batch("the the gate") == "the the gate"
 
     def test_stutters_collapse_in_live_mode_too(self) -> None:
         config = DictionaryConfig(options=DictionaryOptions(remove_fillers=True))
-        assert TextPipeline.for_streaming(config).process("so the the pill") == "so the pill"
+        assert TextPipeline.for_streaming(config).process("so the the gate") == "so the gate"
 
 
 class TestSpokenCommands:

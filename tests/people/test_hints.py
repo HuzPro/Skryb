@@ -79,7 +79,7 @@ def test_an_empty_list_and_no_names_give_no_hint() -> None:
 
 @pytest.mark.parametrize("text", [
     _HINT,
-    "Samaris and terms that may come up and terms that may come up.",
+    "Lorem and terms that may come up and terms that may come up.",
     "Skryb (the app I'm building), Ngozi Adébáyọ̀, QuoteDesk.",
 ])
 def test_a_transcript_that_reads_the_hint_back_is_an_echo(text: str) -> None:
