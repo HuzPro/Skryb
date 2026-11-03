@@ -39,6 +39,15 @@ jobs:
             ~/.cargo/registry/cache
             ui/src-tauri/target
           key: ${{ steps.cargo-key.outputs.key }}
+      - name: extract the crate sources
+        shell: bash
+        run: |
+          time cargo metadata --format-version 1 --manifest-path ui/src-tauri/Cargo.toml > /dev/null
+          time cat $(find ui/src-tauri/target -type f -size +1k) > /dev/null
+          (Get-CimInstance Win32_Processor).Name 2>/dev/null || true
+      - name: cpu
+        shell: pwsh
+        run: (Get-CimInstance Win32_Processor).Name
       - name: first build after restore
         shell: pwsh
         working-directory: ui
