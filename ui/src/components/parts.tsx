@@ -214,51 +214,6 @@ export function StatusDot({ tone }: { tone: Tone }) {
   return <span className={cn("inline-block size-1.5 shrink-0 rounded-[var(--r-dot)] bg-current shadow-[var(--dot-glow)]", color)} />;
 }
 
-/**
- * The sidebar's footer card, one status line over one detail line in either mode, so switching mode moves nothing.
- * Each mode mounts its own card, so its text fades in on a switch while the card itself stays.
- */
-export function StatusCard({
-  tone,
-  label,
-  detail,
-  warning,
-  onOpen,
-  action,
-}: {
-  tone: Tone;
-  label: string;
-  detail: string;
-  warning?: string | undefined;
-  onOpen?: () => void;
-  action?: ReactNode;
-}) {
-  const body = (
-    <>
-      <span className="flex items-center gap-1.5 text-[12px] font-medium">
-        <StatusDot tone={tone} />
-        <span className="truncate tabular-nums">{label}</span>
-      </span>
-      <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground" title={detail}>
-        {detail}
-      </span>
-      {warning ? <span className="mt-1 block truncate text-[11.5px] text-warning" title={warning}>{warning}</span> : null}
-    </>
-  );
-  return (
-    <div className="surface flex min-w-0 flex-1 items-center rounded-lg border border-edge bg-card shadow-card">
-      {onOpen ? (
-        <button onClick={onOpen} className="enter-fade min-w-0 flex-1 self-stretch rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40">
-          {body}
-        </button>
-      ) : (
-        <div className="enter-fade min-w-0 flex-1 px-3 py-2">{body}</div>
-      )}
-      {action ? <div className="enter-pop shrink-0 pr-1.5">{action}</div> : null}
-    </div>
-  );
-}
-
 const EXIT_MS = 160;
 
 export interface MenuItem {

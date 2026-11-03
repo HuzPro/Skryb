@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { isNavActive, launchPath, modeOf, NAV, pageInMode } from "../app";
 import { groupByDay } from "../pages/history";
-import { meetingStatus, pastMeetings } from "../pages/meetings";
+import { pastMeetings } from "../pages/meetings";
 import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
-import type { LiveMeeting, MeetingEntry, MeetingOverview, MeetingSummary } from "./types";
+import type { LiveMeeting, MeetingEntry, MeetingSummary } from "./types";
 
 const line = (id: number, key: string, start: number, end: number, text: string): MeetingEntry => {
   const [track, speaker] = key.split(":");
@@ -268,35 +268,3 @@ describe("past meetings under History", () => {
   });
 });
 
-describe("the footer card in meeting mode", () => {
-  const overview = (ready = true): MeetingOverview => ({ recording: false, folder: "D:\\Meetings", models_ready: ready, models: [], meetings: [] });
-
-  const audio = "PC audio and your mic";
-
-  it("is Ready when nothing records and the models are in, and says what it will record", () => {
-    expect(meetingStatus(null, overview(), 0, audio)).toEqual({ tone: "success", label: "Ready", detail: audio });
-  });
-
-  it("asks for the models before the first meeting", () => {
-    expect(meetingStatus(null, overview(false), 0, audio).label).toBe("Needs its models");
-  });
-
-  it("leads with the running time while recording, past the hour too", () => {
-    const recording = { ...live(), status: "Recording" as const };
-    expect(meetingStatus(recording, overview(), 754, audio)).toEqual({ tone: "destructive", label: "12:34", detail: "Recording · PC audio and your mic" });
-    expect(meetingStatus(recording, overview(), 3725, audio).label).toBe("1:02:05");
-  });
-
-  it("says a meeting is still loading its models rather than counting time", () => {
-    expect(meetingStatus({ ...live(), status: "Loading models" }, overview(), 3, audio)).toMatchObject({ tone: "warning", label: "Loading models" });
-  });
-
-  it("says how far a dropped file has got and names the file", () => {
-    const file = { ...live(), status: "Transcribing" as const, source: "Interview – Ana Lúcia.mp4", progress: 0.42 };
-    expect(meetingStatus(file, overview(), 0, audio)).toEqual({ tone: "primary", label: "Transcribing 42%", detail: "Interview – Ana Lúcia.mp4" });
-  });
-
-  it("says Finishing while the last lines are written", () => {
-    expect(meetingStatus({ ...live(), recording: false, status: "Finishing" }, overview(), 0, audio).label).toBe("Finishing");
-  });
-});

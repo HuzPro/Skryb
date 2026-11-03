@@ -3,7 +3,7 @@ import { AudioLines, BookA, ClipboardPaste, History, House, Keyboard, Mic } from
 import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
-import { ConnectionBanner, DictationStatusCard, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type Mode, type NavItem } from "./components/shell";
+import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type Mode, type NavItem } from "./components/shell";
 import { applyTheme, guardClose, onRelaunch, runBeforeClose, showWindow, windowControls, type LaunchArgs, type Page } from "./lib/platform";
 import { prefetchPages, queryClient } from "./lib/queries";
 import { useServerEvents } from "./lib/sse";
@@ -17,7 +17,6 @@ import {
   MeetingMicrophonePage,
   MeetingModelPage,
   MeetingOutputPage,
-  MeetingStatusCard,
   SavedMeetingPage,
   useMeetingEvents,
 } from "./pages/meetings";
@@ -183,7 +182,6 @@ function Shell() {
               onMode={switchMode}
               pathname={pathname}
               isActive={isNavActive}
-              status={mode === "meetings" ? <MeetingStatusCard onOpen={() => void navigateRef.current("/meeting-home")} /> : <DictationStatusCard />}
             />
           )}
           <div className="relative flex min-w-0 flex-1 flex-col">

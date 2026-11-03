@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlert, LoaderCircle, Mic, Minus, Settings, Square, Users, X, type LucideIcon } from "lucide-react";
+import { CircleAlert, Download, LoaderCircle, Mic, Minus, RefreshCw, Settings, Square, Users, X, type LucideIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { Link } from "react-router";
+import { api } from "../lib/api";
 import { isDirty } from "../lib/draft";
 import { windowControls } from "../lib/platform";
 import { queries } from "../lib/queries";
@@ -10,7 +11,7 @@ import type { AppInfo } from "../lib/types";
 import { cn } from "../lib/utils";
 import { useInstall } from "./install";
 import { Mark } from "./mark";
-import { StatusCard, StatusDot, type Tone } from "./parts";
+import { StatusDot, type Tone } from "./parts";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
 
@@ -256,18 +257,46 @@ function SidebarEdge({ width, onResize }: { width: number; onResize: (width: num
   );
 }
 
-/** Dictation's footer card: whether the engine is ready, and with which model. */
-export function DictationStatusCard() {
-  const status = useEngineStatus();
-  const app = status.app;
-  const saved = useQuery(queries.settings).data;
+/** The footer's left corner, as tall as the settings button: checks for an update, then says how it's going. */
+function UpdateButton() {
+  const app = useAppInfo();
+  const [failed, setFailed] = useState(false);
+  const line = "flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground";
+  if (!app) return <span />;
+  const update = app.update;
+  if (update === null) return <span className={line}>Skryb {app.version}</span>;
+  if (update.state === "ready") {
+    return (
+      <Link to="/updates" draggable={false} title={`Install Skryb ${update.version}`} className={cn(line, "font-medium text-primary transition-colors hover:bg-accent")}>
+        <Download className="size-3.5 shrink-0" />
+        <span className="truncate">Update to {update.version}</span>
+      </Link>
+    );
+  }
+  const busy = update.state === "checking" || update.state === "downloading" || update.state === "installing";
+  const percent = update.bytes_total > 0 ? Math.floor((update.bytes_done * 100) / update.bytes_total) : 0;
+  const label = {
+    checking: "Checking…",
+    downloading: `Downloading ${percent}%`,
+    installing: "Installing…",
+    up_to_date: "Up to date",
+    updated: "Up to date",
+  }[update.state as string] ?? (failed || update.state === "failed" ? "Check again" : "Check for updates");
+  const check = () => {
+    setFailed(false);
+    api.post("/api/updates/check").catch(() => setFailed(true));
+  };
   return (
-    <StatusCard
-      tone={status.tone}
-      label={status.label}
-      detail={app?.engine.model || saved?.model_size || "No model"}
-      warning={app?.engine.device_note ?? undefined}
-    />
+    <button
+      type="button"
+      disabled={busy}
+      title={`Skryb ${app.version}. Check for updates`}
+      onClick={check}
+      className={cn(line, "transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none")}
+    >
+      {busy ? <LoaderCircle className="size-3.5 shrink-0 motion-safe:animate-spin" /> : <RefreshCw className="size-3.5 shrink-0" />}
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 
@@ -277,14 +306,12 @@ export function Sidebar({
   onMode,
   pathname,
   isActive,
-  status,
 }: {
   items: NavItem[];
   mode: Mode;
   onMode: (mode: Mode) => void;
   pathname: string;
   isActive: (item: NavItem, pathname: string) => boolean;
-  status: ReactNode;
 }) {
   const [width, setWidth] = useSidebarWidth();
   const app = useAppInfo();
@@ -322,8 +349,8 @@ export function Sidebar({
           );
         })}
       </nav>
-      <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 p-3">
-        {status}
+      <div className="mt-auto flex items-center justify-between gap-1.5 p-3">
+        <UpdateButton />
         <Link
           to="/updates"
           draggable={false}
@@ -331,7 +358,7 @@ export function Sidebar({
           title="Settings"
           aria-current={settingsOpen ? "page" : undefined}
           className={cn(
-            "surface grid size-8 place-items-center rounded-lg border border-edge bg-card text-muted-foreground shadow-card transition-[color,background-color,scale] hover:bg-accent hover:text-foreground active:scale-[0.97]",
+            "surface grid size-8 shrink-0 place-items-center rounded-lg border border-edge bg-card text-muted-foreground shadow-card transition-[color,background-color,scale] hover:bg-accent hover:text-foreground active:scale-[0.97]",
             settingsOpen && "text-foreground ring-2 ring-ring/40",
           )}
         >
