@@ -340,7 +340,8 @@ jobs:
         shell: bash
         run: |
           python native/cuda/fetch_toolkit.py
-          python native/cuda/build.py ${{ matrix.engine }}
+          # nvlink sometimes can't read its own temp file on the runner (v0.14.0's first run); a second try passes.
+          python native/cuda/build.py ${{ matrix.engine }} || python native/cuda/build.py ${{ matrix.engine }}
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
