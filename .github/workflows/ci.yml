@@ -19,10 +19,6 @@ on:
         description: "Version to release (e.g. 0.2.0). Blank = pyproject.toml."
         required: false
         default: ""
-      salt:
-        description: "measurement: busts the build caches"
-        required: false
-        default: ""
 
 # On `main` a run is never cancelled: it may be publishing. Elsewhere a newer push
 # supersedes the run in flight.
@@ -155,11 +151,13 @@ jobs:
   ui:
     name: Settings window
     runs-on: windows-2022
+    env:
+      NODE_VERSION: "22"
     steps:
       - uses: actions/checkout@v5
       - id: key
         shell: bash
-        run: echo "exe=ui-exe-rust$(rustc -V | cut -d' ' -f2)-node22-${{ hashFiles('ui/**', '!ui/mock/**', '!ui/README.md') }}${{ inputs.salt }}" >> "$GITHUB_OUTPUT"
+        run: echo "exe=ui-exe-rust$(rustc -V | cut -d' ' -f2)-node$NODE_VERSION-${{ hashFiles('ui/**', '!ui/mock/**', '!ui/README.md', 'scripts/build_ui.ps1') }}" >> "$GITHUB_OUTPUT"
       - id: exe
         uses: actions/cache/restore@v4
         with:
@@ -173,7 +171,7 @@ jobs:
       - if: steps.exe.outputs.cache-hit != 'true'
         uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
       # The compiled dependencies (the crates in Cargo.lock), so only the window's
@@ -233,6 +231,8 @@ jobs:
     # overloads ("__device__ function cannot overload __host__ __device__").
     # Visual Studio 2022 predates that change.
     runs-on: windows-2022
+    env:
+      ROCM_VERSION: "7.2.1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -242,8 +242,8 @@ jobs:
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
-          "rocm=native-rocm7.2.1-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
-          "tdt=native-tdt-vs$vs-${{ hashFiles('native/tdt/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
+          "rocm=native-rocm$env:ROCM_VERSION-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**') }}" >> $env:GITHUB_OUTPUT
+          "tdt=native-tdt-vs$vs-${{ hashFiles('native/tdt/**') }}" >> $env:GITHUB_OUTPUT
       - id: rocm
         uses: actions/cache/restore@v4
         with:
@@ -257,15 +257,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: rocm-wheel
-          key: rocm-sdk-core-7.2.1-win_amd64
-      # Unpacked on D:, the runner's local disk, which is faster than C: for 1.8 GB of files.
+          key: rocm-sdk-core-${{ env.ROCM_VERSION }}-win_amd64
       - if: steps.rocm.outputs.cache-hit != 'true'
         name: Install the ROCm SDK
         shell: bash
         run: |
-          ls rocm-wheel/rocm_sdk_core-7.2.1-*.whl 2>/dev/null || python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 -d rocm-wheel
-          python -m pip install --no-deps --no-compile --target "$RUNNER_TEMP/rocm-sdk" rocm-wheel/rocm_sdk_core-7.2.1-*.whl
-          echo "HIPCC=$(cygpath -m "$RUNNER_TEMP")/rocm-sdk/_rocm_sdk_core/bin/hipcc.exe" >> "$GITHUB_ENV"
+          ls rocm-wheel/rocm_sdk_core-$ROCM_VERSION-*.whl 2>/dev/null || python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-$ROCM_VERSION/ rocm-sdk-core==$ROCM_VERSION -d rocm-wheel
+          python -m pip install --no-deps rocm-wheel/rocm_sdk_core-$ROCM_VERSION-*.whl
+      # The three engines build independently, so at the same time.
       - if: steps.rocm.outputs.cache-hit != 'true'
         name: Build native engines
         shell: bash
@@ -330,7 +329,7 @@ jobs:
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
-          "key=native-cuda-${{ matrix.engine }}-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**', 'native/cuda/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
+          "key=native-cuda-${{ matrix.engine }}-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**', 'native/cuda/**') }}" >> $env:GITHUB_OUTPUT
       - id: cache
         uses: actions/cache/restore@v4
         with:
