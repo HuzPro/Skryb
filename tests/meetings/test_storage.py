@@ -52,7 +52,7 @@ def test_saved_meetings_are_listed_newest_first_with_their_length_speakers_and_w
         ("them", 1, 3.0, "Sounds good."),
         ("me", 0, 3065.0, "Thanks everyone."),
     ])
-    _meeting(tmp_path, "2026-10-28 22-45 Marta email tool setup", datetime(2026, 10, 28, 22, 45), [
+    _meeting(tmp_path, "2026-10-28 22-45 Marta garden planning", datetime(2026, 10, 28, 22, 45), [
         ("them", 2, 10.0, "Haan theek hai, main kal tak bhej dunga."),
     ])
     (tmp_path / "2026-10-29 07-00").mkdir()  # a meeting that never got a line
@@ -60,7 +60,7 @@ def test_saved_meetings_are_listed_newest_first_with_their_length_speakers_and_w
 
     meetings = list_meetings(tmp_path)
 
-    assert [m.id for m in meetings] == ["2026-10-28 22-45 Marta email tool setup", "2026-10-16 Ops Onboarding"]
+    assert [m.id for m in meetings] == ["2026-10-28 22-45 Marta garden planning", "2026-10-16 Ops Onboarding"]
     onboarding = meetings[1]
     assert (onboarding.seconds, onboarding.speakers, onboarding.lines, onboarding.words) == (3066.5, 3, 3, 9)
     assert onboarding.started == "2026-10-16T20:20:00"

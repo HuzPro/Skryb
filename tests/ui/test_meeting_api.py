@@ -156,25 +156,25 @@ def test_a_meeting_started_from_the_window_streams_its_lines_and_stops_into_a_sa
 
 
 def test_renaming_a_speaker_in_a_saved_meeting_rewrites_its_files_and_tells_every_window(rig: MeetingRig) -> None:
-    folder = rig.saved_meeting("2026-10-21 Harbor scoping call", [("them", 0, 0.0, "Hi."), ("them", 1, 3.0, "Hello.")])
+    folder = rig.saved_meeting("2026-10-21 Harbor sailing plans", [("them", 0, 0.0, "Hi."), ("them", 1, 3.0, "Hello.")])
     stream = rig.events()
 
-    assert rig.call("POST", "/api/meetings/2026-10-21 Harbor scoping call/rename", {"key": "them:1", "name": "  نادیہ رحمان  "})[0] == 204
+    assert rig.call("POST", "/api/meetings/2026-10-21 Harbor sailing plans/rename", {"key": "them:1", "name": "  نادیہ رحمان  "})[0] == 204
 
     names = stream.until("meeting")
-    assert names == {"type": "names", "names": {"them:0": "Speaker 1", "them:1": "نادیہ رحمان"}, "id": "2026-10-21 Harbor scoping call"}
+    assert names == {"type": "names", "names": {"them:0": "Speaker 1", "them:1": "نادیہ رحمان"}, "id": "2026-10-21 Harbor sailing plans"}
     assert "**نادیہ رحمان**" in (folder / "transcript.md").read_text(encoding="utf-8")
-    status, transcript = rig.call("GET", "/api/meetings/2026-10-21 Harbor scoping call")
+    status, transcript = rig.call("GET", "/api/meetings/2026-10-21 Harbor sailing plans")
     assert status == 200 and transcript["names"]["them:1"] == "نادیہ رحمان"
     stream.close()
 
 
 def test_a_name_longer_than_sixty_characters_is_cut_to_sixty(rig: MeetingRig) -> None:
-    rig.saved_meeting("2026-10-21 Harbor scoping call", [("them", 0, 0.0, "Hi.")])
+    rig.saved_meeting("2026-10-21 Harbor sailing plans", [("them", 0, 0.0, "Hi.")])
 
-    rig.call("POST", "/api/meetings/2026-10-21 Harbor scoping call/rename", {"key": "them:0", "name": "Z" * 500})
+    rig.call("POST", "/api/meetings/2026-10-21 Harbor sailing plans/rename", {"key": "them:0", "name": "Z" * 500})
 
-    _status, transcript = rig.call("GET", "/api/meetings/2026-10-21 Harbor scoping call")
+    _status, transcript = rig.call("GET", "/api/meetings/2026-10-21 Harbor sailing plans")
     assert transcript["names"]["them:0"] == "Z" * 60
 
 
@@ -182,9 +182,9 @@ def test_a_name_longer_than_sixty_characters_is_cut_to_sixty(rig: MeetingRig) ->
     {"key": "../../x", "name": "Omar"}, {"key": "them:x", "name": "Omar"}, {"name": "Omar"}, {"key": "them:0"}, ["them:0"],
 ])
 def test_a_rename_that_names_no_real_speaker_is_refused(rig: MeetingRig, body: object) -> None:
-    rig.saved_meeting("2026-10-21 Harbor scoping call", [("them", 0, 0.0, "Hi.")])
+    rig.saved_meeting("2026-10-21 Harbor sailing plans", [("them", 0, 0.0, "Hi.")])
 
-    assert rig.call("POST", "/api/meetings/2026-10-21 Harbor scoping call/rename", body)[0] == 400
+    assert rig.call("POST", "/api/meetings/2026-10-21 Harbor sailing plans/rename", body)[0] == 400
 
 
 @pytest.mark.parametrize("meeting_id", ["..", "missing", "vocabulary.txt"])
@@ -278,11 +278,11 @@ def test_renaming_a_saved_meeting_renames_its_folder_and_answers_with_its_new_id
 
 def test_deleting_a_saved_meeting_sends_its_folder_to_the_recycle_bin(rig: MeetingRig) -> None:
     rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Welcome aboard.")])
-    rig.saved_meeting("2026-10-21 15-05 Harbor scoping call", [("them", 0, 0.0, "Hi.")])
+    rig.saved_meeting("2026-10-21 15-05 Harbor sailing plans", [("them", 0, 0.0, "Hi.")])
 
     assert rig.call("DELETE", "/api/meetings/2026-10-16 20-20 Ops Onboarding")[0] == 204
 
-    assert _ids(rig) == ["2026-10-21 15-05 Harbor scoping call"]
+    assert _ids(rig) == ["2026-10-21 15-05 Harbor sailing plans"]
     assert (rig.recycle_bin / "2026-10-16 20-20 Ops Onboarding" / "transcript.json").is_file()
 
 

@@ -173,12 +173,12 @@ def _saved_meetings():
     """Folders like the ones in D:\\Meetings: named by hand or by the minute they started."""
     now = datetime.now().replace(second=0, microsecond=0)
     folders = [
-        ("{:%Y-%m-%d} 22-45 Marta email tool setup", 1, 4357.7, {"them:0": "Priya Nair", "them:1": "Omar Haddad", "them:2": "Marta Lindgren", "them:3": "Theo Carver"}),
+        ("{:%Y-%m-%d} 22-45 Marta garden planning", 1, 4357.7, {"them:0": "Priya Nair", "them:1": "Omar Haddad", "them:2": "Marta Lindgren", "them:3": "Theo Carver"}),
         ("{:%Y-%m-%d %H-%M}", 2, 1830.0, {}),
-        ("{:%Y-%m-%d} Harbor scoping call", 8, 3720.5, {"them:0": "Leo Brandt", "them:1": "نادیہ رحمان"}),
+        ("{:%Y-%m-%d} Harbor sailing plans", 8, 3720.5, {"them:0": "Leo Brandt", "them:1": "نادیہ رحمان"}),
         ("{:%Y-%m-%d} Ops Onboarding", 13, 3065.0, {"them:0": "Leo Brandt"}),
         ("{:%Y-%m-%d} 22-53", 9, 2410.0, {}),
-        ("{:%Y-%m-%d} Cedar F&B", 43, 2988.0, {"them:4": "Cedar"}),
+        ("{:%Y-%m-%d} Cedar bake sale", 43, 2988.0, {"them:4": "Cedar"}),
     ]
     rng = random.Random(11)
     meetings = {}

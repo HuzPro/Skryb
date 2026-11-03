@@ -94,7 +94,7 @@ describe("talk share", () => {
 describe("meeting names", () => {
   it("reads the name after the date, and calls a folder named only by its time Meeting", () => {
     expect(meetingName("2026-10-16 Ops Onboarding")).toBe("Ops Onboarding");
-    expect(meetingName("2026-10-28 22-45 Marta email tool setup")).toBe("Marta email tool setup");
+    expect(meetingName("2026-10-28 22-45 Marta garden planning")).toBe("Marta garden planning");
     expect(meetingName("2026-10-20 22-53")).toBe("Meeting");
     expect(meetingName("2026-10-29 14-05")).toBe("Meeting");
     expect(meetingName("2026-10-29 14-05 (2)")).toBe("Meeting");
