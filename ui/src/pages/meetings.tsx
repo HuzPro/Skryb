@@ -409,27 +409,39 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
   const box = useRef<HTMLDivElement>(null);
   const [atEnd, setAtEnd] = useState(true);
   const stick = useRef(true);
+  const landed = useRef(false);
+  const lastTop = useRef(0);
   const nearBottom = () => {
     const element = box.current;
     return !element || element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_BOTTOM_PX;
   };
+  // Opening the page lands on the newest line at once; after that each new line glides into view.
   useEffect(() => {
     const element = box.current;
-    if (element && live && stick.current) element.scrollTop = element.scrollHeight;
-    setAtEnd(nearBottom());
+    if (element && live && stick.current) {
+      element.scrollTo({ top: element.scrollHeight, behavior: landed.current ? "auto" : "instant" });
+      landed.current = transcript.entries.length > 0;
+    }
+    setAtEnd(stick.current);
   }, [transcript.entries, live]);
+  // Only scrolling up lets go of the newest line, so a glide down to a tall new line never does.
   const onScroll = () => {
-    stick.current = nearBottom();
+    const element = box.current;
+    if (!element) return;
+    const up = element.scrollTop < lastTop.current;
+    lastTop.current = element.scrollTop;
+    if (up || nearBottom()) stick.current = nearBottom();
     setAtEnd(stick.current);
   };
   const jump = () => {
     const element = box.current;
-    if (element) element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
     stick.current = true;
+    setAtEnd(true);
+    if (element) element.scrollTop = element.scrollHeight;
   };
   return (
     <Card className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div ref={box} onScroll={onScroll} aria-live={live ? "polite" : undefined} className="selectable min-h-0 flex-1 overflow-y-auto px-5 py-3">
+      <div ref={box} onScroll={onScroll} aria-live={live ? "polite" : undefined} className="selectable min-h-0 flex-1 overflow-y-auto px-5 py-3 motion-safe:scroll-smooth">
         {turns.length ? (
           turns.map((turn) => (
             <div
