@@ -16,10 +16,12 @@ from skryb.recording.overlay import (
 from skryb.recording.pill import (
     CANVAS_WIDTH,
     DEFAULT_PILL_POSITION,
+    DEFAULT_SKIN,
     NOTICE_CLOSE,
     Mode,
     NoticeLayout,
     PillPosition,
+    PillSkin,
     Spring,
     notice_layout,
     notice_target,
@@ -72,6 +74,10 @@ def _no_pill() -> bool:
     return False
 
 
+def _default_skin() -> PillSkin:
+    return DEFAULT_SKIN
+
+
 class Notice:
     """One message with up to three buttons and a close cross, where the pill was.
 
@@ -85,6 +91,7 @@ class Notice:
     changing its stacking, so the pill, shown after it, stays in front. A
     new notice replaces the one showing. Each fades away on its own: after
     ten seconds, or four once tucked, held for as long as it is pointed at.
+    Each one is drawn in the pill's ``skin`` of the moment it opens.
     """
 
     def __init__(
@@ -95,6 +102,7 @@ class Notice:
         load_position: Callable[[], PillPosition] = _default_position,
         pill_showing: Callable[[], bool] = _no_pill,
         clock: Callable[[], float] = time.monotonic,
+        skin: Callable[[], PillSkin] = _default_skin,
     ) -> None:
         self._root = root
         self._window_factory = window_factory
@@ -102,6 +110,8 @@ class Notice:
         self._load_position = load_position
         self._pill_showing = pill_showing
         self._clock = clock
+        self._skin_source = skin
+        self._skin = DEFAULT_SKIN
         self._layout: NoticeLayout | None = None
         self._actions: list[Callable[[], None]] = []
         self._hovered: int | None = None
@@ -153,6 +163,7 @@ class Notice:
         self._clicked = None
         self._pixels = {}
         self._pushed = None
+        self._skin = self._skin_source()
         window = self._api()
         window.resize(layout.width, layout.height)
         self._work_area = window.work_area_for_foreground()
@@ -301,7 +312,7 @@ class Notice:
             return
         pixels = self._pixels.get(self._hovered)
         if pixels is None:
-            pixels = premultiplied_array(render_notice(self._layout, self._hovered, display_scale()))
+            pixels = premultiplied_array(render_notice(self._layout, self._hovered, display_scale(), self._skin))
             self._pixels[self._hovered] = pixels
         faded = pixels if level >= 255 else (pixels.astype(numpy.uint16) * level // 255).astype(numpy.uint8)
         if hidden is not None:

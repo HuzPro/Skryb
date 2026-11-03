@@ -32,10 +32,12 @@ from skryb.recording.pill import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     DEFAULT_PILL_POSITION,
+    DEFAULT_SKIN,
     Button,
     Frame,
     Mode,
     PillPosition,
+    PillSkin,
     Spring,
     VoiceHistory,
     collapsed_size,
@@ -600,6 +602,10 @@ def _forget_position(_position: PillPosition) -> None:
     return None
 
 
+def _default_skin() -> PillSkin:
+    return DEFAULT_SKIN
+
+
 class RecordingOverlay:
     """The pill: grows in on record, shimmers while transcribing, leaves as the text is pasted.
 
@@ -609,6 +615,7 @@ class RecordingOverlay:
 
     Dragging the pill by anything but its buttons moves it, and it comes
     back there next time; a double click puts it back at the bottom centre.
+    Each recording reads ``skin`` afresh, so a new theme shows on the next one.
     """
 
     def __init__(
@@ -626,6 +633,7 @@ class RecordingOverlay:
         clock: Callable[[], float] = time.monotonic,
         load_position: Callable[[], PillPosition] = _default_position,
         save_position: Callable[[PillPosition], None] = _forget_position,
+        skin: Callable[[], PillSkin] = _default_skin,
     ) -> None:
         self._root = root
         self._event_bus = event_bus
@@ -655,7 +663,9 @@ class RecordingOverlay:
         # Kept across recordings: it has learnt how loud this speaker is.
         self._voice = VoiceHistory(_HISTORY_SLICES)
         self._transcribing_since = 0.0
-        self._settled_label = premultiplied_array(render(settled_label_frame(), display_scale()))
+        self._skin_source = skin
+        self._skin = skin()
+        self._settled_label = self._settled_label_pixels()
         self._switch_interval: float | None = None
         self._pressed: Button | None = None
         self._work_area = (0, 0, 0, 0)
@@ -700,6 +710,7 @@ class RecordingOverlay:
     def show(self) -> None:
         """Grow the pill in for a new recording."""
         if not self._visible:
+            self._take_skin()
             self._work_area = self._window_api.work_area_for_foreground()
             self._origin = pill_origin(self._load_position(), self._work_area)
             self._window_api.show_at(*self._origin)
@@ -734,6 +745,15 @@ class RecordingOverlay:
         self._restore_switch_interval()
         self._visible = False
         self._window_api.dispose()
+
+    def _take_skin(self) -> None:
+        skin = self._skin_source()
+        if skin != self._skin:
+            self._skin = skin
+            self._settled_label = self._settled_label_pixels()
+
+    def _settled_label_pixels(self) -> numpy.ndarray:
+        return premultiplied_array(render(settled_label_frame(), display_scale(), self._skin))
 
     def _start_transcribing(self) -> None:
         if not self._visible:
@@ -894,9 +914,9 @@ class RecordingOverlay:
         self._frame = self._current_frame(hovered)
         base = (
             self._settled_label if is_settled_label(self._frame)
-            else premultiplied_array(render(self._frame, display_scale()))
+            else premultiplied_array(render(self._frame, display_scale(), self._skin))
         )
-        self._window_api.push_frame(shimmered(base, self._frame).tobytes())
+        self._window_api.push_frame(shimmered(base, self._frame, self._skin).tobytes())
         if self._mode is Mode.CLOSED and self._opacity.value < 0.01:
             self._visible = False
             self._window_api.hide()

@@ -17,6 +17,7 @@ from skryb.recording.pill import (
     notice_target,
     pill_box,
     pill_origin,
+    pill_skin,
     render,
     render_notice,
     target_size,
@@ -500,3 +501,25 @@ def test_the_close_cross_is_told_apart_from_the_buttons() -> None:
     assert notice_target(layout, cx, cy) == NOTICE_CLOSE
     assert notice_target(layout, *_centre(layout.buttons[0])) == 0
     assert notice_target(layout, 0, 0) is None
+
+
+def test_each_notice_opens_in_the_theme_of_the_moment() -> None:
+    root = FakeRoot()
+    window = FakeNoticeWindow(root)
+    chosen = [pill_skin("default", True)]
+    notice = Notice(root, lambda: window, clock=lambda: root.now, skin=lambda: chosen[0])
+
+    def body_colour() -> tuple[int, int, int]:
+        width, height = window.size
+        at = ((height // 2) * width + 10) * 4
+        blue, green, red, alpha = window.frames[-1][at:at + 4]
+        return round(red * 255 / alpha), round(green * 255 / alpha), round(blue * 255 / alpha)
+
+    notice.show("Recording cancelled.")
+    root.run(1.0)
+    assert body_colour() == pytest.approx(chosen[0].fill, abs=2)
+
+    chosen[0] = pill_skin("paper", False)
+    notice.show("No text box here, so it's on your clipboard.")
+    root.run(1.0)
+    assert body_colour() == pytest.approx(chosen[0].fill, abs=2)
