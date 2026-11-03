@@ -90,15 +90,21 @@ function stopMeeting(): Promise<unknown> {
 }
 
 /** What the footer card says in meeting mode: Ready, the recording's running time, or a file's progress. */
-export function meetingStatus(live: LiveMeeting | null | undefined, overview: MeetingOverview | undefined, elapsed: number): { tone: Tone; label: string } {
+export function meetingStatus(
+  live: LiveMeeting | null | undefined,
+  overview: MeetingOverview | undefined,
+  elapsed: number,
+  audio: string,
+): { tone: Tone; label: string; detail: string } {
   const running = live?.recording ?? overview?.recording ?? false;
-  if (live?.status === "Finishing") return { tone: "primary", label: "Finishing" };
-  if (running && live?.source) return { tone: "primary", label: live.progress == null ? live.status : `${live.status} ${percent(live.progress)}` };
-  if (running && live && live.status !== "Recording") return { tone: "warning", label: live.status };
-  if (running) return { tone: "destructive", label: `Recording ${formatDuration(elapsed)}` };
-  if (overview && !overview.models_ready) return { tone: "warning", label: "Needs its models" };
-  if (!overview) return { tone: "muted", label: "Connecting" };
-  return { tone: "success", label: "Ready" };
+  if (live?.status === "Finishing") return { tone: "primary", label: "Finishing", detail: audio };
+  if (running && live?.source) return { tone: "primary", label: live.progress == null ? live.status : `${live.status} ${percent(live.progress)}`, detail: live.source };
+  if (running && live && live.status !== "Recording") return { tone: "warning", label: live.status, detail: audio };
+  // The card is narrow: the time leads, so it is never the part cut off.
+  if (running) return { tone: "destructive", label: formatDuration(elapsed), detail: `Recording · ${audio}` };
+  if (overview && !overview.models_ready) return { tone: "warning", label: "Needs its models", detail: audio };
+  if (!overview) return { tone: "muted", label: "Connecting", detail: audio };
+  return { tone: "success", label: "Ready", detail: audio };
 }
 
 /** Meeting mode's footer card: opens the live meeting; while one records, Stop ends it from here. */
@@ -109,8 +115,7 @@ export function MeetingStatusCard({ onOpen }: { onOpen: () => void }) {
   const running = live?.recording ?? false;
   const file = running && Boolean(live?.source);
   const elapsed = useElapsed(live?.started, running && !file);
-  const { tone, label } = meetingStatus(live, overview, elapsed);
-  const detail = file ? (live?.source ?? "") : saved?.meetings.record_microphone === false ? "PC audio only" : "PC audio and your mic";
+  const { tone, label, detail } = meetingStatus(live, overview, elapsed, saved?.meetings.record_microphone === false ? "PC audio only" : "PC audio and your mic");
   return (
     <StatusCard
       tone={tone}

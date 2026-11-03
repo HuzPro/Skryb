@@ -269,26 +269,32 @@ describe("past meetings under History", () => {
 describe("the footer card in meeting mode", () => {
   const overview = (ready = true): MeetingOverview => ({ recording: false, folder: "D:\\Meetings", models_ready: ready, models: [], meetings: [] });
 
-  it("is Ready when nothing records and the models are in", () => {
-    expect(meetingStatus(null, overview(), 0)).toEqual({ tone: "success", label: "Ready" });
+  const audio = "PC audio and your mic";
+
+  it("is Ready when nothing records and the models are in, and says what it will record", () => {
+    expect(meetingStatus(null, overview(), 0, audio)).toEqual({ tone: "success", label: "Ready", detail: audio });
   });
 
   it("asks for the models before the first meeting", () => {
-    expect(meetingStatus(null, overview(false), 0).label).toBe("Needs its models");
+    expect(meetingStatus(null, overview(false), 0, audio).label).toBe("Needs its models");
   });
 
-  it("counts a recording up in minutes and seconds, past the hour too", () => {
+  it("leads with the running time while recording, past the hour too", () => {
     const recording = { ...live(), status: "Recording" as const };
-    expect(meetingStatus(recording, overview(), 754)).toEqual({ tone: "destructive", label: "Recording 12:34" });
-    expect(meetingStatus(recording, overview(), 3725)).toEqual({ tone: "destructive", label: "Recording 1:02:05" });
+    expect(meetingStatus(recording, overview(), 754, audio)).toEqual({ tone: "destructive", label: "12:34", detail: "Recording · PC audio and your mic" });
+    expect(meetingStatus(recording, overview(), 3725, audio).label).toBe("1:02:05");
   });
 
-  it("says how far a dropped file has got", () => {
+  it("says a meeting is still loading its models rather than counting time", () => {
+    expect(meetingStatus({ ...live(), status: "Loading models" }, overview(), 3, audio)).toMatchObject({ tone: "warning", label: "Loading models" });
+  });
+
+  it("says how far a dropped file has got and names the file", () => {
     const file = { ...live(), status: "Transcribing" as const, source: "Interview – Ana Lúcia.mp4", progress: 0.42 };
-    expect(meetingStatus(file, overview(), 0)).toEqual({ tone: "primary", label: "Transcribing 42%" });
+    expect(meetingStatus(file, overview(), 0, audio)).toEqual({ tone: "primary", label: "Transcribing 42%", detail: "Interview – Ana Lúcia.mp4" });
   });
 
   it("says Finishing while the last lines are written", () => {
-    expect(meetingStatus({ ...live(), recording: false, status: "Finishing" }, overview(), 0).label).toBe("Finishing");
+    expect(meetingStatus({ ...live(), recording: false, status: "Finishing" }, overview(), 0, audio).label).toBe("Finishing");
   });
 });
