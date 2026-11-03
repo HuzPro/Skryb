@@ -5,6 +5,7 @@ import sys
 import numpy
 import pytest
 
+from skryb.core.brand_mark import EMERALD_DEEP
 from skryb.recording.pill import (
     BOTTOM_MARGIN,
     CANVAS_HEIGHT,
@@ -14,6 +15,7 @@ from skryb.recording.pill import (
     Button,
     Frame,
     Mode,
+    PAPER_COLOURWAYS,
     Spring,
     VoiceHistory,
     VoiceLevel,
@@ -581,6 +583,36 @@ class TestThemes:
 
         assert any((abs(pixels.astype(int) - skin.wave) <= 2).all(axis=1))
 
+    def test_each_paper_colourway_draws_the_finish_button_and_bars_in_its_own_accent(self):
+        for dark in (True, False):
+            accents = {pill_skin("paper", dark, colourway).finish for colourway in PAPER_COLOURWAYS}
+
+            assert len(accents) == len(PAPER_COLOURWAYS)
+            for colourway in PAPER_COLOURWAYS:
+                skin = pill_skin("paper", dark, colourway)
+                assert skin.wave == skin.finish
+                assert skin.fill == pill_skin("paper", dark).fill
+
+    def test_paper_starts_in_the_skryb_green_and_an_unknown_colourway_falls_back_to_it(self):
+        green = pill_skin("paper", False, "green")
+
+        assert green.finish == EMERALD_DEEP
+        assert pill_skin("paper", False) == green
+        for unknown in ("neon", "", None, 42, ["ink"], "Ink"):
+            assert pill_skin("paper", False, unknown) == green
+
+    @pytest.mark.parametrize("colourway", PAPER_COLOURWAYS)
+    @pytest.mark.parametrize("dark", [True, False])
+    def test_the_tick_on_every_paper_colourways_finish_button_is_readable(self, colourway, dark):
+        skin = pill_skin("paper", dark, colourway)
+
+        assert _contrast(skin.finish, skin.finish_glyph) >= 4.5
+        assert _contrast(skin.finish_hover, skin.finish_glyph) >= 4.5
+
+    def test_a_colourway_only_changes_paper(self):
+        for theme in ("default", "glass", "material"):
+            assert pill_skin(theme, True, "plum") == pill_skin(theme, True)
+
     def test_an_unknown_or_missing_theme_draws_the_default_pill(self):
         assert pill_skin("neon", True) is DEFAULT_SKIN
         assert pill_skin(None, True) is DEFAULT_SKIN
@@ -614,3 +646,17 @@ class TestThemes:
 
         assert image.size == render_notice(layout).size
         assert image.getpixel((10, layout.height // 2))[:3] == pytest.approx(skin.fill, abs=1)
+
+
+def _contrast(first: tuple[int, int, int], second: tuple[int, int, int]) -> float:
+    """WCAG's contrast ratio between two colours."""
+
+    def luminance(colour: tuple[int, int, int]) -> float:
+        linear = [
+            value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+            for value in (channel / 255 for channel in colour)
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)

@@ -75,7 +75,7 @@ export function InlineError({ children }: { children: ReactNode }) {
 
 export interface Choice<T extends string> {
   value: T;
-  title: string;
+  title: ReactNode;
   description: string;
   disabled?: boolean;
 }

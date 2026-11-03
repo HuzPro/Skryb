@@ -138,6 +138,18 @@ class TestPillSkin:
             assert load_pill_skin(config, lambda: ColorScheme.DARK) == pill_skin(theme, True)
             assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin(theme, False)
 
+    def test_paper_follows_the_saved_colourway(self):
+        config = FakeConfig({"ui.theme": "paper", "ui.paper_colourway": "ink"})
+
+        assert load_pill_skin(config, lambda: ColorScheme.DARK) == pill_skin("paper", True, "ink")
+        assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin("paper", False, "ink")
+
+    def test_paper_with_no_or_a_hand_edited_colourway_is_green(self):
+        for colourway in (None, 7, "Ink blue 🖋"):
+            values = {"ui.theme": "paper"} if colourway is None else {"ui.theme": "paper", "ui.paper_colourway": colourway}
+
+            assert load_pill_skin(FakeConfig(values), lambda: ColorScheme.LIGHT) == pill_skin("paper", False, "green")
+
     def test_a_fresh_or_hand_edited_config_gets_the_default_pill(self):
         assert load_pill_skin(FakeConfig(), lambda: ColorScheme.DARK) is DEFAULT_SKIN
         assert load_pill_skin(FakeConfig({"ui.theme": 42}), lambda: ColorScheme.DARK) is DEFAULT_SKIN

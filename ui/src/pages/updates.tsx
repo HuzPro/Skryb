@@ -9,13 +9,30 @@ import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { chooseOpenPath, chooseSavePath } from "../lib/platform";
 import { useStore } from "../lib/store";
-import type { Theme, UpdateStatus } from "../lib/types";
+import type { PaperColourway, Theme, UpdateStatus } from "../lib/types";
 
 const THEMES: Choice<Theme>[] = [
   { value: "default", title: "Default", description: "Clean and quiet, the way Skryb has always looked." },
   { value: "glass", title: "Glass", description: "Clear, neutral glass with light along its edges." },
   { value: "material", title: "Material", description: "Rounded, tonal and springy, grown from one indigo." },
   { value: "paper", title: "Paper", description: "Ink on warm paper, with serif headings." },
+];
+
+function Swatch({ colourway, name }: { colourway: PaperColourway; name: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span data-colourway={colourway} className="size-2.5 rounded-full bg-primary" />
+      {name}
+    </span>
+  );
+}
+
+const COLOURWAYS: Choice<PaperColourway>[] = [
+  { value: "green", title: <Swatch colourway="green" name="Skryb green" />, description: "The green of the Skryb icon." },
+  { value: "terracotta", title: <Swatch colourway="terracotta" name="Terracotta" />, description: "Warm clay, Paper's first ink." },
+  { value: "ink", title: <Swatch colourway="ink" name="Ink blue" />, description: "Fountain-pen blue." },
+  { value: "plum", title: <Swatch colourway="plum" name="Plum" />, description: "A deep red-purple." },
+  { value: "graphite", title: <Swatch colourway="graphite" name="Graphite" />, description: "Pencil grey, no colour at all." },
 ];
 
 /** What the Updates section says about *update*; null means a git checkout, which updates through git. */
@@ -151,6 +168,16 @@ export function SettingsPage() {
 
       <Section title="Theme" note="Each theme follows Windows' light or dark setting. You see it as you pick; Save keeps it.">
         <ChoiceCards<Theme> label="Theme" value={draft.theme} choices={THEMES} onChange={(theme) => editSettings((current) => ({ ...current, theme }))} />
+        {draft.theme === "paper" ? (
+          <div className="mt-2.5">
+            <ChoiceCards<PaperColourway>
+              label="Paper colourway"
+              value={draft.paper_colourway}
+              choices={COLOURWAYS}
+              onChange={(paper_colourway) => editSettings((current) => ({ ...current, paper_colourway }))}
+            />
+          </div>
+        ) : null}
       </Section>
 
       <Section title="Settings and logs">

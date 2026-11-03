@@ -102,18 +102,20 @@ function ShowWhenReady() {
  * cross-fades as one picture, with colour transitions held off so no part of it fades on its own.
  */
 function ThemeSync() {
-  const theme = useStore().settings?.draft.theme;
+  const draft = useStore().settings?.draft;
+  const theme = draft?.theme;
+  const colourway = draft?.paper_colourway;
   useEffect(() => {
     const root = document.documentElement;
-    if (!theme || root.dataset.theme === theme) return;
+    if (!theme || (root.dataset.theme === theme && root.dataset.colourway === (theme === "paper" ? colourway : undefined))) return;
     const swap = () => {
       root.setAttribute("data-theme-switch", "");
-      applyTheme(theme);
+      applyTheme(theme, colourway);
     };
     const fade = document.startViewTransition?.(swap);
     if (!fade) swap();
     void (fade?.ready ?? Promise.resolve()).finally(() => root.removeAttribute("data-theme-switch"));
-  }, [theme]);
+  }, [theme, colourway]);
   return null;
 }
 

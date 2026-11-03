@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
     },
     "ui": {
         "theme": "default",
+        "paper_colourway": "green",
     },
 }
 

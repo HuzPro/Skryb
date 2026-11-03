@@ -324,11 +324,9 @@
   --muted-foreground: #6c6457;
   --border: #e4dccb;
   --input: #d3c9b5;
-  --ring: #9a4b2c;
-  --primary: #9a4b2c;
-  --primary-foreground: #fffaf3;
+  --ring: var(--primary);
   --accent: #efe8db;
-  --selected: #f5e7dc;
+  --selected: color-mix(in oklab, var(--primary) 12%, var(--card));
   --destructive: #b3261e;
   --success: #3d7a3a;
   --warning: #9a5b10;
@@ -381,11 +379,7 @@
     --muted-foreground: #a69d8d;
     --border: #322d27;
     --input: #443d34;
-    --ring: #e0906b;
-    --primary: #e0906b;
-    --primary-foreground: #1d1410;
     --accent: #2b2722;
-    --selected: #3a2a21;
     --destructive: #f2867a;
     --success: #8fcf8a;
     --warning: #e7b264;
@@ -404,6 +398,51 @@
     --overlay: rgb(0 0 0 / 0.5);
     --thumb: var(--muted-foreground);
     --thumb-shadow: 0 0 #0000;
+  }
+}
+
+/* Paper's colourways: the accent and the text on it. A swatch carries its own; skryb/recording/pill.py has the pill's. */
+[data-colourway="green"] {
+  --primary: #047857;
+  --primary-foreground: #ffffff;
+}
+[data-colourway="terracotta"] {
+  --primary: #9a4b2c;
+  --primary-foreground: #fffaf3;
+}
+[data-colourway="ink"] {
+  --primary: #2a5288;
+  --primary-foreground: #ffffff;
+}
+[data-colourway="plum"] {
+  --primary: #7d3a70;
+  --primary-foreground: #ffffff;
+}
+[data-colourway="graphite"] {
+  --primary: #46484d;
+  --primary-foreground: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-colourway="green"] {
+    --primary: #34d399;
+    --primary-foreground: #04241a;
+  }
+  [data-colourway="terracotta"] {
+    --primary: #e0906b;
+    --primary-foreground: #1d1410;
+  }
+  [data-colourway="ink"] {
+    --primary: #8fb5e8;
+    --primary-foreground: #0c1a2c;
+  }
+  [data-colourway="plum"] {
+    --primary: #d89bc8;
+    --primary-foreground: #2a0f24;
+  }
+  [data-colourway="graphite"] {
+    --primary: #cbc7bf;
+    --primary-foreground: #1b1a18;
   }
 }
 

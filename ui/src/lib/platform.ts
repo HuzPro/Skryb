@@ -74,9 +74,12 @@ export function showWindow(): void {
   void appWindow?.show();
 }
 
-/** Themes hang off `data-theme` on <html>; anything unknown is the default look. */
-export function applyTheme(theme: string | undefined): void {
-  document.documentElement.dataset.theme = theme ?? "default";
+/** Themes hang off `data-theme` on <html>, and Paper's colourway off `data-colourway`; anything unknown is the default look. */
+export function applyTheme(theme: string | undefined, colourway: string | undefined): void {
+  const root = document.documentElement;
+  root.dataset.theme = theme ?? "default";
+  if (theme === "paper") root.dataset.colourway = colourway ?? "green";
+  else delete root.dataset.colourway;
 }
 
 /** Alt+F4 and the taskbar close ask first; `ask` returns true when the window may close. */

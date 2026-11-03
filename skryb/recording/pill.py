@@ -7,7 +7,7 @@ transparent margin passes clicks through to whatever is underneath.
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cache, lru_cache
 
@@ -144,7 +144,8 @@ _SKINS: dict[tuple[str, bool], PillSkin] = {
         glyph=(24, 26, 36), finish_glyph=(255, 255, 255), label=(24, 26, 36),
         warning=(174, 103, 0), wave=(81, 82, 193), shimmer=(188, 196, 255), light=True, roundness=0.67,
     ),
-    # Paper: ink on cream inside a ruled edge, with a card's corners.
+    # Paper: ink on cream inside a ruled edge, with a card's corners, in a
+    # colourway's accent (see _PAPER_ACCENTS); these are the terracotta.
     ("paper", True): PillSkin(
         fill=(35, 32, 28), fill_alpha=250, border=(68, 61, 52, 255),
         button=(52, 47, 41), button_hover=(68, 61, 52),
@@ -162,10 +163,43 @@ _SKINS: dict[tuple[str, bool], PillSkin] = {
 }
 
 
-def pill_skin(theme: object, dark: bool) -> PillSkin:
-    """The pill for the window's ``theme``, light or dark; an unknown theme gets the default."""
+# Paper's colourways, the Skryb icon's green first: the accent and the text
+# on it, light then dark. The window's twin is in ui/src/index.css.
+PAPER_COLOURWAYS = ("green", "terracotta", "ink", "plum", "graphite")
+_PAPER_ACCENTS: dict[str, tuple[tuple[Rgb, Rgb], tuple[Rgb, Rgb]]] = {
+    "green": ((EMERALD_DEEP, (255, 255, 255)), (EMERALD_LIGHT, (4, 36, 26))),
+    "terracotta": (((154, 75, 44), (255, 250, 243)), ((224, 144, 107), (29, 20, 16))),
+    "ink": (((42, 82, 136), (255, 255, 255)), ((143, 181, 232), (12, 26, 44))),
+    "plum": (((125, 58, 112), (255, 255, 255)), ((216, 155, 200), (42, 15, 36))),
+    "graphite": (((70, 72, 77), (255, 255, 255)), ((203, 199, 191), (27, 26, 24))),
+}
+
+
+# Hovering deepens the accent under white text and lifts it under dark text,
+# so the text only gets easier to read.
+_AWAY_FROM_INK: dict[bool, Rgb] = {True: (0, 0, 0), False: (255, 255, 255)}
+
+
+def pill_skin(theme: object, dark: bool, colourway: object = PAPER_COLOURWAYS[0]) -> PillSkin:
+    """The pill for the window's ``theme``, light or dark; an unknown theme gets the default.
+
+    Paper takes its accent from ``colourway``; an unknown one is the green.
+    """
     key = (theme if isinstance(theme, str) else "default", dark)
-    return _SKINS.get(key) or _SKINS[("default", dark)]
+    skin = _SKINS.get(key) or _SKINS[("default", dark)]
+    if key[0] != "paper":
+        return skin
+    known = colourway if isinstance(colourway, str) and colourway in _PAPER_ACCENTS else PAPER_COLOURWAYS[0]
+    accent, ink = _PAPER_ACCENTS[known][dark]
+    return replace(
+        skin, finish=accent, finish_hover=_mixed(accent, _AWAY_FROM_INK[skin.light], 0.14), finish_glyph=ink,
+        wave=accent, shimmer=_mixed(accent, skin.fill, 0.82 if skin.light else 0.65),
+    )
+
+
+def _mixed(colour: Rgb, other: Rgb, share: float) -> Rgb:
+    red, green, blue = (round(a + (b - a) * share) for a, b in zip(colour, other, strict=True))
+    return red, green, blue
 
 
 class Mode(Enum):

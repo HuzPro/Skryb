@@ -13,6 +13,7 @@ from skryb.core.color_scheme import ColorScheme, detect_app_color_scheme
 from skryb.core.config import ConfigurationStore, ConfigValue
 from skryb.recording.pill import (
     DEFAULT_PILL_POSITION,
+    PAPER_COLOURWAYS,
     PillPosition,
     PillSkin,
     pill_skin,
@@ -86,8 +87,12 @@ def load_pill_position(config: ConfigurationStore) -> PillPosition:
 def load_pill_skin(
     config: ConfigurationStore, scheme: Callable[[], ColorScheme] = detect_app_color_scheme,
 ) -> PillSkin:
-    """The pill in the window's theme and in Windows' light or dark setting for apps."""
-    return pill_skin(config.get("ui.theme", "default"), scheme() is ColorScheme.DARK)
+    """The pill in the window's theme, Paper's colourway and Windows' light or dark setting for apps."""
+    return pill_skin(
+        config.get("ui.theme", "default"),
+        scheme() is ColorScheme.DARK,
+        config.get("ui.paper_colourway", PAPER_COLOURWAYS[0]),
+    )
 
 
 def save_pill_position(config: ConfigurationStore, position: PillPosition) -> None:

@@ -136,6 +136,7 @@ def _default_settings():
         "check_for_updates": True,
         "meetings": {"folder": MEETINGS_FOLDER, "record_microphone": True, "language": "en"},
         "theme": "default",
+        "paper_colourway": "green",
     }
 
 
