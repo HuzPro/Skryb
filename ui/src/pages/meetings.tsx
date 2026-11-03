@@ -322,7 +322,7 @@ function LiveCard({ live, overview, meetings, onOpen }: { live: LiveMeeting | nu
   return (
     <Card className="px-5 py-4">
       <div className="flex items-start gap-3.5">
-        <Circle className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", running && !file && "animate-pulse fill-current text-destructive")} aria-hidden />
+        <Circle className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", running && !file && "fill-current text-destructive motion-safe:animate-pulse")} aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="text-[14px] font-medium tabular-nums">
             {file ? "Transcribing a file" : running ? `${live?.status === "Recording" ? "Recording" : (live?.status ?? "Recording")} · ${formatDuration(elapsed)}` : "Ready when your meeting is"}
@@ -389,7 +389,7 @@ function StatusBadge({ live }: { live: LiveMeeting }) {
   if (live.status === "Recording") {
     return (
       <Badge variant="destructive">
-        <span className="size-1.5 animate-pulse rounded-full bg-destructive" />
+        <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" />
         Recording
       </Badge>
     );

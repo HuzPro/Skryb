@@ -148,7 +148,7 @@ export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange
           >
             <Icon />
             {label}
-            {value === "meetings" && recording ? <span className="size-1.5 animate-pulse rounded-full bg-destructive" /> : null}
+            {value === "meetings" && recording ? <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" /> : null}
           </button>
         );
       })}
