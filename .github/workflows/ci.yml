@@ -19,11 +19,45 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Tests (Python ${{ matrix.python }}, ${{ matrix.n }})
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11"]
+        n: ["auto", "6"]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+      - name: Install system libraries (no update)
+        run: |
+          time sudo apt-get install -y --no-install-recommends libportaudio2 libsndfile1 xvfb xauth || echo "NEEDS UPDATE"
+      - name: Install Python dependencies
+        run: |
+          uv pip install --system --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+          uv pip install --system -e ".[dev,npu]" pytest-xdist
+      - run: python native/tdt/build.py
+      - name: Run tests
+        run: |
+          /usr/bin/time -v xvfb-run -a python -m pytest -q -n ${{ matrix.n }} --dist worksteal 2> time.txt; tail -25 time.txt | head -12
+
   ui:
     name: Settings window
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
+      - name: key timing
+        shell: bash
+        run: |
+          time rustc -V
+          time rustc -V
+          time ls ~/.rustup/toolchains
       - id: key
         shell: bash
         run: echo "exe=ui-exe-$(rustc -V | cut -d' ' -f2)-node22-${{ hashFiles('ui/**') }}-${{ inputs.salt }}" >> "$GITHUB_OUTPUT"
@@ -68,10 +102,8 @@ jobs:
       - if: steps.exe.outputs.cache-hit != 'true'
         name: Build settings window
         shell: pwsh
-        run: |
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          ./scripts/build_ui.ps1
-          Write-Host "build_ui.ps1 took $($sw.Elapsed.TotalSeconds)s"
+        working-directory: ui
+        run: pnpm tauri build -v 2>&1 | Select-String -Pattern "Compiling|Fresh|Finished|Running.*skryb" | Select-Object -First 400
       - if: steps.exe.outputs.cache-hit != 'true' && steps.cargo.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -80,10 +112,6 @@ jobs:
             ~/.cargo/registry/cache
             ui/src-tauri/target
           key: ${{ steps.cargo-key.outputs.key }}
-      - name: cargo cache size
-        if: steps.exe.outputs.cache-hit != 'true'
-        shell: bash
-        run: du -sh ui/src-tauri/target ~/.cargo/registry || true
       - if: steps.exe.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -94,102 +122,79 @@ jobs:
           name: ui
           path: ui/src-tauri/target/release/skryb-ui.exe
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
 
   rocm:
-    name: Native engines (AMD, ${{ matrix.sdk }})
+    name: Native engines (AMD)
     runs-on: windows-2022
-    strategy:
-      fail-fast: false
-      matrix:
-        sdk: [core-and-devel, core-only]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: download wheels
-        shell: bash
-        run: |
-          python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 rocm-sdk-devel==7.2.1 -d wheels
-          ls -la wheels
-      - name: install wheels
-        shell: bash
-        run: |
-          if [ "${{ matrix.sdk }}" = core-only ]; then python -m pip install --no-deps wheels/rocm_sdk_core-*.whl; else python -m pip install --no-deps wheels/*.whl; fi
-      - name: build qasr.dll
-        shell: bash
-        working-directory: native/engine
-        run: |
-          HIPCC="$(python -c 'import _rocm_sdk_core, os; print(os.path.join(os.path.dirname(_rocm_sdk_core.__file__), "bin", "hipcc.exe"))')"
-          mkdir -p build
-          time "$HIPCC" --offload-arch=gfx1200 -O3 -std=c++20 -Wno-unused-result -shared kernels.hip engine.hip -o build/qasr.dll 2>/dev/null
-      - name: build qasr-bench.exe
-        shell: bash
-        working-directory: native/engine
-        run: |
-          HIPCC="$(python -c 'import _rocm_sdk_core, os; print(os.path.join(os.path.dirname(_rocm_sdk_core.__file__), "bin", "hipcc.exe"))')"
-          time "$HIPCC" -O2 -std=c++20 -x c++ bench.cpp -x none build/qasr.lib -o build/qasr-bench.exe 2>/dev/null
-      - name: build npk.dll
-        shell: bash
-        run: time bash native/parakeet/build.sh 2>/dev/null
-      - name: build nd.dll
-        shell: bash
-        run: time bash native/diar/build.sh 2>/dev/null
-      - name: all three at once
-        shell: bash
-        run: |
-          rm -rf native/*/build
-          time ( pids=(); for s in engine parakeet diar; do bash native/$s/build.sh >/dev/null 2>&1 & pids+=($!); done; for p in "${pids[@]}"; do wait $p; done )
-          sha256sum native/engine/build/qasr.dll native/parakeet/build/npk.dll native/diar/build/nd.dll
-          sha256sum native/engine/build/qasr.dll native/parakeet/build/npk.dll native/diar/build/nd.dll > rocm-sums.txt
-      - name: toolchain
+      - id: key
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Select-Object -ExpandProperty Name
-          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled
-          Write-Host "image $env:ImageVersion"
-      - uses: actions/upload-artifact@v4
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
+          "key=native-rocm-7.2.1-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**') }}-${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
+      - id: cache
+        uses: actions/cache/restore@v4
         with:
-          name: rocm-${{ matrix.sdk }}
           path: |
             native/engine/build/qasr.dll
             native/parakeet/build/npk.dll
             native/diar/build/nd.dll
-            rocm-sums.txt
-          retention-days: 3
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: ROCm SDK
+        shell: bash
+        run: python -m pip install --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Build
+        shell: bash
+        run: |
+          pids=()
+          for engine in engine parakeet diar; do bash native/$engine/build.sh > $engine.log 2>&1 & pids+=($!); done
+          for pid in "${pids[@]}"; do wait $pid; done
+          tail -n 1 engine.log parakeet.log diar.log
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
+          key: ${{ steps.key.outputs.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rocm
+          path: |
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
+          if-no-files-found: error
+          retention-days: 1
 
   cuda:
-    name: Native engines (NVIDIA)
+    name: Native engines (NVIDIA, ${{ matrix.engine }})
     runs-on: windows-2022
+    strategy:
+      matrix:
+        engine: [engine, parakeet, diar]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: fetch toolkit
-        shell: bash
-        run: |
-          python native/cuda/fetch_toolkit.py
-          du -sh native/cuda/build/toolkit
       - name: build
         shell: bash
         run: |
-          time python native/cuda/build.py > /dev/null 2>&1
-          sha256sum native/*/build/*_cuda.dll
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cuda
-          path: |
-            native/engine/build/qasr_cuda.dll
-            native/parakeet/build/npk_cuda.dll
-            native/diar/build/nd_cuda.dll
-          retention-days: 3
+          time python native/cuda/fetch_toolkit.py
+          time python native/cuda/build.py ${{ matrix.engine }} > /dev/null 2>&1
 
   installer:
     name: Installer
-    needs: [ui, rocm, cuda]
+    needs: [ui, rocm]
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
@@ -202,20 +207,11 @@ jobs:
           path: ui/src-tauri/target/release
       - uses: actions/download-artifact@v4
         with:
-          name: rocm-core-and-devel
-          path: .
-      - uses: actions/download-artifact@v4
-        with:
-          name: cuda
+          name: rocm
           path: native
-      - name: layout
+      - name: stand-in CUDA dlls (measurement only)
         shell: bash
-        run: find native ui/src-tauri/target -name "*.dll" -o -name "*.exe" | xargs ls -la
-      - name: Inno Setup present?
-        shell: pwsh
-        run: |
-          Get-Command ISCC -ErrorAction SilentlyContinue
-          Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+        run: for d in engine/build/qasr parakeet/build/npk diar/build/nd; do cp native/$d.dll native/${d}_cuda.dll; done
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -241,15 +237,17 @@ jobs:
           "dir=$(Resolve-Path cpython\python)" >> $env:GITHUB_OUTPUT
       - name: Build installer
         shell: pwsh
+        run: python build_installer.py --python-dir "${{ steps.cpython.outputs.dir }}"
+      - name: ISCC variants (measurement only)
+        shell: pwsh
         run: |
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          python build_installer.py --python-dir "${{ steps.cpython.outputs.dir }}"
-          Write-Host "build_installer took $($sw.Elapsed.TotalSeconds)s"
-          Get-ChildItem dist, build/installer-payload/wheels | Format-Table Name, Length
-          (Get-ChildItem build/installer-payload -Recurse | Measure-Object Length -Sum).Sum / 1MB
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Skryb-Setup
-          path: dist/*.exe
-          if-no-files-found: error
-          retention-days: 3
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $wheel = (Get-ChildItem build/installer-payload/wheels/*.whl).Name
+          $base = Get-Content installer/Skryb.iss -Raw
+          foreach ($v in @("", "LZMANumBlockThreads=4", "LZMAUseSeparateProcess=yes", "LZMAUseSeparateProcess=yes`r`nLZMANumBlockThreads=4")) {
+            $text = $base -replace "SolidCompression=yes", "SolidCompression=yes`r`n$v"
+            Set-Content installer/variant.iss $text
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            & $iscc /Q "/DAppVersion=0.13.0" "/DPayloadDir=$PWD\build\installer-payload" "/DWheelFile=$wheel" "/DReqCuda=requirements-nvidia.txt" "/DReqRocm=requirements-amd.txt" "/DReqCpu=requirements-cpu.txt" "/O$PWD\variant" "/Fv" installer/variant.iss
+            Write-Host "variant [$v]: $($sw.Elapsed.TotalSeconds)s size $((Get-Item variant/v.exe).Length)"
+          }
