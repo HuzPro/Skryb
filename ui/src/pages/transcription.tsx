@@ -5,6 +5,7 @@ import { ChoiceCards, Disclosure, PageBody, PageTitle, Row, Rows, Section } from
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api } from "../lib/api";
+import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { Engines, Model, Settings, TranscriptionMode } from "../lib/types";
 
@@ -40,11 +41,7 @@ export function withMode(settings: Settings, mode: TranscriptionMode, models: Mo
 }
 
 export function useEngines(model: string | undefined): Engines | undefined {
-  const engines = useQuery({
-    queryKey: ["engines", model],
-    queryFn: () => api.get<Engines>(`/api/engines?model=${encodeURIComponent(model ?? "")}`),
-    enabled: Boolean(model),
-  }).data;
+  const engines = useQuery({ ...queries.engines(model ?? ""), enabled: Boolean(model) }).data;
   const probed = useRef(false);
   useEffect(() => {
     if (engines?.hardware.probe_pending && !probed.current) {

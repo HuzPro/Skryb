@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError, api, errorText } from "./api";
 import { draftReducer, isDirty, type Draft, type DraftAction } from "./draft";
 import { engineState } from "./events";
@@ -63,7 +63,10 @@ export function withoutEmptyBindings(settings: Settings): Settings {
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
-  const [settings, dispatchSettings] = useReducer(draftReducer as Reducer<Settings>, null);
+  // Settings fetched before the first render start the draft, so no page renders without them.
+  const [settings, dispatchSettings] = useReducer(draftReducer as Reducer<Settings>, client.getQueryData<Settings>(["settings"]), (value) =>
+    value ? { saved: value, draft: value } : null,
+  );
   const [dictionary, dispatchDictionary] = useReducer(draftReducer as Reducer<Dictionary>, null);
   const [savePhase, setSavePhase] = useState<SavePhase>("idle");
   const [saveNote, setSaveNote] = useState("");
@@ -207,7 +210,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 /** Loads a page-level document (the dictionary) into its draft once, and again after the core changes it. */
 export function useSyncedDraft<T>(key: "dictionary", path: string, dispatch: (action: DraftAction<T>) => void): boolean {
   const query = useQuery({ queryKey: [key], queryFn: () => api.get<T>(path) });
-  useEffect(() => {
+  // Before paint, so a page opening with its data already fetched never shows empty first.
+  useLayoutEffect(() => {
     if (query.data) dispatch({ type: "loaded", value: query.data });
   }, [query.data, dispatch]);
   return query.isError;

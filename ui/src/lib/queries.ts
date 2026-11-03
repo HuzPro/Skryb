@@ -1,6 +1,6 @@
 import { QueryClient, queryOptions } from "@tanstack/react-query";
 import { api } from "./api";
-import type { AppInfo, Dictionary, HistoryEntry, LiveMeeting, MeetingOverview, Microphone, Model, Settings } from "./types";
+import type { AppInfo, Dictionary, Engines, HistoryEntry, LiveMeeting, MeetingOverview, Microphone, Model, Settings } from "./types";
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: Infinity, retry: 1, refetchOnWindowFocus: false } },
@@ -20,6 +20,7 @@ export const queries = {
     queryKey: ["meeting-live"],
     queryFn: async () => (await api.get<{ meeting: LiveMeeting | null }>("/api/meetings/live")).meeting,
   }),
+  engines: (model: string) => queryOptions({ queryKey: ["engines", model], queryFn: () => api.get<Engines>(`/api/engines?model=${encodeURIComponent(model)}`) }),
   history: (search: string, limit: number) =>
     queryOptions({
       queryKey: ["history", search, limit],
@@ -35,4 +36,6 @@ export function prefetchPages(client: QueryClient): void {
   void client.prefetchQuery(queries.meetings);
   void client.prefetchQuery(queries.liveMeeting);
   void client.prefetchQuery(queries.history("", HISTORY_PAGE));
+  const model = client.getQueryData<Settings>(["settings"])?.model_size;
+  if (model) void client.prefetchQuery(queries.engines(model));
 }

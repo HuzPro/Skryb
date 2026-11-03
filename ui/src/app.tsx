@@ -129,7 +129,9 @@ function ShowWhenReady() {
 /** Shows the theme being picked before it is saved; discarding puts the saved one back. */
 function ThemeSync() {
   const theme = useStore().settings?.draft.theme;
-  useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => {
+    if (theme) applyTheme(theme);
+  }, [theme]);
   return null;
 }
 
