@@ -1,6 +1,6 @@
 import { QueryClientProvider, useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { AudioLines, BookA, ClipboardPaste, History, Keyboard, Mic } from "lucide-react";
-import { createContext, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, ViewTransition } from "react";
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
 import { ConnectionBanner, DictationStatusCard, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type Mode, type NavItem } from "./components/shell";
@@ -154,10 +154,6 @@ function Shell() {
     const owner = modeOf(pathname);
     if (owner) setChosenMode(owner);
   }, [pathname]);
-  // The page area stays mounted across pages; each page opens at its top.
-  useLayoutEffect(() => {
-    if (main.current) main.current.scrollTop = 0;
-  }, [pathname]);
   const switchMode = useCallback(
     (next: Mode) => {
       startTransition(() => setChosenMode(next));
@@ -210,11 +206,14 @@ function Shell() {
             <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()} showStatus={setup}>
               {setup ? <span className="pointer-events-none text-[13px] font-semibold">Skryb</span> : null}
             </TopBar>
-            <ViewTransition name="page">
-              <main ref={main} className="content-panel min-h-0 flex-1 overflow-y-auto">
-                <Outlet />
-              </main>
-            </ViewTransition>
+            {/* Each page gets its own scroll area, so only a change of page animates; the panel stays put. */}
+            <div className="content-panel flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ViewTransition key={pathname} name="page" update="none">
+                <main ref={main} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+                  <Outlet />
+                </main>
+              </ViewTransition>
+            </div>
             {setup ? null : <SaveBar />}
             {install ? (
               pathname === "/updates" ? null : <InstallBanner view={install} />

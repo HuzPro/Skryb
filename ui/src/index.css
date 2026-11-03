@@ -380,7 +380,6 @@
   border-radius: var(--panel-radius);
   background: var(--panel);
   box-shadow: var(--panel-shadow);
-  scrollbar-gutter: stable;
 }
 
 @keyframes fade-in {
@@ -425,7 +424,10 @@
   animation: pop-out calc(var(--dur) * 0.8) ease-in both;
 }
 
-/* Page and mode changes: the old page fades out, the new one rises in on the theme's spring. */
+/*
+ * Page and mode changes fade through: the old page is nearly gone before the new one rises in on
+ * the theme's spring, so two pages' text never sits on top of each other.
+ */
 ::view-transition {
   pointer-events: none;
 }
@@ -433,10 +435,10 @@
   animation-duration: var(--page-dur);
 }
 ::view-transition-old(page) {
-  animation: fade-out calc(var(--page-dur) * 0.5) ease-out both;
+  animation: fade-out calc(var(--page-dur) * 0.4) ease-in both;
 }
 ::view-transition-new(page) {
-  animation: rise-in var(--page-dur) var(--spring) both;
+  animation: rise-in calc(var(--page-dur) * 0.8) var(--spring) calc(var(--page-dur) * 0.3) both;
 }
 
 /* The logo's motion, matching the tray icon's: see components/mark.tsx. */
