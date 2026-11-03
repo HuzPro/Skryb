@@ -80,6 +80,14 @@ export interface Choice<T extends string> {
   disabled?: boolean;
 }
 
+export function RadioDot({ selected }: { selected: boolean }) {
+  return (
+    <span className={cn("grid size-3.5 shrink-0 place-items-center rounded-full border", selected ? "border-primary" : "border-input")}>
+      {selected ? <span className="size-1.5 rounded-full bg-primary" /> : null}
+    </span>
+  );
+}
+
 /** Mutually exclusive options as cards with a radio dot: Mode, Output mode. */
 export function ChoiceCards<T extends string>({ value, choices, onChange, label }: { value: T; choices: Choice<T>[]; onChange: (value: T) => void; label: string }) {
   return (
@@ -99,9 +107,7 @@ export function ChoiceCards<T extends string>({ value, choices, onChange, label 
             )}
           >
             <span className="flex items-center gap-2 text-[13.5px] font-medium">
-              <span className={cn("grid size-3.5 place-items-center rounded-full border", selected ? "border-primary" : "border-input")}>
-                {selected ? <span className="size-1.5 rounded-full bg-primary" /> : null}
-              </span>
+              <RadioDot selected={selected} />
               {choice.title}
             </span>
             <span className="mt-1 pl-5.5 text-[12.5px] text-muted-foreground">{choice.description}</span>

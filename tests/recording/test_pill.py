@@ -15,7 +15,8 @@ from skryb.recording.pill import (
     Button,
     Frame,
     Mode,
-    PAPER_COLOURWAYS,
+    COLOURWAYS,
+    DEFAULT_COLOURWAYS,
     Spring,
     VoiceHistory,
     VoiceLevel,
@@ -24,6 +25,7 @@ from skryb.recording.pill import (
     hit_test,
     is_settled_label,
     notice_layout,
+    oklch_rgb,
     pill_box,
     pill_origin,
     pill_position,
@@ -593,40 +595,73 @@ class TestThemes:
 
         assert any((abs(pixels.astype(int) - skin.wave) <= 2).all(axis=1))
 
-    def test_each_paper_colourway_draws_the_finish_button_and_bars_in_its_own_accent(self):
+    @pytest.mark.parametrize(("theme", "dark"), _THEMES)
+    def test_each_colourway_draws_the_bars_in_its_own_accent_and_all_but_default_the_finish_button_too(self, theme, dark):
+        skins = [pill_skin(theme, dark, colourway) for colourway in COLOURWAYS]
+
+        assert len({skin.wave for skin in skins}) == len(COLOURWAYS)
+        for skin in skins:
+            assert theme == "default" or skin.wave == skin.finish
+
+    def test_default_keeps_its_neutral_finish_button_in_every_colourway(self):
         for dark in (True, False):
-            accents = {pill_skin("paper", dark, colourway).finish for colourway in PAPER_COLOURWAYS}
+            neutral = pill_skin("default", dark, "green")
+            for colourway in COLOURWAYS:
+                skin = pill_skin("default", dark, colourway)
+                assert (skin.finish, skin.finish_hover, skin.finish_glyph) == (neutral.finish, neutral.finish_hover, neutral.finish_glyph)
 
-            assert len(accents) == len(PAPER_COLOURWAYS)
-            for colourway in PAPER_COLOURWAYS:
-                skin = pill_skin("paper", dark, colourway)
-                assert skin.wave == skin.finish
-                assert skin.fill == pill_skin("paper", dark).fill
+    def test_glass_stays_neutral_glass_in_every_colourway_and_material_tints_its_surfaces_from_the_seed(self):
+        for dark in (True, False):
+            glass_fills = {pill_skin("glass", dark, colourway).fill for colourway in COLOURWAYS}
+            material_fills = {pill_skin("material", dark, colourway).fill for colourway in COLOURWAYS}
 
-    def test_paper_starts_in_the_skryb_green_and_an_unknown_colourway_falls_back_to_it(self):
-        green = pill_skin("paper", False, "green")
+            assert glass_fills == {pill_skin("glass", dark).fill}
+            assert len(material_fills) == len(COLOURWAYS)
 
-        assert green.finish == EMERALD_DEEP
-        assert pill_skin("paper", False) == green
-        for unknown in ("neon", "", None, 42, ["ink"], "Ink"):
-            assert pill_skin("paper", False, unknown) == green
+    def test_each_theme_starts_in_its_own_colourway_and_an_unknown_one_falls_back_to_it(self):
+        assert DEFAULT_COLOURWAYS == {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"}
+        for theme, own in DEFAULT_COLOURWAYS.items():
+            for dark in (True, False):
+                assert pill_skin(theme, dark) == pill_skin(theme, dark, own)
+                for unknown in ("neon", "", None, 42, ["ink"], "Ink", "Ink blue 🖋"):
+                    assert pill_skin(theme, dark, unknown) == pill_skin(theme, dark, own)
 
-    @pytest.mark.parametrize("colourway", PAPER_COLOURWAYS)
-    @pytest.mark.parametrize("dark", [True, False])
-    def test_the_tick_on_every_paper_colourways_finish_button_is_readable(self, colourway, dark):
-        skin = pill_skin("paper", dark, colourway)
+    def test_paper_starts_in_the_skryb_green_and_glass_and_material_in_the_blues_they_had(self):
+        assert pill_skin("paper", False).finish == EMERALD_DEEP
+        assert pill_skin("glass", False).finish == (0, 102, 204)
+        assert pill_skin("glass", True).finish == (78, 161, 255)
+        assert pill_skin("material", False).finish == (81, 82, 193)
+        assert pill_skin("material", True).finish == (174, 184, 254)
+
+    def test_the_default_theme_in_skryb_green_is_the_brand_pill(self):
+        assert pill_skin("default", True, "green") is DEFAULT_SKIN
+
+    @pytest.mark.parametrize("colourway", COLOURWAYS)
+    @pytest.mark.parametrize(("theme", "dark"), _THEMES)
+    def test_the_tick_on_every_finish_button_is_readable(self, theme, dark, colourway):
+        skin = pill_skin(theme, dark, colourway)
 
         assert _contrast(skin.finish, skin.finish_glyph) >= 4.5
         assert _contrast(skin.finish_hover, skin.finish_glyph) >= 4.5
 
-    def test_a_colourway_only_changes_paper(self):
-        for theme in ("default", "glass", "material"):
-            assert pill_skin(theme, True, "plum") == pill_skin(theme, True)
+    @pytest.mark.parametrize("colourway", COLOURWAYS)
+    @pytest.mark.parametrize(("theme", "dark"), _THEMES)
+    def test_the_bars_and_label_stand_out_from_the_pill_in_every_colourway(self, theme, dark, colourway):
+        skin = without_glass(pill_skin(theme, dark, colourway))
+
+        assert _contrast(skin.wave, skin.fill) >= 3
+        assert _contrast(skin.label, skin.fill) >= 4.5
+
+    def test_material_tones_come_out_as_the_window_draws_them(self):
+        assert oklch_rgb(0.5, 0.17, 278) == (81, 82, 193)
+        assert oklch_rgb(0.26, 0.022, 278) == (33, 35, 47)
+        assert oklch_rgb(1, 0, 0) == (255, 255, 255)
+        assert oklch_rgb(0, 0, 0) == (0, 0, 0)
 
     def test_an_unknown_or_missing_theme_draws_the_default_pill(self):
-        assert pill_skin("neon", True) is DEFAULT_SKIN
-        assert pill_skin(None, True) is DEFAULT_SKIN
-        assert pill_skin("", False) == pill_skin("default", False)
+        for unknown in ("neon", None, "", 42):
+            assert pill_skin(unknown, True) == pill_skin("default", True)
+            assert pill_skin(unknown, False, "plum") == pill_skin("default", False, "plum")
 
     @pytest.mark.parametrize("position", [0.0, 0.5, 1.0])
     def test_on_a_light_pill_the_shimmer_only_darkens_so_the_dark_label_reads_the_same(self, position):

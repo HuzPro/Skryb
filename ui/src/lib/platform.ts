@@ -74,11 +74,11 @@ export function showWindow(): void {
   void appWindow?.show();
 }
 
-/** Themes hang off `data-theme` on <html>, and Paper's colourway off `data-colourway`; anything unknown is the default look. */
+/** Themes hang off `data-theme` on <html>, and the theme's colourway off `data-colourway`; anything unknown is the default look. */
 export function applyTheme(theme: string | undefined, colourway: string | undefined): void {
   const root = document.documentElement;
   root.dataset.theme = theme ?? "default";
-  if (theme === "paper") root.dataset.colourway = colourway ?? "green";
+  if (colourway) root.dataset.colourway = colourway;
   else delete root.dataset.colourway;
 }
 

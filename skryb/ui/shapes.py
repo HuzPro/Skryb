@@ -24,7 +24,7 @@ from skryb.people.terms import PeopleList, Term, suggestion_json, term_json, ter
 from skryb.output.output_mode import OutputMode
 from skryb.meetings.storage import LANGUAGES as MEETING_LANGUAGES
 from skryb.output.paste_method import PasteMethod, normalized_process_name
-from skryb.recording.pill import PAPER_COLOURWAYS
+from skryb.recording.pill import COLOURWAYS
 from skryb.recording.preferences import DUCK_MODES
 from skryb.settings.settings_draft import UI_THEMES, SettingsDraft
 from skryb.settings.transcription_mode import TranscriptionMode
@@ -99,7 +99,7 @@ def settings_json(draft: SettingsDraft) -> Json:
             "language": draft.meetings_language,
         },
         "theme": draft.theme,
-        "paper_colourway": draft.paper_colourway,
+        "colourways": dict(draft.colourways),
     }
 
 
@@ -112,6 +112,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
     settings = Fields(document, "settings")
     recording = settings.section("recording")
     meetings = settings.section("meetings")
+    colourways = settings.section("colourways")
     meetings_folder = meetings.text("folder").strip()
     if not meetings_folder:
         raise ValueError("settings.meetings.folder cannot be blank.")
@@ -154,7 +155,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         meetings_record_microphone=meetings.flag("record_microphone"),
         meetings_language=meetings.one_of("language", MEETING_LANGUAGES),
         theme=settings.one_of("theme", UI_THEMES),
-        paper_colourway=settings.one_of("paper_colourway", PAPER_COLOURWAYS),
+        colourways={theme: colourways.one_of(theme, COLOURWAYS) for theme in UI_THEMES},
     )
 
 

@@ -136,6 +136,7 @@ from skryb.recording.notice import Notice
 from skryb.recording.overlay import RecordingOverlay
 from skryb.recording.preferences import (
     RecordingPreferences,
+    fold_paper_colourway,
     load_pill_position,
     load_pill_skin,
     save_pill_position,
@@ -244,6 +245,14 @@ def migrate_hotkey_bindings(config: JsonConfigAdapter) -> None:
     if not migrate_legacy_hotkey(config):
         return
     _logger.info("Migrated the hotkey to shortcut bindings.")
+    config.save()
+
+
+def migrate_paper_colourway(config: JsonConfigAdapter) -> None:
+    """Move Paper's own ``ui.paper_colourway`` into ``ui.colourways``, which holds every theme's."""
+    if not fold_paper_colourway(config):
+        return
+    _logger.info("Moved Paper's colourway into the colourways of every theme.")
     config.save()
 
 
@@ -1220,6 +1229,7 @@ def build_app(
     migrate_language(config)
     migrate_stale_batch_block(config)
     migrate_hotkey_bindings(config)
+    migrate_paper_colourway(config)
 
     if event_bus is None:
         event_bus = SimpleEventBus()

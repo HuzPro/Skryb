@@ -147,8 +147,8 @@ _SKINS: dict[tuple[str, bool], PillSkin] = {
         glyph=(24, 26, 36), finish_glyph=(255, 255, 255), label=(24, 26, 36),
         warning=(174, 103, 0), wave=(81, 82, 193), shimmer=(188, 196, 255), light=True, roundness=0.67,
     ),
-    # Paper: ink on cream inside a ruled edge, with a card's corners, in a
-    # colourway's accent (see _PAPER_ACCENTS); these are the terracotta.
+    # Paper: ink on cream inside a ruled edge, with a card's corners, always
+    # in a colourway's accent (see _ACCENTS); these are the terracotta.
     ("paper", True): PillSkin(
         fill=(35, 32, 28), fill_alpha=250, border=(68, 61, 52, 255),
         button=(52, 47, 41), button_hover=(68, 61, 52),
@@ -166,15 +166,48 @@ _SKINS: dict[tuple[str, bool], PillSkin] = {
 }
 
 
-# Paper's colourways, the Skryb icon's green first: the accent and the text
-# on it, light then dark. The window's twin is in ui/src/index.css.
-PAPER_COLOURWAYS = ("green", "terracotta", "ink", "plum", "graphite")
-_PAPER_ACCENTS: dict[str, tuple[tuple[Rgb, Rgb], tuple[Rgb, Rgb]]] = {
-    "green": ((EMERALD_DEEP, (255, 255, 255)), (EMERALD_LIGHT, (4, 36, 26))),
-    "terracotta": (((154, 75, 44), (255, 250, 243)), ((224, 144, 107), (29, 20, 16))),
-    "ink": (((42, 82, 136), (255, 255, 255)), ((143, 181, 232), (12, 26, 44))),
-    "plum": (((125, 58, 112), (255, 255, 255)), ((216, 155, 200), (42, 15, 36))),
-    "graphite": (((70, 72, 77), (255, 255, 255)), ((203, 199, 191), (27, 26, 24))),
+# Every theme comes in the same five colourways, the Skryb icon's green
+# first, each tuned to it; the window's twin is in ui/src/index.css. A
+# theme starts in its own (DEFAULT_COLOURWAYS), and the skin drawn above in
+# that colourway (_DRAWN_IN) is used as it is.
+COLOURWAYS = ("green", "terracotta", "ink", "plum", "graphite")
+DEFAULT_COLOURWAYS = {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"}
+_DRAWN_IN = {"default": "green", "glass": "ink", "material": "ink"}
+
+# The accent and the text on it, light then dark.
+Accent = tuple[tuple[Rgb, Rgb], tuple[Rgb, Rgb]]
+_WHITE: Rgb = (255, 255, 255)
+_ACCENTS: dict[str, dict[str, Accent]] = {
+    "default": {
+        "green": ((EMERALD_DEEP, _WHITE), (EMERALD_LIGHT, (4, 36, 26))),
+        "terracotta": (((176, 74, 34), _WHITE), ((240, 148, 108), (42, 18, 8))),
+        "ink": (((37, 99, 235), _WHITE), ((59, 123, 246), _WHITE)),
+        "plum": (((142, 58, 130), _WHITE), ((224, 154, 210), (44, 15, 39))),
+        "graphite": (((82, 82, 91), _WHITE), ((212, 212, 216), (24, 24, 27))),
+    },
+    "glass": {
+        "green": (((24, 118, 50), _WHITE), ((48, 209, 88), (3, 35, 12))),
+        "terracotta": (((169, 72, 27), _WHITE), ((255, 157, 112), (43, 17, 5))),
+        "ink": (((0, 102, 204), _WHITE), ((78, 161, 255), (4, 17, 31))),
+        "plum": (((137, 68, 171), _WHITE), ((211, 140, 255), (35, 10, 48))),
+        "graphite": (((93, 93, 98), _WHITE), ((199, 199, 204), (29, 29, 31))),
+    },
+    "paper": {
+        "green": ((EMERALD_DEEP, _WHITE), (EMERALD_LIGHT, (4, 36, 26))),
+        "terracotta": (((154, 75, 44), (255, 250, 243)), ((224, 144, 107), (29, 20, 16))),
+        "ink": (((42, 82, 136), _WHITE), ((143, 181, 232), (12, 26, 44))),
+        "plum": (((125, 58, 112), _WHITE), ((216, 155, 200), (42, 15, 36))),
+        "graphite": (((70, 72, 77), _WHITE), ((203, 199, 191), (27, 26, 24))),
+    },
+}
+# Material grows every tone from a seed: its hue, a scale on each tone's
+# chroma and the light accent's lightness, as index.css does.
+_MATERIAL_SEEDS: dict[str, tuple[float, float, float]] = {
+    "green": (163, 0.54, 0.47),
+    "terracotta": (42, 0.75, 0.5),
+    "ink": (278, 1.0, 0.5),
+    "plum": (335, 0.85, 0.5),
+    "graphite": (265, 0.08, 0.48),
 }
 
 
@@ -183,21 +216,72 @@ _PAPER_ACCENTS: dict[str, tuple[tuple[Rgb, Rgb], tuple[Rgb, Rgb]]] = {
 _AWAY_FROM_INK: dict[bool, Rgb] = {True: (0, 0, 0), False: (255, 255, 255)}
 
 
-def pill_skin(theme: object, dark: bool, colourway: object = PAPER_COLOURWAYS[0]) -> PillSkin:
-    """The pill for the window's ``theme``, light or dark; an unknown theme gets the default.
+def pill_skin(theme: object, dark: bool, colourway: object = None) -> PillSkin:
+    """The pill for the window's ``theme`` in its ``colourway``, light or dark.
 
-    Paper takes its accent from ``colourway``; an unknown one is the green.
+    An unknown theme is the default one, and an unknown colourway the theme's own.
+    Default keeps its neutral finish button and takes only the bars from the colourway.
     """
-    key = (theme if isinstance(theme, str) else "default", dark)
-    skin = _SKINS.get(key) or _SKINS[("default", dark)]
-    if key[0] != "paper":
+    name = theme if isinstance(theme, str) and theme in DEFAULT_COLOURWAYS else "default"
+    chosen = colourway if isinstance(colourway, str) and colourway in COLOURWAYS else DEFAULT_COLOURWAYS[name]
+    skin = _SKINS[name, dark]
+    if _DRAWN_IN.get(name) == chosen:
         return skin
-    known = colourway if isinstance(colourway, str) and colourway in _PAPER_ACCENTS else PAPER_COLOURWAYS[0]
-    accent, ink = _PAPER_ACCENTS[known][dark]
+    if name == "material":
+        hue, scale, lightness = _MATERIAL_SEEDS[chosen]
+        skin = _material_surfaces(skin, dark, hue, scale)
+        accent, ink = _material_accent(dark, hue, scale, lightness)
+    else:
+        accent, ink = _ACCENTS[name][chosen][dark]
+    shimmer = _mixed(accent, skin.fill, 0.82 if skin.light else 0.65)
+    if name == "default":
+        return replace(skin, wave=accent, shimmer=shimmer)
     return replace(
         skin, finish=accent, finish_hover=_mixed(accent, _AWAY_FROM_INK[skin.light], 0.14), finish_glyph=ink,
-        wave=accent, shimmer=_mixed(accent, skin.fill, 0.82 if skin.light else 0.65),
+        wave=accent, shimmer=shimmer,
     )
+
+
+def _material_surfaces(skin: PillSkin, dark: bool, hue: float, scale: float) -> PillSkin:
+    """Material's popover fill, tonal buttons and text, grown from the seed."""
+    def tone(lightness: float, chroma: float) -> Rgb:
+        return oklch_rgb(lightness, chroma * scale, hue)
+
+    if dark:
+        text = tone(0.92, 0.012)
+        return replace(
+            skin, fill=tone(0.26, 0.022), button=tone(0.36, 0.07), button_hover=tone(0.42, 0.08), glyph=text, label=text,
+        )
+    text = tone(0.22, 0.02)
+    return replace(
+        skin, fill=tone(0.935, 0.02), button=tone(0.91, 0.03), button_hover=tone(0.89, 0.06), glyph=text, label=text,
+    )
+
+
+def _material_accent(dark: bool, hue: float, scale: float, lightness: float) -> tuple[Rgb, Rgb]:
+    if dark:
+        return oklch_rgb(0.8, 0.1 * scale, hue), oklch_rgb(0.3, 0.12 * scale, hue)
+    return oklch_rgb(lightness, 0.17 * scale, hue), _WHITE
+
+
+def oklch_rgb(lightness: float, chroma: float, hue: float) -> Rgb:
+    """An OKLCH colour as 8-bit sRGB, clipped to it, as a browser draws index.css's ``oklch()``."""
+    a = chroma * math.cos(math.radians(hue))
+    b = chroma * math.sin(math.radians(hue))
+    long = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    medium = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    short = (lightness - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    linear = (
+        4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short,
+        -1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short,
+        -0.0041960863 * long - 0.7034186147 * medium + 1.7076147010 * short,
+    )
+    red, green, blue = (round(255 * _encoded(min(max(channel, 0.0), 1.0))) for channel in linear)
+    return red, green, blue
+
+
+def _encoded(channel: float) -> float:
+    return 12.92 * channel if channel <= 0.0031308 else 1.055 * channel ** (1 / 2.4) - 0.055
 
 
 def without_glass(skin: PillSkin) -> PillSkin:

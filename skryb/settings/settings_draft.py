@@ -1,8 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from skryb.hotkeys.bindings import DEFAULT_BINDINGS, Binding
 from skryb.output.output_mode import OutputMode
-from skryb.recording.pill import PAPER_COLOURWAYS
+from skryb.recording.pill import DEFAULT_COLOURWAYS
 from skryb.recording.preferences import RecordingPreferences
 from skryb.settings.transcription_mode import TranscriptionMode
 
@@ -49,7 +49,8 @@ class SettingsDraft:
     meetings_record_microphone: bool = True
     meetings_language: str = "en"
     theme: str = "default"
-    paper_colourway: str = PAPER_COLOURWAYS[0]
+    # Each theme's own colourway, by theme.
+    colourways: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLOURWAYS))
 
 
 @dataclass(frozen=True)

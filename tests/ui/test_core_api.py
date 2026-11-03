@@ -30,7 +30,7 @@ _SETTINGS_KEYS = {
     "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings", "theme",
-    "paper_colourway",
+    "colourways",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",
@@ -257,7 +257,8 @@ def test_shortcuts_that_work_together_validate(rig: Rig) -> None:
         (lambda settings: settings.update(output_mode="fax"), "settings.output_mode must be one of"),
         (lambda settings: settings.update(history_retention_days=-7), "cannot be negative"),
         (lambda settings: settings.update(theme="Glass ✨"), "settings.theme must be one of"),
-        (lambda settings: settings.update(paper_colourway="Teal"), "settings.paper_colourway must be one of"),
+        (lambda settings: settings["colourways"].update(glass="Teal"), "settings.colourways.glass must be one of"),
+        (lambda settings: settings["colourways"].pop("paper"), "settings.colourways.paper is missing."),
         (
             lambda settings: settings["recording"].update(cue_volume=True),
             "settings.recording.cue_volume must be a number.",
@@ -267,7 +268,7 @@ def test_shortcuts_that_work_together_validate(rig: Rig) -> None:
             "paste_method_overrides[0]",
         ),
     ],
-    ids=["missing", "wrong-type", "unknown-choice", "negative", "unknown-theme", "unknown-colourway", "bool-as-number", "bad-override"],
+    ids=["missing", "wrong-type", "unknown-choice", "negative", "unknown-theme", "unknown-colourway", "missing-colourway", "bool-as-number", "bad-override"],
 )
 def test_settings_that_cannot_be_read_are_refused_naming_the_field(rig: Rig, change, named: str) -> None:
     settings = _settings(rig)
@@ -317,21 +318,21 @@ def test_a_theme_this_version_does_not_know_reads_back_as_the_default(rig: Rig) 
     assert _settings(rig)["theme"] == "default"
 
 
-def test_paper_starts_in_green_and_a_chosen_colourway_is_saved_and_comes_back(rig: Rig) -> None:
+def test_each_theme_starts_in_its_own_colourway_and_a_chosen_one_is_saved_and_comes_back(rig: Rig) -> None:
     settings = _settings(rig)
-    assert settings["paper_colourway"] == "green"
-    settings.update(theme="paper", paper_colourway="plum")
+    assert settings["colourways"] == {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"}
+    settings.update(theme="material", colourways={"default": "graphite", "glass": "ink", "material": "plum", "paper": "terracotta"})
 
     assert rig.call("PUT", "/api/settings", settings)[0] == 200
 
-    assert rig.config.get("ui.paper_colourway") == "plum"
-    assert _settings(rig)["paper_colourway"] == "plum"
+    assert rig.config.get_all()["ui"]["colourways"] == settings["colourways"]
+    assert _settings(rig)["colourways"] == settings["colourways"]
 
 
-def test_a_colourway_this_version_does_not_know_reads_back_as_green(rig: Rig) -> None:
-    rig.config.set("ui.paper_colourway", "Neon pink")
+def test_a_colourway_this_version_does_not_know_reads_back_as_the_themes_own(rig: Rig) -> None:
+    rig.config.set("ui.colourways", {"default": "Neon pink", "glass": "plum", "paper": 7})
 
-    assert _settings(rig)["paper_colourway"] == "green"
+    assert _settings(rig)["colourways"] == {"default": "ink", "glass": "plum", "material": "ink", "paper": "green"}
 
 
 def test_settings_wait_while_a_dictation_is_in_progress(rig: Rig) -> None:

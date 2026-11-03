@@ -104,10 +104,10 @@ function ShowWhenReady() {
 function ThemeSync() {
   const draft = useStore().settings?.draft;
   const theme = draft?.theme;
-  const colourway = draft?.paper_colourway;
+  const colourway = theme ? draft?.colourways[theme] : undefined;
   useEffect(() => {
     const root = document.documentElement;
-    if (!theme || (root.dataset.theme === theme && root.dataset.colourway === (theme === "paper" ? colourway : undefined))) return;
+    if (!theme || (root.dataset.theme === theme && root.dataset.colourway === colourway)) return;
     const swap = () => {
       root.setAttribute("data-theme-switch", "");
       applyTheme(theme, colourway);

@@ -2,38 +2,75 @@ import { useQueryClient } from "@tanstack/react-query";
 import { FileDown, FileUp, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { installDescription, installTitle, useInstall } from "../components/install";
-import { ChoiceCards, PageBody, PageTitle, ProgressBar, Row, Rows, Section, type Choice } from "../components/parts";
+import { PageBody, PageTitle, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Button } from "../components/ui/button";
+import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { chooseOpenPath, chooseSavePath } from "../lib/platform";
 import { useStore } from "../lib/store";
-import type { PaperColourway, Theme, UpdateStatus } from "../lib/types";
+import type { Colourway, Theme, UpdateStatus } from "../lib/types";
+import { cn } from "../lib/utils";
 
-const THEMES: Choice<Theme>[] = [
-  { value: "default", title: "Default", description: "Clean and quiet, the way Skryb has always looked." },
-  { value: "glass", title: "Glass", description: "Clear, neutral glass with light along its edges." },
-  { value: "material", title: "Material", description: "Rounded, tonal and springy, grown from one indigo." },
-  { value: "paper", title: "Paper", description: "Ink on warm paper, with serif headings." },
+const THEMES: { value: Theme; title: string }[] = [
+  { value: "default", title: "Default" },
+  { value: "glass", title: "Glass" },
+  { value: "material", title: "Material" },
+  { value: "paper", title: "Paper" },
 ];
 
-function Swatch({ colourway, name }: { colourway: PaperColourway; name: string }) {
+const COLOURWAYS: { value: Colourway; label: string }[] = [
+  { value: "green", label: "Skryb green" },
+  { value: "terracotta", label: "Terracotta" },
+  { value: "ink", label: "Ink blue" },
+  { value: "plum", label: "Plum" },
+  { value: "graphite", label: "Graphite" },
+];
+
+/**
+ * One card per theme with its own colour. The radio stretches over the card and the colour menu sits above
+ * it, so neither takes the other's clicks or keys; opening a card's colour menu picks that card's theme.
+ */
+function ThemeCards({ theme, colourways, onPick }: { theme: Theme; colourways: Record<Theme, Colourway>; onPick: (theme: Theme, colourway?: Colourway) => void }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span data-colourway={colourway} className="size-2.5 rounded-full bg-primary" />
-      {name}
-    </span>
+    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-4 gap-2.5">
+      {THEMES.map(({ value, title }) => {
+        const selected = value === theme;
+        return (
+          <div
+            key={value}
+            className={cn(
+              "relative surface rounded-xl border border-edge bg-card px-3.5 py-3 shadow-card transition-colors hover:bg-accent/50 has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-ring/40",
+              selected && "border-primary bg-selected hover:bg-selected",
+            )}
+          >
+            <button
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onPick(value)}
+              className="flex items-center gap-2 text-[13.5px] font-medium outline-none after:absolute after:inset-0 after:rounded-xl"
+            >
+              <RadioDot selected={selected} />
+              {title}
+            </button>
+            <Select
+              label={`${title} colour`}
+              className="relative mt-2.5"
+              value={colourways[value]}
+              options={COLOURWAYS.map((colourway) => ({
+                ...colourway,
+                icon: <span data-theme={value} data-colourway={colourway.value} className="size-2.5 shrink-0 rounded-full bg-primary" />,
+              }))}
+              onOpenChange={(open) => open && onPick(value)}
+              onChange={(colourway) => onPick(value, colourway as Colourway)}
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
-
-const COLOURWAYS: Choice<PaperColourway>[] = [
-  { value: "green", title: <Swatch colourway="green" name="Skryb green" />, description: "The green of the Skryb icon." },
-  { value: "terracotta", title: <Swatch colourway="terracotta" name="Terracotta" />, description: "Warm clay, Paper's first ink." },
-  { value: "ink", title: <Swatch colourway="ink" name="Ink blue" />, description: "Fountain-pen blue." },
-  { value: "plum", title: <Swatch colourway="plum" name="Plum" />, description: "A deep red-purple." },
-  { value: "graphite", title: <Swatch colourway="graphite" name="Graphite" />, description: "Pencil grey, no colour at all." },
-];
 
 /** What the Updates section says about *update*; null means a git checkout, which updates through git. */
 export function describeUpdate(update: UpdateStatus | null, running: string): { title: string; description: string } {
@@ -167,17 +204,13 @@ export function SettingsPage() {
       </Section>
 
       <Section title="Theme" note="Each theme follows Windows' light or dark setting. You see it as you pick; Save keeps it.">
-        <ChoiceCards<Theme> label="Theme" value={draft.theme} choices={THEMES} onChange={(theme) => editSettings((current) => ({ ...current, theme }))} />
-        {draft.theme === "paper" ? (
-          <div className="mt-2.5">
-            <ChoiceCards<PaperColourway>
-              label="Paper colourway"
-              value={draft.paper_colourway}
-              choices={COLOURWAYS}
-              onChange={(paper_colourway) => editSettings((current) => ({ ...current, paper_colourway }))}
-            />
-          </div>
-        ) : null}
+        <ThemeCards
+          theme={draft.theme}
+          colourways={draft.colourways}
+          onPick={(theme, colourway) =>
+            editSettings((current) => ({ ...current, theme, colourways: colourway ? { ...current.colourways, [theme]: colourway } : current.colourways }))
+          }
+        />
       </Section>
 
       <Section title="Settings and logs">

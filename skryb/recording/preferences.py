@@ -8,12 +8,14 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 from skryb.core.color_scheme import ColorScheme, detect_app_color_scheme, transparency_effects_on
 from skryb.core.config import ConfigurationStore, ConfigValue
 from skryb.recording.pill import (
+    COLOURWAYS,
+    DEFAULT_COLOURWAYS,
     DEFAULT_PILL_POSITION,
-    PAPER_COLOURWAYS,
     PillPosition,
     PillSkin,
     pill_skin,
@@ -90,16 +92,39 @@ def load_pill_skin(
     scheme: Callable[[], ColorScheme] = detect_app_color_scheme,
     transparency: Callable[[], bool] = transparency_effects_on,
 ) -> PillSkin:
-    """The pill in the window's theme, Paper's colourway and Windows' light or dark setting for apps.
+    """The pill in the window's theme and its colourway, and Windows' light or dark setting for apps.
 
     With Windows' transparency effects off, glass is solid, as Windows' own materials are.
     """
-    skin = pill_skin(
-        config.get("ui.theme", "default"),
-        scheme() is ColorScheme.DARK,
-        config.get("ui.paper_colourway", PAPER_COLOURWAYS[0]),
-    )
+    theme = config.get("ui.theme", "default")
+    colourway = load_colourways(config).get(theme) if isinstance(theme, str) else None
+    skin = pill_skin(theme, scheme() is ColorScheme.DARK, colourway)
     return skin if transparency() else without_glass(skin)
+
+
+def load_colourways(config: ConfigurationStore) -> dict[str, str]:
+    """Each theme's colourway; a missing or unknown one is the theme's own."""
+    return {
+        theme: picked if isinstance(picked := config.get(f"ui.colourways.{theme}"), str) and picked in COLOURWAYS else default
+        for theme, default in DEFAULT_COLOURWAYS.items()
+    }
+
+
+def fold_paper_colourway(config: ConfigurationStore) -> bool:
+    """Move a saved ``ui.paper_colourway`` into ``ui.colourways`` and drop it. True when config changed."""
+    document = config.get_all()
+    ui = document.get("ui")
+    if not isinstance(ui, dict) or "paper_colourway" not in ui:
+        return False
+    settings = cast(dict[str, object], ui)
+    paper = settings.pop("paper_colourway")
+    saved = settings.get("colourways")
+    colourways = cast(dict[str, object], saved) if isinstance(saved, dict) else {}
+    if isinstance(paper, str) and paper in COLOURWAYS:
+        colourways["paper"] = paper
+    settings["colourways"] = colourways
+    config.replace_all(document)
+    return True
 
 
 def save_pill_position(config: ConfigurationStore, position: PillPosition) -> None:

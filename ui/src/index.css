@@ -171,11 +171,11 @@
   --border: rgb(0 0 0 / 0.08);
   --edge: rgb(255 255 255 / 0.85);
   --input: rgb(0 0 0 / 0.14);
-  --ring: #0066cc;
+  --ring: var(--primary);
   --primary: #0066cc;
   --primary-foreground: #ffffff;
   --accent: rgb(255 255 255 / 0.6);
-  --selected: rgb(0 102 204 / 0.08);
+  --selected: color-mix(in srgb, var(--primary) 8%, transparent);
   --r-md: 10px;
   --r-lg: 14px;
   --r-xl: 18px;
@@ -215,11 +215,10 @@
     --border: rgb(255 255 255 / 0.08);
     --edge: rgb(255 255 255 / 0.13);
     --input: rgb(255 255 255 / 0.16);
-    --ring: #4ea1ff;
     --primary: #4ea1ff;
     --primary-foreground: #04111f;
     --accent: rgb(255 255 255 / 0.08);
-    --selected: rgb(78 161 255 / 0.14);
+    --selected: color-mix(in srgb, var(--primary) 14%, transparent);
     --destructive: #ff7b70;
     --success: #5fe39a;
     --warning: #ffc261;
@@ -237,23 +236,31 @@
   }
 }
 
-/* Material: Material 3 Expressive, a tonal palette from one seed (indigo, hue 278), precomputed. */
-:root[data-theme="material"] {
-  --background: oklch(0.983 0.006 278);
-  --sidebar: oklch(0.962 0.012 278);
-  --card: oklch(0.948 0.016 278);
-  --popover: oklch(0.935 0.02 278);
-  --foreground: oklch(0.22 0.02 278);
-  --muted: oklch(0.925 0.02 278);
-  --muted-foreground: oklch(0.47 0.025 278);
-  --border: oklch(0.885 0.022 278);
-  --edge: transparent;
-  --input: oklch(0.8 0.03 278);
-  --ring: oklch(0.5 0.17 278);
-  --primary: oklch(0.5 0.17 278);
+/*
+ * Material: Material 3 Expressive, a tonal palette grown from one seed: its hue, a scale on every tone's
+ * chroma and the light accent's lightness. The colourways below set the seed; ink is indigo, hue 278.
+ */
+[data-theme="material"] {
+  --seed-h: 278;
+  --seed-c: 1;
+  --seed-l: 0.5;
+  --primary: oklch(var(--seed-l) calc(0.17 * var(--seed-c)) var(--seed-h));
   --primary-foreground: oklch(1 0 0);
-  --accent: oklch(0.91 0.03 278);
-  --selected: oklch(0.89 0.06 278);
+}
+:root[data-theme="material"] {
+  --background: oklch(0.983 calc(0.006 * var(--seed-c)) var(--seed-h));
+  --sidebar: oklch(0.962 calc(0.012 * var(--seed-c)) var(--seed-h));
+  --card: oklch(0.948 calc(0.016 * var(--seed-c)) var(--seed-h));
+  --popover: oklch(0.935 calc(0.02 * var(--seed-c)) var(--seed-h));
+  --foreground: oklch(0.22 calc(0.02 * var(--seed-c)) var(--seed-h));
+  --muted: oklch(0.925 calc(0.02 * var(--seed-c)) var(--seed-h));
+  --muted-foreground: oklch(0.47 calc(0.025 * var(--seed-c)) var(--seed-h));
+  --border: oklch(0.885 calc(0.022 * var(--seed-c)) var(--seed-h));
+  --edge: transparent;
+  --input: oklch(0.8 calc(0.03 * var(--seed-c)) var(--seed-h));
+  --ring: var(--primary);
+  --accent: oklch(0.91 calc(0.03 * var(--seed-c)) var(--seed-h));
+  --selected: oklch(0.89 calc(0.06 * var(--seed-c)) var(--seed-h));
   --destructive: oklch(0.53 0.19 27);
   --success: oklch(0.52 0.13 150);
   --warning: oklch(0.58 0.13 65);
@@ -270,7 +277,7 @@
   --sh-card: 0 0 #0000;
   --sh-lg: 0 1px 2px rgb(0 0 0 / 0.2), 0 3px 8px 3px rgb(0 0 0 / 0.1);
   --sh-2xl: 0 2px 4px rgb(0 0 0 / 0.2), 0 8px 24px 6px rgb(0 0 0 / 0.12);
-  --overlay: oklch(0.2 0.03 278 / 0.38);
+  --overlay: oklch(0.2 calc(0.03 * var(--seed-c)) var(--seed-h) / 0.38);
   /* Tonal chips with Material's small corners; the switch's thumb grows and fills when on. */
   --r-pill: 8px;
   --pill-tint: 20%;
@@ -289,21 +296,22 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  [data-theme="material"] {
+    --primary: oklch(0.8 calc(0.1 * var(--seed-c)) var(--seed-h));
+    --primary-foreground: oklch(0.3 calc(0.12 * var(--seed-c)) var(--seed-h));
+  }
   :root[data-theme="material"] {
-    --background: oklch(0.17 0.012 278);
-    --sidebar: oklch(0.205 0.016 278);
-    --card: oklch(0.235 0.02 278);
-    --popover: oklch(0.26 0.022 278);
-    --foreground: oklch(0.92 0.012 278);
-    --muted: oklch(0.27 0.022 278);
-    --muted-foreground: oklch(0.74 0.025 278);
-    --border: oklch(0.32 0.024 278);
-    --input: oklch(0.42 0.03 278);
-    --ring: oklch(0.8 0.1 278);
-    --primary: oklch(0.8 0.1 278);
-    --primary-foreground: oklch(0.3 0.12 278);
-    --accent: oklch(0.29 0.026 278);
-    --selected: oklch(0.36 0.07 278);
+    --background: oklch(0.17 calc(0.012 * var(--seed-c)) var(--seed-h));
+    --sidebar: oklch(0.205 calc(0.016 * var(--seed-c)) var(--seed-h));
+    --card: oklch(0.235 calc(0.02 * var(--seed-c)) var(--seed-h));
+    --popover: oklch(0.26 calc(0.022 * var(--seed-c)) var(--seed-h));
+    --foreground: oklch(0.92 calc(0.012 * var(--seed-c)) var(--seed-h));
+    --muted: oklch(0.27 calc(0.022 * var(--seed-c)) var(--seed-h));
+    --muted-foreground: oklch(0.74 calc(0.025 * var(--seed-c)) var(--seed-h));
+    --border: oklch(0.32 calc(0.024 * var(--seed-c)) var(--seed-h));
+    --input: oklch(0.42 calc(0.03 * var(--seed-c)) var(--seed-h));
+    --accent: oklch(0.29 calc(0.026 * var(--seed-c)) var(--seed-h));
+    --selected: oklch(0.36 calc(0.07 * var(--seed-c)) var(--seed-h));
     --destructive: oklch(0.78 0.12 27);
     --success: oklch(0.8 0.12 150);
     --warning: oklch(0.82 0.11 75);
@@ -401,46 +409,169 @@
   }
 }
 
-/* Paper's colourways: the accent and the text on it. A swatch carries its own; skryb/recording/pill.py has the pill's. */
-[data-colourway="green"] {
+/*
+ * Colourways: every theme in the same five, each tuned to it. A rule sets the accent and the text on it;
+ * Default also its focus ring and selection, and Material the seed of its palette. A swatch carries
+ * data-theme and data-colourway itself, so it shows the colour as its theme draws it.
+ * skryb/recording/pill.py has the pill's.
+ */
+[data-theme="default"][data-colourway="green"] {
+  --primary: #047857;
+  --primary-foreground: #ffffff;
+  --ring: #047857;
+  --selected: #ebf7f1;
+}
+[data-theme="default"][data-colourway="terracotta"] {
+  --primary: #b04a22;
+  --primary-foreground: #ffffff;
+  --ring: #b04a22;
+  --selected: #fcf0ea;
+}
+[data-theme="default"][data-colourway="ink"] {
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --ring: #2563eb;
+  --selected: #eef3ff;
+}
+[data-theme="default"][data-colourway="plum"] {
+  --primary: #8e3a82;
+  --primary-foreground: #ffffff;
+  --ring: #8e3a82;
+  --selected: #f8eef6;
+}
+[data-theme="default"][data-colourway="graphite"] {
+  --primary: #52525b;
+  --primary-foreground: #ffffff;
+  --ring: #52525b;
+  --selected: #f0f0f2;
+}
+[data-theme="glass"][data-colourway="green"] {
+  --primary: #187632;
+  --primary-foreground: #ffffff;
+}
+[data-theme="glass"][data-colourway="terracotta"] {
+  --primary: #a9481b;
+  --primary-foreground: #ffffff;
+}
+[data-theme="glass"][data-colourway="ink"] {
+  --primary: #0066cc;
+  --primary-foreground: #ffffff;
+}
+[data-theme="glass"][data-colourway="plum"] {
+  --primary: #8944ab;
+  --primary-foreground: #ffffff;
+}
+[data-theme="glass"][data-colourway="graphite"] {
+  --primary: #5d5d62;
+  --primary-foreground: #ffffff;
+}
+[data-theme="material"][data-colourway="green"] {
+  --seed-h: 163;
+  --seed-c: 0.54;
+  --seed-l: 0.47;
+}
+[data-theme="material"][data-colourway="terracotta"] {
+  --seed-h: 42;
+  --seed-c: 0.75;
+}
+[data-theme="material"][data-colourway="plum"] {
+  --seed-h: 335;
+  --seed-c: 0.85;
+}
+[data-theme="material"][data-colourway="graphite"] {
+  --seed-h: 265;
+  --seed-c: 0.08;
+  --seed-l: 0.48;
+}
+[data-theme="paper"][data-colourway="green"] {
   --primary: #047857;
   --primary-foreground: #ffffff;
 }
-[data-colourway="terracotta"] {
+[data-theme="paper"][data-colourway="terracotta"] {
   --primary: #9a4b2c;
   --primary-foreground: #fffaf3;
 }
-[data-colourway="ink"] {
+[data-theme="paper"][data-colourway="ink"] {
   --primary: #2a5288;
   --primary-foreground: #ffffff;
 }
-[data-colourway="plum"] {
+[data-theme="paper"][data-colourway="plum"] {
   --primary: #7d3a70;
   --primary-foreground: #ffffff;
 }
-[data-colourway="graphite"] {
+[data-theme="paper"][data-colourway="graphite"] {
   --primary: #46484d;
   --primary-foreground: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
-  [data-colourway="green"] {
+  [data-theme="default"][data-colourway="green"] {
+    --primary: #34d399;
+    --primary-foreground: #04241a;
+    --ring: #34d399;
+    --selected: #10291f;
+  }
+  [data-theme="default"][data-colourway="terracotta"] {
+    --primary: #f0946c;
+    --primary-foreground: #2a1208;
+    --ring: #f0946c;
+    --selected: #2e1d16;
+  }
+  [data-theme="default"][data-colourway="ink"] {
+    --primary: #3b7bf6;
+    --primary-foreground: #ffffff;
+    --ring: #4f8bff;
+    --selected: #15213a;
+  }
+  [data-theme="default"][data-colourway="plum"] {
+    --primary: #e09ad2;
+    --primary-foreground: #2c0f27;
+    --ring: #e09ad2;
+    --selected: #2b1a28;
+  }
+  [data-theme="default"][data-colourway="graphite"] {
+    --primary: #d4d4d8;
+    --primary-foreground: #18181b;
+    --ring: #d4d4d8;
+    --selected: #25252a;
+  }
+  [data-theme="glass"][data-colourway="green"] {
+    --primary: #30d158;
+    --primary-foreground: #03230c;
+  }
+  [data-theme="glass"][data-colourway="terracotta"] {
+    --primary: #ff9d70;
+    --primary-foreground: #2b1105;
+  }
+  [data-theme="glass"][data-colourway="ink"] {
+    --primary: #4ea1ff;
+    --primary-foreground: #04111f;
+  }
+  [data-theme="glass"][data-colourway="plum"] {
+    --primary: #d38cff;
+    --primary-foreground: #230a30;
+  }
+  [data-theme="glass"][data-colourway="graphite"] {
+    --primary: #c7c7cc;
+    --primary-foreground: #1d1d1f;
+  }
+  [data-theme="paper"][data-colourway="green"] {
     --primary: #34d399;
     --primary-foreground: #04241a;
   }
-  [data-colourway="terracotta"] {
+  [data-theme="paper"][data-colourway="terracotta"] {
     --primary: #e0906b;
     --primary-foreground: #1d1410;
   }
-  [data-colourway="ink"] {
+  [data-theme="paper"][data-colourway="ink"] {
     --primary: #8fb5e8;
     --primary-foreground: #0c1a2c;
   }
-  [data-colourway="plum"] {
+  [data-theme="paper"][data-colourway="plum"] {
     --primary: #d89bc8;
     --primary-foreground: #2a0f24;
   }
-  [data-colourway="graphite"] {
+  [data-theme="paper"][data-colourway="graphite"] {
     --primary: #cbc7bf;
     --primary-foreground: #1b1a18;
   }

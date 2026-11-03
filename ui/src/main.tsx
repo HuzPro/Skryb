@@ -14,7 +14,7 @@ async function start(): Promise<void> {
     queryClient.fetchQuery({ ...queries.settings, retry: false }).catch(() => undefined),
     queryClient.fetchQuery({ ...queries.app, retry: false }).catch(() => undefined),
   ]);
-  applyTheme(settings?.theme, settings?.paper_colourway);
+  applyTheme(settings?.theme, settings?.colourways[settings.theme]);
   const root = document.getElementById("root");
   if (root) createRoot(root).render(<App launch={args} />);
 }

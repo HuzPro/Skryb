@@ -38,9 +38,11 @@ from skryb.output.dictionary_config import (
 from skryb.output.output_mode import OutputMode
 from skryb.output.paste_method import paste_method_overrides
 from skryb.output.text_filter_decorator import load_dictionary
-from skryb.recording.pill import DEFAULT_PILL_POSITION, PAPER_COLOURWAYS
+from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.recording.preferences import (
     RecordingPreferences,
+    fold_paper_colourway,
+    load_colourways,
     save_pill_position,
 )
 from skryb.settings.download_coordinator import DownloadCoordinator
@@ -305,17 +307,13 @@ class SettingsService:
                 )
             ),
             theme=self._theme(),
-            paper_colourway=self._paper_colourway(),
+            colourways=load_colourways(self._config),
             **self._meeting_fields(),
         )
 
     def _theme(self) -> str:
         configured = self._config.get("ui.theme", "default")
         return configured if configured in UI_THEMES else "default"
-
-    def _paper_colourway(self) -> str:
-        configured = self._config.get("ui.paper_colourway", PAPER_COLOURWAYS[0])
-        return configured if configured in PAPER_COLOURWAYS else PAPER_COLOURWAYS[0]
 
     def _meeting_fields(self) -> dict[str, str | bool]:
         meetings = meeting_settings_from(self._config)
@@ -348,7 +346,7 @@ class SettingsService:
         self._config.set("meetings.record_microphone", draft.meetings_record_microphone)
         self._config.set("meetings.language", draft.meetings_language)
         self._config.set("ui.theme", draft.theme)
-        self._config.set("ui.paper_colourway", draft.paper_colourway)
+        self._config.set("ui.colourways", cast(ConfigValue, dict(draft.colourways)))
         # A process name holds a dot, so the map is stored whole rather
         # than key by dotted key.
         self._config.set(
@@ -399,6 +397,7 @@ class SettingsService:
         imported = load_json_object(path)
         self._config.replace_all(deep_merge_config(DEFAULT_CONFIG, imported))
         migrate_legacy_hotkey(self._config)
+        fold_paper_colourway(self._config)
         self._config.save()
 
     # ------------------------------------------------------------------

@@ -9,6 +9,8 @@ from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.recording.pill import DEFAULT_PILL_POSITION, DEFAULT_SKIN, pill_skin, without_glass
 from skryb.recording.preferences import (
     RecordingPreferences,
+    fold_paper_colourway,
+    load_colourways,
     load_pill_position,
     load_pill_skin,
     save_pill_position,
@@ -147,22 +149,67 @@ class TestPillSkin:
             assert skin == without_glass(pill_skin(theme, True))
             assert not skin.glass
 
-    def test_paper_follows_the_saved_colourway(self):
-        config = FakeConfig({"ui.theme": "paper", "ui.paper_colourway": "ink"})
+    def test_the_pill_follows_the_saved_colourway_of_the_theme_in_use(self):
+        colourways = {"default": "plum", "glass": "terracotta", "material": "green", "paper": "ink"}
+        for theme, colourway in colourways.items():
+            config = FakeConfig({"ui.theme": theme, "ui.colourways": colourways})
 
-        assert load_pill_skin(config, lambda: ColorScheme.DARK) == pill_skin("paper", True, "ink")
-        assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin("paper", False, "ink")
+            assert load_pill_skin(config, lambda: ColorScheme.DARK) == pill_skin(theme, True, colourway)
+            assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin(theme, False, colourway)
 
-    def test_paper_with_no_or_a_hand_edited_colourway_is_green(self):
-        for colourway in (None, 7, "Ink blue 🖋"):
-            values = {"ui.theme": "paper"} if colourway is None else {"ui.theme": "paper", "ui.paper_colourway": colourway}
+    def test_a_missing_or_hand_edited_colourway_is_the_themes_own(self):
+        for saved in (None, 7, "plum", ["ink"], {"paper": "Ink blue 🖋"}, {"paper": 3}):
+            values = {"ui.theme": "paper"} if saved is None else {"ui.theme": "paper", "ui.colourways": saved}
 
             assert load_pill_skin(FakeConfig(values), lambda: ColorScheme.LIGHT) == pill_skin("paper", False, "green")
 
-    def test_a_fresh_or_hand_edited_config_gets_the_default_pill(self):
-        assert load_pill_skin(FakeConfig(), lambda: ColorScheme.DARK) is DEFAULT_SKIN
-        assert load_pill_skin(FakeConfig({"ui.theme": 42}), lambda: ColorScheme.DARK) is DEFAULT_SKIN
-        assert load_pill_skin(FakeConfig({"ui.theme": "Glass ✨"}), lambda: ColorScheme.DARK) is DEFAULT_SKIN
+    def test_a_fresh_or_hand_edited_config_gets_the_default_pill_in_ink_blue(self):
+        for values in ({}, {"ui.theme": 42}, {"ui.theme": "Glass ✨"}, {"ui.theme": ["glass"]}):
+            assert load_pill_skin(FakeConfig(values), lambda: ColorScheme.DARK) == pill_skin("default", True, "ink")
+
+
+class TestColourways:
+    def test_a_fresh_config_gives_each_theme_its_own_colourway(self):
+        assert load_colourways(FakeConfig()) == {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"}
+
+    def test_saved_colourways_come_back_and_unknown_ones_or_themes_are_left_out(self):
+        saved = {"glass": "plum", "material": "Teal", "paper": "graphite", "neon": "green", "default": None}
+
+        assert load_colourways(FakeConfig({"ui.colourways": saved})) == {
+            "default": "ink", "glass": "plum", "material": "ink", "paper": "graphite",
+        }
+
+    def test_an_old_paper_colourway_moves_into_the_colourways_and_the_old_key_goes(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"ui": {"theme": "paper", "paper_colourway": "plum"}}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        assert fold_paper_colourway(config) is True
+
+        assert config.get("ui.paper_colourway") is None
+        assert config.get("ui.colourways") == {"default": "ink", "glass": "ink", "material": "ink", "paper": "plum"}
+        assert load_colourways(config)["paper"] == "plum"
+        assert config.get("ui.theme") == "paper"
+
+    def test_an_old_paper_colourway_this_version_does_not_know_is_dropped_and_paper_stays_green(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"ui": {"paper_colourway": "Neon pink 🌸", "colourways": {"glass": "plum"}}}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        assert fold_paper_colourway(config) is True
+
+        assert config.get("ui.paper_colourway") is None
+        assert load_colourways(config) == {"default": "ink", "glass": "plum", "material": "ink", "paper": "green"}
+
+    def test_a_config_already_on_colourways_is_left_alone(self, tmp_path):
+        config = JsonConfigAdapter(tmp_path / "config.json")
+        config.load()
+        before = config.get_all()
+
+        assert fold_paper_colourway(config) is False
+        assert config.get_all() == before
 
     def test_a_theme_saved_later_is_read_the_next_time_the_pill_asks(self):
         config = FakeConfig({"ui.theme": "default"})

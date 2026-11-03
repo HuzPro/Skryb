@@ -7,8 +7,8 @@ export type BindingMode = "toggle" | "hold" | "press";
 export type BindingAction = "dictate" | "paste_last" | "copy_last" | "toggle_meeting";
 /** The window's look; each follows Windows' light or dark setting. */
 export type Theme = "default" | "glass" | "material" | "paper";
-/** Paper's accent colour; green is the Skryb icon's. */
-export type PaperColourway = "green" | "terracotta" | "ink" | "plum" | "graphite";
+/** A theme's accent colour, tuned to each theme; green is the Skryb icon's. */
+export type Colourway = "green" | "terracotta" | "ink" | "plum" | "graphite";
 
 export interface Binding {
   keys: string;
@@ -55,7 +55,8 @@ export interface Settings {
   check_for_updates: boolean;
   meetings: MeetingSettings;
   theme: Theme;
-  paper_colourway: PaperColourway;
+  /** Each theme remembers its own colourway. */
+  colourways: Record<Theme, Colourway>;
 }
 
 export interface ChangeSet {

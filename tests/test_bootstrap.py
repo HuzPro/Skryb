@@ -25,6 +25,7 @@ from skryb.bootstrap import (
     _warmup_safely,
     apply_settings,
     migrate_hotkey_bindings,
+    migrate_paper_colourway,
     migrate_language,
     migrate_output_mode,
 )
@@ -802,6 +803,31 @@ class TestMigrateHotkeyBindings:
         config.load()
 
         migrate_hotkey_bindings(config)
+
+        assert not path.exists()
+
+
+class TestMigratePaperColourway:
+    def test_an_old_paper_colourway_is_saved_as_papers_colourway_and_the_old_key_goes(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"ui": {"theme": "paper", "paper_colourway": "graphite"}}), encoding="utf-8")
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_paper_colourway(config)
+
+        saved = json.loads(path.read_text(encoding="utf-8"))["ui"]
+        assert saved == {
+            "theme": "paper",
+            "colourways": {"default": "ink", "glass": "ink", "material": "ink", "paper": "graphite"},
+        }
+
+    def test_a_config_without_the_old_key_is_not_rewritten(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        config = JsonConfigAdapter(path)
+        config.load()
+
+        migrate_paper_colourway(config)
 
         assert not path.exists()
 

@@ -1,10 +1,13 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 export interface Option {
   value: string;
   label: string;
+  /** Shown before the label, in the list and once chosen. */
+  icon?: ReactNode;
 }
 
 /** A shadcn-style select over a plain list of options; Radix needs a non-empty value, so "" maps to a sentinel. */
@@ -15,6 +18,7 @@ export function Select({
   disabled,
   className,
   label,
+  onOpenChange,
 }: {
   value: string;
   options: Option[];
@@ -22,11 +26,12 @@ export function Select({
   disabled?: boolean;
   className?: string;
   label?: string;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const encode = (raw: string) => (raw === "" ? "\u0000" : raw);
   const decode = (raw: string) => (raw === "\u0000" ? "" : raw);
   return (
-    <SelectPrimitive.Root value={encode(value)} onValueChange={(next) => onChange(decode(next))} disabled={disabled ?? false}>
+    <SelectPrimitive.Root value={encode(value)} onValueChange={(next) => onChange(decode(next))} onOpenChange={onOpenChange} disabled={disabled ?? false}>
       <SelectPrimitive.Trigger
         aria-label={label}
         className={cn(
@@ -50,7 +55,16 @@ export function Select({
                 value={encode(option.value)}
                 className="relative flex h-7 items-center rounded-md pr-7 pl-2 text-[13px] outline-none select-none data-[highlighted]:bg-accent"
               >
-                <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+                <SelectPrimitive.ItemText>
+                  {option.icon ? (
+                    <span className="flex items-center gap-2">
+                      {option.icon}
+                      {option.label}
+                    </span>
+                  ) : (
+                    option.label
+                  )}
+                </SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator className="absolute right-2">
                   <Check className="size-3.5" />
                 </SelectPrimitive.ItemIndicator>
