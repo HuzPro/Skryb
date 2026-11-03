@@ -5,8 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      salt:
+        description: "measurement: busts the build caches"
+        required: false
+        default: ""
 
-# Newer pushes to the same ref supersede in-flight runs.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -15,49 +19,237 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Tests (Ubuntu, CPU, ${{ matrix.mode }})
+  ui:
+    name: Settings window
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - id: key
+        shell: bash
+        run: echo "exe=ui-exe-$(rustc -V | cut -d' ' -f2)-node22-${{ hashFiles('ui/**') }}-${{ inputs.salt }}" >> "$GITHUB_OUTPUT"
+      - id: exe
+        uses: actions/cache/restore@v4
+        with:
+          path: ui/src-tauri/target/release/skryb-ui.exe
+          key: ${{ steps.key.outputs.exe }}
+      - if: steps.exe.outputs.cache-hit != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - if: steps.exe.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - if: steps.exe.outputs.cache-hit != 'true'
+        id: cargo-key
+        shell: bash
+        run: echo "key=cargo-${{ runner.os }}-$(rustc -V | cut -d' ' -f2)-${{ hashFiles('ui/src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+      - if: steps.exe.outputs.cache-hit != 'true'
+        id: cargo
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ui/src-tauri/target
+          key: ${{ steps.cargo-key.outputs.key }}
+      - if: steps.exe.outputs.cache-hit != 'true'
+        name: pnpm install
+        shell: pwsh
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+      - if: steps.exe.outputs.cache-hit != 'true'
+        name: frontend
+        shell: pwsh
+        working-directory: ui
+        run: pnpm build
+      - if: steps.exe.outputs.cache-hit != 'true'
+        name: Build settings window
+        shell: pwsh
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          ./scripts/build_ui.ps1
+          Write-Host "build_ui.ps1 took $($sw.Elapsed.TotalSeconds)s"
+      - if: steps.exe.outputs.cache-hit != 'true' && steps.cargo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ui/src-tauri/target
+          key: ${{ steps.cargo-key.outputs.key }}
+      - name: cargo cache size
+        if: steps.exe.outputs.cache-hit != 'true'
+        shell: bash
+        run: du -sh ui/src-tauri/target ~/.cargo/registry || true
+      - if: steps.exe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ui/src-tauri/target/release/skryb-ui.exe
+          key: ${{ steps.key.outputs.exe }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui
+          path: ui/src-tauri/target/release/skryb-ui.exe
+          if-no-files-found: error
+          retention-days: 3
+
+  rocm:
+    name: Native engines (AMD, ${{ matrix.sdk }})
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        mode: [serial, xdist]
-    runs-on: ubuntu-24.04
+        sdk: [core-and-devel, core-only]
     steps:
       - uses: actions/checkout@v5
-
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
-          enable-cache: false
-
-      - name: Which system libraries are already there
+          python-version: "3.12"
+      - name: download wheels
+        shell: bash
         run: |
-          nproc; free -g
-          for p in libportaudio2 libsndfile1 xvfb xauth; do dpkg -s $p >/dev/null 2>&1 && echo "$p present" || echo "$p MISSING"; done
-
-      - name: Install system libraries
+          python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 rocm-sdk-devel==7.2.1 -d wheels
+          ls -la wheels
+      - name: install wheels
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libportaudio2 libsndfile1 \
-            xvfb xauth
-
-      - name: Install Python dependencies
+          if [ "${{ matrix.sdk }}" = core-only ]; then python -m pip install --no-deps wheels/rocm_sdk_core-*.whl; else python -m pip install --no-deps wheels/*.whl; fi
+      - name: build qasr.dll
+        shell: bash
+        working-directory: native/engine
         run: |
-          uv venv
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          uv pip install -e ".[dev,npu]" pytest-xdist
+          HIPCC="$(python -c 'import _rocm_sdk_core, os; print(os.path.join(os.path.dirname(_rocm_sdk_core.__file__), "bin", "hipcc.exe"))')"
+          mkdir -p build
+          time "$HIPCC" --offload-arch=gfx1200 -O3 -std=c++20 -Wno-unused-result -shared kernels.hip engine.hip -o build/qasr.dll 2>/dev/null
+      - name: build qasr-bench.exe
+        shell: bash
+        working-directory: native/engine
+        run: |
+          HIPCC="$(python -c 'import _rocm_sdk_core, os; print(os.path.join(os.path.dirname(_rocm_sdk_core.__file__), "bin", "hipcc.exe"))')"
+          time "$HIPCC" -O2 -std=c++20 -x c++ bench.cpp -x none build/qasr.lib -o build/qasr-bench.exe 2>/dev/null
+      - name: build npk.dll
+        shell: bash
+        run: time bash native/parakeet/build.sh 2>/dev/null
+      - name: build nd.dll
+        shell: bash
+        run: time bash native/diar/build.sh 2>/dev/null
+      - name: all three at once
+        shell: bash
+        run: |
+          rm -rf native/*/build
+          time ( pids=(); for s in engine parakeet diar; do bash native/$s/build.sh >/dev/null 2>&1 & pids+=($!); done; for p in "${pids[@]}"; do wait $p; done )
+          sha256sum native/engine/build/qasr.dll native/parakeet/build/npk.dll native/diar/build/nd.dll
+          sha256sum native/engine/build/qasr.dll native/parakeet/build/npk.dll native/diar/build/nd.dll > rocm-sums.txt
+      - name: toolchain
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Select-Object -ExpandProperty Name
+          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled
+          Write-Host "image $env:ImageVersion"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rocm-${{ matrix.sdk }}
+          path: |
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
+            rocm-sums.txt
+          retention-days: 3
 
+  cuda:
+    name: Native engines (NVIDIA)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: fetch toolkit
+        shell: bash
+        run: |
+          python native/cuda/fetch_toolkit.py
+          du -sh native/cuda/build/toolkit
+      - name: build
+        shell: bash
+        run: |
+          time python native/cuda/build.py > /dev/null 2>&1
+          sha256sum native/*/build/*_cuda.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cuda
+          path: |
+            native/engine/build/qasr_cuda.dll
+            native/parakeet/build/npk_cuda.dll
+            native/diar/build/nd_cuda.dll
+          retention-days: 3
+
+  installer:
+    name: Installer
+    needs: [ui, rocm, cuda]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui
+          path: ui/src-tauri/target/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: rocm-core-and-devel
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: cuda
+          path: native
+      - name: layout
+        shell: bash
+        run: find native ui/src-tauri/target -name "*.dll" -o -name "*.exe" | xargs ls -la
+      - name: Inno Setup present?
+        shell: pwsh
+        run: |
+          Get-Command ISCC -ErrorAction SilentlyContinue
+          Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
       - name: Build the CPU TDT decoder
         run: python native/tdt/build.py
-
-      - name: Time imports and collection
+      - name: Fetch standalone CPython 3.12
+        id: cpython
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python -X importtime -c "import skryb" 2> importtime.txt; sort -t'|' -k2 -n importtime.txt | tail -15
-          time python -m pytest -q --collect-only > /dev/null
-
-      - name: Run tests
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "skryb-release" }
+          $release = Invoke-RestMethod -Headers $headers `
+            -Uri "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+          $asset = $release.assets |
+            Where-Object { $_.name -match 'cpython-3\.12\.\d+\+.*-x86_64-pc-windows-msvc-install_only\.tar\.gz$' } |
+            Select-Object -First 1
+          if (-not $asset) { throw "No cp312 install_only Windows asset found in the latest release." }
+          Write-Host "Using $($asset.name)"
+          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile cpython.tar.gz
+          New-Item -ItemType Directory -Force -Path cpython | Out-Null
+          tar -xzf cpython.tar.gz -C cpython
+          "dir=$(Resolve-Path cpython\python)" >> $env:GITHUB_OUTPUT
+      - name: Build installer
+        shell: pwsh
         run: |
-          if [ "${{ matrix.mode }}" = xdist ]; then extra="-n auto"; else extra=""; fi
-          xvfb-run -a python -m pytest -q --durations=60 $extra
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          python build_installer.py --python-dir "${{ steps.cpython.outputs.dir }}"
+          Write-Host "build_installer took $($sw.Elapsed.TotalSeconds)s"
+          Get-ChildItem dist, build/installer-payload/wheels | Format-Table Name, Length
+          (Get-ChildItem build/installer-payload -Recurse | Measure-Object Length -Sum).Sum / 1MB
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Skryb-Setup
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 3
