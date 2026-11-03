@@ -90,7 +90,7 @@ jobs:
         run: python -c "import os, pathlib; from release.version import resolve_version; resolve_version(os.environ['VERSION'], pathlib.Path('pyproject.toml'))"
 
   test:
-    name: Tests (Python ${{ matrix.python }}, part ${{ matrix.shard }} of 4 ${{ matrix.bytecode }})
+    name: Tests (Python ${{ matrix.python }}, part ${{ matrix.shard }} of 4)
     # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
     # sounddevice fails test collection.
     runs-on: ubuntu-24.04
@@ -98,9 +98,10 @@ jobs:
       fail-fast: false
       matrix:
         # 3.11 is the oldest Python the app supports; 3.12 is the one the installer bundles.
-        python: ["3.11"]
+        python: ["3.11", "3.12"]
+        # The suite is CPU-bound (about 6 CPU-minutes), so it is split over four
+        # runners of four cores each; tests/conftest.py picks this runner's quarter.
         shard: [1, 2, 3, 4]
-        bytecode: ["", "compile"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -122,10 +123,11 @@ jobs:
       # then the project with its test deps and the parakeet engine (the
       # cache-aware streaming tests import nano_parakeet directly), plus
       # OpenVINO so the NPU engine's CPU-device tests run instead of skipping.
-      # uv resolves the same latest versions pip would, in seconds.
+      # uv resolves the same latest versions pip would, in seconds. It compiles the
+      # bytecode once here, as pip did, instead of in each of the four pytest workers.
       - name: Install dependencies
         env:
-          UV_COMPILE_BYTECODE: ${{ matrix.bytecode == 'compile' && 'true' || 'false' }}
+          UV_COMPILE_BYTECODE: "1"
         run: |
           packages="libportaudio2 libsndfile1 xvfb xauth"
           { sudo apt-get install -y --no-install-recommends $packages || {
@@ -219,8 +221,9 @@ jobs:
   # compilers changed. AMD's rocm-sdk-core wheel carries hipcc, clang and the HIP
   # headers; the runner's Visual Studio supplies the C runtime headers. Compiling
   # needs no GPU. (rocm-sdk-devel isn't needed: the DLLs come out the same without it.)
+  # Also the NPU engine's CPU decoder (tdt_cpu.dll), plain C built with MSVC.
   rocm:
-    name: Native engines (AMD)
+    name: Native engines (AMD) and CPU decoder
     # Pinned, not windows-latest: Visual Studio 2026's C++ library made <cmath>
     # constexpr, and ROCm 7.2.1's HIP compiler then rejects its own GPU math
     # overloads ("__device__ function cannot overload __host__ __device__").
@@ -235,20 +238,29 @@ jobs:
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
-          "key=native-rocm7.2.1-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
-      - id: cache
+          "rocm=native-rocm7.2.1-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
+          "tdt=native-tdt-vs$vs-${{ hashFiles('native/tdt/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
+      - id: rocm
         uses: actions/cache/restore@v4
         with:
           path: |
             native/engine/build/qasr.dll
             native/parakeet/build/npk.dll
             native/diar/build/nd.dll
-          key: ${{ steps.key.outputs.key }}
-      - if: steps.cache.outputs.cache-hit != 'true'
+          key: ${{ steps.key.outputs.rocm }}
+      # The 645 MB wheel as AMD's server sent it, kept so a rebuild doesn't fetch it again.
+      - if: steps.rocm.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: rocm-wheel
+          key: rocm-sdk-core-7.2.1-win_amd64
+      - if: steps.rocm.outputs.cache-hit != 'true'
         name: Install the ROCm SDK
         shell: bash
-        run: python -m pip install --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1
-      - if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          ls rocm-wheel/rocm_sdk_core-7.2.1-*.whl 2>/dev/null || python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 -d rocm-wheel
+          time python -m pip install --no-deps rocm-wheel/rocm_sdk_core-7.2.1-*.whl
+      - if: steps.rocm.outputs.cache-hit != 'true'
         name: Build native engines
         shell: bash
         run: |
@@ -256,64 +268,14 @@ jobs:
           for engine in engine parakeet diar; do bash native/$engine/build.sh > $engine.log 2>&1 & pids+=($!); done
           for pid in "${pids[@]}"; do wait $pid || { cat engine.log parakeet.log diar.log; exit 1; }; done
           tail -n 1 engine.log parakeet.log diar.log
-      - if: steps.cache.outputs.cache-hit != 'true'
+      - if: steps.rocm.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             native/engine/build/qasr.dll
             native/parakeet/build/npk.dll
             native/diar/build/nd.dll
-          key: ${{ steps.key.outputs.key }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rocm
-          path: |
-            native/engine/build/qasr.dll
-            native/parakeet/build/npk.dll
-            native/diar/build/nd.dll
-          if-no-files-found: error
-          retention-days: 1
-
-  # Their NVIDIA builds (qasr_cuda.dll and the rest, for the RTX 30-50 series) from
-  # the same sources: nvcc and the CUDA runtime from NVIDIA's redistributable
-  # archives, and the runner's Visual Studio. No GPU. Also the NPU engine's CPU
-  # decoder (tdt_cpu.dll), plain C built with MSVC.
-  cuda:
-    name: Native engines (NVIDIA) and CPU decoder
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - id: key
-        shell: pwsh
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
-          "cuda=native-cuda-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**', 'native/cuda/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
-          "tdt=native-tdt-vs$vs-${{ hashFiles('native/tdt/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
-      - id: cuda
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            native/engine/build/qasr_cuda.dll
-            native/parakeet/build/npk_cuda.dll
-            native/diar/build/nd_cuda.dll
-          key: ${{ steps.key.outputs.cuda }}
-      - if: steps.cuda.outputs.cache-hit != 'true'
-        name: Build native engines for NVIDIA
-        shell: bash
-        run: |
-          python native/cuda/fetch_toolkit.py
-          python native/cuda/build.py
-      - if: steps.cuda.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            native/engine/build/qasr_cuda.dll
-            native/parakeet/build/npk_cuda.dll
-            native/diar/build/nd_cuda.dll
-          key: ${{ steps.key.outputs.cuda }}
+          key: ${{ steps.key.outputs.rocm }}
       - id: tdt
         uses: actions/cache/restore@v4
         with:
@@ -329,12 +291,60 @@ jobs:
           key: ${{ steps.key.outputs.tdt }}
       - uses: actions/upload-artifact@v4
         with:
-          name: cuda
+          name: rocm
           path: |
-            native/engine/build/qasr_cuda.dll
-            native/parakeet/build/npk_cuda.dll
-            native/diar/build/nd_cuda.dll
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
             native/tdt/build/tdt_cpu.dll
+          if-no-files-found: error
+          retention-days: 1
+
+  # Their NVIDIA builds (qasr_cuda.dll and the rest, for the RTX 30-50 series) from
+  # the same sources, one engine per runner: nvcc and the CUDA runtime from NVIDIA's
+  # redistributable archives, and the runner's Visual Studio. No GPU.
+  cuda:
+    name: Native engine for NVIDIA (${{ matrix.engine }})
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        include:
+          - engine: engine
+            dll: qasr_cuda.dll
+          - engine: parakeet
+            dll: npk_cuda.dll
+          - engine: diar
+            dll: nd_cuda.dll
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - id: key
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
+          "key=native-cuda-${{ matrix.engine }}-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**', 'native/cuda/**') }}${{ inputs.salt }}" >> $env:GITHUB_OUTPUT
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/${{ matrix.engine }}/build/${{ matrix.dll }}
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Build native engine for NVIDIA
+        shell: bash
+        run: |
+          python native/cuda/fetch_toolkit.py
+          python native/cuda/build.py ${{ matrix.engine }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/${{ matrix.engine }}/build/${{ matrix.dll }}
+          key: ${{ steps.key.outputs.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cuda-${{ matrix.engine }}
+          path: native/${{ matrix.engine }}/build/${{ matrix.dll }}
           if-no-files-found: error
           retention-days: 1
 
@@ -357,8 +367,16 @@ jobs:
           path: native
       - uses: actions/download-artifact@v4
         with:
-          name: cuda
-          path: native
+          name: cuda-engine
+          path: native/engine/build
+      - uses: actions/download-artifact@v4
+        with:
+          name: cuda-parakeet
+          path: native/parakeet/build
+      - uses: actions/download-artifact@v4
+        with:
+          name: cuda-diar
+          path: native/diar/build
 
       # The runner image comes with Inno Setup.
       - name: Install Inno Setup
@@ -391,17 +409,6 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: python build_installer.py --python-dir "${{ steps.cpython.outputs.dir }}"
-
-      - name: same bytes without the separate process (measurement only)
-        shell: pwsh
-        run: |
-          $wheel = (Get-ChildItem build/installer-payload/wheels/*.whl).Name
-          $payload = Join-Path $PWD "build\installer-payload"
-          (Get-Content installer/Skryb.iss -Raw) -replace "LZMAUseSeparateProcess=yes", "" | Set-Content installer/variant.iss
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          ISCC /Q "/DAppVersion=0.13.0" "/DPayloadDir=$payload" "/DWheelFile=$wheel" "/DReqCuda=requirements-nvidia.txt" "/DReqRocm=requirements-amd.txt" "/DReqCpu=requirements-cpu.txt" "/O$(Join-Path $PWD 'variant')" "/Fv" installer/variant.iss
-          Write-Host "without: $($sw.Elapsed.TotalSeconds)s"
-          python -c "import sys; a=open(sys.argv[1],'rb').read(); b=open(sys.argv[2],'rb').read(); d=[i for i in range(min(len(a),len(b))) if a[i]!=b[i]]; print('sizes', len(a), len(b), 'differing bytes', len(d), d[:10])" dist/Skryb-Setup-0.13.0.exe variant/v.exe
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
