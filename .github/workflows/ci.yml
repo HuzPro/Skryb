@@ -177,18 +177,22 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
       # The compiled dependencies (the crates in Cargo.lock), so only the window's
-      # own crate is compiled. Its fat LTO link still takes about two minutes.
+      # own crate is compiled; with fat LTO that alone takes 65 to 110 s here.
+      # Cargo's home goes on D:, the runner's local disk: unpacking the crates there
+      # takes a third of the time it takes on C:.
       - if: steps.exe.outputs.cache-hit != 'true'
         id: cargo-key
         shell: bash
-        run: echo "key=cargo-${{ runner.os }}-rust$(rustc -V | cut -d' ' -f2)-${{ hashFiles('ui/src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "CARGO_HOME=$RUNNER_TEMP/cargo" >> "$GITHUB_ENV"
+          echo "key=cargo-${{ runner.os }}-rust$(rustc -V | cut -d' ' -f2)-${{ hashFiles('ui/src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
       - if: steps.exe.outputs.cache-hit != 'true'
         id: cargo
         uses: actions/cache/restore@v4
         with:
           path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
+            ${{ runner.temp }}/cargo/registry/index
+            ${{ runner.temp }}/cargo/registry/cache
             ui/src-tauri/target
           key: ${{ steps.cargo-key.outputs.key }}
       - if: steps.exe.outputs.cache-hit != 'true'
@@ -199,8 +203,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
+            ${{ runner.temp }}/cargo/registry/index
+            ${{ runner.temp }}/cargo/registry/cache
             ui/src-tauri/target
           key: ${{ steps.cargo-key.outputs.key }}
       - if: steps.exe.outputs.cache-hit != 'true'
@@ -254,12 +258,14 @@ jobs:
         with:
           path: rocm-wheel
           key: rocm-sdk-core-7.2.1-win_amd64
+      # Unpacked on D:, the runner's local disk, which is faster than C: for 1.8 GB of files.
       - if: steps.rocm.outputs.cache-hit != 'true'
         name: Install the ROCm SDK
         shell: bash
         run: |
           ls rocm-wheel/rocm_sdk_core-7.2.1-*.whl 2>/dev/null || python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 -d rocm-wheel
-          time python -m pip install --no-deps rocm-wheel/rocm_sdk_core-7.2.1-*.whl
+          python -m pip install --no-deps --no-compile --target "$RUNNER_TEMP/rocm-sdk" rocm-wheel/rocm_sdk_core-7.2.1-*.whl
+          echo "HIPCC=$(cygpath -m "$RUNNER_TEMP")/rocm-sdk/_rocm_sdk_core/bin/hipcc.exe" >> "$GITHUB_ENV"
       - if: steps.rocm.outputs.cache-hit != 'true'
         name: Build native engines
         shell: bash
