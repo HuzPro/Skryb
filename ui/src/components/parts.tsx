@@ -208,7 +208,10 @@ export function StatusDot({ tone }: { tone: Tone }) {
   return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", color)} />;
 }
 
-/** The sidebar's footer card, one status line over one detail line in either mode, so switching mode moves nothing. */
+/**
+ * The sidebar's footer card, one status line over one detail line in either mode, so switching mode moves nothing.
+ * Each mode mounts its own card, so its text fades in on a switch while the card itself stays.
+ */
 export function StatusCard({
   tone,
   label,
@@ -239,13 +242,13 @@ export function StatusCard({
   return (
     <div className="surface flex min-w-0 flex-1 items-center rounded-lg border border-edge bg-card shadow-card">
       {onOpen ? (
-        <button onClick={onOpen} className="min-w-0 flex-1 self-stretch rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40">
+        <button onClick={onOpen} className="enter-fade min-w-0 flex-1 self-stretch rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40">
           {body}
         </button>
       ) : (
-        <div className="min-w-0 flex-1 px-3 py-2">{body}</div>
+        <div className="enter-fade min-w-0 flex-1 px-3 py-2">{body}</div>
       )}
-      {action ? <div className="shrink-0 pr-1.5">{action}</div> : null}
+      {action ? <div className="enter-pop shrink-0 pr-1.5">{action}</div> : null}
     </div>
   );
 }

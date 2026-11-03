@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, LoaderCircle, Mic, Minus, Settings, Square, Users, X, type LucideIcon } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState, ViewTransition, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { isDirty } from "../lib/draft";
 import { windowControls } from "../lib/platform";
@@ -323,7 +323,7 @@ export function Sidebar({
         })}
       </nav>
       <div className="mt-auto flex items-stretch gap-1.5 p-3">
-        <ViewTransition name="mode-status">{status}</ViewTransition>
+        {status}
         <Link
           to="/updates"
           draggable={false}
