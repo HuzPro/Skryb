@@ -5,6 +5,7 @@ import threading
 import time
 from unittest.mock import MagicMock
 
+import numpy
 import pytest
 
 from tests.fakes.dispatcher import InlineActionDispatcher
@@ -67,6 +68,10 @@ class FakeWindowApi:
         self.origin = (0, 0)
         self.moved_to: list[tuple[int, int]] = []
         self.button_down = False
+        # Whether Windows can copy what is behind the window, and what it copied.
+        self.can_follow = False
+        self.followed: list[object] = []
+        self.behind = None
 
     def work_area_for_foreground(self) -> tuple[int, int, int, int]:
         return self.work_area
@@ -109,6 +114,13 @@ class FakeWindowApi:
     def wait_for_frame(self) -> bool:
         self.frame_waits += 1
         return self.synced
+
+    def follow_backdrop(self, frost) -> bool:
+        self.followed.append(frost)
+        return frost is not None and self.can_follow
+
+    def backdrop(self):
+        return self.behind
 
 
 class FakeRoot:
@@ -841,7 +853,31 @@ class TestWin32Window:
         window._hand_cursor = False
         window._origin = (0, 0)
         window._scale = scale
+        window._hwnd = 1
+        window._bitmap = 0
+        window._frost = None
+        window._behind = None
+        window._following = None
+        window._moved = threading.Event()
         return window
+
+    def test_following_its_backdrop_leaves_the_window_out_of_screen_captures_until_it_stops(self):
+        window = self._window()
+        window._user32.SetWindowDisplayAffinity.return_value = 1
+
+        assert window.follow_backdrop(lambda pixels: pixels) is True
+        assert window._user32.SetWindowDisplayAffinity.call_args.args == (1, 0x11)
+
+        assert window.follow_backdrop(None) is False
+        assert window._user32.SetWindowDisplayAffinity.call_args.args == (1, 0x00)
+        assert window.backdrop() is None
+
+    def test_where_windows_cannot_leave_it_out_of_captures_the_window_does_not_follow(self):
+        window = self._window()
+        window._user32.SetWindowDisplayAffinity.return_value = 0
+
+        assert window.follow_backdrop(lambda pixels: pixels) is False
+        assert window._frost is None
 
     def test_is_layered_topmost_and_never_activates_but_does_take_clicks(self):
         window = self._window()
@@ -1127,3 +1163,54 @@ class TestWindowPixels:
         window.push_frame(bytes(1) * (CANVAS_WIDTH * CANVAS_HEIGHT * 4))
 
         window._user32.UpdateLayeredWindow.assert_not_called()
+
+
+class TestGlass:
+    def _bare_pixel(self, frame: bytes) -> tuple[int, int, int, int]:
+        left, top, _right, _bottom = pill_box(*target_size(Mode.RECORDING))
+        at = (round(top + 12) * CANVAS_WIDTH + round(left + 60)) * 4
+        blue, green, red, alpha = frame[at:at + 4]
+        return red, green, blue, alpha
+
+    def test_a_glass_pill_has_its_window_copy_what_is_behind_it_and_other_themes_do_not(self):
+        harness = Harness()
+        harness.api.can_follow = True
+        harness.skin = pill_skin("glass", True)
+        harness.start_recording()
+        assert harness.api.followed[-1] is not None
+        harness.state("recording", "idle")
+        harness.root.run(1.0)
+
+        harness.skin = pill_skin("paper", False, "plum")
+        harness.start_recording()
+
+        assert harness.api.followed[-1] is None
+
+    def test_a_glass_pill_shows_the_frosted_backdrop_through_its_tint(self):
+        harness = Harness()
+        harness.api.can_follow = True
+        harness.api.behind = numpy.full((CANVAS_HEIGHT, CANVAS_WIDTH, 3), (230, 20, 40), numpy.uint8)
+        harness.skin = pill_skin("glass", True)
+
+        harness.start_recording()
+
+        red, green, blue, alpha = self._bare_pixel(harness.api.frames[-1])
+        assert alpha == 255
+        assert red > 100 and red > 3 * green and red > 2 * blue
+
+    def test_where_windows_cannot_copy_what_is_behind_the_glass_pill_is_solid(self):
+        harness = Harness()
+        harness.skin = pill_skin("glass", False)
+
+        harness.start_recording()
+
+        assert self._bare_pixel(harness.api.frames[-1])[3] >= 248
+
+    def test_before_the_first_copy_arrives_the_glass_pill_is_its_see_through_tint(self):
+        harness = Harness()
+        harness.api.can_follow = True
+        harness.skin = pill_skin("glass", False)
+
+        harness.start_recording()
+
+        assert self._bare_pixel(harness.api.frames[-1])[3] < 200

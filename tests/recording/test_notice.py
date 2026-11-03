@@ -75,6 +75,8 @@ class FakeNoticeWindow:
         self.hand = False
         self.cursor: tuple[int, int] | None = None
         self._handler = None
+        self.can_follow = False
+        self.behind = None
 
     def work_area_for_foreground(self) -> tuple[int, int, int, int]:
         return _WORK_AREA
@@ -111,6 +113,12 @@ class FakeNoticeWindow:
 
     def set_hand_cursor(self, hand: bool) -> None:
         self.hand = hand
+
+    def follow_backdrop(self, frost) -> bool:
+        return frost is not None and self.can_follow
+
+    def backdrop(self):
+        return self.behind
 
     def press(self, x: float, y: float) -> None:
         self._in_window_procedure(True, x, y)
@@ -523,3 +531,35 @@ def test_each_notice_opens_in_the_theme_of_the_moment() -> None:
     notice.show("No text box here, so it's on your clipboard.")
     root.run(1.0)
     assert body_colour() == pytest.approx(chosen[0].fill, abs=2)
+
+
+def test_a_glass_notice_shows_what_is_behind_it_frosted_and_leaves_room_for_its_shadow() -> None:
+    root = FakeRoot()
+    window = FakeNoticeWindow(root)
+    window.can_follow = True
+    notice = Notice(root, lambda: window, clock=lambda: root.now, skin=lambda: pill_skin("glass", True))
+    notice.show("Recording cancelled.")
+    width, height = window.size
+    window.behind = numpy.full((height, width, 3), (20, 40, 230), numpy.uint8)
+
+    root.run(1.0)
+
+    at = ((height // 2) * width + 12) * 4
+    blue, green, red, alpha = window.frames[-1][at:at + 4]
+    assert alpha == 255
+    assert blue > 100 and blue > 2 * red
+    plain = notice_layout("Recording cancelled.", [], warning=False)
+    assert (width, height) == (plain.width + 10, plain.height + 10)
+
+
+def test_where_windows_cannot_copy_what_is_behind_a_glass_notice_is_solid() -> None:
+    root = FakeRoot()
+    window = FakeNoticeWindow(root)
+    notice = Notice(root, lambda: window, clock=lambda: root.now, skin=lambda: pill_skin("glass", False))
+
+    notice.show("No text box here, so it's on your clipboard.")
+    root.run(1.0)
+
+    width, height = window.size
+    at = ((height // 2) * width + 12) * 4
+    assert window.frames[-1][at + 3] >= 248

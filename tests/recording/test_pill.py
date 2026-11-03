@@ -28,12 +28,14 @@ from skryb.recording.pill import (
     pill_origin,
     pill_position,
     pill_skin,
+    frosted,
     render,
     render_notice,
     settled_label_frame,
     shimmer_position,
     shimmered,
     target_size,
+    without_glass,
 )
 
 
@@ -554,7 +556,8 @@ class TestThemes:
     def test_each_theme_light_and_dark_fills_the_pill_in_its_own_colour(self):
         fills = {}
         for theme, dark in _THEMES:
-            skin = pill_skin(theme, dark)
+            # Glass is tinted light along its top; its solid form shows the colour alone.
+            skin = without_glass(pill_skin(theme, dark))
             fills[theme, dark] = render(_recording_frame(), skin=skin).getpixel(_bare_point())
 
             assert fills[theme, dark] == pytest.approx((*skin.fill, skin.fill_alpha), abs=1)
@@ -564,9 +567,16 @@ class TestThemes:
     def test_every_theme_keeps_the_pills_size_and_place(self, theme, dark):
         default = render(_recording_frame())
         themed = render(_recording_frame(), skin=pill_skin(theme, dark))
+        left, top, right, bottom = themed.getchannel("A").getbbox()
+        plain_left, plain_top, plain_right, plain_bottom = default.getchannel("A").getbbox()
+        # Only glass's shadow reaches past the pill: a few pixels to the sides and below.
+        sides, below = (4, 6) if theme == "glass" else (1, 1)
 
         assert themed.size == default.size
-        assert themed.getchannel("A").getbbox() == pytest.approx(default.getchannel("A").getbbox(), abs=1)
+        assert top == pytest.approx(plain_top, abs=1)
+        assert -1 <= plain_left - left <= sides
+        assert -1 <= right - plain_right <= sides
+        assert -1 <= bottom - plain_bottom <= below
 
     def test_material_and_paper_draw_squarer_corners_than_the_capsule(self):
         left, top, _right, _bottom = pill_box(*target_size(Mode.RECORDING))
@@ -660,3 +670,47 @@ def _contrast(first: tuple[int, int, int], second: tuple[int, int, int]) -> floa
 
     lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
     return (lighter + 0.05) / (darker + 0.05)
+
+
+class TestGlass:
+    def test_frosting_blurs_what_is_behind_so_a_hard_edge_comes_out_soft(self):
+        behind = numpy.zeros((CANVAS_HEIGHT, CANVAS_WIDTH, 4), numpy.uint8)
+        behind[:, CANVAS_WIDTH // 2:, :3] = 255
+
+        frost = frosted(behind, pill_box(*target_size(Mode.RECORDING)), 24.0, 1.0)
+
+        middle = frost[CANVAS_HEIGHT // 2 + 8, CANVAS_WIDTH // 2 - 6:CANVAS_WIDTH // 2 + 6, 0].astype(int)
+        assert 20 < middle[3] < middle[-4] < 235
+        assert (numpy.diff(middle) >= 0).all()
+
+    @pytest.mark.parametrize("scale", [1.0, 1.5])
+    def test_near_the_rim_the_glass_shows_what_is_a_little_further_out(self, scale):
+        height, width = round(CANVAS_HEIGHT * scale), round(CANVAS_WIDTH * scale)
+        rows = numpy.repeat(numpy.arange(height, dtype=numpy.uint8)[:, None], width, axis=1)
+        behind = numpy.dstack((rows, rows, rows, numpy.full_like(rows, 255)))
+        left, top, right, bottom = pill_box(*target_size(Mode.RECORDING))
+        across = round((left + right) / 2 * scale)
+
+        frost = frosted(behind, (left, top, right, bottom), 24.0, scale)
+
+        just_inside_top = round((top + 1.5) * scale)
+        just_inside_bottom = round((bottom - 1.5) * scale)
+        middle = round((top + bottom) / 2 * scale)
+        assert frost[just_inside_top, across, 0] < just_inside_top - 2 * scale
+        assert frost[just_inside_bottom, across, 0] > just_inside_bottom + 2 * scale
+        assert abs(int(frost[middle, across, 0]) - middle) <= 1
+
+    def test_glass_catches_more_light_along_its_top_rim_than_its_sides(self):
+        image = render(_recording_frame(controls=0.0), skin=pill_skin("glass", True))
+        left, top, right, bottom = pill_box(*target_size(Mode.RECORDING))
+        top_rim = image.getpixel((round((left + right) / 2), round(top)))
+        side = image.getpixel((round(left + 1), round((top + bottom) / 2)))
+
+        assert sum(top_rim[:3]) > sum(side[:3]) + 60
+
+    def test_a_solid_glass_pill_is_opaque_and_any_other_skin_is_left_as_it_is(self):
+        solid = without_glass(pill_skin("glass", True))
+
+        assert (solid.glass, solid.fill_alpha) == (False, 250)
+        assert solid.fill == pill_skin("glass", True).fill
+        assert without_glass(pill_skin("paper", False, "ink")) == pill_skin("paper", False, "ink")

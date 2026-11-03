@@ -12,7 +12,7 @@ from enum import Enum
 from functools import cache, lru_cache
 
 import numpy
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from skryb.core.brand_mark import EMERALD_DEEP, EMERALD_LIGHT
 from skryb.core.screen_scaling import scaled_size
@@ -74,7 +74,9 @@ class PillSkin:
 
     ``light`` skins have a pale fill, so the transcribing shimmer darkens it
     towards ``shimmer`` instead of lifting it. ``roundness`` is the corner
-    radius as a share of half the height: 1 is a capsule.
+    radius as a share of half the height: 1 is a capsule. ``glass`` skins
+    tint a frosted copy of what is behind them, catch the light along their
+    rim and cast a soft shadow.
     """
 
     fill: Rgb
@@ -92,6 +94,7 @@ class PillSkin:
     shimmer: Rgb
     light: bool = False
     roundness: float = 1.0
+    glass: bool = False
 
 
 # Each theme's colours come from its tokens in ui/src/index.css: the card
@@ -114,20 +117,20 @@ _SKINS: dict[tuple[str, bool], PillSkin] = {
         glyph=(24, 24, 27), finish_glyph=(255, 255, 255), label=(24, 24, 27),
         warning=(180, 83, 9), wave=EMERALD_DEEP, shimmer=(167, 243, 208), light=True,
     ),
-    # Glass lets what is behind show through its fill; there is no blur to draw.
+    # Glass: a neutral tint over a frosted copy of what is behind (frosted()).
     ("glass", True): PillSkin(
-        fill=(30, 34, 54), fill_alpha=214, border=(255, 255, 255, 40),
-        button=(52, 56, 78), button_hover=(70, 75, 100),
-        finish=(91, 130, 255), finish_hover=(124, 155, 255),
-        glyph=(236, 238, 246), finish_glyph=(255, 255, 255), label=(236, 238, 246),
-        warning=(255, 194, 97), wave=(124, 155, 255), shimmer=(70, 96, 190),
+        fill=(28, 28, 30), fill_alpha=125, border=(255, 255, 255, 46),
+        button=(72, 72, 76), button_hover=(94, 94, 100),
+        finish=(78, 161, 255), finish_hover=(122, 184, 255),
+        glyph=(245, 245, 247), finish_glyph=(4, 17, 31), label=(245, 245, 247),
+        warning=(255, 194, 97), wave=(78, 161, 255), shimmer=(52, 84, 128), glass=True,
     ),
     ("glass", False): PillSkin(
-        fill=(255, 255, 255), fill_alpha=204, border=(20, 30, 60, 40),
-        button=(232, 234, 242), button_hover=(214, 226, 255),
-        finish=(61, 108, 240), finish_hover=(88, 128, 242),
-        glyph=(20, 24, 38), finish_glyph=(255, 255, 255), label=(20, 24, 38),
-        warning=(180, 83, 9), wave=(61, 108, 240), shimmer=(190, 208, 255), light=True,
+        fill=(250, 250, 252), fill_alpha=150, border=(0, 0, 0, 34),
+        button=(234, 234, 238), button_hover=(220, 220, 226),
+        finish=(0, 102, 204), finish_hover=(0, 88, 176),
+        glyph=(29, 29, 31), finish_glyph=(255, 255, 255), label=(29, 29, 31),
+        warning=(180, 83, 9), wave=(0, 102, 204), shimmer=(200, 222, 246), light=True, glass=True,
     ),
     # Material: tonal surfaces and large, not round, corners.
     ("material", True): PillSkin(
@@ -195,6 +198,11 @@ def pill_skin(theme: object, dark: bool, colourway: object = PAPER_COLOURWAYS[0]
         skin, finish=accent, finish_hover=_mixed(accent, _AWAY_FROM_INK[skin.light], 0.14), finish_glyph=ink,
         wave=accent, shimmer=_mixed(accent, skin.fill, 0.82 if skin.light else 0.65),
     )
+
+
+def without_glass(skin: PillSkin) -> PillSkin:
+    """A glass skin made solid, for when Windows can't show through it; any other skin as it is."""
+    return replace(skin, glass=False, fill_alpha=250) if skin.glass else skin
 
 
 def _mixed(colour: Rgb, other: Rgb, share: float) -> Rgb:
@@ -491,9 +499,7 @@ def render(frame: Frame, screen_scale: float = 1.0, skin: PillSkin = DEFAULT_SKI
 def _draw_pill(image: Image.Image, frame: Frame, skin: PillSkin) -> None:
     scale = _SUPERSAMPLE
     box = tuple(edge * scale for edge in pill_box(frame.width, frame.height))
-    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    _draw_body(draw, box, frame.height * scale / 2, skin)
+    layer = _body(image.size, box, frame.height * scale / 2 * skin.roundness, skin)
     # ImageDraw replaces pixels rather than blending them, so anything
     # drawn part-transparent would punch a hole through the pill. Each
     # fading part is drawn opaque on its own layer and blended in instead.
@@ -511,16 +517,172 @@ def _draw_pill(image: Image.Image, frame: Frame, skin: PillSkin) -> None:
     image.alpha_composite(layer)
 
 
-def _draw_body(draw: ImageDraw.ImageDraw, box: tuple[float, ...], half_height: float, skin: PillSkin) -> None:
+def _body(size: tuple[int, int], box: tuple[float, ...], radius: float, skin: PillSkin) -> Image.Image:
+    """A new layer of ``size`` with the body drawn on it; glass bodies are kept, as they cost more to draw."""
+    if skin.glass:
+        return _glass_body(size, _snapped(box), round(radius), skin).copy()
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
     # Drawn pixels replace those under them, so a clear border would cut a
     # ring out of the fill: a theme without one draws none.
-    draw.rounded_rectangle(
+    ImageDraw.Draw(layer).rounded_rectangle(
         box,
-        radius=half_height * skin.roundness,
+        radius=radius,
         fill=(*skin.fill, skin.fill_alpha),
         outline=skin.border if skin.border[3] else None,
         width=_SUPERSAMPLE,
     )
+    return layer
+
+
+def _snapped(box: tuple[float, ...]) -> tuple[int, int, int, int]:
+    """``box`` on whole supersampled pixels, so a body that is still settling draws as the settled one."""
+    left, top, right, bottom = (round(edge) for edge in box)
+    return left, top, right, bottom
+
+
+# Glass catches the light from above: a sheen over its top and a rim lit
+# brightest along the top edge, a little along the bottom. Its shadow falls
+# just below it, and is cut off where it fades, so only pixels close to the
+# pill take its clicks.
+_SHEEN = {True: 70, False: 34}
+_RIM = {True: (255, 110, 150), False: (210, 70, 120)}
+_SHADOW_DROP = 2.0
+_SHADOW_BLUR = 3.0
+_SHADOW_STRENGTH = 0.35
+_SHADOW_FLOOR = 10
+
+
+@lru_cache(maxsize=16)
+def _glass_body(size: tuple[int, int], box: tuple[int, int, int, int], radius: int, skin: PillSkin) -> Image.Image:
+    scale = _SUPERSAMPLE
+    body = _shape(size, box, radius)
+    shadow = ImageChops.offset(body, 0, round(_SHADOW_DROP * scale)).filter(
+        ImageFilter.GaussianBlur(_SHADOW_BLUR * scale),
+    )
+    shadow = ImageChops.subtract(shadow, body).point(
+        lambda value: 0 if value * _SHADOW_STRENGTH < _SHADOW_FLOOR else round(value * _SHADOW_STRENGTH),
+    )
+    layer = _solid(size, (0, 0, 0), shadow)
+    ImageDraw.Draw(layer).rounded_rectangle(box, radius=radius, fill=(*skin.fill, skin.fill_alpha))
+    inner = _shape(size, (box[0] + scale, box[1] + scale, box[2] - scale, box[3] - scale), max(radius - scale, 0))
+    edge = ImageChops.subtract(body, inner)
+    layer.alpha_composite(_solid(size, skin.border, ImageChops.multiply(edge, Image.new("L", size, skin.border[3]))))
+    top, bottom = box[1], box[3]
+    rows = numpy.clip((numpy.arange(size[1], dtype=numpy.float32) - top) / max(bottom - top, 1), 0.0, 1.0)
+    sheen = numpy.clip(1.0 - rows / 0.5, 0.0, 1.0) ** 2 * _SHEEN[skin.light]
+    rim = numpy.interp(rows, (0.0, 0.5, 1.0), _RIM[skin.light])
+    light = ImageChops.add(
+        ImageChops.multiply(inner, _rows(size, sheen)), ImageChops.multiply(edge, _rows(size, rim)),
+    )
+    layer.alpha_composite(_solid(size, (255, 255, 255), light))
+    return layer
+
+
+def _shape(size: tuple[int, int], box: tuple[int, int, int, int], radius: int) -> Image.Image:
+    shape = Image.new("L", size, 0)
+    ImageDraw.Draw(shape).rounded_rectangle(box, radius=radius, fill=255)
+    return shape
+
+
+def _rows(size: tuple[int, int], values: numpy.ndarray) -> Image.Image:
+    """An 8-bit image whose rows are each one of ``values``, top to bottom."""
+    column = numpy.rint(values).astype(numpy.uint8)[:, None]
+    return Image.fromarray(numpy.ascontiguousarray(numpy.broadcast_to(column, (size[1], size[0]))))
+
+
+def _solid(size: tuple[int, int], colour: tuple[int, ...], alpha: Image.Image) -> Image.Image:
+    layer = Image.new("RGBA", size, (colour[0], colour[1], colour[2], 0))
+    layer.putalpha(alpha)
+    return layer
+
+
+# Through glass, what is behind is blurred, and near the rim it bends the
+# way light does at the edge of a thick lens: each spot there shows what is
+# a little further out. It is done to each fresh copy of the screen behind,
+# a few times a second and off the GUI thread: Windows' own blur can't take
+# the shape of a small layered window (see Win32LayeredOverlayWindow).
+_FROST_BLUR = 7.0
+_LENS_BAND = 10.0
+_LENS_SHIFT = 8.0
+
+
+def frosted(
+    pixels: numpy.ndarray,
+    box: tuple[float, float, float, float],
+    radius: float,
+    screen_scale: float,
+) -> numpy.ndarray:
+    """``pixels`` (BGRA, as captured) blurred and bent at the rim of the body in ``box``, as RGB."""
+    blurred = numpy.asarray(
+        Image.fromarray(numpy.ascontiguousarray(pixels[:, :, 2::-1])).filter(
+            ImageFilter.GaussianBlur(_FROST_BLUR * screen_scale),
+        ),
+    )
+    height, width = blurred.shape[:2]
+    rows, columns = numpy.mgrid[0:height, 0:width].astype(numpy.float32)
+    x, y = (columns + 0.5) / screen_scale, (rows + 0.5) / screen_scale
+    left, top, right, bottom = box
+    across, down = x - (left + right) / 2, y - (top + bottom) / 2
+    past_x = numpy.abs(across) - ((right - left) / 2 - radius)
+    past_y = numpy.abs(down) - ((bottom - top) / 2 - radius)
+    corner_x, corner_y = numpy.maximum(past_x, 0.0), numpy.maximum(past_y, 0.0)
+    corner = numpy.hypot(corner_x, corner_y)
+    # Signed distance to the rim, negative inside, and the way out through it.
+    distance = corner + numpy.minimum(numpy.maximum(past_x, past_y), 0.0) - radius
+    rounded = corner > 1e-6
+    out_x = numpy.where(rounded, corner_x / numpy.maximum(corner, 1e-6), past_x >= past_y) * numpy.sign(across)
+    out_y = numpy.where(rounded, corner_y / numpy.maximum(corner, 1e-6), past_y > past_x) * numpy.sign(down)
+    nearness = numpy.where(distance < 0, numpy.clip(1.0 + distance / _LENS_BAND, 0.0, 1.0), 0.0)
+    shift = _LENS_SHIFT * screen_scale * nearness**2
+    source_x = numpy.clip(numpy.rint(columns + out_x * shift), 0, width - 1).astype(numpy.intp)
+    source_y = numpy.clip(numpy.rint(rows + out_y * shift), 0, height - 1).astype(numpy.intp)
+    return blurred[source_y, source_x]
+
+
+def glazed(pixels: numpy.ndarray, behind: numpy.ndarray, coverage: numpy.ndarray) -> numpy.ndarray:
+    """``pixels`` (premultiplied BGRA) over ``behind`` (RGB) wherever ``coverage`` puts the glass.
+
+    A ``behind`` of another size, from before the window changed size, is left out.
+    """
+    if behind.shape[:2] != pixels.shape[:2] or coverage.shape != pixels.shape[:2]:
+        return pixels
+    under = coverage * (1.0 - pixels[:, :, 3].astype(numpy.float32) / 255.0)
+    out = numpy.empty_like(pixels)
+    out[:, :, :3] = numpy.minimum(pixels[:, :, :3] + behind[:, :, ::-1] * under[:, :, None] + 0.5, 255.0)
+    out[:, :, 3] = numpy.minimum(pixels[:, :, 3] + 255.0 * under + 0.5, 255.0)
+    return out
+
+
+@lru_cache(maxsize=16)
+def _coverage(
+    size: tuple[int, int], box: tuple[int, int, int, int], radius: int, screen_size: tuple[int, int],
+) -> numpy.ndarray:
+    """How much of each screen pixel the body covers, 0 to 1, edged the way it is drawn."""
+    covered = numpy.asarray(
+        _shape(size, box, radius).resize(screen_size, Image.Resampling.LANCZOS), dtype=numpy.float32,
+    ) / 255.0
+    covered.flags.writeable = False
+    return covered
+
+
+def frost_pill(pixels: numpy.ndarray, screen_scale: float, skin: PillSkin) -> numpy.ndarray:
+    """What is behind the pill's canvas, frosted for the pill at rest."""
+    width, height = _RECORDING_SIZE
+    return frosted(pixels, pill_box(width, height), height / 2 * skin.roundness, screen_scale)
+
+
+def glaze_pill(
+    pixels: numpy.ndarray, behind: numpy.ndarray, frame: Frame, screen_scale: float, skin: PillSkin,
+) -> numpy.ndarray:
+    """The rendered ``frame`` (premultiplied BGRA) over the frosted ``behind``, fading with the pill."""
+    scale = _SUPERSAMPLE
+    covered = _coverage(
+        (CANVAS_WIDTH * scale, CANVAS_HEIGHT * scale),
+        _snapped(tuple(edge * scale for edge in pill_box(frame.width, frame.height))),
+        round(frame.height * scale / 2 * skin.roundness),
+        scaled_size(CANVAS_WIDTH, CANVAS_HEIGHT, screen_scale),
+    )
+    return glazed(pixels, behind, covered * frame.opacity)
 
 
 def _blank(image: Image.Image) -> Image.Image:
@@ -724,8 +886,10 @@ _NOTICE_DOT_GAP = 8.0
 _NOTICE_TEXT_GAP = 14.0
 _NOTICE_BUTTON_HEIGHT = _NOTICE_HEIGHT - 2 * _PADDING
 _NOTICE_BUTTON_PADDING = 14.0
-# A transparent pixel all round, so the border is never cut off.
+# A transparent pixel all round, so the border is never cut off; glass
+# leaves room for its shadow.
 _NOTICE_MARGIN = 1
+_GLASS_NOTICE_MARGIN = 6
 
 
 @dataclass(frozen=True)
@@ -741,15 +905,17 @@ class NoticeLayout:
     buttons: tuple[tuple[float, float, float, float], ...]
     # The close cross's centre and radius.
     close: tuple[float, float, float]
+    margin: int = _NOTICE_MARGIN
 
 
-def notice_layout(message: str, labels: Sequence[str], warning: bool) -> NoticeLayout:
+def notice_layout(message: str, labels: Sequence[str], warning: bool, glass: bool = False) -> NoticeLayout:
     """One line is exactly as tall as the pill; a long message wraps instead of widening."""
+    margin = _GLASS_NOTICE_MARGIN if glass else _NOTICE_MARGIN
     lines = _wrapped(message, _LABEL_SIZE, _NOTICE_MAX_TEXT_WIDTH)
     height = math.ceil(_NOTICE_HEIGHT + (len(lines) - 1) * _NOTICE_LINE_HEIGHT)
-    middle = _NOTICE_MARGIN + height / 2
+    middle = margin + height / 2
     radius = _NOTICE_BUTTON_HEIGHT / 2
-    x = _NOTICE_MARGIN + _NOTICE_TEXT_INSET
+    x = margin + _NOTICE_TEXT_INSET
     if warning:
         x += _NOTICE_DOT + _NOTICE_DOT_GAP
     text_left = x
@@ -762,14 +928,15 @@ def notice_layout(message: str, labels: Sequence[str], warning: bool) -> NoticeL
     close = (x + radius, middle, radius)
     x += 2 * radius + _PADDING
     return NoticeLayout(
-        width=math.ceil(x) + _NOTICE_MARGIN,
-        height=height + 2 * _NOTICE_MARGIN,
+        width=math.ceil(x) + margin,
+        height=height + 2 * margin,
         lines=lines,
         labels=tuple(labels),
         warning=warning,
         text_left=text_left,
         buttons=tuple(buttons),
         close=close,
+        margin=margin,
     )
 
 
@@ -792,15 +959,10 @@ def render_notice(
     skin: PillSkin = DEFAULT_SKIN,
 ) -> Image.Image:
     scale = _SUPERSAMPLE
-    image = Image.new("RGBA", (layout.width * scale, layout.height * scale), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    margin = _NOTICE_MARGIN * scale
-    _draw_body(
-        draw,
-        (margin, margin, layout.width * scale - margin, layout.height * scale - margin),
-        _NOTICE_HEIGHT * scale / 2,
-        skin,
+    image = _body(
+        (layout.width * scale, layout.height * scale), _notice_box(layout), _NOTICE_HEIGHT * scale / 2 * skin.roundness, skin,
     )
+    draw = ImageDraw.Draw(image)
     middle = layout.height / 2
     font = _font(_LABEL_SIZE * scale)
     if layout.warning:
@@ -839,6 +1001,32 @@ def render_notice(
     )
     _draw_glyph(draw, Button.CANCEL, cx, cy, radius, False, skin)
     return image.resize(scaled_size(layout.width, layout.height, screen_scale), Image.Resampling.LANCZOS)
+
+
+def _notice_box(layout: NoticeLayout) -> tuple[int, int, int, int]:
+    """The notice's body in supersampled pixels."""
+    scale, margin = _SUPERSAMPLE, layout.margin * _SUPERSAMPLE
+    return margin, margin, layout.width * scale - margin, layout.height * scale - margin
+
+
+def frost_notice(pixels: numpy.ndarray, layout: NoticeLayout, screen_scale: float, skin: PillSkin) -> numpy.ndarray:
+    """What is behind a notice, frosted for it."""
+    left, top, right, bottom = (edge / _SUPERSAMPLE for edge in _notice_box(layout))
+    return frosted(pixels, (left, top, right, bottom), _NOTICE_HEIGHT / 2 * skin.roundness, screen_scale)
+
+
+def glaze_notice(
+    pixels: numpy.ndarray, behind: numpy.ndarray, layout: NoticeLayout, screen_scale: float, skin: PillSkin,
+) -> numpy.ndarray:
+    """A rendered notice (premultiplied BGRA) over the frosted ``behind``."""
+    scale = _SUPERSAMPLE
+    covered = _coverage(
+        (layout.width * scale, layout.height * scale),
+        _notice_box(layout),
+        round(_NOTICE_HEIGHT * scale / 2 * skin.roundness),
+        scaled_size(layout.width, layout.height, screen_scale),
+    )
+    return glazed(pixels, behind, covered)
 
 
 def _wrapped(text: str, size: int, width: int) -> tuple[str, ...]:

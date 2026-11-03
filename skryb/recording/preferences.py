@@ -9,7 +9,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from skryb.core.color_scheme import ColorScheme, detect_app_color_scheme
+from skryb.core.color_scheme import ColorScheme, detect_app_color_scheme, transparency_effects_on
 from skryb.core.config import ConfigurationStore, ConfigValue
 from skryb.recording.pill import (
     DEFAULT_PILL_POSITION,
@@ -17,6 +17,7 @@ from skryb.recording.pill import (
     PillPosition,
     PillSkin,
     pill_skin,
+    without_glass,
 )
 
 _logger = logging.getLogger(__name__)
@@ -85,14 +86,20 @@ def load_pill_position(config: ConfigurationStore) -> PillPosition:
 
 
 def load_pill_skin(
-    config: ConfigurationStore, scheme: Callable[[], ColorScheme] = detect_app_color_scheme,
+    config: ConfigurationStore,
+    scheme: Callable[[], ColorScheme] = detect_app_color_scheme,
+    transparency: Callable[[], bool] = transparency_effects_on,
 ) -> PillSkin:
-    """The pill in the window's theme, Paper's colourway and Windows' light or dark setting for apps."""
-    return pill_skin(
+    """The pill in the window's theme, Paper's colourway and Windows' light or dark setting for apps.
+
+    With Windows' transparency effects off, glass is solid, as Windows' own materials are.
+    """
+    skin = pill_skin(
         config.get("ui.theme", "default"),
         scheme() is ColorScheme.DARK,
         config.get("ui.paper_colourway", PAPER_COLOURWAYS[0]),
     )
+    return skin if transparency() else without_glass(skin)
 
 
 def save_pill_position(config: ConfigurationStore, position: PillPosition) -> None:

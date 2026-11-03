@@ -6,7 +6,7 @@ import pytest
 from tests.fakes.config import FakeConfig
 from skryb.core.color_scheme import ColorScheme
 from skryb.core.json_config_adapter import JsonConfigAdapter
-from skryb.recording.pill import DEFAULT_PILL_POSITION, DEFAULT_SKIN, pill_skin
+from skryb.recording.pill import DEFAULT_PILL_POSITION, DEFAULT_SKIN, pill_skin, without_glass
 from skryb.recording.preferences import (
     RecordingPreferences,
     load_pill_position,
@@ -135,8 +135,17 @@ class TestPillSkin:
         for theme in ("default", "glass", "material", "paper"):
             config = FakeConfig({"ui.theme": theme})
 
-            assert load_pill_skin(config, lambda: ColorScheme.DARK) == pill_skin(theme, True)
-            assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin(theme, False)
+            assert load_pill_skin(config, lambda: ColorScheme.DARK, lambda: True) == pill_skin(theme, True)
+            assert load_pill_skin(config, lambda: ColorScheme.LIGHT, lambda: True) == pill_skin(theme, False)
+
+    def test_with_windows_transparency_effects_off_glass_is_solid_and_the_rest_are_unchanged(self):
+        for theme in ("default", "glass", "material", "paper"):
+            config = FakeConfig({"ui.theme": theme})
+
+            skin = load_pill_skin(config, lambda: ColorScheme.DARK, lambda: False)
+
+            assert skin == without_glass(pill_skin(theme, True))
+            assert not skin.glass
 
     def test_paper_follows_the_saved_colourway(self):
         config = FakeConfig({"ui.theme": "paper", "ui.paper_colourway": "ink"})

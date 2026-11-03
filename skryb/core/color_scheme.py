@@ -10,6 +10,9 @@ class ColorScheme(Enum):
 _SYSTEM_VALUE = "SystemUsesLightTheme"
 # Windows like Settings and the pill follow the apps one.
 _APPS_VALUE = "AppsUseLightTheme"
+# Settings > Personalisation > Colours > Transparency effects.
+_TRANSPARENCY_VALUE = "EnableTransparency"
+_PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 
 
 def detect_color_scheme() -> ColorScheme:
@@ -45,7 +48,28 @@ def color_scheme_from_registry(
 
 
 def _read_color_scheme(winreg: object, value_name: str) -> ColorScheme:
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _PERSONALIZE_KEY) as key:
         uses_light, _ = winreg.QueryValueEx(key, value_name)
     return ColorScheme.LIGHT if uses_light else ColorScheme.DARK
+
+
+def transparency_effects_on() -> bool:
+    """Whether Windows' Transparency effects switch is on; on, as Windows ships it, when it can't be read."""
+    try:
+        import winreg
+    except ImportError:
+        return True
+    return transparency_from_registry(winreg)
+
+
+def transparency_from_registry(winreg: object) -> bool:
+    try:
+        return _read_transparency(winreg)
+    except OSError:
+        return True
+
+
+def _read_transparency(winreg: object) -> bool:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _PERSONALIZE_KEY) as key:
+        enabled, _ = winreg.QueryValueEx(key, _TRANSPARENCY_VALUE)
+    return bool(enabled)

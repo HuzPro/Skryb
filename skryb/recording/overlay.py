@@ -1,5 +1,6 @@
 import ctypes
 import ctypes.wintypes as wintypes
+import functools
 import logging
 import math
 import sys
@@ -42,6 +43,8 @@ from skryb.recording.pill import (
     VoiceHistory,
     collapsed_size,
     countdown_text,
+    frost_pill,
+    glaze_pill,
     hit_test,
     is_settled_label,
     pill_origin,
@@ -51,6 +54,7 @@ from skryb.recording.pill import (
     shimmer_position,
     shimmered,
     target_size,
+    without_glass,
 )
 
 _logger = logging.getLogger(__name__)
@@ -113,6 +117,12 @@ _IDC_HAND = 32649
 _VK_LBUTTON = 0x01
 _VK_RBUTTON = 0x02
 _SM_SWAPBUTTON = 23
+_WDA_NONE = 0x00
+_WDA_EXCLUDEFROMCAPTURE = 0x11
+_SRCCOPY = 0x00CC0020
+# How often a glass window copies what is behind it while it sits still;
+# moving it copies at once.
+_BACKDROP_SECONDS = 0.25
 
 _LRESULT = ctypes.c_ssize_t
 # CFUNCTYPE stands in off Windows, so the pure drawing code imports on CI.
@@ -191,6 +201,8 @@ def premultiplied_bgra(image: Image.Image) -> bytes:
 
 # Receives ``(is_button_down, x, y)`` in window pixels.
 MouseHandler = Callable[[bool, int, int], None]
+# Turns a copy of the screen behind a window (BGRA) into what its glass shows (RGB).
+Frost = Callable[[numpy.ndarray], numpy.ndarray]
 
 
 class OverlayWindowApi(Protocol):
@@ -205,6 +217,8 @@ class OverlayWindowApi(Protocol):
     def wait_for_frame(self) -> bool: ...
     def move_to(self, x: int, y: int) -> None: ...
     def left_button_down(self) -> bool: ...
+    def follow_backdrop(self, frost: Frost | None) -> bool: ...
+    def backdrop(self) -> numpy.ndarray | None: ...
 
 
 # Every overlay window shares one window class, and a class has one window
@@ -264,6 +278,18 @@ class Win32LayeredOverlayWindow:
     Callers work in the design's pixels; only this class sees the screen's,
     ``display_scale`` of them to each, so the frames it is given are drawn
     at that scale.
+
+    Glass needs what is behind the window, blurred, inside a shape that
+    animates. Windows' own materials can't give that here: the documented
+    system backdrop (``DWMSBT_TRANSIENTWINDOW``) and the undocumented
+    acrylic and blur accents both fill the whole window rectangle, ignoring
+    the per-pixel alpha, and a window region doesn't clip a layered window.
+    So while it follows its backdrop, the window keeps itself out of screen
+    captures and a worker thread copies the screen under it a few times a
+    second, or at once when it moves, and frosts the copy for the GUI thread
+    to draw under the next frame. That also keeps it out of screen
+    recordings and shares meanwhile. Windows before 10 2004 can't leave a
+    window out of captures, and get no backdrop.
     """
 
     # The pill's canvas unless resized; the notice above it uses one too.
@@ -287,6 +313,10 @@ class Win32LayeredOverlayWindow:
         self._previous_bitmap: int = 0
         self._bits = ctypes.c_void_p()
         self._pixels: numpy.ndarray | None = None
+        self._frost: Frost | None = None
+        self._behind: numpy.ndarray | None = None
+        self._following: threading.Event | None = None
+        self._moved = threading.Event()
 
     def _declare_signatures(self) -> None:
         # Without these, ctypes narrows handles to C int and 64-bit HWNDs
@@ -381,6 +411,13 @@ class Win32LayeredOverlayWindow:
         self._gdi32.DeleteObject.restype = wintypes.BOOL
         self._gdi32.DeleteDC.argtypes = [wintypes.HDC]
         self._gdi32.DeleteDC.restype = wintypes.BOOL
+        self._gdi32.BitBlt.argtypes = [
+            wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD,
+        ]
+        self._gdi32.BitBlt.restype = wintypes.BOOL
+        self._user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+        self._user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
 
     def _register_class(self) -> None:
         window_class = WindowClass()
@@ -441,6 +478,8 @@ class Win32LayeredOverlayWindow:
             _SWP_NOACTIVATE,
         )
         self._user32.ShowWindow(self._hwnd, _SW_SHOWNOACTIVATE)
+        if self._frost is not None:
+            self._start_following()
 
     def push_frame(self, pixels: bytes) -> None:
         if self._pixels is None:
@@ -472,9 +511,26 @@ class Win32LayeredOverlayWindow:
 
     def hide(self) -> None:
         self._user32.ShowWindow(self._hwnd, _SW_HIDE)
+        self._stop_following()
         if self._bitmap:
             self._winmm.timeEndPeriod(1)
         self._release_surface()
+
+    def follow_backdrop(self, frost: Frost | None) -> bool:
+        """Keep ``frost`` of what is behind the window while it shows; False when off, or Windows can't."""
+        affinity = _WDA_NONE if frost is None else _WDA_EXCLUDEFROMCAPTURE
+        if not self._user32.SetWindowDisplayAffinity(self._hwnd, affinity) or frost is None:
+            self._frost = None
+            self._stop_following()
+            return False
+        self._frost = frost
+        if self._bitmap:
+            self._start_following()
+        return True
+
+    def backdrop(self) -> numpy.ndarray | None:
+        """The latest frosted copy of what is behind the window, or None before the first."""
+        return self._behind
 
     def wait_for_frame(self) -> bool:
         """Block until the compositor's next refresh; False if it has none.
@@ -504,11 +560,13 @@ class Win32LayeredOverlayWindow:
         self._hand_cursor = hand
 
     def move_to(self, x: int, y: int) -> None:
-        self._origin = self._on_screen(x, y)
+        origin, self._origin = self._origin, self._on_screen(x, y)
         self._user32.SetWindowPos(
             self._hwnd, None, *self._origin, 0, 0,
             _SWP_NOACTIVATE | _SWP_NOSIZE | _SWP_NOZORDER,
         )
+        if origin != self._origin:
+            self._moved.set()
 
     def left_button_down(self) -> bool:
         """Whether the primary button is held, wherever the cursor is.
@@ -549,25 +607,8 @@ class Win32LayeredOverlayWindow:
             return
         self._screen_dc = self._user32.GetDC(None)
         self._memory_dc = self._gdi32.CreateCompatibleDC(self._screen_dc)
-        info = BitmapInfo()
-        info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
         width, height = self._screen_size()
-        info.bmiHeader.biWidth = width
-        # Negative height selects a top-down DIB, matching PIL's row order.
-        info.bmiHeader.biHeight = -height
-        info.bmiHeader.biPlanes = 1
-        info.bmiHeader.biBitCount = 32
-        info.bmiHeader.biCompression = _BI_RGB
-        self._bitmap = self._gdi32.CreateDIBSection(
-            self._screen_dc,
-            ctypes.byref(info),
-            _DIB_RGB_COLORS,
-            ctypes.byref(self._bits),
-            None,
-            0,
-        )
-        if not self._bitmap:
-            raise OSError("CreateDIBSection failed")
+        self._bitmap = self._create_dib(self._screen_dc, width, height, self._bits)
         self._pixels = numpy.ctypeslib.as_array(
             ctypes.cast(self._bits, ctypes.POINTER(ctypes.c_uint8)),
             shape=(width * height * 4,),
@@ -575,6 +616,72 @@ class Win32LayeredOverlayWindow:
         self._previous_bitmap = self._gdi32.SelectObject(
             self._memory_dc, self._bitmap,
         )
+
+    def _create_dib(self, screen_dc: int, width: int, height: int, bits: ctypes.c_void_p) -> int:
+        info = BitmapInfo()
+        info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
+        info.bmiHeader.biWidth = width
+        # Negative height selects a top-down DIB, matching PIL's row order.
+        info.bmiHeader.biHeight = -height
+        info.bmiHeader.biPlanes = 1
+        info.bmiHeader.biBitCount = 32
+        info.bmiHeader.biCompression = _BI_RGB
+        bitmap = self._gdi32.CreateDIBSection(
+            screen_dc, ctypes.byref(info), _DIB_RGB_COLORS, ctypes.byref(bits), None, 0,
+        )
+        if not bitmap:
+            raise OSError("CreateDIBSection failed")
+        return int(bitmap)
+
+    def _start_following(self) -> None:
+        if self._following is not None:
+            return
+        self._behind = None
+        stop = threading.Event()
+        self._following = stop
+        threading.Thread(target=self._follow, args=(stop,), name="glass-backdrop", daemon=True).start()
+
+    def _stop_following(self) -> None:
+        stop, self._following = self._following, None
+        if stop is not None:
+            stop.set()
+            self._moved.set()
+        self._behind = None
+
+    def _follow(self, stop: threading.Event) -> None:
+        """The worker: frost what is behind until told to stop; a copy takes about one refresh."""
+        while not stop.is_set():
+            self._moved.clear()
+            try:
+                self._frost_what_is_behind(stop)
+            except Exception:  # the glass goes on without a backdrop rather than taking Skryb down
+                _logger.exception("Copying what is behind the glass failed.")
+                return
+            self._moved.wait(_BACKDROP_SECONDS)
+
+    def _frost_what_is_behind(self, stop: threading.Event) -> None:
+        frost = self._frost
+        pixels = self._copy_screen_behind()
+        if frost is not None and pixels is not None and not stop.is_set():
+            self._behind = frost(pixels)
+
+    def _copy_screen_behind(self) -> numpy.ndarray | None:
+        width, height = self._screen_size()
+        x, y = self._origin
+        screen = self._user32.GetDC(None)
+        memory = self._gdi32.CreateCompatibleDC(screen)
+        bits = ctypes.c_void_p()
+        bitmap = self._create_dib(screen, width, height, bits)
+        previous = self._gdi32.SelectObject(memory, bitmap)
+        copied = self._gdi32.BitBlt(memory, 0, 0, width, height, screen, x, y, _SRCCOPY)
+        pixels = numpy.ctypeslib.as_array(
+            ctypes.cast(bits, ctypes.POINTER(ctypes.c_uint8)), shape=(height, width, 4),
+        ).copy() if copied else None
+        self._gdi32.SelectObject(memory, previous)
+        self._gdi32.DeleteObject(bitmap)
+        self._gdi32.DeleteDC(memory)
+        self._user32.ReleaseDC(None, screen)
+        return pixels
 
     def _release_surface(self) -> None:
         if not self._bitmap:
@@ -747,10 +854,17 @@ class RecordingOverlay:
         self._window_api.dispose()
 
     def _take_skin(self) -> None:
-        skin = self._skin_source()
+        skin = self._backed(self._skin_source())
         if skin != self._skin:
             self._skin = skin
             self._settled_label = self._settled_label_pixels()
+
+    def _backed(self, skin: PillSkin) -> PillSkin:
+        """``skin``, with its window copying what is behind it for glass; solid if it can't."""
+        frost = functools.partial(frost_pill, screen_scale=display_scale(), skin=skin) if skin.glass else None
+        if self._window_api.follow_backdrop(frost) or not skin.glass:
+            return skin
+        return without_glass(skin)
 
     def _settled_label_pixels(self) -> numpy.ndarray:
         return premultiplied_array(render(settled_label_frame(), display_scale(), self._skin))
@@ -916,6 +1030,9 @@ class RecordingOverlay:
             self._settled_label if is_settled_label(self._frame)
             else premultiplied_array(render(self._frame, display_scale(), self._skin))
         )
+        behind = self._window_api.backdrop() if self._skin.glass else None
+        if behind is not None:
+            base = glaze_pill(base, behind, self._frame, display_scale(), self._skin)
         self._window_api.push_frame(shimmered(base, self._frame, self._skin).tobytes())
         if self._mode is Mode.CLOSED and self._opacity.value < 0.01:
             self._visible = False

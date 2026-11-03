@@ -9,6 +9,7 @@ test, not here.
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
+from skryb.core.color_scheme import transparency_from_registry
 from skryb.core.state_machine import AppState
 from skryb.tray import win32_icons
 from skryb.tray.win32_icons import ColorScheme, render_frames_for_scheme
@@ -103,6 +104,15 @@ class TestColorSchemeFromRegistry:
         )
 
         assert scheme == ColorScheme.LIGHT
+
+
+class TestTransparencyEffects:
+    def test_transparency_reads_on_or_off_from_the_personalize_key(self):
+        assert transparency_from_registry(_fake_winreg(uses_light=1)) is True
+        assert transparency_from_registry(_fake_winreg(uses_light=0)) is False
+
+    def test_transparency_counts_as_on_when_the_registry_cannot_be_read(self):
+        assert transparency_from_registry(_fake_winreg(uses_light=None, raises=True)) is True
 
 
 class TestMeetingBadge:

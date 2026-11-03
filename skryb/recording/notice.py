@@ -1,5 +1,6 @@
 """A small notice where the pill was, drawn the way the pill is, that never takes the focus."""
 
+import functools
 import time
 import tkinter
 from collections.abc import Callable, Sequence
@@ -9,6 +10,7 @@ import numpy
 
 from skryb.core.screen_scaling import display_scale
 from skryb.recording.overlay import (
+    Frost,
     MouseHandler,
     Win32LayeredOverlayWindow,
     premultiplied_array,
@@ -23,12 +25,15 @@ from skryb.recording.pill import (
     PillPosition,
     PillSkin,
     Spring,
+    frost_notice,
+    glaze_notice,
     notice_layout,
     notice_target,
     pill_box,
     pill_origin,
     render_notice,
     target_size,
+    without_glass,
 )
 
 NoticeAction = tuple[str, Callable[[], None]]
@@ -64,6 +69,8 @@ class NoticeWindowApi(Protocol):
     def set_mouse_handler(self, handler: MouseHandler) -> None: ...
     def cursor_position(self) -> tuple[int, int] | None: ...
     def set_hand_cursor(self, hand: bool) -> None: ...
+    def follow_backdrop(self, frost: Frost | None) -> bool: ...
+    def backdrop(self) -> numpy.ndarray | None: ...
 
 
 def _default_position() -> PillPosition:
@@ -132,6 +139,7 @@ class Notice:
         self._opacity = Spring(0.0, damping=40.0)
         self._pixels: dict[int | None, numpy.ndarray] = {}
         self._pushed: tuple[int | None, int, tuple[int, int] | None] | None = None
+        self._pushed_behind: numpy.ndarray | None = None
 
     @property
     def visible(self) -> bool:
@@ -154,7 +162,8 @@ class Notice:
     ) -> None:
         self.hide()
         actions = list(buttons)[:_MAX_BUTTONS]
-        layout = notice_layout(message, [label for label, _action in actions], warning)
+        skin = self._skin_source()
+        layout = notice_layout(message, [label for label, _action in actions], warning, glass=skin.glass)
         self._layout = layout
         self._actions = [action for _label, action in actions]
         self._message = message
@@ -163,9 +172,9 @@ class Notice:
         self._clicked = None
         self._pixels = {}
         self._pushed = None
-        self._skin = self._skin_source()
         window = self._api()
         window.resize(layout.width, layout.height)
+        self._skin = self._backed(window, skin, layout)
         self._work_area = window.work_area_for_foreground()
         tucked = self._pill_showing()
         self._x, y = self._place(layout, tucked=tucked, raised=False)
@@ -204,6 +213,16 @@ class Notice:
             self._window = self._window_factory()
             self._window.set_mouse_handler(self._on_mouse)
         return self._window
+
+    def _backed(self, window: NoticeWindowApi, skin: PillSkin, layout: NoticeLayout) -> PillSkin:
+        """``skin``, with the window copying what is behind it for glass; solid if it can't."""
+        frost = (
+            functools.partial(frost_notice, layout=layout, screen_scale=display_scale(), skin=skin)
+            if skin.glass else None
+        )
+        if window.follow_backdrop(frost) or not skin.glass:
+            return skin
+        return without_glass(skin)
 
     def _place(self, layout: NoticeLayout, *, tucked: bool, raised: bool) -> tuple[int, int]:
         left, top, right, _bottom = self._work_area
@@ -308,12 +327,15 @@ class Notice:
             return
         level = round(self._opacity.value * 255)
         hidden = self._hidden_rows()
-        if self._pushed == (self._hovered, level, hidden):
+        behind = self._api().backdrop() if self._skin.glass else None
+        if self._pushed == (self._hovered, level, hidden) and behind is self._pushed_behind:
             return
         pixels = self._pixels.get(self._hovered)
         if pixels is None:
             pixels = premultiplied_array(render_notice(self._layout, self._hovered, display_scale(), self._skin))
             self._pixels[self._hovered] = pixels
+        if behind is not None:
+            pixels = glaze_notice(pixels, behind, self._layout, display_scale(), self._skin)
         faded = pixels if level >= 255 else (pixels.astype(numpy.uint16) * level // 255).astype(numpy.uint8)
         if hidden is not None:
             rows = faded.shape[0] / self._layout.height
@@ -321,6 +343,7 @@ class Notice:
             faded[round(hidden[0] * rows):round(hidden[1] * rows)] = 0
         self._api().push_frame(faded.tobytes())
         self._pushed = (self._hovered, level, hidden)
+        self._pushed_behind = behind
 
     def _on_mouse(self, is_down: bool, x: int, y: int) -> None:
         # Runs in the window procedure, in the middle of Tk's own event
