@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import cast
 
 _logger = logging.getLogger(__name__)
-# The settings window and the word learner both rewrite dictionary.json, from
-# different threads; each rewrite holds this for its whole read and write.
+# The settings window rewrites dictionary.json from the API's threads; each rewrite holds this for its
+# whole read and write.
 _WRITE_LOCK = threading.Lock()
 
 
@@ -29,7 +29,6 @@ class LiteralRule:
     whole_words: bool = True
     phonetic: bool = False
     enabled: bool = True
-    learned: bool = False
 
 
 @dataclass(frozen=True)
@@ -250,7 +249,7 @@ def _load_literal_rule(
     booleans = _literal_booleans(document, index)
     if booleans is None:
         return None
-    case_sensitive, whole_words, phonetic, enabled, learned = booleans
+    case_sensitive, whole_words, phonetic, enabled = booleans
     return LiteralRule(
         spoken=tuple(cast(list[str], raw_spoken)),
         replacement=replacement,
@@ -258,19 +257,17 @@ def _load_literal_rule(
         whole_words=whole_words,
         phonetic=phonetic,
         enabled=enabled,
-        learned=learned,
     )
 
 
 def _literal_booleans(
     document: dict[object, object], index: int,
-) -> tuple[bool, bool, bool, bool, bool] | None:
+) -> tuple[bool, bool, bool, bool] | None:
     defaults = {
         "case_sensitive": False,
         "whole_words": True,
         "phonetic": False,
         "enabled": True,
-        "learned": False,
     }
     values: list[bool] = []
     for name, default in defaults.items():
@@ -279,7 +276,7 @@ def _literal_booleans(
             _warn_bad_rule(index, f"{name} must be boolean")
             return None
         values.append(value)
-    return values[0], values[1], values[2], values[3], values[4]
+    return values[0], values[1], values[2], values[3]
 
 
 def _load_regex_rule(
@@ -312,7 +309,7 @@ def _warn_bad_rule(index: int, reason: str) -> None:
 
 def _rule_to_json(rule: DictionaryRule) -> dict[str, object]:
     if isinstance(rule, LiteralRule):
-        document: dict[str, object] = {
+        return {
             "type": "literal",
             "spoken": list(rule.spoken),
             "replacement": rule.replacement,
@@ -321,9 +318,6 @@ def _rule_to_json(rule: DictionaryRule) -> dict[str, object]:
             "phonetic": rule.phonetic,
             "enabled": rule.enabled,
         }
-        if rule.learned:
-            document["learned"] = True
-        return document
     return {
         "type": "regex",
         "pattern": rule.pattern,

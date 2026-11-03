@@ -675,9 +675,9 @@ export function LiveMeetingPage() {
             </dl>
             <div className="mt-2 flex flex-wrap gap-x-4">
               <OpenFolderButton path={live ? `/api/meetings/${encodeURIComponent(live.id)}/open` : "/api/meetings/folder/open"} />
-              <Button variant="link" className="text-[12.5px]" onClick={() => void api.post("/api/meetings/vocabulary/open")}>
+              <NavLink to="/dictionary" draggable={false} className="text-[12.5px] font-medium text-primary hover:underline">
                 Edit names and terms
-              </Button>
+              </NavLink>
             </div>
           </Card>
         </>
@@ -781,12 +781,12 @@ export function MeetingSettingsPage() {
           </Row>
         </Rows>
       </Section>
-      <Section title="Names and terms" note="Names, companies and jargon the transcript should spell right, one per line. Names you give speakers are added on their own.">
+      <Section title="Names and terms" note="Meetings and dictation share one list of names, companies and jargon to spell right. Names you give speakers are added on their own.">
         <Rows>
-          <Row title="vocabulary.txt" description={draft.folder ? `In ${draft.folder}, shared by every meeting.` : undefined}>
-            <Button variant="outline" onClick={() => void api.post("/api/meetings/vocabulary/open").catch((error: unknown) => setNote(errorText(error)))}>
+          <Row title="People and terms" description="On the Dictionary page.">
+            <NavLink to="/dictionary" draggable={false} className="text-[12.5px] font-medium text-primary hover:underline">
               Edit
-            </Button>
+            </NavLink>
           </Row>
         </Rows>
         {note ? <InlineError>{note}</InlineError> : null}

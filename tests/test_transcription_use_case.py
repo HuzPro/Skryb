@@ -1286,3 +1286,37 @@ class TestOnePressAlwaysStartsTheNextRecording:
             else:
                 press()
             assert state_machine.state == AppState.IDLE
+
+
+class _PromptedEngine(MagicMock):
+    """A Qwen3-ASR stand-in: answers prompted decodes only, and notes each hint and language."""
+
+    def transcribe_prompted(self, audio: AudioSegment, context: str | None, language: str | None) -> TranscriptionResult:
+        self.prompts.append((round(audio.duration_seconds, 1), context, language))
+        return _make_result("Skryb pasted it.")
+
+
+def test_each_dictation_hands_qwen_the_people_and_terms_list_as_it_stands_then() -> None:
+    from skryb.people.terms import Term
+
+    lists = [(Term("Skryb", note="the app I'm building"),), (Term("Skryb", note="the app I'm building"), Term("Odile"))]
+    engine = _PromptedEngine()
+    engine.prompts = []
+    recorder, output = MagicMock(), MagicMock()
+    event_bus = SimpleEventBus()
+    use_case = RecordAndTranscribeUseCase(
+        recorder=recorder, engine=engine, output=output, state_machine=AppStateMachine(event_bus, initial_state=AppState.IDLE),
+        event_bus=event_bus, action_dispatcher=InlineActionDispatcher(), diagnostics=MagicMock(spec=SessionDiagnostics),
+        terms=lambda: lists.pop(0), language=lambda: "en",
+    )
+    recorder.stop_recording.return_value = _make_audio(16000 * 3)
+
+    for _ in range(2):
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+
+    assert engine.prompts == [
+        (3.0, "Names and terms that may come up: Skryb (the app I'm building).", "en"),
+        (3.0, "Names and terms that may come up: Skryb (the app I'm building), Odile.", "en"),
+    ]
+    assert [call.args[0] for call in output.output.call_args_list] == ["Skryb pasted it."] * 2

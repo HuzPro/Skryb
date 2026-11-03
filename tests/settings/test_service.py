@@ -864,40 +864,6 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert service.current_draft().boost_quiet_speech is False
 
 
-class TestTheWordLearningSwitch:
-    def test_learning_is_on_unless_it_was_turned_off(self):
-        service, *_ = _build_service()
-
-        assert service.current_draft().learn_words is True
-
-    def test_turning_it_off_is_saved_with_the_dictionary_settings(self):
-        service, config, *_ = _build_service()
-
-        changes = service.apply_draft(replace(service.current_draft(), learn_words=False))
-
-        assert config.get("dictionary.learn_words") is False
-        assert service.current_draft().learn_words is False
-        assert not changes.learning_turned_on
-
-    def test_a_config_from_before_the_switch_moved_keeps_learning_off(self):
-        service, *_ = _build_service(config_overrides={
-            "writing.cleanup": "polished",
-            "writing.learn_words": False,
-            "writing.learn_style": True,
-            "writing.model_path": "D:/models/Qwen3.5-4B-Q4_K_M.gguf",
-        })
-
-        assert service.current_draft().learn_words is False
-
-    def test_turning_it_back_on_asks_for_the_edit_watcher(self):
-        service, *_ = _build_service(config_overrides={"writing.learn_words": False})
-
-        changes = service.apply_draft(replace(service.current_draft(), learn_words=True))
-
-        assert changes.learning_turned_on
-        assert service.current_draft().learn_words is True
-
-
 def test_recording_preferences_round_trip_through_saved_settings_without_a_rebuild() -> None:
     service, config, _, _, _ = _build_service()
     draft = service.current_draft()

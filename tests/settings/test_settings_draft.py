@@ -211,16 +211,3 @@ class TestLeavingVerbatimTranscription:
         assert changes.output_changed is True
 
 
-class TestLearningChanges:
-    def test_turning_learning_on_asks_for_the_edit_watcher_and_nothing_else(self):
-        changes = ChangeSet.between(_make_draft(learn_words=False), _make_draft(learn_words=True))
-
-        assert changes.learning_turned_on
-        assert not changes.output_changed
-        assert not changes.engine_reload_required
-
-    def test_turning_learning_off_needs_nothing_rebuilt(self):
-        changes = ChangeSet.between(_make_draft(learn_words=True), _make_draft(learn_words=False))
-
-        assert not changes.learning_turned_on
-        assert not changes.output_changed

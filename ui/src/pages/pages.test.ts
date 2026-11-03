@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { launchPath, rememberPage } from "../app";
 import type { HistoryEntry, Model, Settings, UpdateStatus } from "../lib/types";
-import { duplicateAlias, joinAliases, newestFirst, splitAliases } from "./dictionary";
+import { duplicateAlias, joinAliases, newestFirst, splitAliases, termFrom, termProblem } from "./dictionary";
 import { finalText, formatDuration, groupByDay, preview } from "./history";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
@@ -60,7 +60,7 @@ describe("dictionary aliases", () => {
 
   it("does not call a leading-comma alias a duplicate of the same word without it", () => {
     const rules = [
-      { kind: "literal" as const, spoken: [" underscore "], replacement: "_", case_sensitive: false, whole_words: true, phonetic: false, enabled: true, learned: false },
+      { kind: "literal" as const, spoken: [" underscore "], replacement: "_", case_sensitive: false, whole_words: true, phonetic: false, enabled: true },
     ];
     const candidate = { ...rules[0]!, spoken: splitAliases(", underscore") };
     expect(duplicateAlias(rules, candidate, -1)).toBe(false);
@@ -78,13 +78,41 @@ describe("dictionary aliases", () => {
 
   it("spots an alias another word rule already uses, ignoring the rule being edited", () => {
     const rules = [
-      { kind: "literal" as const, spoken: ["jason"], replacement: "JSON", case_sensitive: false, whole_words: true, phonetic: false, enabled: true, learned: false },
+      { kind: "literal" as const, spoken: ["jason"], replacement: "JSON", case_sensitive: false, whole_words: true, phonetic: false, enabled: true },
       { kind: "regex" as const, pattern: "jason", replacement: "x", enabled: true },
     ];
     const candidate = { ...rules[0]!, spoken: [" jason"] };
     expect(duplicateAlias(rules, candidate, -1)).toBe(true);
     expect(duplicateAlias(rules, candidate, 0)).toBe(false);
     expect(duplicateAlias(rules, rules[1]!, -1)).toBe(false);
+  });
+});
+
+describe("people and terms", () => {
+  const people = [
+    { written: "Skryb", note: "the app I'm building", heard_as: ["Skribe"], phonetic: false },
+    { written: "Ngozi Adébáyọ̀", note: "", heard_as: [], phonetic: true },
+  ];
+
+  it("trims an entry and splits its heard-as spellings without repeats or its own spelling", () => {
+    expect(termFrom({ written: "  Odile ", note: " the   designer ", heard: "Odeel, , odeel, ODILE, Audile ", phonetic: true })).toEqual({
+      written: "Odile", note: "the designer", heard_as: ["Odeel", "Audile"], phonetic: true,
+    });
+  });
+
+  it("refuses a blank entry, a name twice, and a spelling that would swap one entry for another", () => {
+    const term = (written: string, heard_as: string[] = []) => ({ written, note: "", heard_as, phonetic: false });
+    expect(termProblem(people, term(""), -1)).toBe("Write the name or term the way it should appear.");
+    expect(termProblem(people, term("skryb"), -1)).toBe("“skryb” is already in the list.");
+    expect(termProblem(people, term("Scribe", ["skryb"]), -1)).toContain("is an entry of its own");
+    expect(termProblem(people, term("Scryb", ["SKRIBE"]), -1)).toBe("“SKRIBE” is already heard as “Skryb”.");
+    expect(termProblem(people, term("Skribe"), -1)).toContain("is a heard-as spelling of “Skryb”");
+  });
+
+  it("lets an entry be saved over itself, and a thousand distinct entries pass", () => {
+    expect(termProblem(people, people[0]!, 0)).toBe("");
+    const many = Array.from({ length: 1000 }, (_, at) => ({ written: `Name ${at}`, note: "", heard_as: [`Nayme ${at}`], phonetic: false }));
+    expect(termProblem(many, { written: "Name 1000", note: "", heard_as: ["Nayme 1000"], phonetic: false }, -1)).toBe("");
   });
 });
 

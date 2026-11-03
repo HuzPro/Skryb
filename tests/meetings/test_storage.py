@@ -12,9 +12,8 @@ from skryb.meetings.storage import (
     meeting_settings_from,
     new_meeting_folder,
     rename_meeting,
-    vocabulary_file,
 )
-from skryb.meetings.transcript import VOCABULARY_TEMPLATE, Transcript
+from skryb.meetings.transcript import Transcript
 from tests.fakes.config import FakeConfig
 
 
@@ -45,14 +44,6 @@ def test_two_meetings_in_the_same_minute_get_numbered_folders(tmp_path: Path) ->
     (tmp_path / "2026-10-29 09-05").mkdir()
     (tmp_path / "2026-10-29 09-05 (2)").mkdir()
     assert new_meeting_folder(tmp_path, started) == tmp_path / "2026-10-29 09-05 (3)"
-
-
-def test_the_vocabulary_file_is_created_with_its_example_once_and_never_overwritten(tmp_path: Path) -> None:
-    root = tmp_path / "Meetings"
-    path = vocabulary_file(root)
-    assert path.read_text(encoding="utf-8") == VOCABULARY_TEMPLATE
-    path.write_text("Northwind\nBRIGHTLINE\n", encoding="utf-8")
-    assert vocabulary_file(root).read_text(encoding="utf-8") == "Northwind\nBRIGHTLINE\n"
 
 
 def test_saved_meetings_are_listed_newest_first_with_their_length_speakers_and_words(tmp_path: Path) -> None:

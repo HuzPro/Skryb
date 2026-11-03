@@ -51,6 +51,7 @@ class MeetingRig:
             make_models=lambda _settings: FakeModels(),
             make_capture=self._capture,
             publish=lambda event: self.hub.publish("meeting", event),
+            people=self.root / "people.json",
             clock=lambda: datetime(2026, 10, 29, 14, 5),
         )
         self.server.bind(MeetingApi(
@@ -204,12 +205,6 @@ def test_a_saved_transcript_that_cannot_be_read_is_explained(rig: MeetingRig) ->
     status, body = rig.call("GET", "/api/meetings/Dana call")
 
     assert status == 400 and body["error"].startswith("That meeting's transcript could not be read")
-
-
-def test_editing_names_and_terms_creates_the_shared_file_and_opens_it(rig: MeetingRig) -> None:
-    assert rig.call("POST", "/api/meetings/vocabulary/open")[0] == 204
-    assert rig.opened == [rig.root / "vocabulary.txt"]
-    assert (rig.root / "vocabulary.txt").read_text(encoding="utf-8").startswith("# Names and terms")
 
 
 def test_open_folder_opens_a_saved_meetings_folder(rig: MeetingRig) -> None:

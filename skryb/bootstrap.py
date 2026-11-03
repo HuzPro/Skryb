@@ -40,7 +40,7 @@ from skryb.core.release_update import (
 )
 from skryb.core.self_update import SelfUpdate
 from skryb.core.single_instance import SecondLaunches
-from skryb.core.startup_log import milestone, process_started_at, session_id
+from skryb.core.startup_log import milestone, process_started_at
 from skryb.core.timestamps import utc_now
 from skryb.core.state_machine import AppState, AppStateMachine
 from skryb.diagnostics.session import SessionDiagnostics, content_recording_enabled
@@ -99,6 +99,7 @@ from skryb.output.text_filter_decorator import (
     TextFilterDecorator,
     load_dictionary,
 )
+from skryb.output.rule_counts import RuleCounts
 from skryb.output.text_pipeline import PipelineMode, build_pipeline
 from skryb.output.win32_caret_context import (
     read_caret_context,
@@ -115,7 +116,6 @@ from skryb.output.win32_key_sender import (
 from skryb.output.win32_modifier_key_state_reader import (
     Win32ModifierKeyStateReader,
 )
-from skryb.output.word_learning import WordLearner, learns_words
 from skryb.history.retention import HistoryPruner, history_retention_days
 from skryb.meetings.asr import (
     MeetingModels, build_meeting_asr, diarizer_snapshot, native_diarizer_for, roman_urdu_snapshot,
@@ -125,6 +125,8 @@ from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.models import DIARIZER, ROMAN_URDU
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import meeting_settings_from
+from skryb.people.repick import Repick, suggest_heard_as
+from skryb.people.terms import import_vocabulary, load_terms
 from skryb.history.service import HistoryService
 from skryb.recording.audio_ducking import AudioDucking, core_audio_sessions
 from skryb.recording.audio_segment import AudioSegment
@@ -180,6 +182,7 @@ from skryb.transcription.model_info import (
 )
 from skryb.transcription.model_manager import ModelManager
 from skryb.transcription.placeholder_engine import PlaceholderEngine
+from skryb.transcription.qwen3_asr_prompt import LANGUAGE_NAMES
 from skryb.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
 )
@@ -281,40 +284,23 @@ def _edit_capture_enabled(config: JsonConfigAdapter) -> bool:
     )
 
 
-def _learning_enabled(config: JsonConfigAdapter, learner: WordLearner | None) -> bool:
-    return learner is not None and learns_words(config)
+def _build_edit_capture(config: JsonConfigAdapter, paths: AppPaths) -> Win32EditObserver | None:
+    """The keystroke watcher, or nothing while edit capture is off.
 
-
-def _build_edit_capture(
-    config: JsonConfigAdapter, paths: AppPaths, learner: WordLearner | None = None,
-) -> Win32EditObserver | None:
-    """The keystroke watcher, or nothing unless something needs it.
-
-    It feeds two sinks. ``edits.jsonl`` records what the user types into
-    the window a transcription was pasted into, so it stays off by default
-    and config-only. The learner keeps only word corrections, and follows
-    the Dictionary page's learning switch.
+    ``edits.jsonl`` records what the user types into the window a
+    transcription was pasted into, so it stays off by default and config-only.
     """
-    capture = _edit_capture_enabled(config)
-    if not capture and not _learning_enabled(config, learner):
+    if not _edit_capture_enabled(config):
         return None
-    write_jsonl: Callable[[dict[str, object]], None] | None = None
-    if capture:
-        _warn_if_synced_folder(paths.diagnostics_dir)
-        write_jsonl = JsonlWriter(paths.session_dir / "edits.jsonl").append
-        _logger.info("Edit capture is on; saving to %s", paths.session_dir)
+    _warn_if_synced_folder(paths.diagnostics_dir)
+    write_jsonl = JsonlWriter(paths.session_dir / "edits.jsonl").append
+    _logger.info("Edit capture is on; saving to %s", paths.session_dir)
 
     def write(event: dict[str, object]) -> None:
-        if write_jsonl is not None and _edit_capture_enabled(config):
+        if _edit_capture_enabled(config):
             write_jsonl(event)
-        if learner is not None and _learning_enabled(config, learner):
-            learner.observe(event)
 
-    return Win32EditObserver(EditRecorder(
-        write, utc_now,
-        lambda: (write_jsonl is not None and _edit_capture_enabled(config))
-        or _learning_enabled(config, learner),
-    ))
+    return Win32EditObserver(EditRecorder(write, utc_now, lambda: _edit_capture_enabled(config)))
 
 
 def _delivery_reporter(
@@ -353,6 +339,8 @@ def _build_output(
     models_dir: Path | None = None,
     on_delivered: Callable[[str], None] = _ignore_delivery,
     hooks: DeliveryHooks | None = None,
+    people_path: Path | None = None,
+    rule_counts: RuleCounts | None = None,
 ) -> TextOutputHandler:
     sleeper = TimeSleeper()
     writer = Win32ClipboardWriter(sleeper=sleeper)
@@ -427,8 +415,19 @@ def _build_output(
                 functools.partial(time.sleep, _REREAD_CARET_AFTER_SECONDS),
             ),
             target_app=_foreground_process,
+            terms=load_terms(people_path) if people_path is not None else (),
+            on_repick=functools.partial(suggest_heard_as, people_path) if people_path is not None else _ignore_repick,
+            on_fired=rule_counts.add if rule_counts is not None else _ignore_fired,
         ),
     )
+
+
+def _ignore_repick(_picked: Repick) -> None:
+    return None
+
+
+def _ignore_fired(_rules: object) -> None:
+    return None
 
 
 def _foreground_process() -> str:
@@ -569,6 +568,12 @@ def _wake_after_idle_seconds(
     if isinstance(value, bool) or not isinstance(value, int | float):
         return _WAKE_AFTER_IDLE_SECONDS
     return max(float(value), 0.0)
+
+
+def _dictation_language(config: JsonConfigAdapter) -> str:
+    """The language Qwen3-ASR is held to; it knows English and Hindi (asked for Urdu)."""
+    language = config.get("transcription.language", "en")
+    return language if language in LANGUAGE_NAMES else "en"
 
 
 def _prepare_audio(config: JsonConfigAdapter, audio: AudioSegment) -> AudioSegment:
@@ -1062,6 +1067,7 @@ def _build_meetings(
         ),
         make_capture=Capture,
         publish=publish,
+        people=paths.people_path,
         on_change=on_change,
     )
     return recorder, files
@@ -1232,17 +1238,9 @@ def build_app(
     diagnostics = SessionDiagnostics(paths, config, registry, hardware_detector)
     atexit.register(diagnostics.dispose)
     log_caret_text_when(functools.partial(content_recording_enabled, config))
-    # The learner adds words to dictionary.json from the edit-capture thread;
-    # the rebuilt output chain is what puts them to use. The callback is
-    # bound late: it only runs once the app is up.
-    learner = WordLearner(
-        paths.base / "learning.json",
-        paths.dictionary_path,
-        functools.partial(learns_words, config),
-        lambda: _use_learned_words(),
-        session_id(),
-    )
-    edit_capture = _build_edit_capture(config, paths, learner)
+    edit_capture = _build_edit_capture(config, paths)
+    import_vocabulary(paths.people_path, meeting_settings_from(config).folder / "vocabulary.txt")
+    rule_counts = RuleCounts(paths.rule_counts_path)
     if edit_capture is not None:
         atexit.register(edit_capture.stop)
 
@@ -1292,6 +1290,8 @@ def build_app(
         pipeline_mode, paths.models_dir,
         _delivery_reporter(edit_capture, pipeline_mode, output_mode),
         hooks=delivery_hooks,
+        people_path=paths.people_path,
+        rule_counts=rule_counts,
     )
     action_dispatcher: ActionDispatcher = ThreadedActionDispatcher()
 
@@ -1320,29 +1320,9 @@ def build_app(
         wake_after_idle_seconds=functools.partial(
             _wake_after_idle_seconds, config, diagnostics,
         ),
+        terms=functools.partial(load_terms, paths.people_path),
+        language=functools.partial(_dictation_language, config),
     )
-
-    def _use_learned_words() -> None:
-        output_mode = _resolve_output_mode(config)
-        pipeline_mode = _resolve_pipeline_mode(config)
-        record_and_transcribe_use_case.set_output(
-            _build_output(
-                output_mode, gui_dispatcher, paths.dictionary_path,
-                pipeline_mode, paths.models_dir,
-                _delivery_reporter(edit_capture, pipeline_mode, output_mode),
-                hooks=delivery_hooks,
-            )
-        )
-
-    def _edit_watcher(changes: ChangeSet) -> Win32EditObserver | None:
-        """The edit watcher, started now if learning was just switched on."""
-        nonlocal edit_capture
-        if edit_capture is None and changes.learning_turned_on:
-            edit_capture = _build_edit_capture(config, paths, learner)
-            if edit_capture is not None:
-                edit_capture.start()
-                atexit.register(edit_capture.stop)
-        return edit_capture
 
     hotkey_actions = _hotkey_actions(record_and_transcribe_use_case)
     listener = _build_hotkey_listener(
@@ -1395,10 +1375,12 @@ def build_app(
             gui_dispatcher=gui_dispatcher,
             dictionary_path=paths.dictionary_path,
             models_dir=paths.models_dir,
-            edit_capture=_edit_watcher(changes),
+            edit_capture=edit_capture,
             hotkey_actions=hotkey_actions,
             delivery_hooks=delivery_hooks,
             history_pruner=history_pruner,
+            people_path=paths.people_path,
+            rule_counts=rule_counts,
         )
 
     # Bound late: the app, the API and the notice all come after it.
@@ -1458,7 +1440,8 @@ def build_app(
         on_save=lambda changes: gui_dispatcher.dispatch(
             lambda: apply_saved_settings(changes),
         ),
-        learner=learner,
+        people_path=paths.people_path,
+        rule_counts=rule_counts,
         history=HistoryService(
             paths.diagnostics_dir, record_and_transcribe_use_case.retranscribe,
         ),
@@ -1639,6 +1622,8 @@ def apply_settings(
     hotkey_actions: HotkeyActions | None = None,
     delivery_hooks: DeliveryHooks | None = None,
     history_pruner: HistoryPruner | None = None,
+    people_path: Path | None = None,
+    rule_counts: RuleCounts | None = None,
 ) -> None:
     """Apply settings changes that don't require a model hot-swap.
 
@@ -1655,14 +1640,15 @@ def apply_settings(
                 pipeline_mode, models_dir,
                 _delivery_reporter(edit_capture, pipeline_mode, output_mode),
                 hooks=delivery_hooks,
+                people_path=people_path,
+                rule_counts=rule_counts,
             )
         )
 
     if changes.history_retention_changed and history_pruner is not None:
         history_pruner.prune_now()
 
-    # A just-started edit watcher only sees keys once the listener has it.
-    if changes.hotkey_changed or changes.learning_turned_on:
+    if changes.hotkey_changed:
         new_listener = _build_hotkey_listener(
             config, use_case, hotkey_actions or _hotkey_actions(use_case),
             _key_observer(edit_capture),

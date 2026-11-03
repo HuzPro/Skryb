@@ -7,6 +7,7 @@ which the server answers with a 400.
 
 import math
 from collections.abc import Iterable
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from typing import TypeVar, cast
 
@@ -18,6 +19,7 @@ from skryb.output.dictionary_config import (
     LiteralRule,
     dictionary_from_json,
 )
+from skryb.people.terms import PeopleList, Term, suggestion_json, term_json, terms_from_json
 from skryb.output.output_mode import OutputMode
 from skryb.meetings.storage import LANGUAGES as MEETING_LANGUAGES
 from skryb.output.paste_method import PasteMethod, normalized_process_name
@@ -78,7 +80,6 @@ def settings_json(draft: SettingsDraft) -> Json:
         "capture_content": draft.capture_content,
         "input_device": draft.input_device,
         "boost_quiet_speech": draft.boost_quiet_speech,
-        "learn_words": draft.learn_words,
         "hotkey_bindings": [binding_json(binding) for binding in draft.hotkey_bindings],
         "double_tap_locks_hold": draft.double_tap_locks_hold,
         "recording": {
@@ -126,7 +127,6 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         capture_content=settings.flag("capture_content"),
         input_device=settings.text("input_device"),
         boost_quiet_speech=settings.flag("boost_quiet_speech"),
-        learn_words=settings.flag("learn_words"),
         hotkey_bindings=bindings_from_json(settings.items("hotkey_bindings")),
         double_tap_locks_hold=settings.flag("double_tap_locks_hold"),
         recording=replace(
@@ -164,30 +164,27 @@ def bindings_from_json(rows: list[object]) -> tuple[Binding, ...]:
     return tuple(bindings)
 
 
-def dictionary_json(dictionary: DictionaryConfig) -> Json:
+def dictionary_json(
+    dictionary: DictionaryConfig, people: PeopleList, fired: Callable[[DictionaryRule], int],
+) -> Json:
+    """The Dictionary page: its rules with how often each has fired, and the people and terms list."""
     return {
         "options": asdict(dictionary.options),
-        "rules": [_rule_json(rule) for rule in dictionary.rules],
+        "rules": [{**_rule_json(rule), "fired": fired(rule)} for rule in dictionary.rules],
+        "people": [term_json(term) for term in people.terms],
+        "suggestions": [suggestion_json(suggestion) for suggestion in people.suggestions],
     }
 
 
-def dictionary_from_contract(document: object) -> DictionaryConfig:
-    """The contract names a rule's type ``kind``; the saved file calls it ``type``."""
+def dictionary_from_contract(document: object) -> tuple[DictionaryConfig, tuple[Term, ...]]:
+    """The rules and the people and terms list. The contract names a rule's type ``kind``; the saved file calls it ``type``."""
     fields = Fields(document, "dictionary")
     rules: list[object] = []
     for index, rule in enumerate(fields.items("rules")):
         raw = Fields(rule, f"rules[{index}]").raw()
         rules.append({**raw, "type": raw.get("kind")})
-    return dictionary_from_json({"options": fields.section("options").raw(), "rules": rules})
-
-
-def learned_pairs(dictionary: DictionaryConfig) -> set[tuple[str, str]]:
-    """Each learned word as the learner blocks it: first spoken form, written form."""
-    return {
-        (rule.spoken[0].strip(), rule.replacement)
-        for rule in dictionary.rules
-        if isinstance(rule, LiteralRule) and rule.learned
-    }
+    dictionary = dictionary_from_json({"options": fields.section("options").raw(), "rules": rules})
+    return dictionary, terms_from_json(fields.items("people"))
 
 
 class Fields:
@@ -262,7 +259,6 @@ def _rule_json(rule: DictionaryRule) -> Json:
             "whole_words": rule.whole_words,
             "phonetic": rule.phonetic,
             "enabled": rule.enabled,
-            "learned": rule.learned,
         }
     return {
         "kind": "regex",

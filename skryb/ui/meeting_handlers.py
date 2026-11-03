@@ -13,7 +13,7 @@ from skryb.core.action_dispatcher import ThreadedActionDispatcher
 from skryb.core.recycle_bin import move_to_recycle_bin
 from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
-from skryb.meetings.storage import list_meetings, meeting_folder, rename_meeting, vocabulary_file
+from skryb.meetings.storage import list_meetings, meeting_folder, rename_meeting
 from skryb.meetings.transcript import Transcript, is_speaker_key
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, Route
 from skryb.ui.event_hub import EventHub
@@ -55,7 +55,6 @@ class MeetingApi:
             ("POST", "/api/meetings/stop", self._stop),
             ("POST", "/api/meetings/files", self._transcribe_file),
             ("POST", "/api/meetings/models/download", self._download_models),
-            ("POST", "/api/meetings/vocabulary/open", self._open_vocabulary),
             ("POST", "/api/meetings/folder/open", self._open_meetings_folder),
             ("GET", "/api/meetings/{id}", self._read),
             ("POST", "/api/meetings/{id}/rename", self._rename),
@@ -112,14 +111,6 @@ class MeetingApi:
             _logger.exception("The meeting models' download did not start")
             raise ApiError(400, f"Could not start the download: {exc}") from exc
         return _ACCEPTED
-
-    def _open_vocabulary(self, _request: ApiRequest) -> ApiResponse:
-        try:
-            path = vocabulary_file(self._folder())
-        except OSError as exc:
-            raise ApiError(400, f"Could not create the vocabulary file: {exc}") from exc
-        self._open_path(path)
-        return _NO_CONTENT
 
     def _open_meetings_folder(self, _request: ApiRequest) -> ApiResponse:
         folder = self._folder()

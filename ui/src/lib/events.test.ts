@@ -105,7 +105,7 @@ describe("server events", () => {
   it("replaces app and settings wholesale", () => {
     const next = { ...app, state: "recording" as const };
     expect(reduceEvent({ app }, "app", next).snapshot.app).toBe(next);
-    const settings = { model_size: "parakeet-tdt-0.6b-v3", learn_words: false } as Settings;
+    const settings = { model_size: "parakeet-tdt-0.6b-v3", boost_quiet_speech: false } as Settings;
     expect(reduceEvent({}, "settings", settings).snapshot.settings).toBe(settings);
   });
 

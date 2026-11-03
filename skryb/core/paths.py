@@ -57,6 +57,14 @@ class AppPaths:
         return self.base / "dictionary.json"
 
     @property
+    def people_path(self) -> Path:
+        return self.base / "people.json"
+
+    @property
+    def rule_counts_path(self) -> Path:
+        return self.base / "rule_counts.json"
+
+    @property
     def default_diagnostics_dir(self) -> Path:
         return self.base / "diagnostics"
 

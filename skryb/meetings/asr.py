@@ -24,6 +24,7 @@ from skryb.meetings.openvino_diarizer import OpenVinoDiarizer
 from skryb.meetings.models import (
     DIARIZER, ROMAN_URDU, Diarizer, Labeller, NpuRomanUrduAsr, RomanUrduAsr, Vad, gpu_available, release_gpu,
 )
+from skryb.people.hints import transcribe_with_hint
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
 from skryb.transcription.engine_registry import EngineRegistry, EngineSpec
@@ -162,9 +163,9 @@ class MeetingModels:
         with self._turns.meeting():
             engine = self._dictation_engine()
             if isinstance(engine, PromptedTranscriber):
-                return engine.transcribe_prompted(clip, context, "en").text
+                return transcribe_with_hint(engine, clip, context, "en").text
         # ponytail: if dictation switches to Qwen3-ASR mid-meeting, the meeting keeps its own copy until it ends.
-        return self._own_engine().transcribe_prompted(clip, context, "en").text
+        return transcribe_with_hint(self._own_engine(), clip, context, "en").text
 
     def release(self) -> None:
         if isinstance(self._diarizer, (NativeDiarizer, OpenVinoDiarizer)):

@@ -38,6 +38,11 @@ class _FakeSpeech:
     def __init__(self, reply: str) -> None:
         self.reply = reply
         self.heard: list[np.ndarray] = []
+        self.hotwords: list[list[str]] = []
+
+    def set_hotwords(self, words: list[str]) -> int:
+        self.hotwords.append(words)
+        return min(len(words), 25)
 
     def transcribe_array(self, audio: np.ndarray) -> tuple[str, float, float]:
         self.heard.append(audio)
@@ -331,3 +336,22 @@ class TestDenseWeights:
         dense = phonon2_cpu_adapter.dense_weights(tmp_path / "model.fermion")
 
         assert not [name for name in dense if name.endswith("num_batches_tracked")]
+
+
+def test_the_decoder_is_told_the_names_to_favour_only_when_they_change(fermion: _FakeFermion, tmp_path: Path) -> None:
+    adapter = _loaded(tmp_path)
+
+    for words in (["Skryb", "Ngozi Adébáyọ̀"], ["Skryb", "Ngozi Adébáyọ̀"], [], []):
+        adapter.set_hotwords(words)
+        adapter.transcribe(_speech(1))
+
+    assert fermion.speech.hotwords == [["Skryb", "Ngozi Adébáyọ̀"], []]
+
+
+def test_names_given_before_the_model_loads_are_not_lost(fermion: _FakeFermion, tmp_path: Path) -> None:
+    adapter = Phonon2CpuAdapter(_snapshot(tmp_path))
+    adapter.set_hotwords(["Skryb"])
+    adapter.load_model()
+    adapter.set_hotwords(["Skryb"])
+
+    assert fermion.speech.hotwords == [["Skryb"]]

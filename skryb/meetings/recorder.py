@@ -10,7 +10,7 @@ from pathlib import Path
 from skryb.meetings.file_session import Decode, FileSession
 from skryb.meetings.media_file import MediaFileError, check, decode_audio
 from skryb.meetings.session import MeetingCapture, Models, Session
-from skryb.meetings.storage import MeetingSettings, new_meeting_folder, vocabulary_file
+from skryb.meetings.storage import MeetingSettings, new_meeting_folder
 from skryb.meetings.transcript import Event
 
 _logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ class MeetingRecorder:
         make_models: Callable[[MeetingSettings], Models],
         make_capture: Callable[[bool], MeetingCapture],
         publish: Callable[[Event], None],
+        people: Path,
         on_change: Callable[[bool], None] = _nothing,
         clock: Callable[[], datetime] = datetime.now,
         check_file: Callable[[Path], None] = check,
@@ -45,6 +46,7 @@ class MeetingRecorder:
         self._make_models = make_models
         self._make_capture = make_capture
         self._publish = publish
+        self._people = people
         self._on_change = on_change
         self._clock = clock
         self._turn = threading.Lock()  # one start or stop at a time
@@ -98,7 +100,7 @@ class MeetingRecorder:
                 new_meeting_folder(settings.folder, started), started,
                 capture=self._make_capture(settings.record_microphone),
                 models=self._make_models(settings),
-                vocabulary=self._vocabulary(settings.folder),
+                people=self._people,
                 publish=self._publish,
                 record_microphone=settings.record_microphone,
             )
@@ -133,7 +135,7 @@ class MeetingRecorder:
                 new_meeting_folder(settings.folder, started, path.stem), started,
                 source=path,
                 models=self._make_models(settings),
-                vocabulary=self._vocabulary(settings.folder),
+                people=self._people,
                 publish=self._publish,
                 on_done=self._file_done,
                 decode=self._decode_file,
@@ -182,10 +184,3 @@ class MeetingRecorder:
             self.stop()
         else:
             self.start()
-
-    @staticmethod
-    def _vocabulary(folder: Path) -> Path:
-        try:
-            return vocabulary_file(folder)
-        except OSError:
-            return folder / "vocabulary.txt"

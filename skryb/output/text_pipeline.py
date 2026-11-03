@@ -1,6 +1,6 @@
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -24,6 +24,10 @@ from skryb.output.punctuation_stage import (
     PunctuationStage,
     create_punctuation_backend,
 )
+from skryb.people.repick import Repick, keep_written_case, repick
+from skryb.people.terms import Term, people_rules
+
+FiredRules = Callable[[Sequence[DictionaryRule]], None]
 
 _logger = logging.getLogger(__name__)
 
@@ -82,7 +86,18 @@ _SPOKEN_MARKS = ".,;:!?"
 _STRAY_MARKS = _SPOKEN_MARKS + " \t"
 _TOKEN_PATTERN = re.compile(r"\w+|\s+|[^\w\s]+", re.UNICODE)
 _FILLER_PATTERN = re.compile(r"(?<!\w)(?:um+|uh+|erm+)(?!\w)", re.IGNORECASE)
+# "ah" is a filler only set off by a comma or a sentence edge: in 1,378 of Huz's dictations 54 of its 62
+# appearances were, and the rest sat inside a sentence.
+_AH_PATTERN = re.compile(r"(?<![\w'’-])ah+(?![\w'’-])", re.IGNORECASE)
 _COMMA_BEFORE_FILLER = re.compile(r",[ \t]*$")
+# Short words said twice by accident ("the the", "I I"). Doubles that can be meant are left out:
+# "had had", "that that", "is is" ("what it is is"), "her her" ("gave her her keys"), "so so", "very very".
+_STUTTER_WORDS = frozenset({
+    "a", "an", "the", "i", "you", "we", "they", "he", "she", "it", "me", "my", "your", "our", "their", "his",
+    "its", "and", "or", "but", "if", "to", "of", "in", "on", "at", "for", "with", "from", "this", "what",
+    "which", "where", "when", "how", "why", "who", "like", "can", "just", "was", "are",
+})
+_STUTTER = re.compile(r"(?<![\w'’-])(\w+)(?:,?[ \t]+\1)+(?![\w'’-])", re.IGNORECASE)
 
 
 def _phrase_pattern(phrase: str) -> str:
@@ -205,9 +220,27 @@ def _search_entry_stage(target_app: Callable[[], str]) -> Callable[[str], str]:
     return drop
 
 
-def _caret_stage(caret_context: Callable[[], CaretContext]) -> Callable[[str], str]:
+def _ignore_repick(_picked: Repick) -> None:
+    return None
+
+
+def _ignore_fired(_rules: Sequence[DictionaryRule]) -> None:
+    return None
+
+
+def _caret_stage(
+    caret_context: Callable[[], CaretContext],
+    terms: Sequence[Term] = (),
+    on_repick: Callable[[Repick], None] = _ignore_repick,
+) -> Callable[[str], str]:
     def fit(text: str) -> str:
-        return fit_to_context(text, caret_context())
+        context = caret_context()
+        picked = repick(text, context.selected, terms) if terms and context.selected.strip() else None
+        if picked is None:
+            return fit_to_context(text, context)
+        on_repick(picked)
+        fitted = fit_to_context(picked.text, context)
+        return keep_written_case(fitted, picked.written) if picked.written else fitted
 
     return fit
 
@@ -224,6 +257,9 @@ class TextPipeline:
         models_dir: Path | None = None,
         caret_context: Callable[[], CaretContext] = _no_caret_context,
         target_app: Callable[[], str] = _no_target_app,
+        terms: Sequence[Term] = (),
+        on_repick: Callable[[Repick], None] = _ignore_repick,
+        on_fired: FiredRules = _ignore_fired,
     ) -> "TextPipeline":
         stages: list[Callable[[str], str]] = []
         if config.options.punctuation_model:
@@ -237,14 +273,15 @@ class TextPipeline:
             stages.append(PunctuationStage(backend).apply)
         if config.options.remove_fillers:
             stages.append(remove_fillers)
+            stages.append(collapse_stutters)
         # Before spoken commands, so a full stop the speaker asked for by
         # saying "period" is never taken for a pause.
         stages.append(join_pause_breaks)
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
         stages.append(add_trailing_sentence_space)
-        stages.append(_caret_stage(caret_context))
-        stages.append(_RuleStage(config.rules).apply)
+        stages.append(_caret_stage(caret_context, terms, on_repick))
+        stages.append(_RuleStage(config.rules + people_rules(terms), on_fired).apply)
         if config.options.numbers:
             stages.append(format_numbers)
         stages.append(_search_entry_stage(target_app))
@@ -255,16 +292,21 @@ class TextPipeline:
         return cls(())
 
     @classmethod
-    def for_streaming(cls, config: DictionaryConfig) -> "TextPipeline":
+    def for_streaming(
+        cls, config: DictionaryConfig, terms: Sequence[Term] = (), on_fired: FiredRules = _ignore_fired,
+    ) -> "TextPipeline":
         stages: list[Callable[[str], str]] = []
         if config.options.remove_fillers:
             stages.append(remove_fillers)
-        safe_rules = tuple(
-            safe_rule
-            for rule in config.rules
+            stages.append(collapse_stutters)
+        safe = [
+            (safe_rule, rule)
+            for rule in config.rules + people_rules(terms)
             if (safe_rule := _streaming_rule(rule)) is not None
-        )
-        stages.append(_RuleStage(safe_rules).apply_streaming)
+        ]
+        stages.append(_RuleStage(
+            tuple(safe_rule for safe_rule, _ in safe), on_fired, tuple(rule for _, rule in safe),
+        ).apply_streaming)
         return cls(tuple(stages))
 
     def process(self, text: str) -> str:
@@ -281,13 +323,16 @@ def build_pipeline(
     models_dir: Path | None = None,
     caret_context: Callable[[], CaretContext] = _no_caret_context,
     target_app: Callable[[], str] = _no_target_app,
+    terms: Sequence[Term] = (),
+    on_repick: Callable[[Repick], None] = _ignore_repick,
+    on_fired: FiredRules = _ignore_fired,
 ) -> TextPipeline:
     if mode is PipelineMode.VERBATIM:
         return TextPipeline.passthrough()
     if mode is PipelineMode.STREAMING:
-        return TextPipeline.for_streaming(config)
+        return TextPipeline.for_streaming(config, terms, on_fired)
     return TextPipeline.for_batch(
-        config, punctuation_backend, models_dir, caret_context, target_app,
+        config, punctuation_backend, models_dir, caret_context, target_app, terms, on_repick, on_fired,
     )
 
 
@@ -304,13 +349,18 @@ def tokenize(text: str) -> tuple[TextToken, ...]:
 
 
 def remove_fillers(text: str) -> str:
-    replacements = [
-        _filler_replacement(text, match)
-        for match in _FILLER_PATTERN.finditer(text)
-    ]
-    if not replacements:
+    matches = [*_FILLER_PATTERN.finditer(text), *(m for m in _AH_PATTERN.finditer(text) if _set_off(text, m))]
+    if not matches:
         return text
-    return _apply_replacements(text, replacements)
+    return _apply_replacements(text, [_filler_replacement(text, match) for match in matches])
+
+
+def collapse_stutters(text: str) -> str:
+    """A short word said twice or more in a row, kept once: "the the" is "the"."""
+    def collapse(match: re.Match[str]) -> str:
+        return match.group(1) if match.group(1).casefold() in _STUTTER_WORDS else match.group(0)
+
+    return _STUTTER.sub(collapse, text)
 
 
 def apply_spoken_commands(text: str) -> str:
@@ -409,7 +459,15 @@ def _digits_of(part: str) -> str:
 
 
 class _RuleStage:
-    def __init__(self, rules: tuple[DictionaryRule, ...]) -> None:
+    def __init__(
+        self,
+        rules: tuple[DictionaryRule, ...],
+        on_fired: FiredRules = _ignore_fired,
+        counted_as: tuple[DictionaryRule, ...] | None = None,
+    ) -> None:
+        # Live mode runs single-word copies of the rules; each firing counts for the rule it came from.
+        self._counted_as = rules if counted_as is None else counted_as
+        self._on_fired = on_fired
         self._glue_next = False
         self._finders = tuple(
             finder
@@ -449,6 +507,8 @@ class _RuleStage:
                 _logger.info(
                     "phonetic replacement applied",
                 )
+        if selected:
+            self._on_fired([self._counted_as[_rule_index(replacement)] for replacement in selected])
         return _render_replacements(text, selected)
 
 
@@ -688,6 +748,12 @@ def _phonetic_replacements(
     return replacements
 
 
+def _rule_index(replacement: _Replacement) -> int:
+    if replacement.priority >= _PHONETIC_PRIORITY_BASE:
+        return replacement.priority - _PHONETIC_PRIORITY_BASE
+    return replacement.priority
+
+
 def _word_runs(text: str) -> tuple[tuple[TextToken, ...], ...]:
     runs: list[tuple[TextToken, ...]] = []
     current: list[TextToken] = []
@@ -801,6 +867,8 @@ def _streaming_rule(rule: DictionaryRule) -> DictionaryRule | None:
 def _filler_replacement(text: str, match: re.Match[str]) -> _Replacement:
     start = match.start()
     end = match.end()
+    if _starts_sentence(text, start):
+        return _sentence_start_filler(text, start, end)
     if text[end:end + 1] == ",":
         return _Replacement(start, _past_comma_spacing(text, end + 1), "", 0)
     preceding_comma = _COMMA_BEFORE_FILLER.search(text, 0, start)
@@ -811,6 +879,26 @@ def _filler_replacement(text: str, match: re.Match[str]) -> _Replacement:
     elif start > 0 and text[start - 1] in " \t":
         start -= 1
     return _Replacement(start, end, "", 0)
+
+
+def _sentence_start_filler(text: str, start: int, end: int) -> _Replacement:
+    """A filler that opens a sentence goes with its mark ("Um. Yeah." is "Yeah."), and the next word takes the capital."""
+    stop = _past_comma_spacing(text, end + 1) if text[end:end + 1] in ",.!?" else _past_comma_spacing(text, end)
+    following = text[stop:stop + 1]
+    if following.islower():
+        return _Replacement(start, stop + 1, following.upper(), 0)
+    return _Replacement(start, stop, "", 0)
+
+
+def _starts_sentence(text: str, start: int) -> bool:
+    preceding = text[:start].rstrip(" \t")
+    return not preceding or preceding[-1] in ".!?\n"
+
+
+def _set_off(text: str, match: re.Match[str]) -> bool:
+    before = text[:match.start()].rstrip(" \t")
+    after = text[match.end():].lstrip(" \t")
+    return not before or before[-1] in ".!?,\n" or not after or after[0] in ".!?,\n"
 
 
 def _past_comma_spacing(text: str, index: int) -> int:

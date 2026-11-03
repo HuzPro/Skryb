@@ -34,7 +34,7 @@ class Rig:
         self._audio, self._calls, self._gate = audio, decode_progress_calls, gate
         self.session = FileSession(
             tmp_path / "Meetings" / "2026-10-29 14-05 Q3 planning", datetime(2026, 10, 29, 14, 5),
-            source=self.source, models=self.models, vocabulary=tmp_path / "vocabulary.txt",
+            source=self.source, models=self.models, people=tmp_path / "people.json",
             publish=self.events.append, on_done=lambda _session: self.done.set(), decode=self._decode,
         )
 

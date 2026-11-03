@@ -30,9 +30,6 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
-    # The Dictionary page's switch; read at each edit, but it needs the
-    # edit watcher, which only runs while something uses it.
-    learn_words: bool = True
     hotkey_bindings: tuple[Binding, ...] = DEFAULT_BINDINGS
     double_tap_locks_hold: bool = True
     # Read where it is used, at each recording or sound, so none of it
@@ -64,8 +61,6 @@ class ChangeSet:
     output_changed: bool
     mode_changed: bool = False
     diagnostics_changed: bool = False
-    # Learning needs the edit watcher, which only runs while something uses it.
-    learning_turned_on: bool = False
     history_retention_changed: bool = False
 
     @classmethod
@@ -111,7 +106,6 @@ class ChangeSet:
             history_retention_changed=(
                 original.history_retention_days != updated.history_retention_days
             ),
-            learning_turned_on=not original.learn_words and updated.learn_words,
         )
 
     @property

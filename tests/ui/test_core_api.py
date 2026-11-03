@@ -22,12 +22,13 @@ from skryb.output.output_mode import OutputMode
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.settings.settings_draft import SettingsDraft
 from skryb.transcription.engine_types import HardwareProfile
+from skryb.people.terms import suggest
 from skryb.ui.shapes import draft_from_json
 
 _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
     "crisperwhisper_mode", "question_marks", "capture_content", "input_device", "boost_quiet_speech",
-    "learn_words", "hotkey_bindings", "double_tap_locks_hold", "recording",
+    "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings",
 }
 _RECORDING_KEYS = {
@@ -36,7 +37,7 @@ _RECORDING_KEYS = {
 }
 _CHANGE_KEYS = {
     "engine_reload_required", "hotkey_changed", "output_changed", "mode_changed",
-    "diagnostics_changed", "learning_turned_on",
+    "diagnostics_changed",
     "history_retention_changed",
 }
 
@@ -114,7 +115,6 @@ def test_the_app_and_its_settings_answer_in_the_contracts_shapes(rig: Rig) -> No
 
     settings = _settings(rig)
     assert set(settings) == _SETTINGS_KEYS
-    assert settings["learn_words"] is True
     assert set(settings["recording"]) == _RECORDING_KEYS
     assert set(settings["meetings"]) == {"folder", "record_microphone", "language"}
     assert settings["model_size"] == PARAKEET
@@ -132,7 +132,6 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
         {"keys": "", "mode": "toggle", "action": "paste_last"},
         {"keys": "ctrl+alt+c", "mode": "hold", "action": "copy_last"},
     ]
-    settings["learn_words"] = False
     settings["recording"]["preferred_devices"] = ["Maono PD300X", " ", "Maono PD300X", "Jabra"]
     settings["paste_method_overrides"] = [["Mintty", "shift_insert"], ["code.exe", "ctrl_v"]]
 
@@ -147,11 +146,9 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
     assert len(rig.saved) == 1 and rig.saved[0].hotkey_changed and rig.saved[0].output_changed
     assert rig.config.get("output.mode") == "clipboard_only"
     assert rig.config.get("audio.preferred_devices") == ["Maono PD300X", "Jabra"]
-    assert rig.config.get("dictionary.learn_words") is False
     pushed = stream.until("settings")
     stream.close()
     assert pushed["output_mode"] == "clipboard_only"
-    assert pushed["learn_words"] is False
     assert pushed["hotkey_bindings"] == [
         {"keys": "ctrl+alt+space", "mode": "hold", "action": "dictate"},
         {"keys": "f13", "mode": "toggle", "action": "dictate"},
@@ -616,17 +613,23 @@ _DICTIONARY: dict[str, Any] = {
     },
     "rules": [
         {"kind": "literal", "spoken": ["aisha", "ayesha"], "replacement": "Aïsha", "case_sensitive": False,
-         "whole_words": True, "phonetic": True, "enabled": True, "learned": False},
+         "whole_words": True, "phonetic": True, "enabled": True, "fired": 0},
         {"kind": "literal", "spoken": ["farhan"], "replacement": "Farhān", "case_sensitive": False,
-         "whole_words": True, "phonetic": False, "enabled": True, "learned": True},
+         "whole_words": True, "phonetic": False, "enabled": True, "fired": 0},
         {"kind": "literal", "spoken": ["tokyo"], "replacement": "東京", "case_sensitive": True,
-         "whole_words": False, "phonetic": False, "enabled": False, "learned": True},
-        {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True},
+         "whole_words": False, "phonetic": False, "enabled": False, "fired": 0},
+        {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True, "fired": 0},
     ],
+    "people": [
+        {"written": "Skryb", "note": "the app I'm building", "heard_as": ["Skribe"], "phonetic": False},
+        {"written": "Ngozi Adébáyọ̀", "note": "", "heard_as": [], "phonetic": True},
+        {"written": "Ümit O'Neil", "note": "", "heard_as": ["Umit O'Neil"], "phonetic": False},
+    ],
+    "suggestions": [],
 }
 
 
-def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
+def test_the_dictionary_round_trips_with_the_people_and_terms_list_and_rebuilds_the_pipeline(rig: Rig) -> None:
     status, empty = rig.call("GET", "/api/dictionary")
     assert status == 200
     assert empty == {
@@ -635,6 +638,8 @@ def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
             "punctuation_model": False,
         },
         "rules": [],
+        "people": [],
+        "suggestions": [],
     }
 
     assert rig.call("PUT", "/api/dictionary", _DICTIONARY)[0] == 204
@@ -643,54 +648,76 @@ def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
     assert [changes.output_changed for changes in rig.saved] == [True]
 
 
-def test_removing_learned_words_stops_them_being_learned_again(rig: Rig, monkeypatch) -> None:
-    forgotten: list[tuple[tuple[str, str], ...]] = []
-    monkeypatch.setattr(rig.learner, "block", lambda pairs: forgotten.append(tuple(pairs)))
+def test_each_rule_shows_how_many_times_it_has_fired(rig: Rig) -> None:
     rig.call("PUT", "/api/dictionary", _DICTIONARY)
-    kept = [rule for rule in _DICTIONARY["rules"] if rule.get("spoken") != ["farhan"]]
-    without_farhan = {**_DICTIONARY, "rules": kept}
+    aisha, _farhan, _tokyo, teh = rig.service.dictionary_rules().rules
 
-    rig.call("PUT", "/api/dictionary", without_farhan)
-    assert rig.call("POST", "/api/dictionary/forget-learned")[0] == 204
+    rig.rule_counts.add([aisha, teh])
+    rig.rule_counts.add([teh])
 
-    assert forgotten == [(("farhan", "Farhān"),), (("tokyo", "東京"),)]
-    kinds = [(rule["kind"], rule.get("learned")) for rule in rig.call("GET", "/api/dictionary")[1]["rules"]]
-    assert kinds == [("literal", False), ("regex", None)]
-
-
-def test_forgetting_one_learned_word_removes_only_it_and_stops_it_being_learned_again(
-    rig: Rig, monkeypatch,
-) -> None:
-    forgotten: list[tuple[tuple[str, str], ...]] = []
-    monkeypatch.setattr(rig.learner, "block", lambda pairs: forgotten.append(tuple(pairs)))
-    slashed = {
-        "kind": "literal", "spoken": ["ümit / o'neil"], "replacement": "Ümit O'Neil",
-        "case_sensitive": False, "whole_words": True, "phonetic": False, "enabled": True,
-        "learned": True,
-    }
-    rig.call("PUT", "/api/dictionary", {**_DICTIONARY, "rules": [*_DICTIONARY["rules"], slashed]})
-    rig.saved.clear()
-
-    assert rig.call("DELETE", "/api/dictionary/learned/%C3%BCmit%20%2F%20o'neil")[0] == 204
-    assert rig.call("DELETE", "/api/dictionary/learned/tokyo")[0] == 204
-
-    assert forgotten == [(("ümit / o'neil", "Ümit O'Neil"),), (("tokyo", "東京"),)]
     rules = rig.call("GET", "/api/dictionary")[1]["rules"]
-    assert [rule.get("spoken", rule.get("pattern")) for rule in rules] == [
-        ["aisha", "ayesha"], ["farhan"], r"\bteh\b",
-    ]
-    assert [changes.output_changed for changes in rig.saved] == [True, True]
+    assert [rule["fired"] for rule in rules] == [1, 0, 0, 2]
 
 
-def test_forgetting_a_word_that_was_not_learned_changes_nothing(rig: Rig) -> None:
+def test_accepting_a_suggestion_makes_it_a_heard_as_spelling_and_rebuilds_the_pipeline(rig: Rig) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+    suggest(rig.people_path, "Umit O'Neal", "Ümit O'Neil")
+    suggest(rig.people_path, "Scribe", "Skryb")
+    rig.saved.clear()
+
+    assert rig.call("POST", "/api/people/suggestions/Umit%20O'Neal/accept")[0] == 204
+
+    dictionary = rig.call("GET", "/api/dictionary")[1]
+    assert dictionary["people"][2]["heard_as"] == ["Umit O'Neil", "Umit O'Neal"]
+    assert dictionary["suggestions"] == [{"heard": "Scribe", "written": "Skryb", "times": 1}]
+    assert [changes.output_changed for changes in rig.saved] == [True]
+
+
+def test_a_dismissed_suggestion_goes_and_is_never_offered_again(rig: Rig) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+    suggest(rig.people_path, "Scribe", "Skryb")
+
+    assert rig.call("DELETE", "/api/people/suggestions/scribe")[0] == 204
+    suggest(rig.people_path, "Scribe", "Skryb")
+
+    dictionary = rig.call("GET", "/api/dictionary")[1]
+    assert dictionary["suggestions"] == []
+    assert dictionary["people"][0]["heard_as"] == ["Skribe"]
+
+
+def test_a_suggestion_that_is_gone_answers_not_found_and_changes_nothing(rig: Rig) -> None:
     rig.call("PUT", "/api/dictionary", _DICTIONARY)
     rig.saved.clear()
 
-    assert rig.call("DELETE", "/api/dictionary/learned/aisha")[0] == 404
-    assert rig.call("DELETE", "/api/dictionary/learned/nobody")[0] == 404
+    assert rig.call("POST", "/api/people/suggestions/nobody/accept")[0] == 404
+    assert rig.call("DELETE", "/api/people/suggestions/nobody")[0] == 404
 
     assert rig.call("GET", "/api/dictionary") == (200, _DICTIONARY)
     assert rig.saved == []
+
+
+@pytest.mark.parametrize(("people", "reason"), [
+    ([{"written": "Mara", "note": "", "heard_as": [], "phonetic": False},
+      {"written": "mara", "note": "", "heard_as": [], "phonetic": False}], "“mara” is in the list twice."),
+    ([{"written": "Mara", "note": "", "heard_as": [], "phonetic": False},
+      {"written": "Marra", "note": "", "heard_as": ["Mara"], "phonetic": False}],
+     "“Mara” is an entry of its own, so it can't be swapped for “Marra”."),
+    ([{"written": "Mara", "note": "", "heard_as": ["Mora"], "phonetic": False},
+      {"written": "Marra", "note": "", "heard_as": ["mora"], "phonetic": False}],
+     "“mora” is heard as both “Mara” and “Marra”."),
+    ([{"written": "   ", "note": "", "heard_as": [], "phonetic": False}],
+     "Entry 1 needs how it is written, a note, heard-as spellings and sounds-alike."),
+])
+def test_a_people_list_that_would_swap_one_name_for_another_is_refused_and_the_saved_one_is_kept(
+    rig: Rig, people: list[dict[str, Any]], reason: str,
+) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+
+    status, body = rig.call("PUT", "/api/dictionary", {**_DICTIONARY, "people": people})
+
+    assert status == 400
+    assert body["detail"] == reason
+    assert rig.call("GET", "/api/dictionary") == (200, _DICTIONARY)
 
 
 def test_a_dictionary_with_a_broken_rule_is_refused_and_the_saved_one_is_kept(rig: Rig) -> None:

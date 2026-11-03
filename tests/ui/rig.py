@@ -21,7 +21,7 @@ from tests.fakes.model_manager import FakeModelManager
 from skryb.core.event_bus import SimpleEventBus
 from skryb.core.state_machine import AppStateMachine
 from skryb.history.service import HistoryService, RetryOutcome
-from skryb.output.word_learning import WordLearner
+from skryb.output.rule_counts import RuleCounts
 from skryb.recording.input_devices import Microphones
 from skryb.settings.download_coordinator import DownloadCoordinator
 from skryb.settings.engine_hot_swap import EngineHotSwapCoordinator
@@ -142,10 +142,8 @@ class Rig:
         self.played: list[Path] = []
         self.previewed: list[tuple[str, float]] = []
         self.stopped = 0
-        self.learner = WordLearner(
-            tmp_path / "learning.json", tmp_path / "dictionary.json",
-            lambda: True, lambda: None, "rig",
-        )
+        self.people_path = tmp_path / "people.json"
+        self.rule_counts = RuleCounts(tmp_path / "rule_counts.json")
         self.hub = EventHub(self.bus, heartbeat_seconds=heartbeat_seconds)
         self.server = ApiServer(self.hub, poll_seconds=0.02)
         self.server.start()
@@ -163,7 +161,8 @@ class Rig:
             diagnostics_dir=self.history_dir,
             state=lambda: self.state_machine.state,
             on_save=on_save or self.saved.append,
-            learner=None if first_run else self.learner,
+            people_path=None if first_run else self.people_path,
+            rule_counts=None if first_run else self.rule_counts,
             history=None if first_run else HistoryService(
                 self.history_dir,
                 retranscribe or _never_retranscribes,

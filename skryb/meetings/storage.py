@@ -1,8 +1,7 @@
 """Where meetings are kept: one folder per meeting under the meetings folder.
 
 Each meeting folder holds ``them.flac`` (what the PC played), ``me.flac``
-(the microphone), ``transcript.json`` and ``transcript.md``. One
-``vocabulary.txt`` beside the meeting folders serves every meeting.
+(the microphone), ``transcript.json`` and ``transcript.md``.
 """
 
 import json
@@ -14,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from skryb.core.config import ConfigurationStore
-from skryb.meetings.transcript import TRANSCRIPT_JSON, VOCABULARY, VOCABULARY_TEMPLATE, Transcript
+from skryb.meetings.transcript import TRANSCRIPT_JSON, Transcript
 
 _SECOND_DRIVE = Path("D:/")
 # English; Urdu, written in Roman Urdu; or each sentence in whichever of the two it is.
@@ -80,15 +79,6 @@ def _folder_safe(name: str) -> str:
     """*name* as part of a folder name: no characters Windows refuses, one line, at most 80 characters."""
     cleaned = "".join(" " if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in name)
     return " ".join(cleaned.split())[:_NAME_CHARS].rstrip(" .")
-
-
-def vocabulary_file(root: Path) -> Path:
-    """The shared names-and-terms list, created with a commented example the first time."""
-    path = root / VOCABULARY
-    if not path.exists():
-        root.mkdir(parents=True, exist_ok=True)
-        path.write_text(VOCABULARY_TEMPLATE, encoding="utf-8")
-    return path
 
 
 @dataclass(frozen=True)

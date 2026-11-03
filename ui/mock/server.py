@@ -120,7 +120,7 @@ def _default_settings():
     return {
         "model_size": "parakeet-tdt-0.6b-v3", "language": "en", "device": "auto", "engine": "auto",
         "output_mode": "direct_paste", "transcription_mode": "batch", "crisperwhisper_mode": "intended",
-        "capture_content": True, "question_marks": True, "input_device": "", "boost_quiet_speech": True, "learn_words": True,
+        "capture_content": True, "question_marks": True, "input_device": "", "boost_quiet_speech": True,
         "hotkey_bindings": [
             {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
             {"keys": "ctrl+shift+f9", "mode": "hold", "action": "dictate"},
@@ -228,15 +228,22 @@ class Core:
             "options": {"remove_fillers": True, "spoken_commands": True, "numbers": False, "punctuation_model": False},
             "rules": [
                 {"kind": "literal", "spoken": ["jason", "jayson"], "replacement": "JSON", "case_sensitive": False,
-                 "whole_words": True, "phonetic": False, "enabled": True, "learned": False},
+                 "whole_words": True, "phonetic": False, "enabled": True, "fired": 41},
                 {"kind": "literal", "spoken": ["siobhan", "shivawn"], "replacement": "Siobhán", "case_sensitive": False,
-                 "whole_words": True, "phonetic": True, "enabled": True, "learned": True},
+                 "whole_words": True, "phonetic": True, "enabled": True, "fired": 3},
                 {"kind": "literal", "spoken": [" dot com"], "replacement": ".com", "case_sensitive": False,
-                 "whole_words": True, "phonetic": False, "enabled": True, "learned": False},
+                 "whole_words": True, "phonetic": False, "enabled": True, "fired": 0},
                 {"kind": "literal", "spoken": ["zurich"], "replacement": "Zürich", "case_sensitive": False,
-                 "whole_words": True, "phonetic": False, "enabled": False, "learned": True},
-                {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True},
+                 "whole_words": True, "phonetic": False, "enabled": False, "fired": 0},
+                {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True, "fired": 12},
             ],
+            "people": [
+                {"written": "Skryb", "note": "the app I'm building", "heard_as": [], "phonetic": False},
+                {"written": "Mikaela", "note": "design lead", "heard_as": ["Mikayla"], "phonetic": False},
+                {"written": "Michaela", "note": "finance", "heard_as": [], "phonetic": False},
+                {"written": "Ngozi Adébáyọ̀", "note": "", "heard_as": ["Ngozi Adebayo"], "phonetic": True},
+            ],
+            "suggestions": [{"heard": "scribe", "written": "Skryb", "times": 2}, {"heard": "Mikala", "written": "Mikaela", "times": 1}],
         }
         self.history = _history()
         self.meeting_models = [dict(model, installed=not first_run, download=None) for model in MEETING_MODELS]
@@ -642,7 +649,6 @@ class Handler(BaseHTTPRequestHandler):
             "engine_reload_required": reload, "hotkey_changed": before["hotkey_bindings"] != draft["hotkey_bindings"],
             "output_changed": before["output_mode"] != draft["output_mode"], "mode_changed": before["transcription_mode"] != draft["transcription_mode"],
             "diagnostics_changed": before["capture_content"] != draft["capture_content"],
-            "learning_turned_on": not before["learn_words"] and draft["learn_words"],
             "history_retention_changed": before["history_retention_days"] != draft["history_retention_days"],
         }
         core.settings = draft
@@ -735,19 +741,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dictionary(self, method, rest, query) -> None:
         core = self.core
-        if rest == ["forget-learned"]:
-            core.dictionary["rules"] = [r for r in core.dictionary["rules"] if not (r["kind"] == "literal" and r["learned"])]
-            self._send(204)
-        elif method == "DELETE" and rest[:1] == ["learned"] and len(rest) == 2:
-            rules = core.dictionary["rules"]
-            kept = [r for r in rules if not (r["kind"] == "literal" and r["learned"] and r["spoken"][0].strip() == rest[1].strip())]
-            core.dictionary["rules"] = kept
-            self._send(204) if len(kept) < len(rules) else self._error(404, "That learned word is no longer in the dictionary.")
-        elif method == "PUT":
-            core.dictionary = self._body()
+        if method == "PUT":
+            core.dictionary = {**self._body(), "suggestions": core.dictionary["suggestions"]}
             self._send(204)
         else:
             self._send(200, core.dictionary)
+
+    def _people(self, method, rest, query) -> None:
+        dictionary = self.core.dictionary
+        heard = rest[1].strip().casefold() if rest[:1] == ["suggestions"] and len(rest) >= 2 else ""
+        found = next((s for s in dictionary["suggestions"] if s["heard"].casefold() == heard), None)
+        if found is None:
+            self._error(404, "That suggestion is no longer there.")
+            return
+        dictionary["suggestions"] = [s for s in dictionary["suggestions"] if s is not found]
+        if method == "POST" and rest[2:] == ["accept"]:
+            for term in dictionary["people"]:
+                if term["written"] == found["written"]:
+                    term["heard_as"] = [*term["heard_as"], found["heard"]]
+        self._send(204)
 
     def _history(self, method, rest, query) -> None:
         core = self.core
@@ -847,7 +859,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not model["installed"] and not model["download"]:
                     model["download"] = {"state": "downloading", "bytes_done": 0, "bytes_total": model["size"], "error": ""}
             self._send(202)
-        elif rest in (["vocabulary", "open"], ["folder", "open"]):
+        elif rest == ["folder", "open"]:
             self._send(204)
         elif len(rest) == 1 and method == "GET":
             meeting = live if live and live["id"] == rest[0] else core.meetings.get(rest[0])
