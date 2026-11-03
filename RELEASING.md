@@ -40,15 +40,19 @@ The release gate fails if the two differ: the installed app reports
 `pyproject.toml`'s version, so a mismatched tag would have its updater offer
 the same update forever.
 
-The [`Release` workflow](.github/workflows/release.yml) then runs the tests,
-builds the installer, tags `v0.2.0`, and publishes a GitHub Release with the
-`setup.exe`. Any other commit only runs the cheap gate job and stops, so
-ordinary merges never release.
+The [`CI` workflow](.github/workflows/ci.yml) runs the tests and builds the
+installer on every push and pull request. For that commit it also tags
+`v0.2.0` and publishes a GitHub Release with the `setup.exe`, once the tests
+and the installer build have passed. Any other commit stops before publishing,
+so ordinary merges never release. The settings window and the native engines
+are rebuilt only when their sources changed; otherwise the run reuses the last
+build of the same sources.
 
 The leading `v` is optional, a trailing squash-merge `(#NN)` is ignored, and
-the version is read from the first line only. `workflow_dispatch` (Actions
-tab) is an escape hatch for re-runs; leave its version blank to use
-`pyproject.toml`.
+the version is read from the first line only. Running the workflow by hand
+(Actions tab, on `main`, with "Publish a release" ticked) is an escape hatch
+for re-runs; leave its version blank to use `pyproject.toml`. Without the tick
+a manual run only builds and tests.
 
 ## Build the installer locally
 
@@ -57,9 +61,8 @@ CPython 3.12 (a [python-build-standalone](https://github.com/astral-sh/python-bu
 `install_only` build), and the settings window and the native Qwen3-ASR
 engine built first. The build stops if `ui\src-tauri\target\release\skryb-ui.exe`
 or `native\engine\build\qasr.dll` is missing, because both ship inside the
-app wheel. The engine needs AMD's `rocm-sdk-core` and `rocm-sdk-devel` 7.2.1
-wheels in the Python that runs `build.sh` (see `native/README.md`); the
-Release workflow installs them on the runner:
+app wheel. The engine needs AMD's `rocm-sdk-core` 7.2.1 wheel in the Python
+that runs `build.sh` (see `native/README.md`); CI installs it on the runner:
 
 ```powershell
 .\scripts\build_ui.ps1
