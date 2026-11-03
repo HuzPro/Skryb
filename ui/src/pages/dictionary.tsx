@@ -314,7 +314,7 @@ export function DictionaryPage() {
                   {term.note ? <span className="truncate text-[12.5px] text-muted-foreground">{term.note}</span> : null}
                   <span className="flex min-w-0 flex-1 flex-wrap justify-end gap-1">
                     {term.heard_as.map((spelling) => (
-                      <span key={spelling} className="max-w-full truncate rounded-md bg-muted px-1.5 py-px text-[12.5px]">
+                      <span key={spelling} className="chip max-w-full truncate px-1.5 py-px text-[12.5px]">
                         {spelling}
                       </span>
                     ))}
@@ -373,12 +373,12 @@ export function DictionaryPage() {
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {rule.kind === "literal" ? (
                       rule.spoken.map((alias, at) => (
-                        <span key={`${alias}-${at}`} className="max-w-full truncate rounded-md bg-muted px-1.5 py-px text-[12.5px]">
+                        <span key={`${alias}-${at}`} className="chip max-w-full truncate px-1.5 py-px text-[12.5px]">
                           {shown(alias)}
                         </span>
                       ))
                     ) : (
-                      <code className="truncate rounded-md bg-muted px-1.5 py-px font-mono text-[12px]">{shown(rule.pattern)}</code>
+                      <code className="chip truncate px-1.5 py-px font-mono text-[12px]">{shown(rule.pattern)}</code>
                     )}
                   </div>
                   <ArrowRight className="size-3.5 text-muted-foreground" />

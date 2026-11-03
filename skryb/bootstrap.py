@@ -137,6 +137,7 @@ from skryb.recording.overlay import RecordingOverlay
 from skryb.recording.preferences import (
     RecordingPreferences,
     load_pill_position,
+    load_pill_skin,
     save_pill_position,
 )
 from skryb.recording.silence_watchdog import SilenceWatchdog
@@ -1078,7 +1079,7 @@ def _build_meetings(
 
 
 def _device_of(engine: TranscriptionEngine) -> tuple[str | None, str | None]:
-    """The device an engine that can say (the NPU engine) runs dictation on, and why when it is not the NPU."""
+    """The device an engine that can say runs dictation on, GPU, NPU or CPU, and why when it is not the NPU."""
     return getattr(engine, "encoder_device", None), getattr(engine, "device_note", None)
 
 
@@ -1352,6 +1353,7 @@ def build_app(
             on_tick=_paste_memory.sync_clicks,
             load_position=functools.partial(load_pill_position, config),
             save_position=functools.partial(save_pill_position, config),
+            skin=functools.partial(load_pill_skin, config),
         )
         if config.get("overlay.enabled", True)
         else None
@@ -1489,6 +1491,7 @@ def build_app(
         root,
         load_position=functools.partial(load_pill_position, config),
         pill_showing=lambda: overlay is not None and overlay.mode is not PillMode.CLOSED,
+        skin=functools.partial(load_pill_skin, config),
     )
     RecoveryNotices(
         event_bus,

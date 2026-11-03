@@ -163,10 +163,23 @@ def _history():
         entries.append({
             "id": f"{at:%Y%m%dT%H%M%SZ}-{index * 2654435761 % 16**8:08x}.{index % 40 + 3}", "at": at.isoformat(timespec="seconds"),
             "text": heard,
-            "audio_seconds": round(1.5 + rng.random() * 40, 1), "status": status, "error": error,
+            "audio_seconds": round(1.0 + len(text.split()) * 0.4 + rng.random() * 3, 1), "status": status, "error": error,
             "has_audio": has_audio, "typed": typed,
         })
     return entries
+
+
+def _usage(history):
+    """Words and speaking time of the dictations that kept their text, all of them and since Monday."""
+    today = datetime.now().date()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    kept = [entry for entry in history if not entry["status"]]
+
+    def total(entries):
+        return {"words": sum(len((entry["typed"] or entry["text"]).split()) for entry in entries),
+                "seconds": round(sum(entry["audio_seconds"] for entry in entries), 1)}
+
+    return {"all": total(kept), "week": total([entry for entry in kept if entry["at"][:10] >= monday])}
 
 
 def _saved_meetings():
@@ -769,6 +782,9 @@ class Handler(BaseHTTPRequestHandler):
             entry for entry in core.history
             if any(needle in text.casefold() for text in (entry["text"], entry["typed"]))
         ]
+        if method == "GET" and rest == ["usage"]:
+            self._send(200, _usage(core.history))
+            return
         if method == "GET":
             limit = query.get("limit", [""])[0]
             self._send(200, found[:int(limit)] if limit.isdigit() else found)

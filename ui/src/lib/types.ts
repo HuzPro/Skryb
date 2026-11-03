@@ -163,12 +163,24 @@ export interface HistoryEntry {
   typed: string;
 }
 
+/** Words kept in history and the seconds spent saying them. */
+export interface Usage {
+  words: number;
+  seconds: number;
+}
+
+/** Over all of history, and this week from Monday. */
+export interface HistoryUsage {
+  all: Usage;
+  week: Usage;
+}
+
 export interface EngineInfo {
   ready: boolean;
   loading: boolean;
   error: string | null;
   model: string;
-  /** Where dictation runs, for an engine that can say: "NPU" or "CPU". */
+  /** Where dictation runs, for an engine that can say: "GPU", "NPU" or "CPU". */
   device?: string | null;
   /** Why dictation is not on the NPU, when it isn't. */
   device_note?: string | null;

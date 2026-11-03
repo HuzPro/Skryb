@@ -10,6 +10,7 @@ from skryb.recording.pill import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     DEFAULT_PILL_POSITION,
+    DEFAULT_SKIN,
     Button,
     Frame,
     Mode,
@@ -24,6 +25,7 @@ from skryb.recording.pill import (
     pill_box,
     pill_origin,
     pill_position,
+    pill_skin,
     render,
     render_notice,
     settled_label_frame,
@@ -535,3 +537,80 @@ class TestNotices:
         notice = _recording_frame(silent_microphone="Blue Yeti")
 
         assert render(both).tobytes() == render(notice).tobytes()
+
+
+_THEMES = [(theme, dark) for theme in ("default", "glass", "material", "paper") for dark in (True, False)]
+
+
+def _bare_point() -> tuple[int, int]:
+    """A spot on the recording pill above its buttons and waveform."""
+    left, top, _right, _bottom = pill_box(*target_size(Mode.RECORDING))
+    return round(left + 60), round(top + 3)
+
+
+class TestThemes:
+    def test_each_theme_light_and_dark_fills_the_pill_in_its_own_colour(self):
+        fills = {}
+        for theme, dark in _THEMES:
+            skin = pill_skin(theme, dark)
+            fills[theme, dark] = render(_recording_frame(), skin=skin).getpixel(_bare_point())
+
+            assert fills[theme, dark] == pytest.approx((*skin.fill, skin.fill_alpha), abs=1)
+        assert len(set(fills.values())) == len(_THEMES)
+
+    @pytest.mark.parametrize(("theme", "dark"), _THEMES)
+    def test_every_theme_keeps_the_pills_size_and_place(self, theme, dark):
+        default = render(_recording_frame())
+        themed = render(_recording_frame(), skin=pill_skin(theme, dark))
+
+        assert themed.size == default.size
+        assert themed.getchannel("A").getbbox() == pytest.approx(default.getchannel("A").getbbox(), abs=1)
+
+    def test_material_and_paper_draw_squarer_corners_than_the_capsule(self):
+        left, top, _right, _bottom = pill_box(*target_size(Mode.RECORDING))
+        corner = (round(left + 4), round(top + 4))
+
+        assert render(_recording_frame()).getpixel(corner)[3] == 0
+        assert render(_recording_frame(), skin=pill_skin("material", True)).getpixel(corner)[3] > 0
+        assert render(_recording_frame(), skin=pill_skin("paper", False)).getpixel(corner)[3] > 0
+
+    def test_the_bars_are_drawn_in_the_themes_colour(self):
+        frame = _recording_frame(levels=(1.0,) * 13)
+        skin = pill_skin("paper", False)
+        pixels = numpy.asarray(render(frame, skin=skin))[:, :, :3].reshape(-1, 3)
+
+        assert any((abs(pixels.astype(int) - skin.wave) <= 2).all(axis=1))
+
+    def test_an_unknown_or_missing_theme_draws_the_default_pill(self):
+        assert pill_skin("neon", True) is DEFAULT_SKIN
+        assert pill_skin(None, True) is DEFAULT_SKIN
+        assert pill_skin("", False) == pill_skin("default", False)
+
+    @pytest.mark.parametrize("position", [0.0, 0.5, 1.0])
+    def test_on_a_light_pill_the_shimmer_only_darkens_so_the_dark_label_reads_the_same(self, position):
+        from skryb.recording.overlay import premultiplied_array
+
+        skin = pill_skin("default", False)
+        base = premultiplied_array(render(settled_label_frame(), skin=skin))
+        lit = shimmered(base, _shimmer_at(position), skin)
+
+        assert (lit <= base).all()
+
+    def test_on_a_light_pill_the_shimmer_band_shades_the_fill_under_it(self):
+        from skryb.recording.overlay import premultiplied_array
+
+        skin = pill_skin("paper", False)
+        base = premultiplied_array(render(settled_label_frame(), skin=skin))
+        x, y = _bare_point()
+
+        assert shimmered(base, _shimmer_at(0.3), skin)[y, x, :3].sum() < base[y, x, :3].sum() - 20
+
+    @pytest.mark.parametrize(("theme", "dark"), _THEMES)
+    def test_a_notice_is_drawn_in_the_theme_at_the_same_size(self, theme, dark):
+        layout = notice_layout("Recording cancelled.", ["Transcribe anyway"], warning=True)
+        skin = pill_skin(theme, dark)
+
+        image = render_notice(layout, skin=skin)
+
+        assert image.size == render_notice(layout).size
+        assert image.getpixel((10, layout.height // 2))[:3] == pytest.approx(skin.fill, abs=1)

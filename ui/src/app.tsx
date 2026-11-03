@@ -1,5 +1,5 @@
 import { QueryClientProvider, useIsFetching, useQueryClient } from "@tanstack/react-query";
-import { AudioLines, BookA, ClipboardPaste, History, Keyboard, Mic } from "lucide-react";
+import { AudioLines, BookA, ClipboardPaste, History, House, Keyboard, Mic } from "lucide-react";
 import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
@@ -10,9 +10,10 @@ import { useServerEvents } from "./lib/sse";
 import { StoreProvider, useStore, useStoreRef } from "./lib/store";
 import { DictionaryPage } from "./pages/dictionary";
 import { HistoryPage } from "./pages/history";
+import { DictationHomePage } from "./pages/home";
 import {
-  LiveMeetingPage,
   MeetingHistoryPage,
+  MeetingHomePage,
   MeetingMicrophonePage,
   MeetingModelPage,
   MeetingOutputPage,
@@ -29,6 +30,7 @@ import { SettingsPage } from "./pages/updates";
 
 /** The same items in the same order in both modes; only the page behind each changes with the mode. */
 export const NAV: NavItem[] = [
+  { label: "Home", icon: House, dictation: "/home", meetings: "/meeting-home" },
   { label: "History", icon: History, dictation: "/history", meetings: "/meetings" },
   { label: "Dictionary", icon: BookA, dictation: "/dictionary", meetings: "/dictionary" },
   { label: "Shortcuts", icon: Keyboard, dictation: "/shortcuts", meetings: "/shortcuts" },
@@ -39,13 +41,8 @@ export const NAV: NavItem[] = [
 
 // Pages both modes share: opening one keeps the mode it was opened from.
 const SHARED = new Set(["/dictionary", "/shortcuts", "/updates", "/setup"]);
-// A live or saved meeting sits under History in meeting mode.
+// A saved meeting sits under History in meeting mode.
 const MEETING = /^\/meetings\/./;
-
-const LAST_SETTINGS_PAGE = "last-settings-page";
-const SETTINGS_PAGES = [...new Set([...NAV.flatMap((item) => [item.dictation, item.meetings]), "/updates"])]
-  .filter((path) => path !== "/history" && path !== "/meetings")
-  .map((path) => path.slice(1));
 
 /** Whether `pathname` is one of `item`'s pages. */
 export function isNavActive(item: NavItem, pathname: string): boolean {
@@ -64,36 +61,11 @@ export function pageInMode(pathname: string, mode: Mode): string {
   return item ? item[mode] : pathname;
 }
 
-type PageMemory = Pick<Storage, "getItem" | "setItem">;
-
-function browserStorage(): PageMemory | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-/** `--page settings` reopens the settings page shown last, Transcription the first time. */
-export function launchPath(page: Page, memory: PageMemory | null = browserStorage()): string {
-  if (page === "history" || page === "setup" || page === "updates" || page === "meetings") return `/${page}`;
-  let last: string | null = null;
-  try {
-    last = memory?.getItem(LAST_SETTINGS_PAGE) ?? null;
-  } catch {
-    last = null;
-  }
-  return `/${last && SETTINGS_PAGES.includes(last) ? last : "transcription"}`;
-}
-
-export function rememberPage(pathname: string, memory: PageMemory | null = browserStorage()): void {
-  const page = pathname.slice(1);
-  if (!SETTINGS_PAGES.includes(page)) return;
-  try {
-    memory?.setItem(LAST_SETTINGS_PAGE, page);
-  } catch {
-    // Storage blocked: the next launch starts on Transcription.
-  }
+/** The window opens on Home; the tray's Meetings opens meeting mode's Home. */
+export function launchPath(page: Page): string {
+  if (page === "settings") return "/home";
+  if (page === "meetings") return "/meeting-home";
+  return `/${page}`;
 }
 
 /** The page the last version's window showed when it handed over, if it is one this version has. */
@@ -161,7 +133,6 @@ function Shell() {
   const mode = modeOf(pathname) ?? chosenMode;
   useMeetingEvents();
   useEffect(() => {
-    rememberPage(pathname);
     const owner = modeOf(pathname);
     if (owner) setChosenMode(owner);
   }, [pathname]);
@@ -210,7 +181,7 @@ function Shell() {
               onMode={switchMode}
               pathname={pathname}
               isActive={isNavActive}
-              status={mode === "meetings" ? <MeetingStatusCard onOpen={() => void navigateRef.current("/meetings/live")} /> : <DictationStatusCard />}
+              status={mode === "meetings" ? <MeetingStatusCard onOpen={() => void navigateRef.current("/meeting-home")} /> : <DictationStatusCard />}
             />
           )}
           <div className="relative flex min-w-0 flex-1 flex-col">
@@ -241,6 +212,8 @@ function Shell() {
 }
 
 const PAGES = [
+  { path: "home", element: <DictationHomePage /> },
+  { path: "meeting-home", element: <MeetingHomePage /> },
   { path: "history", element: <HistoryPage /> },
   { path: "dictionary", element: <DictionaryPage /> },
   { path: "shortcuts", element: <ShortcutsPage /> },
@@ -250,7 +223,6 @@ const PAGES = [
   { path: "updates", element: <SettingsPage /> },
   { path: "setup", element: <SetupPage /> },
   { path: "meetings", element: <MeetingHistoryPage /> },
-  { path: "meetings/live", element: <LiveMeetingPage /> },
   { path: "meetings/:id", element: <SavedMeetingPage /> },
   { path: "meeting-microphone", element: <MeetingMicrophonePage /> },
   { path: "meeting-output", element: <MeetingOutputPage /> },

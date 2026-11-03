@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Search, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { formatGigabytes } from "../components/models";
 import { Card, ContextMenu, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, StatusCard, type Tone } from "../components/parts";
 import { Badge } from "../components/ui/badge";
@@ -152,9 +152,8 @@ export function MeetingHistoryPage() {
   const overview = useMeetingOverview();
   const live = useLiveMeeting();
   const recording = live?.recording ?? overview?.recording ?? false;
-  const { settings, confirm } = useStore();
+  const { confirm } = useStore();
   const client = useQueryClient();
-  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const search = useDebounced(query, 120);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -210,7 +209,6 @@ export function MeetingHistoryPage() {
   };
 
   const empty = !overview ? "Loading…" : search ? "No meetings match your search." : "Meetings you record or transcribe show up here.";
-  const meetings = settings?.saved.meetings;
 
   return (
     <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-5")}>
@@ -220,53 +218,46 @@ export function MeetingHistoryPage() {
           <Input aria-label="Search meetings" placeholder="Search meetings" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} />
         </div>
       </PageTitle>
-      {overview && !overview.models_ready ? <MeetingModels overview={overview} compact /> : null}
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] grid-rows-[minmax(0,1fr)] gap-3">
-        <Card className="relative min-w-0 overflow-hidden">
-          <nav aria-label="Past meetings" className="h-full overflow-y-auto px-1.5 pb-1.5">
-            {items.map((item) =>
-              item.kind === "day" ? (
-                <div key={`day-${item.label}`} className="flex h-[30px] items-end px-2.5 pb-1 text-[11.5px] font-semibold text-muted-foreground">
-                  {item.label}
-                </div>
-              ) : renaming === item.entry.id ? (
-                <RenameField key={item.entry.id} meeting={item.entry} onDone={(name) => void rename(item.entry.id, name)} />
-              ) : (
-                <Link
-                  key={item.entry.id}
-                  to={`/meetings/${encodeURIComponent(item.entry.id)}`}
-                  draggable={false}
-                  onContextMenu={(event) => openMenu(item.entry.id, event)}
-                  onKeyDown={(event) => keys(item.entry.id, event)}
-                  className={cn(
-                    "flex h-[50px] items-center gap-3 rounded-lg px-2.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40",
-                    menu?.id === item.entry.id && "bg-accent/60",
-                  )}
-                >
-                  <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{item.entry.started.slice(11, 16)}</span>
-                  <span className="min-w-0 flex-1 truncate text-[13px]" title={item.entry.id}>
-                    {meetingName(item.entry.id)}
-                  </span>
-                  <span className="shrink-0 text-[12px] text-muted-foreground">
-                    {item.entry.speakers} {item.entry.speakers === 1 ? "voice" : "voices"}
-                  </span>
-                  <span className="w-12 shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">{formatDuration(item.entry.seconds)}</span>
-                </Link>
-              ),
-            )}
-          </nav>
-          {!past.length ? <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12.5px] text-muted-foreground">{empty}</p> : null}
-          {problem ? (
-            <p role="alert" className="absolute inset-x-0 bottom-0 border-t bg-card px-4 py-2 text-[12px] text-destructive">
-              {problem}
-            </p>
-          ) : null}
-        </Card>
-        <div className="flex min-w-0 flex-col gap-3 overflow-y-auto">
-          <LiveCard live={live} overview={overview} meetings={meetings} onOpen={() => void navigate("/meetings/live")} />
-          <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} />
-        </div>
-      </div>
+      <Card className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        <nav aria-label="Past meetings" className="h-full overflow-y-auto px-1.5 pb-1.5">
+          {items.map((item) =>
+            item.kind === "day" ? (
+              <div key={`day-${item.label}`} className="flex h-[30px] items-end px-2.5 pb-1 text-[11.5px] font-semibold text-muted-foreground">
+                {item.label}
+              </div>
+            ) : renaming === item.entry.id ? (
+              <RenameField key={item.entry.id} meeting={item.entry} onDone={(name) => void rename(item.entry.id, name)} />
+            ) : (
+              <Link
+                key={item.entry.id}
+                to={`/meetings/${encodeURIComponent(item.entry.id)}`}
+                draggable={false}
+                onContextMenu={(event) => openMenu(item.entry.id, event)}
+                onKeyDown={(event) => keys(item.entry.id, event)}
+                className={cn(
+                  "flex h-[50px] items-center gap-3 rounded-lg px-2.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40",
+                  menu?.id === item.entry.id && "bg-accent/60",
+                )}
+              >
+                <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{item.entry.started.slice(11, 16)}</span>
+                <span className="min-w-0 flex-1 truncate text-[13px]" title={item.entry.id}>
+                  {meetingName(item.entry.id)}
+                </span>
+                <span className="shrink-0 text-[12px] text-muted-foreground">
+                  {item.entry.speakers} {item.entry.speakers === 1 ? "voice" : "voices"}
+                </span>
+                <span className="w-12 shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">{formatDuration(item.entry.seconds)}</span>
+              </Link>
+            ),
+          )}
+        </nav>
+        {!past.length ? <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12.5px] text-muted-foreground">{empty}</p> : null}
+        {problem ? (
+          <p role="alert" className="absolute inset-x-0 bottom-0 border-t bg-card px-4 py-2 text-[12px] text-destructive">
+            {problem}
+          </p>
+        ) : null}
+      </Card>
       {menu ? (
         <ContextMenu
           x={menu.x}
@@ -313,44 +304,9 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
   );
 }
 
-/** Starts a meeting, or shows the one recording with Stop, at the top of meeting History. */
-function LiveCard({ live, overview, meetings, onOpen }: { live: LiveMeeting | null | undefined; overview: MeetingOverview | undefined; meetings: MeetingSettings | undefined; onOpen: () => void }) {
-  const running = live?.recording ?? false;
-  const file = running && Boolean(live?.source);
-  const elapsed = useElapsed(live?.started, running && !file);
-  const language = LANGUAGES.find((choice) => choice.value === meetings?.language)?.label ?? "English";
-  return (
-    <Card className="px-5 py-4">
-      <div className="flex items-start gap-3.5">
-        <Circle className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", running && !file && "fill-current text-destructive motion-safe:animate-pulse")} aria-hidden />
-        <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-medium tabular-nums">
-            {file ? "Transcribing a file" : running ? `${live?.status === "Recording" ? "Recording" : (live?.status ?? "Recording")} · ${formatDuration(elapsed)}` : "Ready when your meeting is"}
-          </p>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            {file
-              ? live?.source
-              : running
-                ? `Listening to ${live?.device || "what your PC plays"}.`
-                : `Start here, from the tray icon or your meeting shortcut. Skryb records what your PC plays${meetings?.record_microphone === false ? "" : " and your microphone"}, tells the voices apart and writes it down in ${language}.`}
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <StartStopButton live={live} overview={overview} onStarted={onOpen} />
-            {live ? (
-              <Button variant="outline" className="h-10 px-4" onClick={onOpen}>
-                {running ? "Open the live meeting" : "Open the last meeting"}
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 // -- shared pieces ---------------------------------------------------------------------
 
-function StartStopButton({ live, overview, onStarted }: { live: LiveMeeting | null | undefined; overview: MeetingOverview | undefined; onStarted?: () => void }) {
+function StartStopButton({ live, overview }: { live: LiveMeeting | null | undefined; overview: MeetingOverview | undefined }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const recording = live?.recording ?? false;
@@ -361,7 +317,6 @@ function StartStopButton({ live, overview, onStarted }: { live: LiveMeeting | nu
     setProblem("");
     try {
       await api.post(recording ? "/api/meetings/stop" : "/api/meetings/start");
-      if (!recording) onStarted?.();
     } catch (error) {
       setProblem(errorText(error));
     } finally {
@@ -539,7 +494,7 @@ function SpeakersCard({ transcript, meetingId, focusKey }: { transcript: Meeting
   );
 }
 
-function Detail({ term, children }: { term: string; children: ReactNode }) {
+export function Detail({ term, children }: { term: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted-foreground">{term}</dt>
@@ -704,9 +659,10 @@ function FileDropCard({ ready, meetingLanguage, className }: { ready: boolean; m
   );
 }
 
-// -- the live meeting -------------------------------------------------------------------
+// -- Home: the live meeting --------------------------------------------------------------
 
-export function LiveMeetingPage() {
+/** Meeting mode's Home: Start, a file to drop, and the meeting as it is written down. */
+export function MeetingHomePage() {
   const live = useLiveMeeting();
   const overview = useMeetingOverview();
   const client = useQueryClient();
@@ -728,8 +684,7 @@ export function LiveMeetingPage() {
   const header = (
     <div className="flex min-h-10 items-center gap-4">
       <div className="flex min-w-0 flex-1 items-center gap-x-3">
-        <BackToHistory />
-        <h1 className="page-title shrink-0">{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Live meeting"}</h1>
+        <h1 className="page-title shrink-0">{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Meetings"}</h1>
         {live ? <StatusBadge live={live} /> : null}
         {live && running && !file ? <span className="text-[13px] text-muted-foreground tabular-nums">{formatDuration(elapsed)}</span> : null}
         {live?.device && running ? <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">Listening to {live.device}</span> : null}

@@ -4,11 +4,13 @@ import math
 import pytest
 
 from tests.fakes.config import FakeConfig
+from skryb.core.color_scheme import ColorScheme
 from skryb.core.json_config_adapter import JsonConfigAdapter
-from skryb.recording.pill import DEFAULT_PILL_POSITION
+from skryb.recording.pill import DEFAULT_PILL_POSITION, DEFAULT_SKIN, pill_skin
 from skryb.recording.preferences import (
     RecordingPreferences,
     load_pill_position,
+    load_pill_skin,
     save_pill_position,
 )
 
@@ -126,3 +128,25 @@ class TestPillPositionStorage:
         save_pill_position(config, (0.3, 0.3))
 
         assert load_pill_position(config) == DEFAULT_PILL_POSITION
+
+
+class TestPillSkin:
+    def test_the_pill_follows_the_saved_theme_and_windows_light_or_dark_setting(self):
+        for theme in ("default", "glass", "material", "paper"):
+            config = FakeConfig({"ui.theme": theme})
+
+            assert load_pill_skin(config, lambda: ColorScheme.DARK) == pill_skin(theme, True)
+            assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin(theme, False)
+
+    def test_a_fresh_or_hand_edited_config_gets_the_default_pill(self):
+        assert load_pill_skin(FakeConfig(), lambda: ColorScheme.DARK) is DEFAULT_SKIN
+        assert load_pill_skin(FakeConfig({"ui.theme": 42}), lambda: ColorScheme.DARK) is DEFAULT_SKIN
+        assert load_pill_skin(FakeConfig({"ui.theme": "Glass ✨"}), lambda: ColorScheme.DARK) is DEFAULT_SKIN
+
+    def test_a_theme_saved_later_is_read_the_next_time_the_pill_asks(self):
+        config = FakeConfig({"ui.theme": "default"})
+        assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin("default", False)
+
+        config.set("ui.theme", "paper")
+
+        assert load_pill_skin(config, lambda: ColorScheme.LIGHT) == pill_skin("paper", False)

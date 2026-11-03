@@ -6,10 +6,17 @@ applies from the next recording, sound or plugged-in microphone on.
 
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
+from skryb.core.color_scheme import ColorScheme, detect_app_color_scheme
 from skryb.core.config import ConfigurationStore, ConfigValue
-from skryb.recording.pill import DEFAULT_PILL_POSITION, PillPosition
+from skryb.recording.pill import (
+    DEFAULT_PILL_POSITION,
+    PillPosition,
+    PillSkin,
+    pill_skin,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -74,6 +81,13 @@ def load_pill_position(config: ConfigurationStore) -> PillPosition:
         _number(config.get("overlay.position.x"), across, 0.0, 1.0),
         _number(config.get("overlay.position.y"), down, 0.0, 1.0),
     )
+
+
+def load_pill_skin(
+    config: ConfigurationStore, scheme: Callable[[], ColorScheme] = detect_app_color_scheme,
+) -> PillSkin:
+    """The pill in the window's theme and in Windows' light or dark setting for apps."""
+    return pill_skin(config.get("ui.theme", "default"), scheme() is ColorScheme.DARK)
 
 
 def save_pill_position(config: ConfigurationStore, position: PillPosition) -> None:

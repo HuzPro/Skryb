@@ -48,22 +48,8 @@ _BAR_WIDTH = 3.0
 _BAR_GAP = 4.0
 _BAR_MIN_HEIGHT = 3.0
 
-_PILL_FILL = (12, 12, 14)
-# The brand emerald: the voice bars, and the colour the transcribing shimmer lifts the fill towards.
-_WAVE = EMERALD_LIGHT
-_SHIMMER_FILL = EMERALD_DEEP
-_BORDER = (255, 255, 255, 26)
-_BUTTON_FILL = (58, 58, 62)
-_BUTTON_HOVER_FILL = (82, 82, 88)
-_FINISH_FILL = (255, 255, 255)
-_FINISH_HOVER_FILL = (222, 222, 226)
-_GLYPH = (255, 255, 255)
-_FINISH_GLYPH = (10, 10, 12)
-_LABEL = (236, 236, 240)
 _LABEL_TEXT = "Transcribing"
 _LABEL_SIZE = 12
-# The dark theme warning colour (#fbbf24).
-_AMBER = (251, 191, 36)
 _NOTICE_TEXT = "No audio from"
 _NOTICE_SIZE = 11
 _NOTICE_LINE_OFFSET = 7.0
@@ -77,6 +63,109 @@ _COUNTDOWN_BAR_COUNT = 7
 _STIFFNESS = 380.0
 _DAMPING = 26.0
 _SPRING_STEP_SECONDS = 1 / 240
+
+
+Rgb = tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class PillSkin:
+    """The pill's and the notice's colours and corners in one theme, light or dark.
+
+    ``light`` skins have a pale fill, so the transcribing shimmer darkens it
+    towards ``shimmer`` instead of lifting it. ``roundness`` is the corner
+    radius as a share of half the height: 1 is a capsule.
+    """
+
+    fill: Rgb
+    fill_alpha: int
+    border: tuple[int, int, int, int]
+    button: Rgb
+    button_hover: Rgb
+    finish: Rgb
+    finish_hover: Rgb
+    glyph: Rgb
+    finish_glyph: Rgb
+    label: Rgb
+    warning: Rgb
+    wave: Rgb
+    shimmer: Rgb
+    light: bool = False
+    roundness: float = 1.0
+
+
+# Each theme's colours come from its tokens in ui/src/index.css: the card
+# or popover for the fill, the primary for the finish button and the bars,
+# the warning for a silent microphone. The default dark pill is the one the
+# app has always had, with the brand emerald for its bars and shimmer.
+DEFAULT_SKIN = PillSkin(
+    fill=(12, 12, 14), fill_alpha=250, border=(255, 255, 255, 26),
+    button=(58, 58, 62), button_hover=(82, 82, 88),
+    finish=(255, 255, 255), finish_hover=(222, 222, 226),
+    glyph=(255, 255, 255), finish_glyph=(10, 10, 12), label=(236, 236, 240),
+    warning=(251, 191, 36), wave=EMERALD_LIGHT, shimmer=EMERALD_DEEP,
+)
+_SKINS: dict[tuple[str, bool], PillSkin] = {
+    ("default", True): DEFAULT_SKIN,
+    ("default", False): PillSkin(
+        fill=(255, 255, 255), fill_alpha=250, border=(0, 0, 0, 30),
+        button=(241, 241, 243), button_hover=(226, 226, 230),
+        finish=(24, 24, 27), finish_hover=(63, 63, 70),
+        glyph=(24, 24, 27), finish_glyph=(255, 255, 255), label=(24, 24, 27),
+        warning=(180, 83, 9), wave=EMERALD_DEEP, shimmer=(167, 243, 208), light=True,
+    ),
+    # Glass lets what is behind show through its fill; there is no blur to draw.
+    ("glass", True): PillSkin(
+        fill=(30, 34, 54), fill_alpha=214, border=(255, 255, 255, 40),
+        button=(52, 56, 78), button_hover=(70, 75, 100),
+        finish=(91, 130, 255), finish_hover=(124, 155, 255),
+        glyph=(236, 238, 246), finish_glyph=(255, 255, 255), label=(236, 238, 246),
+        warning=(255, 194, 97), wave=(124, 155, 255), shimmer=(70, 96, 190),
+    ),
+    ("glass", False): PillSkin(
+        fill=(255, 255, 255), fill_alpha=204, border=(20, 30, 60, 40),
+        button=(232, 234, 242), button_hover=(214, 226, 255),
+        finish=(61, 108, 240), finish_hover=(88, 128, 242),
+        glyph=(20, 24, 38), finish_glyph=(255, 255, 255), label=(20, 24, 38),
+        warning=(180, 83, 9), wave=(61, 108, 240), shimmer=(190, 208, 255), light=True,
+    ),
+    # Material: tonal surfaces and large, not round, corners.
+    ("material", True): PillSkin(
+        fill=(33, 35, 47), fill_alpha=250, border=(0, 0, 0, 0),
+        button=(53, 57, 97), button_hover=(67, 72, 120),
+        finish=(174, 184, 254), finish_hover=(196, 205, 255),
+        glyph=(226, 228, 237), finish_glyph=(35, 33, 104), label=(226, 228, 237),
+        warning=(238, 186, 112), wave=(174, 184, 254), shimmer=(77, 83, 151), roundness=0.67,
+    ),
+    ("material", False): PillSkin(
+        fill=(230, 233, 247), fill_alpha=250, border=(0, 0, 0, 0),
+        button=(220, 224, 246), button_hover=(209, 216, 255),
+        finish=(81, 82, 193), finish_hover=(96, 100, 213),
+        glyph=(24, 26, 36), finish_glyph=(255, 255, 255), label=(24, 26, 36),
+        warning=(174, 103, 0), wave=(81, 82, 193), shimmer=(188, 196, 255), light=True, roundness=0.67,
+    ),
+    # Paper: ink on cream inside a ruled edge, with a card's corners.
+    ("paper", True): PillSkin(
+        fill=(35, 32, 28), fill_alpha=250, border=(68, 61, 52, 255),
+        button=(52, 47, 41), button_hover=(68, 61, 52),
+        finish=(224, 144, 107), finish_hover=(232, 165, 133),
+        glyph=(236, 229, 216), finish_glyph=(29, 20, 16), label=(236, 229, 216),
+        warning=(231, 178, 100), wave=(224, 144, 107), shimmer=(86, 58, 44), roundness=0.5,
+    ),
+    ("paper", False): PillSkin(
+        fill=(255, 253, 248), fill_alpha=250, border=(221, 212, 194, 255),
+        button=(242, 237, 227), button_hover=(228, 220, 203),
+        finish=(154, 75, 44), finish_hover=(176, 88, 58),
+        glyph=(29, 26, 22), finish_glyph=(255, 250, 243), label=(29, 26, 22),
+        warning=(154, 91, 16), wave=(154, 75, 44), shimmer=(240, 214, 196), light=True, roundness=0.5,
+    ),
+}
+
+
+def pill_skin(theme: object, dark: bool) -> PillSkin:
+    """The pill for the window's ``theme``, light or dark; an unknown theme gets the default."""
+    key = (theme if isinstance(theme, str) else "default", dark)
+    return _SKINS.get(key) or _SKINS[("default", dark)]
 
 
 class Mode(Enum):
@@ -297,10 +386,11 @@ def hit_test(frame: Frame, x: float, y: float) -> Button | None:
 
 
 # While transcribing, a soft band of the accent colour sweeps across the
-# pill, easing in and out of each pass. It only lifts the dark fill
-# towards the band colour, never darkens anything, so the white label
-# reads the same throughout. Applied to finished pixels with numpy: a
-# full redraw costs milliseconds, and a frame at 240 Hz has four.
+# pill, easing in and out of each pass. On a dark pill it only lifts the
+# fill towards the band colour, never darkens anything, so the white label
+# reads the same throughout; on a light one it only darkens, so the dark
+# label does. Applied to finished pixels with numpy: a full redraw costs
+# milliseconds, and a frame at 240 Hz has four.
 _SHIMMER_SECONDS = 0.9
 _SHIMMER_WIDTH = 130.0
 _SHIMMER_STRENGTH = 0.6
@@ -312,7 +402,7 @@ def shimmer_position(seconds: float) -> float:
     return t * t * (3 - 2 * t)
 
 
-def shimmered(pixels: numpy.ndarray, frame: Frame) -> numpy.ndarray:
+def shimmered(pixels: numpy.ndarray, frame: Frame, skin: PillSkin = DEFAULT_SKIN) -> numpy.ndarray:
     """``pixels`` (premultiplied BGRA) with the shimmer band drawn at ``frame.shimmer``."""
     if frame.shimmer < 0 or frame.label <= 0:
         return pixels
@@ -327,10 +417,10 @@ def shimmered(pixels: numpy.ndarray, frame: Frame) -> numpy.ndarray:
         return pixels
     span = slice(int(columns[0]), int(columns[-1]) + 1)
     region = pixels[:, span, :].astype(numpy.float32)
-    colour = numpy.array(_SHIMMER_FILL[::-1], dtype=numpy.float32) * (region[:, :, 3:4] / 255.0)
+    colour = numpy.array(skin.shimmer[::-1], dtype=numpy.float32) * (region[:, :, 3:4] / 255.0)
     rgb = region[:, :, :3]
     lifted = rgb + (colour - rgb) * weight[span][None, :, None]
-    region[:, :, :3] = numpy.maximum(rgb, lifted)
+    region[:, :, :3] = numpy.minimum(rgb, lifted) if skin.light else numpy.maximum(rgb, lifted)
     out = pixels.copy()
     out[:, span, :] = numpy.rint(region).astype(numpy.uint8)
     return out
@@ -353,41 +443,50 @@ def is_settled_label(frame: Frame) -> bool:
     )
 
 
-def render(frame: Frame, screen_scale: float = 1.0) -> Image.Image:
-    """The canvas with ``frame`` drawn on it, ``screen_scale`` screen pixels to each of the design's."""
+def render(frame: Frame, screen_scale: float = 1.0, skin: PillSkin = DEFAULT_SKIN) -> Image.Image:
+    """The canvas with ``frame`` drawn on it in ``skin``, ``screen_scale`` screen pixels to each of the design's."""
     scale = _SUPERSAMPLE
     image = Image.new(
         "RGBA", (CANVAS_WIDTH * scale, CANVAS_HEIGHT * scale), (0, 0, 0, 0),
     )
     if frame.opacity > 0.004 and frame.width > 1 and frame.height > 1:
-        _draw_pill(image, frame)
+        _draw_pill(image, frame, skin)
     return image.resize(scaled_size(CANVAS_WIDTH, CANVAS_HEIGHT, screen_scale), Image.Resampling.LANCZOS)
 
 
-def _draw_pill(image: Image.Image, frame: Frame) -> None:
+def _draw_pill(image: Image.Image, frame: Frame, skin: PillSkin) -> None:
     scale = _SUPERSAMPLE
     box = tuple(edge * scale for edge in pill_box(frame.width, frame.height))
-    radius = frame.height * scale / 2
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    draw.rounded_rectangle(
-        box, radius=radius, fill=(*_PILL_FILL, 250), outline=_BORDER, width=scale,
-    )
+    _draw_body(draw, box, frame.height * scale / 2, skin)
     # ImageDraw replaces pixels rather than blending them, so anything
     # drawn part-transparent would punch a hole through the pill. Each
     # fading part is drawn opaque on its own layer and blended in instead.
     if frame.label > 0:
         label = _blank(image)
-        _draw_label(ImageDraw.Draw(label), box)
+        _draw_label(ImageDraw.Draw(label), box, skin)
         # The label waits for the buttons to be mostly gone, so the two
         # never sit on top of each other mid-change.
         _blend(layer, label, frame.label * max(0.0, 1.0 - 2.0 * frame.controls))
     if frame.controls > 0:
         controls = _blank(image)
-        _draw_controls(ImageDraw.Draw(controls), frame)
+        _draw_controls(ImageDraw.Draw(controls), frame, skin)
         _blend(layer, controls, frame.controls)
     _fade(layer, frame.opacity)
     image.alpha_composite(layer)
+
+
+def _draw_body(draw: ImageDraw.ImageDraw, box: tuple[float, ...], half_height: float, skin: PillSkin) -> None:
+    # Drawn pixels replace those under them, so a clear border would cut a
+    # ring out of the fill: a theme without one draws none.
+    draw.rounded_rectangle(
+        box,
+        radius=half_height * skin.roundness,
+        fill=(*skin.fill, skin.fill_alpha),
+        outline=skin.border if skin.border[3] else None,
+        width=_SUPERSAMPLE,
+    )
 
 
 def _blank(image: Image.Image) -> Image.Image:
@@ -404,33 +503,33 @@ def _blend(base: Image.Image, top: Image.Image, strength: float) -> None:
     base.alpha_composite(top)
 
 
-def _draw_label(draw: ImageDraw.ImageDraw, box: tuple[float, ...]) -> None:
+def _draw_label(draw: ImageDraw.ImageDraw, box: tuple[float, ...], skin: PillSkin) -> None:
     left, top, right, bottom = box
     draw.text(
         ((left + right) / 2, (top + bottom) / 2),
         _LABEL_TEXT,
         font=_font(_LABEL_SIZE * _SUPERSAMPLE),
-        fill=(*_LABEL, 255),
+        fill=(*skin.label, 255),
         anchor="mm",
     )
 
 
-def _draw_controls(draw: ImageDraw.ImageDraw, frame: Frame) -> None:
+def _draw_controls(draw: ImageDraw.ImageDraw, frame: Frame, skin: PillSkin) -> None:
     scale = _SUPERSAMPLE
     centres = button_centres(frame)
     for button, (cx, cy, radius) in centres.items():
         hovered = button is frame.hovered
         if button is Button.FINISH:
-            fill = _FINISH_HOVER_FILL if hovered else _FINISH_FILL
+            fill = skin.finish_hover if hovered else skin.finish
         else:
-            fill = _BUTTON_HOVER_FILL if hovered else _BUTTON_FILL
+            fill = skin.button_hover if hovered else skin.button
         draw.ellipse(
             ((cx - radius) * scale, (cy - radius) * scale,
              (cx + radius) * scale, (cy + radius) * scale),
             fill=(*fill, 255),
         )
-        _draw_glyph(draw, button, cx, cy, radius, frame.paused)
-    _draw_middle(draw, frame, centres)
+        _draw_glyph(draw, button, cx, cy, radius, frame.paused, skin)
+    _draw_middle(draw, frame, centres, skin)
 
 
 def _draw_glyph(
@@ -440,10 +539,11 @@ def _draw_glyph(
     cy: float,
     radius: float,
     paused: bool,
+    skin: PillSkin,
 ) -> None:
     scale = _SUPERSAMPLE
     size = radius * (0.5 if button is Button.FINISH else 0.42)
-    glyph = _FINISH_GLYPH if button is Button.FINISH else _GLYPH
+    glyph = skin.finish_glyph if button is Button.FINISH else skin.glyph
     colour = (*glyph, 255)
     width = max(round(2.2 * scale), 1)
 
@@ -476,6 +576,7 @@ def _draw_middle(
     draw: ImageDraw.ImageDraw,
     frame: Frame,
     centres: dict[Button, tuple[float, float, float]],
+    skin: PillSkin,
 ) -> None:
     cancel_x, middle, radius = centres[Button.CANCEL]
     pause_x = centres[Button.PAUSE][0]
@@ -486,20 +587,21 @@ def _draw_middle(
             cancel_x + radius + _TEXT_MARGIN,
             pause_x - radius - _TEXT_MARGIN,
             middle,
+            skin.warning,
         )
         return
     start = cancel_x + radius + _WAVE_MARGIN
     end = pause_x - radius - _WAVE_MARGIN
     count = _BAR_COUNT
     if frame.countdown:
-        start += _draw_text(draw, frame.countdown, _COUNTDOWN_SIZE, start, middle, "lm")
+        start += _draw_text(draw, frame.countdown, _COUNTDOWN_SIZE, start, middle, "lm", skin.warning)
         start += _COUNTDOWN_GAP
         count = _COUNTDOWN_BAR_COUNT
-    _draw_waveform(draw, frame, start, end, middle, count)
+    _draw_waveform(draw, frame, start, end, middle, count, skin.wave)
 
 
 def _draw_silence_notice(
-    draw: ImageDraw.ImageDraw, microphone: str, start: float, end: float, middle: float,
+    draw: ImageDraw.ImageDraw, microphone: str, start: float, end: float, middle: float, colour: Rgb,
 ) -> None:
     width = max(int(end - start), 0)
     centre = (start + end) / 2
@@ -507,17 +609,17 @@ def _draw_silence_notice(
         (_NOTICE_TEXT, middle - _NOTICE_LINE_OFFSET),
         (microphone, middle + _NOTICE_LINE_OFFSET),
     ):
-        _draw_text(draw, _fitted(text, _NOTICE_SIZE, width), _NOTICE_SIZE, centre, y, "mm")
+        _draw_text(draw, _fitted(text, _NOTICE_SIZE, width), _NOTICE_SIZE, centre, y, "mm", colour)
 
 
 def _draw_text(
-    draw: ImageDraw.ImageDraw, text: str, size: int, x: float, y: float, anchor: str,
+    draw: ImageDraw.ImageDraw, text: str, size: int, x: float, y: float, anchor: str, colour: Rgb,
 ) -> float:
-    """Draw ``text`` in amber and return how wide it is, in canvas pixels."""
+    """Draw ``text`` in ``colour`` and return how wide it is, in canvas pixels."""
     font = _font(size * _SUPERSAMPLE)
     draw.text(
         (x * _SUPERSAMPLE, y * _SUPERSAMPLE), text, font=font,
-        fill=(*_AMBER, 255), anchor=anchor,
+        fill=(*colour, 255), anchor=anchor,
     )
     return font.getlength(text) / _SUPERSAMPLE
 
@@ -541,6 +643,7 @@ def _draw_waveform(
     end: float,
     middle: float,
     count: int,
+    colour: Rgb,
 ) -> None:
     """The newest slice enters past the right end and slides into the last
     slot as it fills; older ones keep sliding left and fade out past the
@@ -570,13 +673,13 @@ def _draw_waveform(
         draw.rounded_rectangle(
             (left * scale, top * scale, (left + _BAR_WIDTH) * scale, (top + height) * scale),
             radius=_BAR_WIDTH * scale / 2,
-            fill=(*_WAVE, round(strength * fade)),
+            fill=(*colour, round(strength * fade)),
         )
 
 
-# The notice above the pill is drawn the way the pill is: the same dark
-# capsule, border, type and round buttons, a white first button like the
-# finish button, and an amber dot when something went wrong.
+# The notice above the pill is drawn the way the pill is: the same body,
+# border, type and buttons, a first button coloured like the finish
+# button, and a dot in the warning colour when something went wrong.
 NOTICE_CLOSE = -1
 _NOTICE_HEIGHT = _RECORDING_SIZE[1]
 _NOTICE_LINE_HEIGHT = 16.0
@@ -648,17 +751,21 @@ def notice_target(layout: NoticeLayout, x: float, y: float) -> int | None:
     return None
 
 
-def render_notice(layout: NoticeLayout, hovered: int | None = None, screen_scale: float = 1.0) -> Image.Image:
+def render_notice(
+    layout: NoticeLayout,
+    hovered: int | None = None,
+    screen_scale: float = 1.0,
+    skin: PillSkin = DEFAULT_SKIN,
+) -> Image.Image:
     scale = _SUPERSAMPLE
     image = Image.new("RGBA", (layout.width * scale, layout.height * scale), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     margin = _NOTICE_MARGIN * scale
-    draw.rounded_rectangle(
+    _draw_body(
+        draw,
         (margin, margin, layout.width * scale - margin, layout.height * scale - margin),
-        radius=_NOTICE_HEIGHT * scale / 2,
-        fill=(*_PILL_FILL, 250),
-        outline=_BORDER,
-        width=scale,
+        _NOTICE_HEIGHT * scale / 2,
+        skin,
     )
     middle = layout.height / 2
     font = _font(_LABEL_SIZE * scale)
@@ -667,36 +774,36 @@ def render_notice(layout: NoticeLayout, hovered: int | None = None, screen_scale
         draw.ellipse(
             (dot_left * scale, (middle - _NOTICE_DOT / 2) * scale,
              (dot_left + _NOTICE_DOT) * scale, (middle + _NOTICE_DOT / 2) * scale),
-            fill=(*_AMBER, 255),
+            fill=(*skin.warning, 255),
         )
     first_line = middle - (len(layout.lines) - 1) * _NOTICE_LINE_HEIGHT / 2
     for index, line in enumerate(layout.lines):
         draw.text(
             (layout.text_left * scale, (first_line + index * _NOTICE_LINE_HEIGHT) * scale),
-            line, font=font, fill=(*_LABEL, 255), anchor="lm",
+            line, font=font, fill=(*skin.label, 255), anchor="lm",
         )
     for index, (box, label) in enumerate(zip(layout.buttons, layout.labels, strict=True)):
         lit = index == hovered
         if index == 0:
-            fill, text = (_FINISH_HOVER_FILL if lit else _FINISH_FILL), _FINISH_GLYPH
+            fill, text = (skin.finish_hover if lit else skin.finish), skin.finish_glyph
         else:
-            fill, text = (_BUTTON_HOVER_FILL if lit else _BUTTON_FILL), _LABEL
+            fill, text = (skin.button_hover if lit else skin.button), skin.label
         left, top, right, bottom = (edge * scale for edge in box)
         draw.rounded_rectangle(
-            (left, top, right, bottom), radius=(bottom - top) / 2, fill=(*fill, 255),
+            (left, top, right, bottom), radius=(bottom - top) / 2 * skin.roundness, fill=(*fill, 255),
         )
         draw.text(
             ((left + right) / 2, (top + bottom) / 2), label,
             font=font, fill=(*text, 255), anchor="mm",
         )
     cx, cy, radius = layout.close
-    fill = _BUTTON_HOVER_FILL if hovered == NOTICE_CLOSE else _BUTTON_FILL
+    fill = skin.button_hover if hovered == NOTICE_CLOSE else skin.button
     draw.ellipse(
         ((cx - radius) * scale, (cy - radius) * scale,
          (cx + radius) * scale, (cy + radius) * scale),
         fill=(*fill, 255),
     )
-    _draw_glyph(draw, Button.CANCEL, cx, cy, radius, paused=False)
+    _draw_glyph(draw, Button.CANCEL, cx, cy, radius, False, skin)
     return image.resize(scaled_size(layout.width, layout.height, screen_scale), Image.Resampling.LANCZOS)
 
 

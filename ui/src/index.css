@@ -88,6 +88,23 @@
   --surface-filter: none;
   --overlay: rgb(0 0 0 / 0.4);
 
+  /* Pills: badges and the status line, word chips, status dots and the switch. */
+  --r-pill: 999px;
+  --pill-tint: 12%;
+  --pill-line: 0px;
+  --pill-ring: 0 0 #0000;
+  --r-chip: 6px;
+  --chip-ring: 0 0 #0000;
+  --r-dot: 999px;
+  --dot-glow: 0 0 #0000;
+  --r-switch: 999px;
+  --track-off: var(--input);
+  --track-line: transparent;
+  --thumb: #ffffff;
+  --thumb-on: #ffffff;
+  --thumb-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  --thumb-off-scale: 1;
+
   /* Content sits straight on the window; Paper insets it in a panel. */
   --sidebar-edge: var(--border);
   --panel: transparent;
@@ -168,6 +185,12 @@
   --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 30px 70px -20px rgb(30 40 90 / 0.4);
   --surface-filter: blur(18px) saturate(170%);
   --overlay: rgb(30 36 60 / 0.25);
+  --pill-tint: 16%;
+  --pill-ring: inset 0 1px 0 rgb(255 255 255 / 0.55);
+  --r-chip: 999px;
+  --chip-ring: inset 0 1px 0 rgb(255 255 255 / 0.55);
+  --dot-glow: 0 0 6px currentColor;
+  --thumb-shadow: inset 0 1px 0 #ffffff, 0 1px 4px rgb(20 30 60 / 0.3);
   --dur: 180ms;
   --spring-dur: 476ms;
   --spring: linear(0, 0.078, 0.259, 0.476, 0.683, 0.854, 0.979, 1.058, 1.097, 1.107, 1.097, 1.077, 1.054, 1.032, 1.014, 1.001, 0.993, 0.989, 0.989, 0.99, 1);
@@ -204,6 +227,12 @@
     --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 18px 44px -12px rgb(0 0 0 / 0.7);
     --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 30px 70px -20px rgb(0 0 0 / 0.8);
     --overlay: rgb(4 6 14 / 0.45);
+    --pill-tint: 20%;
+    --pill-ring: inset 0 1px 0 rgb(255 255 255 / 0.1);
+    --chip-ring: inset 0 1px 0 rgb(255 255 255 / 0.1);
+    --thumb: #eceef6;
+    --thumb-on: #ffffff;
+    --thumb-shadow: inset 0 1px 0 #ffffff, 0 1px 4px rgb(0 0 0 / 0.5);
   }
 }
 
@@ -241,6 +270,16 @@
   --sh-lg: 0 1px 2px rgb(0 0 0 / 0.2), 0 3px 8px 3px rgb(0 0 0 / 0.1);
   --sh-2xl: 0 2px 4px rgb(0 0 0 / 0.2), 0 8px 24px 6px rgb(0 0 0 / 0.12);
   --overlay: oklch(0.2 0.03 278 / 0.38);
+  /* Tonal chips with Material's small corners; the switch's thumb grows and fills when on. */
+  --r-pill: 8px;
+  --pill-tint: 20%;
+  --r-chip: 8px;
+  --track-off: var(--muted);
+  --track-line: var(--muted-foreground);
+  --thumb: var(--muted-foreground);
+  --thumb-on: var(--primary-foreground);
+  --thumb-shadow: 0 0 #0000;
+  --thumb-off-scale: 0.62;
   --dur: 200ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --spring-dur: 296ms;
@@ -312,6 +351,17 @@
   --panel-radius: 14px;
   --panel-shadow: 0 0 0 1px #ddd4c2, 0 2px 8px -2px rgb(60 45 20 / 0.08);
   --overlay: rgb(40 30 15 / 0.35);
+  /* Ruled labels: outlined in ink, square-cornered, with a square dot. */
+  --r-pill: 4px;
+  --pill-tint: 0%;
+  --pill-line: 1px;
+  --r-chip: 3px;
+  --chip-ring: inset 0 0 0 1px var(--border);
+  --r-dot: 1px;
+  --r-switch: 5px;
+  --thumb: var(--card);
+  --thumb-on: var(--primary-foreground);
+  --thumb-shadow: 0 1px 1px rgb(60 45 20 / 0.3);
   --dur: 200ms;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --spring-dur: 308ms;
@@ -351,12 +401,29 @@
     --sh-card: 0 0 #0000;
     --panel-shadow: 0 0 0 1px #2c2823;
     --overlay: rgb(0 0 0 / 0.5);
+    --thumb: var(--muted-foreground);
+    --thumb-shadow: 0 0 #0000;
   }
 }
 
 /* Blur reads what is behind a surface; a surface on its own window has nothing to blur. */
 @utility surface {
   backdrop-filter: var(--surface-filter);
+}
+
+/* A badge or status line tinted, or in Paper outlined, in its own text colour. */
+@utility pill {
+  border-radius: var(--r-pill);
+  background-color: color-mix(in oklab, currentColor var(--pill-tint), transparent);
+  box-shadow:
+    inset 0 0 0 var(--pill-line) color-mix(in oklab, currentColor 45%, transparent),
+    var(--pill-ring);
+}
+
+@utility chip {
+  border-radius: var(--r-chip);
+  background-color: var(--muted);
+  box-shadow: var(--chip-ring);
 }
 
 @utility page-title {

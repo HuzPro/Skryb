@@ -12,6 +12,7 @@ from dataclasses import asdict, replace
 from typing import TypeVar, cast
 
 from skryb.history.entries import HistoryEntry
+from skryb.history.usage import Usage
 from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode, binding_for
 from skryb.output.dictionary_config import (
     DictionaryConfig,
@@ -60,6 +61,10 @@ def history_entry_json(entry: HistoryEntry) -> Json:
         "has_audio": has_audio(entry),
         "typed": entry.typed,
     }
+
+
+def usage_json(usage: Usage) -> Json:
+    return {"words": usage.words, "seconds": round(usage.seconds, 1)}
 
 
 def binding_json(binding: Binding) -> Json:

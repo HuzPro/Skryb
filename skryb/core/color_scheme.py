@@ -8,6 +8,8 @@ class ColorScheme(Enum):
 
 # The taskbar and tray follow the system switch, not the apps one.
 _SYSTEM_VALUE = "SystemUsesLightTheme"
+# Windows like Settings and the pill follow the apps one.
+_APPS_VALUE = "AppsUseLightTheme"
 
 
 def detect_color_scheme() -> ColorScheme:
@@ -18,6 +20,11 @@ def detect_color_scheme() -> ColorScheme:
     cross-platform without guarding the import themselves.
     """
     return _detect(_SYSTEM_VALUE)
+
+
+def detect_app_color_scheme() -> ColorScheme:
+    """Read the Windows apps light/dark setting, defaulting to light the same way."""
+    return _detect(_APPS_VALUE)
 
 
 def _detect(value_name: str) -> ColorScheme:

@@ -58,6 +58,8 @@ def unpacked_model_dir(snapshot: Path) -> Path:
 class Phonon2CpuAdapter(TranscriptionEngine):
     """Phonon on Fermion's CPU engine. It never uses the GPU."""
 
+    encoder_device = "CPU"
+
     def __init__(self, snapshot: Path) -> None:
         self._snapshot = snapshot
         self._model: object | None = None

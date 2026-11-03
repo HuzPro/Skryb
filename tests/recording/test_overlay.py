@@ -29,9 +29,13 @@ from skryb.recording.pill import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     DEFAULT_PILL_POSITION,
+    DEFAULT_SKIN,
     Button,
     Mode,
+    PillSkin,
     button_centres,
+    pill_box,
+    pill_skin,
     target_size,
 )
 
@@ -145,6 +149,7 @@ class Harness:
         self.ticks = 0
         self.position = position
         self.saved: list[tuple[float, float]] = []
+        self.skin: PillSkin = DEFAULT_SKIN
         self.overlay = RecordingOverlay(
             root=self.root,
             event_bus=self.bus,
@@ -159,6 +164,7 @@ class Harness:
             clock=lambda: self.root.now,
             load_position=lambda: self.position,
             save_position=self.saved.append,
+            skin=lambda: self.skin,
         )
 
     def _pressed(self) -> None:
@@ -763,6 +769,46 @@ class TestMarshalling:
         bus.publish(TextPastedEvent())
 
         dispatcher.dispatch.assert_not_called()
+
+
+def _pill_colour(frame: bytes) -> tuple[int, int, int]:
+    """The straight colour of the pill above its buttons, from a premultiplied BGRA frame."""
+    left, top, _right, _bottom = pill_box(*target_size(Mode.RECORDING))
+    at = (round(top + 3) * CANVAS_WIDTH + round(left + 60)) * 4
+    blue, green, red, alpha = frame[at:at + 4]
+    return round(red * 255 / alpha), round(green * 255 / alpha), round(blue * 255 / alpha)
+
+
+class TestTheme:
+    def test_a_theme_chosen_while_the_pill_is_away_shows_on_the_next_recording(self):
+        harness = Harness()
+        harness.start_recording()
+        assert _pill_colour(harness.api.frames[-1]) == pytest.approx(DEFAULT_SKIN.fill, abs=2)
+        harness.state("recording", "idle")
+        harness.root.run(1.0)
+
+        harness.skin = pill_skin("paper", False)
+        harness.start_recording()
+
+        assert _pill_colour(harness.api.frames[-1]) == pytest.approx(harness.skin.fill, abs=2)
+
+    def test_a_theme_chosen_mid_recording_waits_for_the_next_one(self):
+        harness = Harness()
+        harness.start_recording()
+
+        harness.skin = pill_skin("material", False)
+        harness.root.run(0.5)
+
+        assert _pill_colour(harness.api.frames[-1]) == pytest.approx(DEFAULT_SKIN.fill, abs=2)
+
+    def test_the_transcribing_pill_rests_in_the_theme_too(self):
+        harness = Harness()
+        harness.skin = pill_skin("glass", True)
+        harness.start_recording()
+        harness.state("recording", "transcribing")
+        harness.root.run(1.0)
+
+        assert _pill_colour(harness.api.frames[-1]) == pytest.approx(harness.skin.fill, abs=2)
 
 
 class TestFramePixels:

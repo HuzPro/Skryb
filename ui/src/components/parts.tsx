@@ -199,13 +199,13 @@ export type Tone = "success" | "warning" | "destructive" | "muted" | "primary";
 
 export function StatusDot({ tone }: { tone: Tone }) {
   const color = {
-    success: "bg-success",
-    warning: "bg-warning",
-    destructive: "bg-destructive",
-    muted: "bg-muted-foreground/60",
-    primary: "bg-primary",
+    success: "text-success",
+    warning: "text-warning",
+    destructive: "text-destructive",
+    muted: "text-muted-foreground/60",
+    primary: "text-primary",
   }[tone];
-  return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", color)} />;
+  return <span className={cn("inline-block size-1.5 shrink-0 rounded-[var(--r-dot)] bg-current shadow-[var(--dot-glow)]", color)} />;
 }
 
 /**

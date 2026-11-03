@@ -115,6 +115,26 @@ def test_thousands_of_dictations_list_newest_first_and_filter_ignoring_case(seed
     assert _history(seeded, "no dictation says this") == []
 
 
+def test_usage_adds_up_the_words_and_speaking_time_of_every_dictation_that_kept_its_text(seeded: Rig) -> None:
+    kept = [entry for entry in _history(seeded) if not entry["status"]]
+
+    status, usage = seeded.call("GET", "/api/history/usage")
+
+    assert status == 200
+    assert usage["all"] == {
+        "words": sum(len(entry["text"].split()) for entry in kept),
+        "seconds": round(2.4 * len(kept), 1),
+    }
+    assert usage["all"]["words"] > 10_000
+    assert usage["week"] == {"words": 0, "seconds": 0.0}
+
+
+def test_usage_of_an_empty_history_is_all_zeros(make_rig: Callable[..., Rig]) -> None:
+    assert make_rig().call("GET", "/api/history/usage") == (
+        200, {"all": {"words": 0, "seconds": 0.0}, "week": {"words": 0, "seconds": 0.0}},
+    )
+
+
 def test_a_limit_lists_only_that_many_of_the_newest_dictations(seeded: Rig) -> None:
     everything = _history(seeded)
 

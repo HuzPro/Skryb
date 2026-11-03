@@ -47,6 +47,8 @@ def packed_model_path(snapshot: Path) -> Path:
 class NativeQwen3AsrAdapter(TranscriptionEngine):
     """Batch Qwen3-ASR through ``qasr.dll``. One call at a time, like every adapter here."""
 
+    encoder_device = "GPU"
+
     def __init__(
         self, snapshot: Path, dll_path: Path | None = None, question_threshold: float | None = QUESTION_THRESHOLD,
         cuda: bool = False,

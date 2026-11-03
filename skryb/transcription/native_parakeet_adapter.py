@@ -46,6 +46,8 @@ def packed_model_path(weights: Path) -> Path:
 class NativeParakeetAdapter(TranscriptionEngine):
     """Batch Parakeet TDT through ``npk.dll``. One call at a time, like every adapter here."""
 
+    encoder_device = "GPU"
+
     def __init__(self, model_dir: Path, repo_id: str, dll_path: Path | None = None, cuda: bool = False) -> None:
         self._model_dir = model_dir
         self._repo_id = repo_id
