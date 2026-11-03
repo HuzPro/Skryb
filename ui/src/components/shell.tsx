@@ -79,7 +79,7 @@ export function TopBar({ nativeTitlebar, onClose, showStatus, children }: { nati
       </div>
       {showStatus ? (
         <div data-tauri-drag-region className="flex items-center pr-2">
-          <span className="pointer-events-none flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-[11.5px] text-muted-foreground">
+          <span className="pointer-events-none flex items-center gap-1.5 rounded-[var(--r-pill)] border bg-card px-2.5 py-0.5 text-[11.5px] text-muted-foreground">
             <StatusDot tone={status.tone} />
             {status.label}
           </span>
