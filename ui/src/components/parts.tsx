@@ -322,7 +322,7 @@ export function ContextMenu({ x, y, label, items, onClose: closed }: { x: number
       onKeyDown={keys}
       onContextMenu={(event) => event.preventDefault()}
       style={place}
-      className={cn("surface fixed z-50 min-w-[176px] rounded-lg border border-edge bg-popover p-1 shadow-lg", leaving ? "pointer-events-none exit-pop" : "enter-pop")}
+      className={cn("surface fixed z-50 min-w-[176px] origin-top-left rounded-lg border border-edge bg-popover p-1 shadow-lg", leaving ? "pointer-events-none exit-pop" : "enter-pop")}
     >
       {items.map(({ label: name, icon: Icon, onSelect, shortcut, danger }) => (
         <button

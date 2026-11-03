@@ -394,7 +394,6 @@
 }
 @keyframes pop-in {
   from {
-    opacity: 0;
     scale: 0.96;
   }
 }
@@ -414,8 +413,11 @@
 @utility enter-fade {
   animation: fade-in var(--dur) var(--ease) both;
 }
+/* Popups settle on the spring but are fully visible within the theme's plain duration. */
 @utility enter-pop {
-  animation: pop-in var(--spring-dur) var(--spring) both;
+  animation:
+    fade-in var(--dur) var(--ease) both,
+    pop-in var(--spring-dur) var(--spring) both;
 }
 @utility exit-fade {
   animation: fade-out calc(var(--dur) * 0.8) ease-in both;
