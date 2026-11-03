@@ -107,7 +107,7 @@ const MODES: { value: Mode; label: string; icon: LucideIcon }[] = [
   { value: "meetings", label: "Meetings", icon: Users },
 ];
 
-/** A segmented switch: the thumb slides to the chosen mode on the theme's spring; arrow keys move it too. */
+/** A segmented switch: the thumb glides to the chosen mode without overshooting its track; arrow keys move it too. */
 export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange: (mode: Mode) => void; recording: boolean }) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const at = Math.max(0, MODES.findIndex((choice) => choice.value === mode));
@@ -123,7 +123,7 @@ export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange
     <div role="radiogroup" aria-label="Mode" onKeyDown={keys} className="relative grid h-8 grid-cols-2 rounded-button bg-muted p-[3px]">
       <span
         aria-hidden
-        className="spring absolute inset-y-[3px] left-[3px] w-[calc(50%-3px)] rounded-[calc(var(--r-button)-3px)] border border-edge bg-card shadow-xs"
+        className="absolute inset-y-[3px] left-[3px] w-[calc(50%-3px)] transition-transform duration-[var(--page-dur)] rounded-[calc(var(--r-button)-3px)] border border-edge bg-card shadow-xs"
         style={{ transform: `translateX(${at * 100}%)` }}
       />
       {MODES.map(({ value, label, icon: Icon }, index) => {
