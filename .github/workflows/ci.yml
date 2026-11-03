@@ -16,24 +16,25 @@ permissions:
 
 jobs:
   test:
-    name: Tests (Ubuntu, CPU)
-    # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
-    # sounddevice fails test collection.
+    name: Tests (Ubuntu, CPU, ${{ matrix.mode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [serial, xdist]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+          enable-cache: false
 
-      # System libraries the suite pulls in at import time on Linux:
-      #   libportaudio2 -> sounddevice (recording adapter)
-      #   libsndfile1   -> soundfile (audio test dep)
-      #   xvfb + xauth  -> virtual X display for the Tkinter widget tests
-      #                    (the native Win32 modules are excluded on Linux)
+      - name: Which system libraries are already there
+        run: |
+          nproc; free -g
+          for p in libportaudio2 libsndfile1 xvfb xauth; do dpkg -s $p >/dev/null 2>&1 && echo "$p present" || echo "$p MISSING"; done
+
       - name: Install system libraries
         run: |
           sudo apt-get update
@@ -41,23 +42,22 @@ jobs:
             libportaudio2 libsndfile1 \
             xvfb xauth
 
-      # CPU PyTorch from the dedicated index (skips the large CUDA wheels),
-      # then the project with its test deps and the parakeet engine (the
-      # cache-aware streaming tests import nano_parakeet directly), plus
-      # OpenVINO so the NPU engine's CPU-device tests run instead of skipping.
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          pip install -e ".[dev,npu]"
+          uv venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+          uv pip install -e ".[dev,npu]" pytest-xdist
 
-      # The NPU engine's CPU decoder is plain C; its tests load this build.
       - name: Build the CPU TDT decoder
         run: python native/tdt/build.py
 
-      # `python -m pytest` puts the repo root on sys.path (the `tests`
-      # package imports need it). `-m "not slow"` (pyproject.toml addopts)
-      # and the Windows-only module exclusions (tests/conftest.py) apply
-      # automatically.
+      - name: Time imports and collection
+        run: |
+          python -X importtime -c "import skryb" 2> importtime.txt; sort -t'|' -k2 -n importtime.txt | tail -15
+          time python -m pytest -q --collect-only > /dev/null
+
       - name: Run tests
-        run: xvfb-run -a python -m pytest -q
+        run: |
+          if [ "${{ matrix.mode }}" = xdist ]; then extra="-n auto"; else extra=""; fi
+          xvfb-run -a python -m pytest -q --durations=60 $extra
