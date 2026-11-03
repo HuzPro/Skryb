@@ -27,22 +27,25 @@ function edgeWhitespace(text: string): [string, string] {
   return [text.slice(0, text.length - text.trimStart().length), text.slice(text.trimEnd().length)];
 }
 
-/** Mirrors the old page: "a, b" -> ["a", "b"]; a space at either end of the box glues every alias to the neighbouring text.
+/** "a, b" -> ["a", "b"]: the one space after a comma separates; every other space stays on the alias beside it and glues
+ * that alias to the neighbouring text, so "link. , link" keeps "link. ".
  * A comma at the very start or end of the box belongs to the alias, so ", underscore" also swallows the comma before it. */
 export function splitAliases(spoken: string): string[] {
   const [left, right] = edgeWhitespace(spoken);
   const text = spoken.trim();
   const head = /^(?:,\s*)*/.exec(text)?.[0] ?? "";
   const tail = /(?:\s*,)*$/.exec(text.slice(head.length))?.[0] ?? "";
-  const aliases = text.slice(head.length, text.length - tail.length).split(",").map((alias) => alias.trim()).filter(Boolean);
+  const aliases = text
+    .slice(head.length, text.length - tail.length)
+    .split(",")
+    .map((alias, at) => (at > 0 && alias.startsWith(" ") ? alias.slice(1) : alias))
+    .filter((alias) => alias.trim());
   const last = aliases.length - 1;
-  return aliases.map((alias, at) => left + (at === 0 ? head : "") + alias + (at === last ? tail : "") + right);
+  return aliases.map((alias, at) => (at === 0 ? left + head : "") + alias + (at === last ? tail + right : ""));
 }
 
 export function joinAliases(aliases: string[]): string {
-  const [left] = edgeWhitespace(aliases[0] ?? "");
-  const [, right] = edgeWhitespace(aliases.at(-1) ?? "");
-  return left + aliases.map((alias) => alias.trim()).join(", ") + right;
+  return aliases.join(", ");
 }
 
 function shown(source: string): string {
@@ -384,7 +387,7 @@ export function DictionaryPage() {
 
       <Section
         title="Words and replacements"
-        note="Replace spoken words or phrases with typed text. Separate aliases with commas; regex rules use one pattern. A space at the start or end of the box glues every alias to the neighbouring text."
+        note="Replace spoken words or phrases with typed text. Separate aliases with commas; regex rules use one pattern. A space typed at an alias's start or end stays part of that alias and glues it to the neighbouring text."
       >
         <Card className="divide-y">
           <form

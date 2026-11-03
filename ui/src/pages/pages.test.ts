@@ -46,8 +46,21 @@ describe("dictionary aliases", () => {
   it("splits on commas and drops blanks", () => {
     expect(splitAliases("jason, jayson")).toEqual(["jason", "jayson"]);
     expect(splitAliases("jason,, ,jayson")).toEqual(["jason", "jayson"]);
-    expect(splitAliases("jason, JSON ")).toEqual(["jason ", "JSON "]);
+    expect(splitAliases("jason, JSON ")).toEqual(["jason", "JSON "]);
     expect(splitAliases(" , ,")).toEqual([]);
+  });
+
+  it("keeps a space typed before a comma on its own alias only", () => {
+    expect(splitAliases("My GitHub link. , my github link")).toEqual(["My GitHub link. ", "my github link"]);
+    expect(splitAliases("my github link, My GitHub link. ")).toEqual(["my github link", "My GitHub link. "]);
+    expect(splitAliases("Calendar link. , calendar link. , cal link")).toEqual(["Calendar link. ", "calendar link. ", "cal link"]);
+    expect(splitAliases("a,  b")).toEqual(["a", " b"]);
+  });
+
+  it("round-trips aliases with their own edge spaces, old glue-on-every-alias rules included", () => {
+    for (const aliases of [["My GitHub link. ", "my github link"], [" a", "b "], ["jason ", "JSON "], ["a", " b"], ["café ✓ ", "naïve"]]) {
+      expect(splitAliases(joinAliases(aliases))).toEqual(aliases);
+    }
   });
 
   it("keeps a comma at the start or end of the box as part of the alias", () => {
@@ -67,9 +80,10 @@ describe("dictionary aliases", () => {
     expect(duplicateAlias(rules, candidate, -1)).toBe(false);
   });
 
-  it("glues every alias to the neighbouring text when the box starts or ends with a space", () => {
-    expect(splitAliases(" dot com, dotcom")).toEqual([" dot com", " dotcom"]);
-    expect(joinAliases([" dot com", " dotcom"])).toBe(" dot com, dotcom");
+  it("glues only the first or last alias when the box starts or ends with a space", () => {
+    expect(splitAliases(" dot com, dotcom")).toEqual([" dot com", "dotcom"]);
+    expect(splitAliases(" dot com,  dotcom")).toEqual([" dot com", " dotcom"]);
+    expect(joinAliases([" dot com", " dotcom"])).toBe(" dot com,  dotcom");
   });
 
   it("round-trips unicode aliases", () => {
