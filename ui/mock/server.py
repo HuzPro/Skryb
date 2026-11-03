@@ -163,7 +163,7 @@ def _history():
         entries.append({
             "id": f"{at:%Y%m%dT%H%M%SZ}-{index * 2654435761 % 16**8:08x}.{index % 40 + 3}", "at": at.isoformat(timespec="seconds"),
             "text": heard,
-            "audio_seconds": round(1.5 + rng.random() * 40, 1), "status": status, "error": error,
+            "audio_seconds": round(1.0 + len(text.split()) * 0.4 + rng.random() * 3, 1), "status": status, "error": error,
             "has_audio": has_audio, "typed": typed,
         })
     return entries
