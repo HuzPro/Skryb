@@ -1,5 +1,6 @@
 import logging
 import math
+import threading
 from collections.abc import Callable
 
 import numpy as np
@@ -22,6 +23,8 @@ _logger = logging.getLogger(__name__)
 # The volume setting's default plays the cues exactly as loud as they were
 # before there was a setting; the top of the slider is a little louder.
 _UNCHANGED_VOLUME = RecordingPreferences.cue_volume
+# Device buffering beyond the cue's own length, so all of it fits in the primed buffers.
+_HEADROOM_SECONDS = 0.1
 
 
 def _on() -> bool:
@@ -53,6 +56,8 @@ class SoundDeviceCuePlayer(RecordingCuePlayer, ReadyCuePlayer):
         self._stop = tone_to_samples(STOP_FREQUENCY_HZ)
         self._ready = ready_chime_to_samples()
         self._warning = warning_to_samples()
+        self._lock = threading.Lock()
+        self._stream = None
 
     def play_start(self) -> None:
         self._play(self._start)
@@ -86,4 +91,32 @@ class SoundDeviceCuePlayer(RecordingCuePlayer, ReadyCuePlayer):
     def _emit(self, samples: np.ndarray) -> None:
         import sounddevice as sd
 
-        sd.play(samples, self._sample_rate, blocking=False)
+        # sd.play feeds the device from a Python callback as it plays, so a thread holding the GIL
+        # stutters the cue; the first dictation after a load held it ~0.5 s reading the tokenizer.
+        # Priming hands the whole cue to the device inside start(), before anything else runs.
+        stream = sd.OutputStream(
+            self._sample_rate, channels=1, dtype="float32",
+            callback=_feeder(samples, sd.CallbackStop),
+            latency=len(samples) / self._sample_rate + _HEADROOM_SECONDS,
+            prime_output_buffers_using_stream_callback=True,
+        )
+        with self._lock:
+            if self._stream is not None:
+                self._stream.close()
+            self._stream = stream
+            stream.start()
+
+
+def _feeder(samples: np.ndarray, finished: type[Exception]) -> Callable[..., None]:
+    """A stream callback that writes *samples* out block by block, then silence, and ends the stream."""
+    remaining = samples
+
+    def fill(outdata: np.ndarray, frames: int, _time: object, _status: object) -> None:
+        nonlocal remaining
+        chunk, remaining = remaining[:frames], remaining[frames:]
+        outdata[:len(chunk), 0] = chunk
+        outdata[len(chunk):] = 0
+        if not len(remaining):
+            raise finished
+
+    return fill
