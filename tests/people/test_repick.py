@@ -97,6 +97,39 @@ def test_a_dictation_with_no_selection_is_never_re_picked() -> None:
     assert picks == []
 
 
+_SWAPPED = (
+    Term("Skryb", note="the app I'm building", heard_as=("scribe",), phonetic=True),
+    Term("Katryna", heard_as=("Katrina",), phonetic=True),
+    Term("Catrina", phonetic=True),
+)
+
+
+def _dictated_with_swaps(text: str, before: str, selected: str, after: str = "") -> str:
+    pipeline = TextPipeline.for_batch(
+        DictionaryConfig(), caret_context=lambda: CaretContext(before, selected, after), terms=_SWAPPED,
+    )
+    return pipeline.process(text)
+
+
+def test_the_ordinary_word_picked_over_an_entry_is_not_swapped_back_by_its_heard_as_spelling() -> None:
+    assert _dictated_with_swaps("Scribe.", "We built ", "Skryb", ". ") == "scribe"
+    assert _dictated_with_swaps("scribe.", "It works.  ", "Skryb", ". ") == "Scribe"
+    assert _dictated_with_swaps("Scribe.", "I opened ", "Skryb ", "again.") == "scribe "
+
+
+def test_the_other_person_picked_is_not_swapped_back_by_the_first_ones_sounds_alike() -> None:
+    assert _dictated_with_swaps("Catrina.", "I sent it to ", "Catrina ", "yesterday.") == "Katryna "
+    assert _dictated_with_swaps("Katryna.", "I sent it to ", "Katryna ", "yesterday.") == "Catrina "
+
+
+def test_an_entry_the_model_wrote_over_itself_becomes_the_ordinary_word_it_is_heard_as() -> None:
+    assert _dictated_with_swaps("Skryb.", "We built ", "Skryb", ". ") == "scribe"
+
+
+def test_a_dictation_over_no_selection_still_has_its_heard_as_spellings_swapped() -> None:
+    assert _dictated_with_swaps("We built a scribe.", "", "", "") == "We built a Skryb. "
+
+
 def test_re_picks_become_suggestions_once_for_each_spelling_dictated_over(tmp_path: Path) -> None:
     path = tmp_path / "people.json"
     update_people(path, lambda people: replace(people, terms=_PEOPLE))
