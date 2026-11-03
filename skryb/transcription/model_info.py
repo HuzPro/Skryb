@@ -143,7 +143,7 @@ QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
         engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
         npu_engine_priorities=_QWEN3_ASR_NPU_ENGINE_PRIORITIES,
         tier="Large",
-        needs="A GPU with about 5 GB of VRAM; an Intel NPU runs it more slowly",
+        needs="A GPU with about 4 GB of VRAM free; an Intel NPU runs it more slowly",
     ),
 }
 

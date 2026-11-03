@@ -50,7 +50,7 @@ MODELS = [
     {"name": "qwen3-asr-1.7b", "display_size": "4.1 GB", "size": 4_080_000_000,
      "description": "Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, the NPU on Intel, PyTorch elsewhere",
      "installed": False, "supports_batch": True, "supports_streaming": False, "license_id": None,
-     "tier": "Large", "needs": "A GPU with about 5 GB of VRAM; an Intel NPU runs it more slowly"},
+     "tier": "Large", "needs": "A GPU with about 4 GB of VRAM free; an Intel NPU runs it more slowly"},
     {"name": "nemotron-speech-streaming-en-0.6b", "display_size": "2.5 GB", "size": 2_470_000_000,
      "description": "NVIDIA cache-aware streaming (English, low-latency, GPU)", "installed": False,
      "supports_batch": False, "supports_streaming": True, "license_id": None, "tier": None, "needs": None},

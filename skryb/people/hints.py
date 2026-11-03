@@ -20,7 +20,9 @@ _logger = logging.getLogger(__name__)
 _PREAMBLE = "Names and terms that may come up"
 # What the model writes when it reads the hint back instead of the speech, with or without the first words.
 _ECHO = "terms that may come up"
-# On shorter clips the hint makes the model invent words ("Oh." became "Boston.").
+# On shorter clips the hint makes the model invent words ("Oh." became "Boston.") or read the hint back:
+# re-decoding 1,393 of Huz's dictations with it, 39 of 63 clips under 1 s came out as the hint and 4 of
+# 145 at 1-1.5 s, none from 2 s up, and under 2 s it changed 3 times as many words as it fixed names.
 MIN_HINT_SECONDS = 2.0
 HOTWORD_LIMIT = 25
 
