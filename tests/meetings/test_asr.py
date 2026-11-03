@@ -185,7 +185,7 @@ def test_an_urdu_meeting_keeps_the_roman_urdu_line_spelled_the_urdu_way(setting:
 
 
 @pytest.mark.parametrize("apex_line", [
-    "So the estimator connects to LedgerLine first.",
+    "So the rota goes into LedgerLine first.",
     "nan",
     " NaN ",
     "",
@@ -193,13 +193,13 @@ def test_an_urdu_meeting_keeps_the_roman_urdu_line_spelled_the_urdu_way(setting:
     "Theek hai.",
 ])
 def test_an_urdu_meeting_hands_english_empty_and_runaway_lines_to_qwen3_asr_with_the_vocabulary(apex_line: str) -> None:
-    dictation = FakeQwen("So the estimator connects to LedgerLine first.")
+    dictation = FakeQwen("So the rota goes into LedgerLine first.")
     models, _built = _models(dictation, language="ur")
     FakeApex.lines = [apex_line]
 
     text = models.transcribe(_CLIP, "Names and terms that may come up: LedgerLine.")
 
-    assert text == "So the estimator connects to LedgerLine first."
+    assert text == "So the rota goes into LedgerLine first."
     assert dictation.calls == [(3.0, "Names and terms that may come up: LedgerLine.", "en")]
 
 

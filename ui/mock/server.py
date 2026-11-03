@@ -73,16 +73,16 @@ MEETING_MODELS = [
      " Auto meetings (Oriserve Whisper Hindi2Hinglish Apex)", "urdu_only": True},
 ]
 MEETING_LINES = [
-    ("them:0", "All right, let's jump in. Launch Board first, then the order intake."),
-    ("them:1", "Sounds good. I pulled the numbers from QuoteDesk this morning."),
-    ("them:2", "So the estimator connects to LedgerLine first, and then we push the quote back into Slack?"),
-    ("me:0", "Yeah, exactly. Northwind handles the routing, BRIGHTLINE just sees the finished quote."),
+    ("them:0", "All right, let's jump in. Bake Board first, then the seed swap."),
+    ("them:1", "Sounds good. I pulled the sign-ups from QuoteDesk this morning."),
+    ("them:2", "So the rota goes into LedgerLine first, and then we post the plan in the group chat?"),
+    ("me:0", "Yeah, exactly. Northwind sorts the plots, BRIGHTLINE just sees the finished plan."),
     ("them:1", "Haan theek hai, main kal tak woh sheet bhej dunga."),
-    ("them:0", "Perfect. Marta, can you check whether the FormDeck fields still match?"),
-    ("them:2", "I'll look tonight. About a dozen a day is what we see right now."),
+    ("them:0", "Perfect. Marta, can you check whether the FormDeck names still match?"),
+    ("them:2", "I'll look tonight. About a dozen new sign-ups a week right now."),
     ("me:0", "Ek do ghante mein main bhi dekh leta hoon."),
-    ("them:3", "Quick one from me: are rush orders in scope for the pilot?"),
-    ("them:0", "Not yet. Let's keep the pilot to the first two products."),
+    ("them:3", "Quick one from me: are late sign-ups allowed this season?"),
+    ("them:0", "Not yet. Let's keep this season to the first two beds."),
 ]
 
 ENGINES = {
