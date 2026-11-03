@@ -30,6 +30,7 @@ class Calls:
             dictate_activate=lambda: self.log.append("dictate on"),
             dictate_deactivate=lambda: self.log.append("dictate off"),
             paste_last=lambda: self.log.append("paste last"),
+            toggle_meeting=lambda: self.log.append("meeting"),
         )
 
 
@@ -71,6 +72,20 @@ class TestSeveralShortcutsInOneAdapter:
         adapter._handle_key(False, keys.VK_XBUTTON1)
 
         assert calls.log == ["dictate on", "dictate on", "dictate on", "dictate off"]
+
+    def test_a_meeting_shortcut_starts_or_stops_the_meeting_once_per_press(self):
+        calls = Calls()
+        adapter = _adapter(
+            calls,
+            Binding("ctrl+alt+m", BindingMode.TOGGLE, BindingAction.DICTATE),
+            Binding("ctrl+alt+f13", BindingMode.PRESS, BindingAction.TOGGLE_MEETING),
+        )
+
+        _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _F13)
+        _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _F13)
+        _tap(adapter, keys.VK_LCONTROL, keys.VK_LMENU, _M)
+
+        assert calls.log == ["meeting", "meeting", "dictate on"]
 
     def test_a_shortcut_with_no_action_yet_is_inert(self):
         calls = Calls()

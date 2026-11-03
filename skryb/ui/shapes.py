@@ -23,7 +23,7 @@ from skryb.meetings.storage import LANGUAGES as MEETING_LANGUAGES
 from skryb.output.paste_method import PasteMethod, normalized_process_name
 from skryb.recording.preferences import DUCK_MODES
 from skryb.settings.service import CRISPERWHISPER_MODES
-from skryb.settings.settings_draft import SettingsDraft
+from skryb.settings.settings_draft import UI_THEMES, SettingsDraft
 from skryb.settings.transcription_mode import TranscriptionMode
 
 Json = dict[str, object]
@@ -93,6 +93,7 @@ def settings_json(draft: SettingsDraft) -> Json:
             "record_microphone": draft.meetings_record_microphone,
             "language": draft.meetings_language,
         },
+        "theme": draft.theme,
     }
 
 
@@ -148,6 +149,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         meetings_folder=meetings_folder,
         meetings_record_microphone=meetings.flag("record_microphone"),
         meetings_language=meetings.one_of("language", MEETING_LANGUAGES),
+        theme=settings.one_of("theme", UI_THEMES),
     )
 
 

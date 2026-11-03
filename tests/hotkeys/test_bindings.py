@@ -174,12 +174,13 @@ class TestParsingSavedBindings:
             {"keys": "f14", "mode": "press", "action": "dictate"},
             {"keys": "f15", "mode": "push_to_talk", "action": "dictate"},
             {"keys": "f16", "action": "dictate"},
+            {"keys": "f17", "mode": "hold", "action": "toggle_meeting"},
         ]
 
         parsed = parse_bindings(FakeConfig({"hotkey.bindings": rows}))
 
         assert [binding.mode for binding in parsed] == [
-            BindingMode.PRESS, _TOGGLE, _TOGGLE, _TOGGLE,
+            BindingMode.PRESS, _TOGGLE, _TOGGLE, _TOGGLE, BindingMode.PRESS,
         ]
 
     def test_thousands_of_saved_rows_with_duplicates_and_junk_parse_quickly(self):

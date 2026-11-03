@@ -5,6 +5,9 @@ from skryb.output.output_mode import OutputMode
 from skryb.recording.preferences import RecordingPreferences
 from skryb.settings.transcription_mode import TranscriptionMode
 
+# The window's look; it is only read by the window, so it needs no rebuild.
+UI_THEMES = ("default", "glass", "material", "paper")
+
 
 @dataclass(frozen=True)
 class SettingsDraft:
@@ -48,6 +51,7 @@ class SettingsDraft:
     meetings_folder: str = ""
     meetings_record_microphone: bool = True
     meetings_language: str = "en"
+    theme: str = "default"
 
 
 @dataclass(frozen=True)

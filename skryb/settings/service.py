@@ -48,7 +48,7 @@ from skryb.settings.download_coordinator import DownloadCoordinator
 from skryb.settings.engine_hot_swap import EngineHotSwap
 from skryb.settings.model_installation_cache import ModelInstallationCache
 from skryb.settings.model_view import ModelView
-from skryb.settings.settings_draft import ChangeSet, SettingsDraft
+from skryb.settings.settings_draft import UI_THEMES, ChangeSet, SettingsDraft
 from skryb.settings.transcription_mode import TranscriptionMode
 from skryb.transcription.engine_factory import (
     engine_candidates_ignoring_hardware,
@@ -309,8 +309,13 @@ class SettingsService:
                     ).items(),
                 )
             ),
+            theme=self._theme(),
             **self._meeting_fields(),
         )
+
+    def _theme(self) -> str:
+        configured = self._config.get("ui.theme", "default")
+        return configured if configured in UI_THEMES else "default"
 
     def _meeting_fields(self) -> dict[str, str | bool]:
         meetings = meeting_settings_from(self._config)
@@ -356,6 +361,7 @@ class SettingsService:
         self._config.set("meetings.folder", draft.meetings_folder.strip())
         self._config.set("meetings.record_microphone", draft.meetings_record_microphone)
         self._config.set("meetings.language", draft.meetings_language)
+        self._config.set("ui.theme", draft.theme)
         # A process name holds a dot, so the map is stored whole rather
         # than key by dotted key.
         self._config.set(

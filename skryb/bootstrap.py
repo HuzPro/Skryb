@@ -512,12 +512,15 @@ def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
     return transcribes_verbatim(model, config.get("transcription.crisperwhisper_mode", "intended"))
 
 
-def _hotkey_actions(use_case: RecordAndTranscribeUseCase) -> HotkeyActions:
+def _hotkey_actions(
+    use_case: RecordAndTranscribeUseCase, toggle_meeting: Callable[[], None] | None = None,
+) -> HotkeyActions:
     return HotkeyActions(
         dictate_activate=use_case.on_hotkey_activated,
         dictate_deactivate=use_case.on_hotkey_deactivated,
         paste_last=use_case.paste_last,
         copy_last=use_case.copy_last,
+        toggle_meeting=toggle_meeting,
     )
 
 
@@ -1088,7 +1091,7 @@ def _publish_device_changes(
 
 
 def _toggle_meeting(meetings: MeetingRecorder, explain: Callable[[str], None]) -> None:
-    """Start or stop from the tray; a meeting that cannot start says why and opens the Meetings page."""
+    """Start or stop from the tray or a shortcut; a meeting that cannot start says why and opens the Meetings page."""
     try:
         meetings.toggle()
     except MeetingError as exc:
@@ -1344,7 +1347,13 @@ def build_app(
                 atexit.register(edit_capture.stop)
         return edit_capture
 
-    hotkey_actions = _hotkey_actions(record_and_transcribe_use_case)
+    def toggle_meeting_from_shortcut() -> None:
+        # Bound late: the meeting recorder is built after the hotkey hook.
+        action_dispatcher.dispatch(
+            functools.partial(_toggle_meeting, meetings, explain_meeting_problem),
+        )
+
+    hotkey_actions = _hotkey_actions(record_and_transcribe_use_case, toggle_meeting_from_shortcut)
     listener = _build_hotkey_listener(
         config, record_and_transcribe_use_case, hotkey_actions,
         _key_observer(edit_capture),

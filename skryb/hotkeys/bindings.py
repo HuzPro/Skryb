@@ -24,9 +24,12 @@ class BindingAction(StrEnum):
     DICTATE = "dictate"
     PASTE_LAST = "paste_last"
     COPY_LAST = "copy_last"
+    TOGGLE_MEETING = "toggle_meeting"
 
 
-_PRESS_ACTIONS = frozenset({BindingAction.PASTE_LAST, BindingAction.COPY_LAST})
+_PRESS_ACTIONS = frozenset({
+    BindingAction.PASTE_LAST, BindingAction.COPY_LAST, BindingAction.TOGGLE_MEETING,
+})
 _ACTION_NAMES = frozenset(action.value for action in BindingAction)
 _LEGACY_KEYS = ("combination", "mode")
 _LEGACY_DEFAULT_COMBO = "ctrl+alt+m"

@@ -70,6 +70,9 @@ DEFAULT_CONFIG = {
         "record_microphone": True,
         "language": "en",
     },
+    "ui": {
+        "theme": "default",
+    },
 }
 
 

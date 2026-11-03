@@ -135,6 +135,7 @@ def _default_settings():
         "paste_method_overrides": [["notepad.exe", "shift_insert"], ["windowsterminal.exe", "ctrl_shift_v"]],
         "check_for_updates": True,
         "meetings": {"folder": MEETINGS_FOLDER, "record_microphone": True, "language": "en"},
+        "theme": "default",
     }
 
 

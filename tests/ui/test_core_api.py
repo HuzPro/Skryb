@@ -28,7 +28,7 @@ _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
     "crisperwhisper_mode", "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "learn_words", "hotkey_bindings", "double_tap_locks_hold", "recording",
-    "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings",
+    "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings", "theme",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",
@@ -257,6 +257,7 @@ def test_shortcuts_that_work_together_validate(rig: Rig) -> None:
         ),
         (lambda settings: settings.update(output_mode="fax"), "settings.output_mode must be one of"),
         (lambda settings: settings.update(history_retention_days=-7), "cannot be negative"),
+        (lambda settings: settings.update(theme="Glass ✨"), "settings.theme must be one of"),
         (
             lambda settings: settings["recording"].update(cue_volume=True),
             "settings.recording.cue_volume must be a number.",
@@ -266,7 +267,7 @@ def test_shortcuts_that_work_together_validate(rig: Rig) -> None:
             "paste_method_overrides[0]",
         ),
     ],
-    ids=["missing", "wrong-type", "unknown-choice", "negative", "bool-as-number", "bad-override"],
+    ids=["missing", "wrong-type", "unknown-choice", "negative", "unknown-theme", "bool-as-number", "bad-override"],
 )
 def test_settings_that_cannot_be_read_are_refused_naming_the_field(rig: Rig, change, named: str) -> None:
     settings = _settings(rig)
@@ -297,6 +298,23 @@ def test_a_setting_the_shell_does_not_send_yet_keeps_its_saved_value(rig: Rig) -
 
     assert isinstance(draft, _DraftWithALaterSetting)
     assert (draft.pill_size, draft.language) == ("small", "de")
+
+
+def test_a_chosen_theme_is_saved_and_comes_back_as_chosen(rig: Rig) -> None:
+    settings = _settings(rig)
+    assert settings["theme"] == "default"
+    settings["theme"] = "paper"
+
+    assert rig.call("PUT", "/api/settings", settings)[0] == 200
+
+    assert rig.config.get("ui.theme") == "paper"
+    assert _settings(rig)["theme"] == "paper"
+
+
+def test_a_theme_this_version_does_not_know_reads_back_as_the_default(rig: Rig) -> None:
+    rig.config.set("ui.theme", "neon")
+
+    assert _settings(rig)["theme"] == "default"
 
 
 def test_settings_wait_while_a_dictation_is_in_progress(rig: Rig) -> None:
