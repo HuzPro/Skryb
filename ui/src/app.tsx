@@ -125,11 +125,22 @@ function ShowWhenReady() {
   return null;
 }
 
-/** Shows the theme being picked before it is saved; discarding puts the saved one back. */
+/**
+ * Shows the theme being picked before it is saved; discarding puts the saved one back. The whole window
+ * cross-fades as one picture, with colour transitions held off so no part of it fades on its own.
+ */
 function ThemeSync() {
   const theme = useStore().settings?.draft.theme;
   useEffect(() => {
-    if (theme) applyTheme(theme);
+    const root = document.documentElement;
+    if (!theme || root.dataset.theme === theme) return;
+    const swap = () => {
+      root.setAttribute("data-theme-switch", "");
+      applyTheme(theme);
+    };
+    const fade = document.startViewTransition?.(swap);
+    if (!fade) swap();
+    void (fade?.ready ?? Promise.resolve()).finally(() => root.removeAttribute("data-theme-switch"));
   }, [theme]);
   return null;
 }

@@ -433,8 +433,15 @@
 ::view-transition {
   pointer-events: none;
 }
-::view-transition-group(page) {
+::view-transition-group(page),
+::view-transition-group(root) {
   animation-duration: var(--page-dur);
+}
+/* A theme switch cross-fades the whole window (app.tsx, ThemeSync); nothing transitions on its own meanwhile. */
+[data-theme-switch] *,
+[data-theme-switch] *::before,
+[data-theme-switch] *::after {
+  transition: none !important;
 }
 ::view-transition-old(page) {
   animation: fade-out calc(var(--page-dur) * 0.4) ease-in both;
