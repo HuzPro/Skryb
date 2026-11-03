@@ -6,7 +6,7 @@ import { finalText, formatDuration, groupByDay, preview } from "./history";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
-import { withMode } from "./transcription";
+import { byTier, withMode } from "./transcription";
 import { describeUpdate } from "./updates";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -113,6 +113,15 @@ describe("people and terms", () => {
     expect(termProblem(people, people[0]!, 0)).toBe("");
     const many = Array.from({ length: 1000 }, (_, at) => ({ written: `Name ${at}`, note: "", heard_as: [`Nayme ${at}`], phonetic: false }));
     expect(termProblem(many, { written: "Name 1000", note: "", heard_as: ["Nayme 1000"], phonetic: false }, -1)).toBe("");
+  });
+});
+
+describe("the model lineup", () => {
+  it("lists Small, Medium and Large first, then models outside the lineup in the order sent", () => {
+    const model = (name: string, tier?: string) => ({ name, tier } as Model);
+    const sorted = byTier([model("live"), model("qwen", "Large"), model("phonon", "Small"), model("other"), model("parakeet", "Medium")]);
+    expect(sorted.map((m) => m.name)).toEqual(["phonon", "parakeet", "qwen", "live", "other"]);
+    expect(byTier([])).toEqual([]);
   });
 });
 

@@ -36,10 +36,23 @@ from skryb.ui.api_server import ApiServer
 from skryb.ui.event_hub import EventHub
 
 PARAKEET = "parakeet-ultra"
-TURBO = "crisperwhisper-2.0-turbo"
+QWEN = "qwen3-asr-1.7b"
 NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-CRISPERWHISPER_LICENCE = "crisperwhisper-nc"
+GATED = "gated-example"
+GATED_LICENCE = "example-nc"
 _TIMEOUT_SECONDS = 10.0
+
+
+def add_gated_model(monkeypatch: Any) -> None:
+    """A made-up model that asks for a licence: none in the catalogue does any more."""
+    from dataclasses import replace
+
+    from skryb.transcription import license_policy
+    from skryb.transcription.model_info import ALL_MODELS
+
+    gated = replace(ALL_MODELS[PARAKEET], name=GATED, license_id=GATED_LICENCE, license_url="https://example.com/LICENSE.md")
+    monkeypatch.setitem(ALL_MODELS, GATED, gated)
+    monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"# Example Licence\n\nResearch only.\n")
 
 
 class FakeCaptureBridge:

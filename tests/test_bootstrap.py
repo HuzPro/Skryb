@@ -22,7 +22,6 @@ from skryb.bootstrap import (
     _delivery_reporter,
     _ignore_delivery,
     _key_observer,
-    _resolve_pipeline_mode,
     _warmup_safely,
     apply_settings,
     migrate_hotkey_bindings,
@@ -533,7 +532,17 @@ class TestLicenceGateAtStartupLoad:
     itself, so both are exercised here.
     """
 
-    _GATED = "crisperwhisper-2.0-turbo"
+    _GATED = "gated-example"
+
+    @pytest.fixture(autouse=True)
+    def _a_gated_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from dataclasses import replace
+
+        from skryb.transcription import license_policy
+        from skryb.transcription.model_info import ALL_MODELS
+
+        monkeypatch.setitem(ALL_MODELS, self._GATED, replace(ALL_MODELS["parakeet-ultra"], name=self._GATED, license_id="example-nc"))
+        monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"Example licence")
 
     def _gated_config(self) -> FakeConfig:
         return FakeConfig({"transcription.model_size": self._GATED})
@@ -592,7 +601,7 @@ class TestLicenceGateAtStartupLoad:
         )
 
         assert len(received) == 1
-        assert "crisperwhisper-nc" in received[0].error
+        assert "example-nc" in received[0].error
         assert state_machine.state == AppState.IDLE
         use_case.set_engine.assert_not_called()
 
@@ -1103,39 +1112,6 @@ class TestBuildStreamingEngineRouting:
         assert isinstance(engine, CacheAwareStreamingEngine)
 
 
-class TestPipelineModeForVerbatimTranscription:
-    @staticmethod
-    def _config(model: str, mode: str, transcription_mode: str = "batch"):
-        config = JsonConfigAdapter(Path("unused.json"))
-        config.load()
-        config.set("transcription.model_size", model)
-        config.set("transcription.crisperwhisper_mode", mode)
-        config.set("transcription.mode", transcription_mode)
-        return config
-
-    def test_should_bypass_the_pipeline_for_verbatim_crisperwhisper(self) -> None:
-        config = self._config("crisperwhisper-2.0-turbo", "verbatim")
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.VERBATIM
-
-    def test_should_keep_the_pipeline_for_intended_crisperwhisper(self) -> None:
-        config = self._config("crisperwhisper-2.0-turbo", "intended")
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
-
-    def test_should_ignore_a_stale_verbatim_value_on_another_model(self) -> None:
-        config = self._config("parakeet-ultra", "verbatim")
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
-
-    def test_should_ignore_a_stale_verbatim_value_when_streaming(self) -> None:
-        config = self._config(
-            "nemotron-speech-streaming-en-0.6b", "verbatim", "streaming",
-        )
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.STREAMING
-
-
 class TestEditCaptureSwitch:
     """Edit capture records keystrokes, so it must stay off unless asked for."""
 
@@ -1403,7 +1379,7 @@ def _draft(**overrides):
     from skryb.settings.settings_draft import SettingsDraft
 
     fields = {
-        "model_size": "crisperwhisper-2.0-turbo",
+        "model_size": "qwen3-asr-1.7b",
         "language": "en",
         "device": "auto",
         "engine": "auto",

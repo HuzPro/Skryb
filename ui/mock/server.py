@@ -30,33 +30,30 @@ DOWNLOAD_SECONDS = 8.0
 ENGINE_LOAD_SECONDS = 1.5
 HISTORY_SIZE = 2500
 
+# No model in the lineup asks for a licence any more; this keeps the licence dialog's shape for the shell.
 LICENSE = {
-    "id": "crisperwhisper-nc",
-    "title": "CrisperWhisper licence (non-commercial research)",
-    "url": "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/main/LICENSE.md",
-    "text": (
-        "CrisperWhisper 2.0 - Non-Commercial Research Licence\n\n"
-        "1. You may use the model weights and their outputs for non-commercial research only.\n"
-        "2. You may not use the weights or outputs in any product or service offered for money.\n"
-        "3. Redistribution must keep this licence and the attribution to nyra labs.\n\n"
-    ) + "\n".join(f"{n}. Placeholder clause {n}: the mock repeats this so the dialog scrolls." for n in range(4, 40)),
+    "id": "example-licence",
+    "title": "Example model licence",
+    "url": "https://example.com/licence",
+    "text": "\n".join(f"{n}. Placeholder clause {n}: the mock repeats this so the dialog scrolls." for n in range(1, 40)),
 }
 
 MODELS = [
-    {"name": "parakeet-tdt-0.6b-v3", "display_size": "2.5 GB", "size": 2_510_000_000,
-     "description": "Best accuracy, built-in punctuation (25 languages)", "installed": True,
-     "supports_batch": True, "supports_streaming": False, "has_speech_styles": False, "license_id": None},
+    {"name": "phonon-2.5-english", "display_size": "164 MB", "size": 164_000_000,
+     "description": "Parakeet v3 shrunk to 164 MB by Fermion Research: fast on CPU, English only", "installed": True,
+     "supports_batch": True, "supports_streaming": False, "license_id": None,
+     "tier": "Small", "needs": "No GPU: the CPU or an Intel NPU, with under 1 GB of RAM"},
+    {"name": "parakeet-ultra", "display_size": "1.3 GB", "size": 1_260_000_000,
+     "description": "Parakeet v3 retrained by Moondream: fewer errors, same 25 languages", "installed": True,
+     "supports_batch": True, "supports_streaming": True, "license_id": None,
+     "tier": "Medium", "needs": "A GPU with about 2 GB of VRAM, or an Intel NPU"},
+    {"name": "qwen3-asr-1.7b", "display_size": "4.1 GB", "size": 4_080_000_000,
+     "description": "Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, the NPU on Intel, PyTorch elsewhere",
+     "installed": False, "supports_batch": True, "supports_streaming": False, "license_id": None,
+     "tier": "Large", "needs": "A GPU with about 5 GB of VRAM; an Intel NPU runs it more slowly"},
     {"name": "nemotron-speech-streaming-en-0.6b", "display_size": "2.5 GB", "size": 2_470_000_000,
      "description": "NVIDIA cache-aware streaming (English, low-latency, GPU)", "installed": False,
-     "supports_batch": False, "supports_streaming": True, "has_speech_styles": False, "license_id": None},
-    {"name": "crisperwhisper-2.0-turbo", "display_size": "1.6 GB", "size": 1_630_000_000,
-     "description": "Fast 0.8B intended/verbatim Whisper; weights/outputs under non-commercial research license",
-     "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
-     "license_id": "crisperwhisper-nc"},
-    {"name": "crisperwhisper-2.0-large", "display_size": "3.1 GB", "size": 3_100_000_000,
-     "description": "Accurate 1.55B intended/verbatim Whisper; weights/outputs under non-commercial research license",
-     "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
-     "license_id": "crisperwhisper-nc"},
+     "supports_batch": False, "supports_streaming": True, "license_id": None, "tier": None, "needs": None},
 ]
 
 BROKEN_MICROPHONE = "Microphone Array (Realtek(R) A"
@@ -89,13 +86,16 @@ MEETING_LINES = [
 ]
 
 ENGINES = {
-    "parakeet-tdt-0.6b-v3": [("nano_parakeet", "Parakeet (ONNX Runtime)", "Runs on the CPU with ONNX Runtime; no GPU needed.")],
-    "nemotron-speech-streaming-en-0.6b": [("nemotron_streaming", "Nemotron streaming (NeMo)", "Needs a CUDA GPU.")],
-    "crisperwhisper-2.0-turbo": [
-        ("crisperwhisper_ct2", "CrisperWhisper (CTranslate2)", "Fastest on this computer: CTranslate2 on the CPU, no torch needed."),
-        ("crisperwhisper", "CrisperWhisper (Transformers)", "Uses torch; slower to start."),
+    "phonon-2.5-english": [("phonon2_cpu", "Phonon-2 (Fermion CPU engine)", "Runs on the CPU; no GPU needed.")],
+    "parakeet-ultra": [
+        ("native_parakeet", "Parakeet (native GPU engine)", "Fastest on this computer: no torch needed."),
+        ("nano_parakeet", "nano-parakeet (PyTorch)", "Uses torch; slower to start."),
     ],
-    "crisperwhisper-2.0-large": [("crisperwhisper", "CrisperWhisper (Transformers)", "Uses torch; the only engine for this model.")],
+    "qwen3-asr-1.7b": [
+        ("native_qwen3_asr", "Qwen3-ASR (native GPU engine)", "Recommended for your AMD GPU (gfx1200)"),
+        ("qwen3_asr", "Qwen3-ASR (Transformers)", "Uses torch; slower to start."),
+    ],
+    "nemotron-speech-streaming-en-0.6b": [("nemotron_streaming", "Nemotron streaming (NeMo)", "Needs a CUDA GPU.")],
 }
 
 SAMPLE_TEXTS = [
@@ -118,8 +118,8 @@ SAMPLE_TEXTS = [
 
 def _default_settings():
     return {
-        "model_size": "parakeet-tdt-0.6b-v3", "language": "en", "device": "auto", "engine": "auto",
-        "output_mode": "direct_paste", "transcription_mode": "batch", "crisperwhisper_mode": "intended",
+        "model_size": "parakeet-ultra", "language": "en", "device": "auto", "engine": "auto",
+        "output_mode": "direct_paste", "transcription_mode": "batch",
         "capture_content": True, "question_marks": True, "input_device": "", "boost_quiet_speech": True,
         "hotkey_bindings": [
             {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
@@ -211,7 +211,7 @@ class Core:
                 model["installed"] = False
         self.app = {"version": "0.9.0", "state": "idle",
                     "engine": {"ready": not first_run, "loading": False, "error": None,
-                               "model": "" if first_run else "parakeet-tdt-0.6b-v3",
+                               "model": "" if first_run else "parakeet-ultra",
                                "device": None if first_run else "NPU", "device_note": None},
                     "first_run": first_run, "diagnostics_directory": "D:\\VoiceToText_logs",
                     "history_directory": "D:\\VoiceToText_logs", "pill_default_position": [0.5, 1.0],
@@ -644,7 +644,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error(409, "Settings can be saved once the current dictation finishes.")
             return
         before = core.settings
-        reload = any(before[key] != draft[key] for key in ("model_size", "engine", "device", "transcription_mode", "crisperwhisper_mode"))
+        reload = any(before[key] != draft[key] for key in ("model_size", "engine", "device", "transcription_mode"))
         changes = {
             "engine_reload_required": reload, "hotkey_changed": before["hotkey_bindings"] != draft["hotkey_bindings"],
             "output_changed": before["output_mode"] != draft["output_mode"], "mode_changed": before["transcription_mode"] != draft["transcription_mode"],

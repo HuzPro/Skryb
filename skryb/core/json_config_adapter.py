@@ -35,7 +35,6 @@ DEFAULT_CONFIG = {
         "language": "en",
         "beam_size": 5,
         "mode": "batch",
-        "crisperwhisper_mode": "intended",
         "wake_after_idle_seconds": 60.0,
         "question_marks": True,
     },

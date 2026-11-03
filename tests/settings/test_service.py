@@ -64,10 +64,6 @@ def test_recording_consent_round_trips_through_saved_settings() -> None:
     service.apply_draft(replace(service.current_draft(), capture_content=False))
     assert config.get("diagnostics.capture_content") is False
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-_CRISPERWHISPER = {
-    "crisperwhisper-2.0-turbo",
-    "crisperwhisper-2.0-large",
-}
 
 
 def _build_service(
@@ -180,7 +176,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, "phonon-2.5-english", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, "phonon-2.5-english", _NEMOTRON, "qwen3-asr-1.7b",
         }
 
     def test_should_mark_installed_status_on_view(self):
@@ -561,7 +557,15 @@ class TestLicenceConsent:
     into the loader.
     """
 
-    _GATED = "crisperwhisper-2.0-turbo"
+    _GATED = "gated-example"
+
+    @pytest.fixture(autouse=True)
+    def _a_gated_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from skryb.transcription import license_policy
+
+        gated = replace(ALL_MODELS[_PARAKEET], name=self._GATED, license_id="example-nc", license_url="https://example.com/LICENSE.md")
+        monkeypatch.setitem(ALL_MODELS, self._GATED, gated)
+        monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"# Example Licence\n\nResearch only.\n")
 
     def _gated_service(self, config: FakeConfig):
         service, *_ = _build_service(
@@ -591,9 +595,9 @@ class TestLicenceConsent:
 
         terms = service.license_terms(self._GATED)
 
-        assert terms.license_id == "crisperwhisper-nc"
-        assert terms.url == ALL_MODELS[self._GATED].license_url
-        assert terms.text.startswith("# CrisperWhisper 2.0")
+        assert terms.license_id == "example-nc"
+        assert terms.url == "https://example.com/LICENSE.md"
+        assert terms.text.startswith("# Example Licence")
 
     def test_should_clear_the_requirement_once_the_licence_is_accepted(self):
         service = self._gated_service(FakeConfig())

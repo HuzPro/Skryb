@@ -13,7 +13,7 @@ import pytest
 
 from tests.fakes.installs import without_openvino
 from tests.fakes.hardware import FakeHardwareDetector
-from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
+from tests.ui.rig import GATED, GATED_LICENCE, NEMOTRON, PARAKEET, QWEN, Rig, add_gated_model
 from skryb.core.events import DownloadProgressEvent
 from skryb.core.release_update import UpdateStatus
 from skryb.transcription import engine_factory
@@ -27,7 +27,7 @@ from skryb.ui.shapes import draft_from_json
 
 _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
-    "crisperwhisper_mode", "question_marks", "capture_content", "input_device", "boost_quiet_speech",
+    "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings",
 }
@@ -159,34 +159,35 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
     }
 
 
-def test_a_gated_model_is_refused_until_its_licence_is_accepted_then_it_loads(make_rig) -> None:
-    rig = make_rig(installed=(PARAKEET, TURBO))
+def test_a_gated_model_is_refused_until_its_licence_is_accepted_then_it_loads(make_rig, monkeypatch) -> None:
+    add_gated_model(monkeypatch)
+    rig = make_rig(installed=(PARAKEET, GATED))
     stream = rig.events()
     settings = _settings(rig)
-    settings["model_size"] = TURBO
+    settings["model_size"] = GATED
 
     status, refused = rig.call("PUT", "/api/settings", settings)
 
     assert status == 409
-    assert refused["license"]["id"] == CRISPERWHISPER_LICENCE
-    assert "CrisperWhisper" in refused["license"]["text"]
+    assert refused["license"]["id"] == GATED_LICENCE
+    assert "Example Licence" in refused["license"]["text"]
     assert refused["license"]["title"]
     assert rig.config.get("transcription.model_size") == PARAKEET
     assert rig.saved == []
 
-    assert rig.call("POST", "/api/license/accept", {"id": CRISPERWHISPER_LICENCE})[0] == 204
+    assert rig.call("POST", "/api/license/accept", {"id": GATED_LICENCE})[0] == 204
     status, reply = rig.call("PUT", "/api/settings", settings)
 
     assert status == 200
     assert reply["engine_reload_started"] is True
     assert stream.until("engine") == {
-        "state": "loading", "loading": True, "ready": False, "error": None, "model": TURBO,
+        "state": "loading", "loading": True, "ready": False, "error": None, "model": GATED,
     }
     assert stream.until("engine")["state"] == "ready"
     stream.close()
     assert [changes.engine_reload_required for changes in rig.saved] == [True]
     assert rig.call("GET", "/api/app")[1]["engine"] == {
-        "loading": False, "ready": True, "error": None, "model": TURBO, "device": None, "device_note": None,
+        "loading": False, "ready": True, "error": None, "model": GATED, "device": None, "device_note": None,
     }
 
 
@@ -310,10 +311,10 @@ def test_settings_wait_while_a_dictation_is_in_progress(rig: Rig) -> None:
 
 def test_a_model_that_is_not_installed_cannot_be_chosen(rig: Rig) -> None:
     settings = _settings(rig)
-    settings["model_size"] = "crisperwhisper-2.0-large"
+    settings["model_size"] = QWEN
 
     assert rig.call("PUT", "/api/settings", settings) == (
-        400, {"error": "'crisperwhisper-2.0-large' is not installed. Download it first."},
+        400, {"error": "'qwen3-asr-1.7b' is not installed. Download it first."},
     )
 
 
@@ -404,13 +405,13 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
 
     assert status == 200
     by_name = {model["name"]: model for model in models}
-    assert set(by_name) == {
-        PARAKEET, "phonon-2.5-english", NEMOTRON, TURBO, "crisperwhisper-2.0-large", "qwen3-asr-1.7b",
-    }
+    assert set(by_name) == {PARAKEET, "phonon-2.5-english", NEMOTRON, QWEN}
     assert by_name[PARAKEET]["installed"] is True
     assert by_name[PARAKEET]["license_id"] is None
-    assert by_name[TURBO]["license_id"] == CRISPERWHISPER_LICENCE
-    assert by_name[TURBO]["has_speech_styles"] is True
+    assert [by_name[name]["tier"] for name in ("phonon-2.5-english", PARAKEET, QWEN, NEMOTRON)] == [
+        "Small", "Medium", "Large", None,
+    ]
+    assert by_name[QWEN]["needs"] and by_name[NEMOTRON]["needs"] is None
     assert (by_name[NEMOTRON]["supports_streaming"], by_name[NEMOTRON]["supports_batch"]) == (True, False)
     assert by_name[NEMOTRON]["download"] == {
         "state": "downloading", "bytes_done": 512, "bytes_total": 2048, "error": "",
@@ -418,9 +419,8 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
     assert by_name[PARAKEET]["download"] is None
     assert set(by_name[PARAKEET]) == {
         "name", "display_size", "description", "installed", "supports_batch",
-        "supports_streaming", "has_speech_styles", "license_id", "download",
+        "supports_streaming", "license_id", "tier", "needs", "download",
     }
-    assert by_name["phonon-2.5-english"]["has_speech_styles"] is False
 
 
 def test_first_run_setup_lists_this_computers_default_model_first(make_rig) -> None:
@@ -430,7 +430,7 @@ def test_first_run_setup_lists_this_computers_default_model_first(make_rig) -> N
     names = [model["name"] for model in rig.call("GET", "/api/models")[1]]
 
     assert names[0] == "phonon-2.5-english"
-    assert names[1:3] == [PARAKEET, "crisperwhisper-2.0-turbo"]
+    assert names[1:3] == [PARAKEET, QWEN]
     assert len(names) == len(set(names))
 
 
@@ -439,10 +439,11 @@ def test_the_settings_window_keeps_the_catalogue_order(rig: Rig) -> None:
 
     names = [model["name"] for model in rig.call("GET", "/api/models")[1]]
 
-    assert names[:3] == [PARAKEET, "phonon-2.5-english", "crisperwhisper-2.0-turbo"]
+    assert names[:3] == [PARAKEET, "phonon-2.5-english", QWEN]
 
 
-def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(make_rig) -> None:
+def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(make_rig, monkeypatch) -> None:
+    add_gated_model(monkeypatch)
     rig = make_rig(installed=(PARAKEET, NEMOTRON))
     stream = rig.events()
 
@@ -450,11 +451,11 @@ def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(m
     assert rig.call("POST", f"/api/models/{NEMOTRON}/pause")[0] == 202
     assert rig.call("POST", f"/api/models/{NEMOTRON}/resume")[0] == 202
     assert rig.call("POST", f"/api/models/{NEMOTRON}/cancel")[0] == 202
-    assert rig.call("POST", "/api/models/crisperwhisper-2.0-large/cancel")[0] == 202
+    assert rig.call("POST", f"/api/models/{QWEN}/cancel")[0] == 202
     assert rig.manager.download_calls == [NEMOTRON, NEMOTRON]
 
-    status, refused = rig.call("POST", f"/api/models/{TURBO}/download")
-    assert status == 409 and refused["license"]["id"] == CRISPERWHISPER_LICENCE
+    status, refused = rig.call("POST", f"/api/models/{GATED}/download")
+    assert status == 409 and refused["license"]["id"] == GATED_LICENCE
     assert rig.call("POST", f"/api/models/{PARAKEET}/delete")[0] == 409
     assert rig.call("POST", "/api/models/no-such-model/download")[0] == 404
 
@@ -473,14 +474,14 @@ def test_engines_answer_before_the_gpu_probe_and_the_probe_reports_later(make_ri
         rig = make_rig(hardware=detector)
     stream = rig.events()
 
-    status, engines = rig.call("GET", f"/api/engines?model={TURBO}")
+    status, engines = rig.call("GET", f"/api/engines?model={QWEN}")
 
     assert status == 200
     assert engines["hardware"] == {
         "probe_pending": True, "streaming_supported": False, "kind": "", "device_name": "",
     }
     ranked = [candidate["id"] for candidate in engines["candidates"]]
-    assert ranked == ["crisperwhisper_ct2", "crisperwhisper"]
+    assert ranked == ["qwen3_asr"]
     assert set(engines["candidates"][0]) == {"id", "label", "recommended", "reason"}
     assert detector.detect_calls == 0
 

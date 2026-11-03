@@ -24,7 +24,6 @@ from skryb.output.output_mode import OutputMode
 from skryb.meetings.storage import LANGUAGES as MEETING_LANGUAGES
 from skryb.output.paste_method import PasteMethod, normalized_process_name
 from skryb.recording.preferences import DUCK_MODES
-from skryb.settings.service import CRISPERWHISPER_MODES
 from skryb.settings.settings_draft import SettingsDraft
 from skryb.settings.transcription_mode import TranscriptionMode
 
@@ -75,7 +74,6 @@ def settings_json(draft: SettingsDraft) -> Json:
         "engine": draft.engine,
         "output_mode": draft.output_mode.value,
         "transcription_mode": draft.transcription_mode.value,
-        "crisperwhisper_mode": draft.crisperwhisper_mode,
         "question_marks": draft.question_marks,
         "capture_content": draft.capture_content,
         "input_device": draft.input_device,
@@ -122,7 +120,6 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         transcription_mode=TranscriptionMode(
             settings.one_of("transcription_mode", (m.value for m in TranscriptionMode)),
         ),
-        crisperwhisper_mode=settings.one_of("crisperwhisper_mode", CRISPERWHISPER_MODES),
         question_marks=settings.flag("question_marks"),
         capture_content=settings.flag("capture_content"),
         input_device=settings.text("input_device"),

@@ -21,10 +21,13 @@ export const LANGUAGES = [
   { value: "zh", label: "Chinese" },
 ];
 
-const STYLES = [
-  { value: "intended", label: "Intended (what I meant)" },
-  { value: "verbatim", label: "Verbatim (what I said)" },
-];
+const TIERS = ["Small", "Medium", "Large"];
+
+/** Dictation's lineup smallest first, then any model outside it in the order the core sent. */
+export function byTier(models: Model[]): Model[] {
+  const rank = (model: Model) => (model.tier ? TIERS.indexOf(model.tier) : TIERS.length);
+  return [...models].sort((a, b) => rank(a) - rank(b));
+}
 
 export function fitsMode(model: Model, mode: TranscriptionMode): boolean {
   return mode === "streaming" ? model.supports_streaming : model.supports_batch;
@@ -68,9 +71,7 @@ export function TranscriptionPage() {
     : hardware.streaming_supported
       ? ""
       : "Needs a CUDA or ROCm GPU, and none was detected.";
-  const shown = models.filter((model) => fitsMode(model, draft.transcription_mode));
-  const selectedModel = models.find((model) => model.name === draft.model_size);
-  const hasStyles = selectedModel?.has_speech_styles ?? false;
+  const shown = byTier(models.filter((model) => fitsMode(model, draft.transcription_mode)));
   const candidates = engines?.candidates ?? [];
   const engineOptions = [
     { value: "auto", label: "Automatic" },
@@ -97,7 +98,7 @@ export function TranscriptionPage() {
           ]}
         />
       </Section>
-      <Section title="Models">
+      <Section title="Models" note={draft.transcription_mode === "batch" ? "Small, Medium and Large: the larger the model, the fewer mistakes, and the more it needs." : undefined}>
         <div role="radiogroup" aria-label="Model" className="flex flex-col gap-2">
           {shown.map((model) => (
             <ModelCard
@@ -119,23 +120,6 @@ export function TranscriptionPage() {
               value={draft.language}
               options={LANGUAGES.some((language) => language.value === draft.language) ? LANGUAGES : [...LANGUAGES, { value: draft.language, label: draft.language }]}
               onChange={(language) => editSettings((current) => ({ ...current, language }))}
-            />
-          </Row>
-          <Row
-            title="Speech style"
-            description={
-              hasStyles
-                ? "Verbatim keeps fillers and skips the dictionary, spoken commands, and number formatting."
-                : "Only CrisperWhisper models have speech styles."
-            }
-          >
-            <Select
-              label="Speech style"
-              className="w-56"
-              value={draft.crisperwhisper_mode}
-              options={STYLES}
-              disabled={!hasStyles}
-              onChange={(style) => editSettings((current) => ({ ...current, crisperwhisper_mode: style as Settings["crisperwhisper_mode"] }))}
             />
           </Row>
           <Row

@@ -51,16 +51,20 @@ first thing to include in a bug report.
   to 5. The default is `Ctrl+Alt+M`. Double-tap a hold shortcut to go
   hands-free. The shortcut's last key never reaches the focused app, and your
   clipboard is preserved.
-- **Local models.** Parakeet Ultra (`parakeet-ultra`) is the default on a GPU,
-  and CrisperWhisper is there too, under a non-commercial license.
+- **Local models, in three sizes.** Small is Phonon-2.5 English (CPU or Intel
+  NPU, no GPU), Medium is Parakeet Ultra (`parakeet-ultra`, the default on a
+  GPU) and Large is Qwen3-ASR 1.7B, the most accurate.
 - **Live streaming mode (experimental).** Text appears while you speak, using
   Parakeet or the cache-aware `nemotron-speech-streaming-en-0.6b`. GPU only.
 - **GPU first, CPU works too.** CUDA and ROCm, Windows ROCm included, are
   first-class. On a computer with no GPU the default is `phonon-2.5-english`, Parakeet
   v3 shrunk to 164 MB (English only). It runs on Fermion Research's CPU engine
   at roughly 15 to 30 times faster than real time.
-- **Learns your spellings.** Fix a word it got wrong after it pastes. Once two
-  separate fixes agree, it uses your spelling from then on.
+- **Spells your names right.** List the people, products and terms you say on
+  the Dictionary page, with a note such as "the app I'm building". Dictation and
+  meetings tell the model about them. Select a name it got wrong and say it
+  again to get the other spelling; Skryb then offers to swap that spelling
+  every time.
 - **Small footprint.** A tray icon, plus a pill on screen while you dictate.
   Settings and History open in a separate 3.5 MB window only when you ask for
   them, and it closes completely when you close it.
@@ -86,11 +90,7 @@ turn it on deliberately. Turning history off stops edit capture writing too.
 
 The application is licensed under
 [Apache-2.0](https://github.com/HuzPro/Skryb/blob/main/LICENSE.txt).
-Downloaded models have their own licenses. CrisperWhisper weights and outputs
-are restricted to non-commercial use, and the app asks you to accept those
-terms before downloading or using them. Commercial or production use needs
-separate permission under its
-[model license](https://github.com/HuzPro/Skryb/blob/main/skryb/licenses/crisperwhisper-nc.md).
+Downloaded models have their own licenses.
 
 ## Sponsorship
 

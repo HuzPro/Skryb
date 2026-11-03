@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -41,6 +41,9 @@ class ModelInfo:
     engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
     # Overrides for a computer with an Intel NPU the NPU engine was tuned on (``intel_npu``).
     npu_engine_priorities: Mapping[EngineId, int] = field(default_factory=lambda: _EMPTY_PRIORITIES)
+    # Where it sits in the dictation lineup (Small, Medium, Large) and roughly what it needs to run well.
+    tier: str = ""
+    needs: str = ""
 
     @property
     def display_size(self) -> str:
@@ -73,6 +76,8 @@ PARAKEET_MODELS: dict[str, ModelInfo] = {
         revision="73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         compatible_engines=_NPU_PARAKEET_ENGINES,
         engine_priorities=_NPU_PARAKEET_ENGINE_PRIORITIES,
+        tier="Medium",
+        needs="A GPU with about 2 GB of VRAM, or an Intel NPU",
     ),
 }
 
@@ -102,6 +107,8 @@ PHONON2_MODELS: dict[str, ModelInfo] = {
         compatible_engines=("phonon2_cpu", "native_parakeet", "openvino_parakeet"),
         engine_priorities=_PHONON2_ENGINE_PRIORITIES,
         npu_engine_priorities=_PHONON2_NPU_ENGINE_PRIORITIES,
+        tier="Small",
+        needs="No GPU: the CPU or an Intel NPU, with under 1 GB of RAM",
     ),
 }
 
@@ -135,6 +142,8 @@ QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
         compatible_engines=("native_qwen3_asr", "openvino_qwen3_asr", "qwen3_asr"),
         engine_priorities=_QWEN3_ASR_ENGINE_PRIORITIES,
         npu_engine_priorities=_QWEN3_ASR_NPU_ENGINE_PRIORITIES,
+        tier="Large",
+        needs="A GPU with about 5 GB of VRAM; an Intel NPU runs it more slowly",
     ),
 }
 
@@ -156,77 +165,9 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 }
 
 
-_CRISPERWHISPER_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"crisperwhisper": 40, "crisperwhisper_ct2": 45, "native_crisperwhisper": 120, "openvino_crisperwhisper": 30},
-)
-_CRISPERWHISPER_NPU_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
-    {"openvino_crisperwhisper": 110},
-)
-
-# One licence covers both variants: the LICENSE.md bytes at the two
-# pinned commits are byte-identical, so a single acceptance is correct
-# rather than a convenient guess.
-CRISPERWHISPER_LICENSE_ID = "crisperwhisper-nc"
-
-
-CRISPERWHISPER_MODELS: dict[str, ModelInfo] = {
-    "crisperwhisper-2.0-turbo": ModelInfo(
-        name="crisperwhisper-2.0-turbo",
-        size_mb=1630,
-        description=(
-            "Fast 0.8B intended/verbatim Whisper; "
-            "weights/outputs under non-commercial research license"
-        ),
-        repo_id="nyralabs/CrisperWhisper2.0_turbo",
-        revision="de0369c8a68025b7f6e86387b6eb5a3b369787c8",
-        license_id=CRISPERWHISPER_LICENSE_ID,
-        license_url=(
-            "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/"
-            "de0369c8a68025b7f6e86387b6eb5a3b369787c8/LICENSE.md"
-        ),
-        compatible_engines=("native_crisperwhisper", "openvino_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2"),
-        engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
-        npu_engine_priorities=_CRISPERWHISPER_NPU_ENGINE_PRIORITIES,
-    ),
-    "crisperwhisper-2.0-large": ModelInfo(
-        name="crisperwhisper-2.0-large",
-        size_mb=3100,
-        description=(
-            "Accurate 1.55B intended/verbatim Whisper; "
-            "weights/outputs under non-commercial research license"
-        ),
-        repo_id="nyralabs/CrisperWhisper2.0_large",
-        revision="f4334f6e8193f2691212d49b20fa12d370e13896",
-        license_id=CRISPERWHISPER_LICENSE_ID,
-        license_url=(
-            "https://huggingface.co/nyralabs/CrisperWhisper2.0_large/blob/"
-            "f4334f6e8193f2691212d49b20fa12d370e13896/LICENSE.md"
-        ),
-        compatible_engines=("native_crisperwhisper", "openvino_crisperwhisper", "crisperwhisper"),
-        engine_priorities=_CRISPERWHISPER_ENGINE_PRIORITIES,
-        npu_engine_priorities=_CRISPERWHISPER_NPU_ENGINE_PRIORITIES,
-    ),
-}
-
-
 ALL_MODELS: dict[str, ModelInfo] = {
-    **PARAKEET_MODELS, **PHONON2_MODELS, **NEMOTRON_STREAMING_MODELS,
-    **CRISPERWHISPER_MODELS, **QWEN3_ASR_MODELS,
+    **PARAKEET_MODELS, **PHONON2_MODELS, **NEMOTRON_STREAMING_MODELS, **QWEN3_ASR_MODELS,
 }
-
-
-def has_crisperwhisper_modes(name: str) -> bool:
-    """Whether *name* is decoded with an intended/verbatim prefix."""
-    return name in CRISPERWHISPER_MODELS
-
-
-def transcribes_verbatim(name: str, crisperwhisper_mode: str) -> bool:
-    """Whether *name* hands over the words as spoken, so cleanup must stay off.
-
-    A mode left behind from an earlier model never applies to a model
-    without speech styles.
-    """
-    return has_crisperwhisper_modes(name) and crisperwhisper_mode == "verbatim"
 
 
 def is_catalog_model(name: str) -> bool:
@@ -274,9 +215,29 @@ _REMOVED_MODEL_STREAMING_REPLACEMENTS: dict[str, str] = {
 }
 
 
-def migrate_removed_models(config: ConfigurationStore) -> None:
+_CRISPERWHISPER = ("crisperwhisper-2.0-turbo", "crisperwhisper-2.0-large")
+
+
+def best_model_left(hardware_kind: object, native_gpu: bool, installed: Callable[[str], bool]) -> str:
+    """The largest model this computer runs well, preferring one already downloaded.
+
+    Qwen3-ASR on a GPU the native engine knows, Parakeet Ultra on any other
+    GPU, Phonon-2.5 English without one.
+    """
+    if hardware_kind in (None, "cpu"):
+        ladder = [CPU_DEFAULT_MODEL]
+    elif native_gpu:
+        ladder = ["qwen3-asr-1.7b", DEFAULT_MODEL, CPU_DEFAULT_MODEL]
+    else:
+        ladder = [DEFAULT_MODEL, CPU_DEFAULT_MODEL]
+    return next((name for name in ladder if installed(name)), ladder[0])
+
+
+def migrate_removed_models(
+    config: ConfigurationStore, crisperwhisper_replacement: Callable[[], str] = lambda: DEFAULT_MODEL,
+) -> None:
     current = config.get("transcription.model_size")
-    replacement = _REMOVED_MODEL_REPLACEMENTS.get(current)
+    replacement = crisperwhisper_replacement() if current in _CRISPERWHISPER else _REMOVED_MODEL_REPLACEMENTS.get(current)
     if replacement is None:
         return
     if config.get("transcription.mode", "batch") == "streaming":
@@ -290,8 +251,13 @@ def migrate_removed_models(config: ConfigurationStore) -> None:
     config.save()
 
 
+
 _REMOVED_ENGINES: frozenset[str] = frozenset({
     "ark_asr",
+    "crisperwhisper",
+    "crisperwhisper_ct2",
+    "native_crisperwhisper",
+    "openvino_crisperwhisper",
     "faster_whisper",
     "granite_speech",
     "granite_turboctc",

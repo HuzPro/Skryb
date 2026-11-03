@@ -22,7 +22,6 @@ class SettingsDraft:
     engine: str
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
-    crisperwhisper_mode: str = "intended"
     # Handed to the engine when it is built, like the speech style.
     question_marks: bool = True
     capture_content: bool = False
@@ -65,19 +64,12 @@ class ChangeSet:
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
-        # The intended/verbatim tags are baked into the decoder prefix at
-        # load time, and verbatim also switches the output pipeline off,
-        # so a mode change has to reload the engine and rebuild output.
-        crisperwhisper_mode_changed = (
-            original.crisperwhisper_mode != updated.crisperwhisper_mode
-        )
         engine_reload_required = (
             original.model_size != updated.model_size
             or original.device != updated.device
             or original.language != updated.language
             or original.engine != updated.engine
             or original.transcription_mode != updated.transcription_mode
-            or crisperwhisper_mode_changed
             or original.question_marks != updated.question_marks
         )
         hotkey_changed = (
@@ -85,16 +77,9 @@ class ChangeSet:
             or original.double_tap_locks_hold != updated.double_tap_locks_hold
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
-        # The pipeline runs in passthrough only while the selected model
-        # transcribes verbatim (see transcribes_verbatim), so changing the model alone
-        # can turn the dictionary, filler removal and number formatting back
-        # on or off. That resolution lives in the composition root; rebuilding
-        # output for any model change is what keeps this from having to hold a
-        # second copy of it that can drift.
         output_changed = (
             original.output_mode != updated.output_mode
             or mode_changed
-            or crisperwhisper_mode_changed
             or original.model_size != updated.model_size
         )
         return cls(

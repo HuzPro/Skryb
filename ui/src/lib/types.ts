@@ -39,7 +39,6 @@ export interface Settings {
   engine: string;
   output_mode: OutputMode;
   transcription_mode: TranscriptionMode;
-  crisperwhisper_mode: "intended" | "verbatim";
   question_marks: boolean;
   capture_content: boolean;
   input_device: string;
@@ -71,8 +70,11 @@ export interface Model {
   installed: boolean;
   supports_batch: boolean;
   supports_streaming: boolean;
-  has_speech_styles: boolean;
   license_id: string | null;
+  /** Small, Medium or Large in the dictation lineup; null for live and meeting models. */
+  tier?: string | null;
+  /** Roughly what it needs to run well. */
+  needs?: string | null;
   download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
 }
 

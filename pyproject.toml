@@ -25,11 +25,11 @@ dependencies = [
     "requests>=2.31.0",
     "nano-parakeet>=0.2.1",
     # 5.18.0 is the first release with Nemotron 3 Diarization, which meetings
-    # use to tell speakers apart; CrisperWhisper only needs 4.40. The upper
+    # use to tell speakers apart. The upper
     # bound keeps a future major out until tested. torchaudio is the decode
     # backend transformers' audio loader uses.
     "transformers>=5.18.0,<6",
-    # Whisper prompt building and decoding go straight to the Rust
+    # The native Qwen3-ASR engine tokenises its prompt straight in the Rust
     # tokenizer, so no engine has to import Transformers for them.
     "tokenizers>=0.23.1",
     "torchaudio>=2.5",
@@ -61,12 +61,6 @@ dependencies = [
 
 [project.optional-dependencies]
 punct = ["sherpa-onnx>=1.10"]
-# CTranslate2 runs CrisperWhisper without importing transformers, which is
-# the difference between a 15.5 s and a 3.4 s launch. PyPI publishes only
-# the CPU/CUDA build; AMD GPUs need the ROCm wheel from CTranslate2's
-# GitHub release, which is on no index and carries the same version
-# number, so this extra cannot express it. See INSTALL.md.
-ct2 = ["ctranslate2>=4.8.2,<5"]
 # Runs the Parakeet encoder on an Intel NPU (Core Ultra, Core Series 3).
 # 2026.1 is the first release that knows Wildcat Lake's NPU.
 npu = ["openvino>=2026.1"]
@@ -116,4 +110,4 @@ include = ["skryb*"]
 # show. ui-bin/ holds the settings window exe, which only the installer
 # build puts there.
 [tool.setuptools.package-data]
-skryb = ["licenses/*.md", "ui-bin/*.exe", "transcription/qasr.dll", "transcription/npk.dll", "transcription/cw.dll", "transcription/nd.dll", "transcription/*_cuda.dll", "transcription/tdt_cpu.dll"]
+skryb = ["licenses/*.md", "ui-bin/*.exe", "transcription/qasr.dll", "transcription/npk.dll", "transcription/nd.dll", "transcription/*_cuda.dll", "transcription/tdt_cpu.dll"]

@@ -20,7 +20,7 @@ from skryb.settings.model_installation_cache import ModelInstallationCache
 from skryb.settings.service import SettingsService
 from skryb.transcription.engine_types import HardwareProfile
 
-_TURBO = "crisperwhisper-2.0-turbo"
+_QWEN = "qwen3-asr-1.7b"
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
 _ROCM = HardwareProfile(
     kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200",
@@ -32,7 +32,7 @@ def _service(
     detector: FakeHardwareDetector, tmp_path: Path, engine: str = "auto",
 ) -> SettingsService:
     config = FakeConfig({
-        "transcription.model_size": _TURBO,
+        "transcription.model_size": _QWEN,
         "transcription.engine": engine,
         "transcription.language": "en",
         "transcription.device": "auto",
@@ -40,7 +40,7 @@ def _service(
         "hotkey.mode": "toggle",
         "output.mode": "direct_paste",
     })
-    manager = FakeModelManager(installed={_TURBO: True})
+    manager = FakeModelManager(installed={_QWEN: True})
     bus = SimpleEventBus()
     return SettingsService(
         config=config,
@@ -63,10 +63,10 @@ def test_engine_choices_before_the_probe_come_from_the_ranking_that_ignores_hard
     detector = FakeHardwareDetector(_ROCM, probed=False)
     service = _service(detector, tmp_path)
 
-    turbo = service.engine_candidates_for(_TURBO)
+    qwen = service.engine_candidates_for(_QWEN)
 
-    assert [c.engine_id for c in turbo] == ["crisperwhisper_ct2", "crisperwhisper"]
-    assert [c.reason for c in turbo] == ["", ""]
+    assert [c.engine_id for c in qwen] == ["qwen3_asr"]
+    assert [c.reason for c in qwen] == [""]
     assert service.engine_candidates_for(_NEMOTRON) == ()
     assert service.supports_streaming_hardware() is False
     assert service.hardware_probe_pending() is True

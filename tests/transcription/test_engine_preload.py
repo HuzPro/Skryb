@@ -40,7 +40,7 @@ class TestEnginePreload:
 
     def test_an_error_building_the_engine_is_raised_to_whoever_waits(self) -> None:
         def build() -> FakeTranscriptionEngine:
-            raise PermissionError("licence for 'crisperwhisper-2.0-turbo' not accepted")
+            raise PermissionError("licence for 'gated-example' not accepted")
 
         preload = EnginePreload.start(build)
 

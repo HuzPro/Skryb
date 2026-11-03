@@ -176,12 +176,13 @@ from skryb.transcription.hardware_detector import HardwareDetector
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import (
     DEFAULT_MODEL,
+    best_model_left,
     ModelInfo,
     get_model_info,
-    transcribes_verbatim,
 )
 from skryb.transcription.model_manager import ModelManager
 from skryb.transcription.placeholder_engine import PlaceholderEngine
+from skryb.transcription.native_engine_dll import NATIVE_GPU_ARCHS
 from skryb.transcription.qwen3_asr_prompt import LANGUAGE_NAMES
 from skryb.transcription.streaming.live_streaming_controller import (
     LiveStreamingController,
@@ -496,19 +497,9 @@ def _resolve_output_mode(config: JsonConfigAdapter) -> OutputMode:
 
 
 def _resolve_pipeline_mode(config: JsonConfigAdapter) -> PipelineMode:
-    if _transcribes_verbatim(config):
-        return PipelineMode.VERBATIM
     if config.get("transcription.mode", "batch") == "streaming":
         return PipelineMode.STREAMING
     return PipelineMode.BATCH
-
-
-def _transcribes_verbatim(config: JsonConfigAdapter) -> bool:
-    """Whether the active model is decoding in verbatim mode."""
-    model = config.get("transcription.model_size", DEFAULT_MODEL)
-    if not isinstance(model, str):
-        return False
-    return transcribes_verbatim(model, config.get("transcription.crisperwhisper_mode", "intended"))
 
 
 def _hotkey_actions(use_case: RecordAndTranscribeUseCase) -> HotkeyActions:
@@ -568,6 +559,16 @@ def _wake_after_idle_seconds(
     if isinstance(value, bool) or not isinstance(value, int | float):
         return _WAKE_AFTER_IDLE_SECONDS
     return max(float(value), 0.0)
+
+
+def _best_model_left(config: JsonConfigAdapter, paths: AppPaths, hardware_detector: HardwareDetector) -> str:
+    """What a config that picked CrisperWhisper moves to, judged by the GPU last probed."""
+    hardware = hardware_detector.peek()
+    return best_model_left(
+        None if hardware is None else hardware.kind,
+        hardware is not None and hardware.gfx_arch in NATIVE_GPU_ARCHS,
+        lambda name: bool(engines_with_model_on_disk(get_model_info(name), paths.models_dir)),
+    )
 
 
 def _dictation_language(config: JsonConfigAdapter) -> str:
@@ -1210,7 +1211,7 @@ def build_app(
         migrate_engine_field,
         migrate_removed_models,
     )
-    migrate_removed_models(config)
+    migrate_removed_models(config, functools.partial(_best_model_left, config, paths, hardware_detector))
     migrate_engine_field(config)
     migrate_output_mode(config)
     migrate_language(config)

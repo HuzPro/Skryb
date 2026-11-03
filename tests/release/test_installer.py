@@ -119,13 +119,10 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
         parakeet = repo / "native" / "parakeet" / "build" / "npk.dll"
         parakeet.parent.mkdir(parents=True)
         parakeet.write_bytes(b"MZ native parakeet")
-        whisper = repo / "native" / "whisper" / "build" / "cw.dll"
-        whisper.parent.mkdir(parents=True)
-        whisper.write_bytes(b"MZ native whisper")
         diarizer = repo / "native" / "diar" / "build" / "nd.dll"
         diarizer.parent.mkdir(parents=True)
         diarizer.write_bytes(b"MZ native diarizer")
-        for amd in (dll, parakeet, whisper, diarizer):
+        for amd in (dll, parakeet, diarizer):
             amd.with_name(f"{amd.stem}_cuda.dll").write_bytes(b"MZ nvidia " + amd.name.encode())
         decoder = repo / "native" / "tdt" / "build" / "tdt_cpu.dll"
         decoder.parent.mkdir(parents=True)
@@ -163,7 +160,6 @@ class TestStageWheelSource:
 
         assert (source / "skryb" / "transcription" / "qasr.dll").read_bytes() == b"MZ native engine"
         assert (source / "skryb" / "transcription" / "npk.dll").read_bytes() == b"MZ native parakeet"
-        assert (source / "skryb" / "transcription" / "cw.dll").read_bytes() == b"MZ native whisper"
         assert (source / "skryb" / "transcription" / "nd.dll").read_bytes() == b"MZ native diarizer"
         assert (source / "skryb" / "transcription" / "tdt_cpu.dll").read_bytes() == b"MZ cpu decoder"
 
@@ -172,14 +168,14 @@ class TestStageWheelSource:
 
         source = _stage_wheel_source(repo, tmp_path / "scratch")
 
-        for name in ("qasr", "npk", "cw", "nd"):
+        for name in ("qasr", "npk", "nd"):
             assert (source / "skryb" / "transcription" / f"{name}_cuda.dll").read_bytes() == b"MZ nvidia " + f"{name}.dll".encode()
 
     def test_refuses_to_build_an_installer_without_an_nvidia_build(self, tmp_path):
         repo = _fake_repo(tmp_path)
-        (repo / "native" / "whisper" / "build" / "cw_cuda.dll").unlink()
+        (repo / "native" / "diar" / "build" / "nd_cuda.dll").unlink()
 
-        with pytest.raises(InstallerBuildError, match=r"cw_cuda\.dll is missing.*native/cuda/build\.py"):
+        with pytest.raises(InstallerBuildError, match=r"nd_cuda\.dll is missing.*native/cuda/build\.py"):
             _stage_wheel_source(repo, tmp_path / "scratch")
 
     def test_refuses_to_build_an_installer_without_the_native_parakeet_engine(self, tmp_path):
@@ -187,13 +183,6 @@ class TestStageWheelSource:
         (repo / "native" / "parakeet" / "build" / "npk.dll").unlink()
 
         with pytest.raises(InstallerBuildError, match=r"native/parakeet/build\.sh"):
-            _stage_wheel_source(repo, tmp_path / "scratch")
-
-    def test_refuses_to_build_an_installer_without_the_native_crisperwhisper_engine(self, tmp_path):
-        repo = _fake_repo(tmp_path)
-        (repo / "native" / "whisper" / "build" / "cw.dll").unlink()
-
-        with pytest.raises(InstallerBuildError, match=r"native/whisper/build\.sh"):
             _stage_wheel_source(repo, tmp_path / "scratch")
 
     def test_refuses_to_build_an_installer_without_the_npu_engines_cpu_decoder(self, tmp_path):

@@ -343,11 +343,6 @@ class TestPauseBreaks:
 
         assert _batch("Make a plan and um. Do it.", options=options) == "Make a plan and do it. "
 
-    def test_should_leave_verbatim_transcripts_alone(self) -> None:
-        pipeline = build_pipeline(DictionaryConfig(), PipelineMode.VERBATIM)
-
-        assert pipeline.process("Make a plan and. Do it.") == "Make a plan and. Do it."
-
 
 class TestRuleStage:
     def test_should_apply_the_longest_multi_alias_literal_match(self) -> None:
@@ -713,34 +708,6 @@ class TestStreamingPipeline:
         result = TextPipeline.for_streaming(config).process("get hub twenty percent")
 
         assert result == "get hub twenty percent"
-
-
-def _everything_on() -> DictionaryConfig:
-    return DictionaryConfig(
-        options=DictionaryOptions(
-            remove_fillers=True, spoken_commands=True, numbers=True,
-        ),
-        rules=(LiteralRule(spoken=("cloud",), replacement="Claude"),),
-    )
-
-
-class TestVerbatimPipeline:
-    def test_should_return_the_text_untouched(self) -> None:
-        pipeline = build_pipeline(_everything_on(), PipelineMode.VERBATIM)
-        spoken = "um cloud said uh twenty five percent period"
-
-        assert pipeline.process(spoken) == spoken
-
-    def test_should_keep_what_the_batch_pipeline_would_rewrite(self) -> None:
-        config = _everything_on()
-        spoken = "um cloud said uh twenty five percent period"
-
-        verbatim = build_pipeline(config, PipelineMode.VERBATIM).process(spoken)
-        batch = build_pipeline(config, PipelineMode.BATCH).process(spoken)
-
-        assert "um" in verbatim and "uh" in verbatim
-        assert "cloud" in verbatim
-        assert batch != verbatim
 
 
 class TestCaretContextStage:

@@ -524,8 +524,9 @@ class CoreApi:
                 "installed": view.installed,
                 "supports_batch": self._service.model_supports_batch(view.name),
                 "supports_streaming": self._service.model_supports_streaming(view.name),
-                "has_speech_styles": self._service.model_has_speech_styles(view.name),
                 "license_id": ALL_MODELS[view.name].license_id or None,
+                "tier": ALL_MODELS[view.name].tier or None,
+                "needs": ALL_MODELS[view.name].needs or None,
                 "download": self._hub.download_of(view.name),
             }
             for view in views.values()

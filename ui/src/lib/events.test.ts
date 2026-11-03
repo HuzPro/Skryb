@@ -9,7 +9,6 @@ const model = (name: string, installed = false): Model => ({
   installed,
   supports_batch: true,
   supports_streaming: false,
-  has_speech_styles: false,
   license_id: null,
   download: null,
 });
@@ -26,12 +25,12 @@ const app: AppInfo = {
   meeting_recording: false,
 };
 
-const models = [model("parakeet-tdt-0.6b-v3", true), model("crisperwhisper-2.0-turbo"), model("crisperwhisper-2.0-large")];
+const models = [model("parakeet-tdt-0.6b-v3", true), model("qwen3-asr-1.7b"), model("phonon-2.5-english")];
 
 describe("server events", () => {
   it("moves the progress of the downloading model and leaves the others alone", () => {
     const { snapshot, refetch } = reduceEvent({ models }, "download", {
-      name: "crisperwhisper-2.0-turbo", state: "downloading", bytes_done: 500, bytes_total: 1630, error: "",
+      name: "qwen3-asr-1.7b", state: "downloading", bytes_done: 500, bytes_total: 1630, error: "",
     });
     expect(snapshot.models?.[1]?.download).toEqual({ state: "downloading", bytes_done: 500, bytes_total: 1630, error: "" });
     expect(snapshot.models?.[0]).toBe(models[0]);
@@ -41,16 +40,16 @@ describe("server events", () => {
 
   it("marks a finished download installed and asks for a fresh model list", () => {
     const { snapshot, refetch } = reduceEvent({ models }, "download", {
-      name: "crisperwhisper-2.0-turbo", state: "completed", bytes_done: 1630, bytes_total: 1630, error: "",
+      name: "qwen3-asr-1.7b", state: "completed", bytes_done: 1630, bytes_total: 1630, error: "",
     });
     expect(snapshot.models?.[1]).toMatchObject({ installed: true, download: null });
     expect(refetch).toEqual(["models"]);
   });
 
   it("clears the bar of a cancelled download and keeps a failed one with its reason", () => {
-    const cancelled = reduceEvent({ models }, "download", { name: "crisperwhisper-2.0-large", state: "cancelled", bytes_done: 0, bytes_total: 0, error: "" });
+    const cancelled = reduceEvent({ models }, "download", { name: "phonon-2.5-english", state: "cancelled", bytes_done: 0, bytes_total: 0, error: "" });
     expect(cancelled.snapshot.models?.[2]?.download).toBeNull();
-    const failed = reduceEvent({ models }, "download", { name: "crisperwhisper-2.0-large", state: "failed", bytes_done: 9, bytes_total: 3100, error: "Disk full" });
+    const failed = reduceEvent({ models }, "download", { name: "phonon-2.5-english", state: "failed", bytes_done: 9, bytes_total: 3100, error: "Disk full" });
     expect(failed.snapshot.models?.[2]?.download).toMatchObject({ state: "failed", error: "Disk full" });
   });
 
@@ -74,22 +73,22 @@ describe("server events", () => {
   it("ends on the last of a thousand progress events", () => {
     let snapshot: Snapshot = { models };
     for (let done = 0; done <= 1000; done++) {
-      snapshot = reduceEvent(snapshot, "download", { name: "crisperwhisper-2.0-large", state: "downloading", bytes_done: done, bytes_total: 1000, error: "" }).snapshot;
+      snapshot = reduceEvent(snapshot, "download", { name: "phonon-2.5-english", state: "downloading", bytes_done: done, bytes_total: 1000, error: "" }).snapshot;
     }
     expect(snapshot.models?.[2]?.download?.bytes_done).toBe(1000);
     expect(snapshot.models?.[0]).toBe(models[0]);
   });
 
   it("reads the core's engine event, where state and flags come together", () => {
-    const failed = reduceEvent({ app }, "engine", { state: "failed", loading: false, ready: false, error: "Model file missing", model: "crisperwhisper-2.0-large" });
-    expect(failed.snapshot.app?.engine).toEqual({ ready: false, loading: false, error: "Model file missing", model: "crisperwhisper-2.0-large" });
-    const ready = reduceEvent({ app }, "engine", { state: "ready", loading: false, ready: true, error: null, model: "crisperwhisper-2.0-large" });
-    expect(ready.snapshot.app?.engine).toEqual({ ready: true, loading: false, error: null, model: "crisperwhisper-2.0-large" });
+    const failed = reduceEvent({ app }, "engine", { state: "failed", loading: false, ready: false, error: "Model file missing", model: "phonon-2.5-english" });
+    expect(failed.snapshot.app?.engine).toEqual({ ready: false, loading: false, error: "Model file missing", model: "phonon-2.5-english" });
+    const ready = reduceEvent({ app }, "engine", { state: "ready", loading: false, ready: true, error: null, model: "phonon-2.5-english" });
+    expect(ready.snapshot.app?.engine).toEqual({ ready: true, loading: false, error: null, model: "phonon-2.5-english" });
   });
 
   it("follows the engine through loading, ready and failed in either event shape", () => {
-    const loading = reduceEvent({ app }, "engine", { state: "loading", error: null, model: "crisperwhisper-2.0-turbo" }).snapshot.app?.engine;
-    expect(loading).toEqual({ ready: false, loading: true, error: null, model: "crisperwhisper-2.0-turbo" });
+    const loading = reduceEvent({ app }, "engine", { state: "loading", error: null, model: "qwen3-asr-1.7b" }).snapshot.app?.engine;
+    expect(loading).toEqual({ ready: false, loading: true, error: null, model: "qwen3-asr-1.7b" });
     const ready = reduceEvent({ app }, "engine", { loading: false, ready: true, error: null, model: "m" }).snapshot.app?.engine;
     expect(ready).toMatchObject({ ready: true, loading: false });
     const failed = reduceEvent({ app }, "engine", { state: "failed", error: "CUDA out of memory" }).snapshot.app?.engine;

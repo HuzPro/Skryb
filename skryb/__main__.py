@@ -481,12 +481,9 @@ def _start_engine_preload(
 ) -> EnginePreload | None:
     """Start loading the batch engine, or return None to leave it to the tray.
 
-    Only the torch-free CTranslate2 engine is preloaded. Its modules are
-    imported here, on the main thread, so the preload thread imports no
-    skryb module: two threads importing the same modules can
-    deadlock, which Python 3.12 raises as an error. A torch engine would
-    import torch to pick its device, and its adapter imports more of the
-    app, so it keeps loading after the tray as before.
+    Only a torch-free engine is preloaded. A torch engine would import torch
+    to pick its device, and its adapter imports more of the app, so it keeps
+    loading after the tray as before.
 
     Also skipped where ``build_app`` would change what gets loaded first:
     streaming builds its engine elsewhere, and a legacy ``None``/``"auto"``
@@ -503,13 +500,6 @@ def _start_engine_preload(
         return None
     if startup_requires_torch(config, registry, paths.models_dir, hardware_detector.peek()):
         return None
-    import importlib
-
-    for module in (
-        "skryb.transcription.crisperwhisper_ct2_adapter",
-        "skryb.transcription.ct2_conversion",
-    ):
-        importlib.import_module(module)
     from skryb.transcription.engine_preload import EnginePreload
 
     return EnginePreload.start(
