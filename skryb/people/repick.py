@@ -47,8 +47,8 @@ def repick(text: str, selected: str, terms: Sequence[Term]) -> Repick | None:
     if not (_same(said_base, chosen_base) or any(_covers(term, said_base) for term in group)):
         return None
     names = [term.written for term in group]
-    # Two people with one name cycle between them; one entry also gives back the ordinary word the model heard.
-    others = (chosen_base, said_base) if len(names) == 1 else (chosen_base,)
+    # Two people with one name cycle between them; one entry also gives back the ordinary word it is heard as.
+    others = (chosen_base, said_base, *group[0].heard_as) if len(names) == 1 else (chosen_base,)
     spellings = _distinct(names + [word for word in others if not any(_same(word, term.written) for term in terms)])
     if len(spellings) < 2:
         return None

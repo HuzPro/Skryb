@@ -225,6 +225,7 @@ def _ignore_fired(_rules: Sequence[DictionaryRule]) -> None:
 
 def _caret_stage(
     caret_context: Callable[[], CaretContext],
+    swap: Callable[[str], str],
     terms: Sequence[Term] = (),
     on_repick: Callable[[Repick], None] = _ignore_repick,
 ) -> Callable[[str], str]:
@@ -232,7 +233,8 @@ def _caret_stage(
         context = caret_context()
         picked = repick(text, context.selected, terms) if terms and context.selected.strip() else None
         if picked is None:
-            return fit_to_context(text, context)
+            return swap(fit_to_context(text, context))
+        # No swaps after a re-pick: "scribe" is a heard-as spelling of "Skryb", so they would undo it.
         on_repick(picked)
         fitted = fit_to_context(picked.text, context)
         return keep_written_case(fitted, picked.written) if picked.written else fitted
@@ -275,8 +277,9 @@ class TextPipeline:
         if config.options.spoken_commands:
             stages.append(apply_spoken_commands)
         stages.append(add_trailing_sentence_space)
-        stages.append(_caret_stage(caret_context, terms, on_repick))
-        stages.append(_RuleStage(config.rules + people_rules(terms), on_fired).apply)
+        stages.append(_caret_stage(
+            caret_context, _RuleStage(config.rules + people_rules(terms), on_fired).apply, terms, on_repick,
+        ))
         if config.options.numbers:
             stages.append(format_numbers)
         stages.append(_search_entry_stage(target_app))
