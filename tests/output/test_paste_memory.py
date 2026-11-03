@@ -219,9 +219,9 @@ class TestFollowingTyping:
         typing_memory.remember("first message ")
         desktop.clicks += 1
 
-        type_text(typing_memory, "talha")
+        type_text(typing_memory, "tobias")
 
-        assert typing_memory.context().before == "talha"
+        assert typing_memory.context().before == "tobias"
 
     def test_keeps_only_the_context_width_of_a_long_run_of_typing(self, typing_memory):
         type_text(typing_memory, "word " * 3000)
@@ -270,7 +270,7 @@ class TestSpacingAfterTypingIntoAnUnreadableBox:
         return fitted
 
     def test_puts_a_space_before_a_dictation_that_follows_a_typed_word(self, typing_memory):
-        type_text(typing_memory, "talha")
+        type_text(typing_memory, "tobias")
 
         assert self.dictate(typing_memory, "Can we somehow just tell Rafael. ") == " can we somehow just tell Rafael. "
 
