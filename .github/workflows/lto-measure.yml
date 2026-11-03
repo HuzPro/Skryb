@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   measure:
-    name: restored cache, build twice (${{ matrix.n }})
+    name: restored cache (${{ matrix.variant }})
     runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        n: [a, b]
+        variant: [registry-cache, registry-src]
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -28,39 +28,45 @@ jobs:
           cache-dependency-path: ui/pnpm-lock.yaml
       - id: cargo-key
         shell: bash
-        run: |
-          echo "key=cargo-${{ runner.os }}-rust$(rustc -V | cut -d' ' -f2)-${{ hashFiles('ui/src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
-          wmic cpu get name || true
-          powershell -c "(Get-CimInstance Win32_Processor).Name"
-      - uses: actions/cache/restore@v4
+        run: echo "key=cargo-${{ runner.os }}-rust$(rustc -V | cut -d' ' -f2)-${{ hashFiles('ui/src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+      - if: matrix.variant == 'registry-cache'
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ui/src-tauri/target
           key: ${{ steps.cargo-key.outputs.key }}
+      - if: matrix.variant == 'registry-src'
+        id: src
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ui/src-tauri/target
+          key: ${{ steps.cargo-key.outputs.key }}-src
+          restore-keys: ${{ steps.cargo-key.outputs.key }}
       - name: extract the crate sources
         shell: bash
-        run: |
-          time cargo metadata --format-version 1 --manifest-path ui/src-tauri/Cargo.toml > /dev/null
-          time cat $(find ui/src-tauri/target -type f -size +1k) > /dev/null
-          (Get-CimInstance Win32_Processor).Name 2>/dev/null || true
-      - name: cpu
-        shell: pwsh
-        run: (Get-CimInstance Win32_Processor).Name
+        run: time cargo metadata --format-version 1 --manifest-path ui/src-tauri/Cargo.toml > /dev/null
       - name: first build after restore
         shell: pwsh
         working-directory: ui
         run: |
           pnpm install --frozen-lockfile
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          pnpm tauri build
-          Write-Host "first $($sw.Elapsed.TotalSeconds)s"
-      - name: second build after a frontend change
-        shell: pwsh
-        working-directory: ui
-        run: |
           Add-Content src/main.tsx "// changed"
           $sw = [Diagnostics.Stopwatch]::StartNew()
           pnpm tauri build
-          Write-Host "second $($sw.Elapsed.TotalSeconds)s"
+          Write-Host "first $($sw.Elapsed.TotalSeconds)s"
+          git checkout src/main.tsx
+      - if: matrix.variant == 'registry-src' && steps.src.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ui/src-tauri/target
+          key: ${{ steps.cargo-key.outputs.key }}-src
