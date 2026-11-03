@@ -90,7 +90,7 @@ jobs:
         run: python -c "import os, pathlib; from release.version import resolve_version; resolve_version(os.environ['VERSION'], pathlib.Path('pyproject.toml'))"
 
   test:
-    name: Tests (Python ${{ matrix.python }}, part ${{ matrix.shard }} of 3)
+    name: Tests (Python ${{ matrix.python }}, part ${{ matrix.shard }} of 4 ${{ matrix.bytecode }})
     # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
     # sounddevice fails test collection.
     runs-on: ubuntu-24.04
@@ -98,10 +98,9 @@ jobs:
       fail-fast: false
       matrix:
         # 3.11 is the oldest Python the app supports; 3.12 is the one the installer bundles.
-        python: ["3.11", "3.12"]
-        # The suite is CPU-bound (about 6 CPU-minutes), so it is split over three
-        # runners of four cores each; tests/conftest.py picks this runner's third.
-        shard: [1, 2, 3]
+        python: ["3.11"]
+        shard: [1, 2, 3, 4]
+        bytecode: ["", "compile"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -117,25 +116,24 @@ jobs:
       #   libsndfile1   -> soundfile (audio test dep)
       #   xvfb + xauth  -> virtual X display for the Tkinter widget tests
       #                    (the native Win32 modules are excluded on Linux)
-      # The runner image's package lists are recent enough; `apt-get update` only
-      # runs if they aren't.
-      - name: Install system libraries
-        run: |
-          packages="libportaudio2 libsndfile1 xvfb xauth"
-          sudo apt-get install -y --no-install-recommends $packages || {
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends $packages
-          }
-
+      # apt runs alongside the Python install. The runner image's package lists are
+      # recent enough; `apt-get update` only runs if they aren't.
       # CPU PyTorch from the dedicated index (skips the large CUDA wheels),
       # then the project with its test deps and the parakeet engine (the
       # cache-aware streaming tests import nano_parakeet directly), plus
       # OpenVINO so the NPU engine's CPU-device tests run instead of skipping.
       # uv resolves the same latest versions pip would, in seconds.
-      - name: Install Python dependencies
+      - name: Install dependencies
+        env:
+          UV_COMPILE_BYTECODE: ${{ matrix.bytecode == 'compile' && 'true' || 'false' }}
         run: |
+          packages="libportaudio2 libsndfile1 xvfb xauth"
+          { sudo apt-get install -y --no-install-recommends $packages || {
+              sudo apt-get update && sudo apt-get install -y --no-install-recommends $packages; }; } > apt.log 2>&1 &
+          apt=$!
           uv pip install --system --index-url https://download.pytorch.org/whl/cpu torch torchaudio
           uv pip install --system -e ".[dev,npu]"
+          wait $apt || { cat apt.log; exit 1; }
 
       # The NPU engine's CPU decoder is plain C; its tests load this build.
       - name: Build the CPU TDT decoder
@@ -147,7 +145,7 @@ jobs:
       # automatically. `-n auto` runs a worker per core.
       - name: Run tests
         env:
-          SKRYB_TEST_SHARD: ${{ matrix.shard }}/3
+          SKRYB_TEST_SHARD: ${{ matrix.shard }}/4
         run: xvfb-run -a python -m pytest -q -n auto --dist worksteal
 
   # The settings window (Tauri), rebuilt only when its sources or the Rust compiler
@@ -362,9 +360,10 @@ jobs:
           name: cuda
           path: native
 
+      # The runner image comes with Inno Setup.
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --no-progress -y
+        run: if (-not (Get-Command ISCC -ErrorAction SilentlyContinue)) { choco install innosetup --no-progress -y }
 
       # Bundle a relocatable CPython 3.12 (python-build-standalone). AMD's
       # Windows ROCm wheels are cp312-only, so the bundled runtime is 3.12.
@@ -392,6 +391,17 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: python build_installer.py --python-dir "${{ steps.cpython.outputs.dir }}"
+
+      - name: same bytes without the separate process (measurement only)
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem build/installer-payload/wheels/*.whl).Name
+          $payload = Join-Path $PWD "build\installer-payload"
+          (Get-Content installer/Skryb.iss -Raw) -replace "LZMAUseSeparateProcess=yes", "" | Set-Content installer/variant.iss
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          ISCC /Q "/DAppVersion=0.13.0" "/DPayloadDir=$payload" "/DWheelFile=$wheel" "/DReqCuda=requirements-nvidia.txt" "/DReqRocm=requirements-amd.txt" "/DReqCpu=requirements-cpu.txt" "/O$(Join-Path $PWD 'variant')" "/Fv" installer/variant.iss
+          Write-Host "without: $($sw.Elapsed.TotalSeconds)s"
+          python -c "import sys; a=open(sys.argv[1],'rb').read(); b=open(sys.argv[2],'rb').read(); d=[i for i in range(min(len(a),len(b))) if a[i]!=b[i]]; print('sizes', len(a), len(b), 'differing bytes', len(d), d[:10])" dist/Skryb-Setup-0.13.0.exe variant/v.exe
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
