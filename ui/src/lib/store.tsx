@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError, api, errorText } from "./api";
-import { draftReducer, isDirty, type Draft, type DraftAction } from "./draft";
+import { draftReducer, inTurn, isDirty, type Draft, type DraftAction } from "./draft";
 import { engineState } from "./events";
 import { validateBindings } from "./keys";
+import { onBeforeClose } from "./platform";
 import { queries } from "./queries";
 import { onServerEvent } from "./sse";
 import type { Dictionary, License, SaveResult, Settings } from "./types";
@@ -16,6 +17,17 @@ export type Prompt =
   | { kind: "unsaved"; resolve: (choice: UnsavedChoice) => void };
 
 export type SavePhase = "idle" | "saving" | "applying";
+
+/** Where the dictionary's own saving is: it saves itself shortly after each change. */
+export interface DictionarySave {
+  state: "idle" | "saving" | "saved" | "failed";
+  error: string;
+  /** False when the core refused the change; the page then shows what the core kept. */
+  retry: boolean;
+}
+
+/** How long the dictionary waits after a change before saving it, so a burst of changes is one save. */
+const DICTIONARY_SAVE_DELAY_MS = 500;
 
 type Reducer<T> = (state: Draft<T> | null, action: DraftAction<T>) => Draft<T> | null;
 
@@ -30,7 +42,9 @@ interface Store {
   dismissSaveError: () => void;
   dictionary: Draft<Dictionary> | null;
   dispatchDictionary: (action: DraftAction<Dictionary>) => void;
-  saveDictionary: () => Promise<string>;
+  /** Saves the dictionary now if it has changed; "" when it is saved, else why not. */
+  flushDictionary: () => Promise<string>;
+  dictionarySave: DictionarySave;
   anyDirty: () => boolean;
   prompt: Prompt | null;
   closePrompt: () => void;
@@ -72,6 +86,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [saveNote, setSaveNote] = useState("");
   const [saveError, setSaveError] = useState("");
   const [prompt, setPrompt] = useState<Prompt | null>(null);
+  const [dictionarySave, setDictionarySave] = useState<DictionarySave>({ state: "idle", error: "", retry: false });
 
   const settingsQuery = useQuery(queries.settings);
   useEffect(() => {
@@ -147,28 +162,66 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [settings, withLicense, waitForEngine, client]);
 
-  const saveDictionary = useCallback(async (): Promise<string> => {
-    if (!dictionary || !isDirty(dictionary)) return "";
-    try {
-      await api.put("/api/dictionary", dictionary.draft);
-      dispatchDictionary({ type: "committed", value: dictionary.draft });
-      client.setQueryData(["dictionary"], dictionary.draft);
-      return "";
-    } catch (error) {
-      return errorText(error);
-    }
-  }, [dictionary, client]);
+  // Saves read the newest draft when their turn comes. The ref takes every change at once, so a save
+  // started right after an edit, or queued behind another save, sees it before React renders again.
+  const dictionaryRef = useRef(dictionary);
+  dictionaryRef.current = dictionary;
+  const changeDictionary = useCallback((action: DraftAction<Dictionary>) => {
+    dispatchDictionary(action);
+    dictionaryRef.current = draftReducer(dictionaryRef.current, action);
+  }, []);
+  const flushDictionary = useMemo(
+    () =>
+      inTurn(async (): Promise<string> => {
+        const current = dictionaryRef.current;
+        if (!current || !isDirty(current)) return "";
+        const sent = current.draft;
+        setDictionarySave({ state: "saving", error: "", retry: false });
+        try {
+          await api.put("/api/dictionary", sent);
+          changeDictionary({ type: "saved", value: sent });
+          client.setQueryData(["dictionary"], sent);
+          setDictionarySave({ state: "saved", error: "", retry: false });
+          return "";
+        } catch (error) {
+          const refused = error instanceof ApiError && error.status === 400;
+          if (refused) changeDictionary({ type: "discard" });
+          const text = refused ? `Not saved. ${error.detail || error.message}` : `Not saved. ${errorText(error)}`;
+          setDictionarySave({ state: "failed", error: text, retry: !refused });
+          return text;
+        }
+      }),
+    [client, changeDictionary],
+  );
+
+  useEffect(() => {
+    if (!isDirty(dictionary)) return;
+    const timer = setTimeout(() => void flushDictionary(), DICTIONARY_SAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [dictionary, flushDictionary]);
+
+  // A change still waiting out the delay goes to the core before the window closes.
+  useEffect(() => {
+    const forget = onBeforeClose(flushDictionary);
+    return () => {
+      forget();
+      void flushDictionary();
+    };
+  }, [flushDictionary]);
 
   const saveAll = useCallback(async (): Promise<boolean> => {
     const settingsSaved = !isDirty(settings) || (await saveSettings());
-    const problem = await saveDictionary();
-    if (problem) setSaveError(problem);
+    const problem = await flushDictionary();
     return settingsSaved && !problem;
-  }, [settings, saveSettings, saveDictionary]);
+  }, [settings, saveSettings, flushDictionary]);
 
-  const latest = useRef({ settings, dictionary });
-  latest.current = { settings, dictionary };
-  const anyDirty = useCallback(() => isDirty(latest.current.settings) || isDirty(latest.current.dictionary), []);
+  // The dictionary saves itself, so it only counts as unsaved once a save of it has failed.
+  const latest = useRef({ settings, dictionary, dictionarySave });
+  latest.current = { settings, dictionary, dictionarySave };
+  const anyDirty = useCallback(
+    () => isDirty(latest.current.settings) || (latest.current.dictionarySave.state === "failed" && isDirty(latest.current.dictionary)),
+    [],
+  );
 
   const store = useMemo<Store>(
     () => ({
@@ -184,8 +237,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       saveError,
       dismissSaveError: () => setSaveError(""),
       dictionary,
-      dispatchDictionary,
-      saveDictionary,
+      dispatchDictionary: changeDictionary,
+      flushDictionary,
+      dictionarySave,
       anyDirty,
       prompt,
       closePrompt: () => setPrompt(null),
@@ -194,7 +248,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       withLicense,
       saveAll,
     }),
-    [settings, saveSettings, savePhase, saveNote, saveError, dictionary, saveDictionary, anyDirty, prompt, confirm, askUnsaved, withLicense, saveAll],
+    [settings, saveSettings, savePhase, saveNote, saveError, dictionary, changeDictionary, flushDictionary, dictionarySave, anyDirty, prompt, confirm, askUnsaved, withLicense, saveAll],
   );
 
   const storeRef = useRef(store);

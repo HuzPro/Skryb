@@ -751,7 +751,15 @@ class Handler(BaseHTTPRequestHandler):
     def _dictionary(self, method, rest, query) -> None:
         core = self.core
         if method == "PUT":
-            core.dictionary = {**self._body(), "suggestions": core.dictionary["suggestions"]}
+            body = self._body()
+            for index, rule in enumerate(body["rules"]):
+                try:
+                    if rule["kind"] == "regex":
+                        re.compile(rule["pattern"]).sub(rule["replacement"], "")
+                except re.error:
+                    self._error(400, "That dictionary could not be read.", detail=f"Dictionary rule {index + 1} is not valid.")
+                    return
+            core.dictionary = {**body, "suggestions": core.dictionary["suggestions"]}
             self._send(204)
         else:
             self._send(200, core.dictionary)

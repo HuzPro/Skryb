@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check as CheckIcon, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowRight, Check as CheckIcon, LoaderCircle, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Card, InlineError, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
 import { Badge } from "../components/ui/badge";
@@ -8,8 +8,7 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
-import { isDirty } from "../lib/draft";
-import { useStore, useSyncedDraft } from "../lib/store";
+import { useStore, useSyncedDraft, type DictionarySave } from "../lib/store";
 import type { Dictionary, DictionaryRule, LiteralRule, Suggestion, Term } from "../lib/types";
 
 const OPTIONS: { key: keyof Dictionary["options"]; title: string; description: string }[] = [
@@ -198,13 +197,46 @@ function SuggestionRow({ suggestion, onAccept, onDismiss }: { suggestion: Sugges
   );
 }
 
+/** A quiet word on the dictionary's own saving, and what went wrong when a save didn't work. */
+function SaveCue({ save, onRetry }: { save: DictionarySave; onRetry: () => void }) {
+  if (save.state === "saving") {
+    return (
+      <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+        <LoaderCircle className="size-3.5 animate-spin" />
+        Saving...
+      </span>
+    );
+  }
+  if (save.state === "saved") {
+    return (
+      <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+        <CheckIcon className="size-3.5" />
+        Saved
+      </span>
+    );
+  }
+  if (save.state === "failed") {
+    return (
+      <span role="alert" className="flex min-w-0 items-center gap-2 text-[12.5px] text-destructive">
+        <span className="min-w-0">{save.error}</span>
+        {save.retry ? (
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Retry
+          </Button>
+        ) : null}
+      </span>
+    );
+  }
+  return null;
+}
+
 /** The list shows the newest rule first; the saved order, which rules apply in, stays oldest first. */
 export function newestFirst<T>(rules: T[]): { rule: T; index: number }[] {
   return rules.map((rule, index) => ({ rule, index })).reverse();
 }
 
 export function DictionaryPage() {
-  const { dictionary, dispatchDictionary, saveDictionary } = useStore();
+  const { dictionary, dispatchDictionary, flushDictionary, dictionarySave } = useStore();
   const client = useQueryClient();
   const failed = useSyncedDraft<Dictionary>("dictionary", "/api/dictionary", dispatchDictionary);
   const [adding, setAdding] = useState<Editor>(EMPTY_EDITOR);
@@ -218,27 +250,39 @@ export function DictionaryPage() {
 
   const editRules = (update: (rules: DictionaryRule[]) => DictionaryRule[]) =>
     dispatchDictionary({ type: "edit", update: (current) => ({ ...current, rules: update(current.rules) }) });
-  const place = (editor: Editor, index: number): boolean => {
+  /**
+   * Adding or changing an entry saves it at once, after anything still waiting, so one the core refuses (a regex
+   * it can't read) takes nothing else back with it and stays in its box to fix.
+   */
+  const saveNow = async (change: () => void): Promise<string> => {
+    await flushDictionary();
+    change();
+    return flushDictionary();
+  };
+  const place = async (editor: Editor, index: number): Promise<boolean> => {
     const rule = ruleFrom(editor, draft.rules[index]);
     if (typeof rule === "string") return setError(rule), false;
     if (duplicateAlias(draft.rules, rule, index)) return setError("Another word rule already uses one of those aliases."), false;
-    setError("");
-    editRules((rules) => (index < rules.length ? rules.map((other, at) => (at === index ? rule : other)) : [...rules, rule]));
-    return true;
+    const problem = await saveNow(() =>
+      editRules((rules) => (index < rules.length ? rules.map((other, at) => (at === index ? rule : other)) : [...rules, rule])),
+    );
+    setError(problem);
+    return !problem;
   };
   const editTerms = (update: (people: Term[]) => Term[]) =>
     dispatchDictionary({ type: "edit", update: (current) => ({ ...current, people: update(current.people) }) });
-  const placeTerm = (editor: TermEditor, index: number): boolean => {
+  const placeTerm = async (editor: TermEditor, index: number): Promise<boolean> => {
     const term = termFrom(editor);
-    const problem = termProblem(draft.people, term, index);
-    if (problem) return setTermError(problem), false;
-    setTermError("");
-    editTerms((people) => (index < people.length ? people.map((other, at) => (at === index ? term : other)) : [...people, term]));
-    return true;
+    const invalid = termProblem(draft.people, term, index);
+    if (invalid) return setTermError(invalid), false;
+    const problem = await saveNow(() => editTerms((people) => (index < people.length ? people.map((other, at) => (at === index ? term : other)) : [...people, term])));
+    setTermError(problem);
+    return !problem;
   };
-  /** Settled at once, so it cannot be discarded; unsaved edits elsewhere on the page stay. */
+  /** Settled by the core itself, after any change still on its way there, so neither undoes the other. */
   const settle = async (request: () => Promise<void>, change: (current: Dictionary) => Dictionary) => {
     try {
+      await flushDictionary();
       await request();
       const fresh = await api.get<Dictionary>("/api/dictionary");
       dispatchDictionary({ type: "edit", update: (current) => ({ ...change(current), suggestions: fresh.suggestions }) });
@@ -258,7 +302,9 @@ export function DictionaryPage() {
 
   return (
     <PageBody>
-      <PageTitle title="Dictionary" />
+      <PageTitle title="Dictionary">
+        <SaveCue save={dictionarySave} onRetry={() => void flushDictionary()} />
+      </PageTitle>
       <Section title="Cleanup">
         <Rows>
           {OPTIONS.map(({ key, title, description }) => (
@@ -283,9 +329,9 @@ export function DictionaryPage() {
           ))}
           <form
             className="px-4 py-3"
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
-              if (placeTerm(addingTerm, draft.people.length)) setAddingTerm(EMPTY_TERM);
+              if (await placeTerm(addingTerm, draft.people.length)) setAddingTerm(EMPTY_TERM);
             }}
           >
             <TermFields editor={addingTerm} onChange={setAddingTerm}>
@@ -303,7 +349,7 @@ export function DictionaryPage() {
                     <Button size="sm" variant="ghost" onClick={() => (setEditingTerm(null), setTermError(""))}>
                       Cancel
                     </Button>
-                    <Button size="sm" onClick={() => placeTerm(editingTerm.editor, index) && setEditingTerm(null)}>
+                    <Button size="sm" onClick={async () => (await placeTerm(editingTerm.editor, index)) && setEditingTerm(null)}>
                       Done
                     </Button>
                   </TermFields>
@@ -343,9 +389,9 @@ export function DictionaryPage() {
         <Card className="divide-y">
           <form
             className="px-4 py-3"
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
-              if (place(adding, draft.rules.length)) setAdding({ ...EMPTY_EDITOR, kind: adding.kind });
+              if (await place(adding, draft.rules.length)) setAdding({ ...EMPTY_EDITOR, kind: adding.kind });
             }}
           >
             <RuleEditor editor={adding} onChange={setAdding}>
@@ -363,7 +409,7 @@ export function DictionaryPage() {
                     <Button size="sm" variant="ghost" onClick={() => (setEditing(null), setError(""))}>
                       Cancel
                     </Button>
-                    <Button size="sm" onClick={() => place(editing.editor, index) && setEditing(null)}>
+                    <Button size="sm" onClick={async () => (await place(editing.editor, index)) && setEditing(null)}>
                       Done
                     </Button>
                   </RuleEditor>
@@ -409,19 +455,6 @@ export function DictionaryPage() {
           )}
         </Card>
         {error ? <InlineError>{error}</InlineError> : null}
-        <div className="mt-2.5 flex items-center gap-2">
-          {isDirty(dictionary) ? (
-            <>
-              <span className="ml-auto text-[12.5px] text-muted-foreground">Dictionary changed</span>
-              <Button variant="ghost" size="sm" onClick={() => (dispatchDictionary({ type: "discard" }), setError(""), setTermError(""))}>
-                Discard
-              </Button>
-              <Button size="sm" onClick={async () => setError(await saveDictionary())}>
-                Save dictionary
-              </Button>
-            </>
-          ) : null}
-        </div>
       </Section>
     </PageBody>
   );

@@ -104,7 +104,7 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
 export function SettingsPage() {
   const app = useAppInfo();
   const install = useInstall();
-  const { settings, editSettings, discardSettings, anyDirty, askUnsaved, saveAll } = useStore();
+  const { settings, editSettings, discardSettings, anyDirty, askUnsaved, saveAll, flushDictionary } = useStore();
   const client = useQueryClient();
   const [requestError, setRequestError] = useState("");
   const [fileNote, setFileNote] = useState({ text: "", error: false });
@@ -143,6 +143,7 @@ export function SettingsPage() {
       const choice = await askUnsaved();
       if (choice === "cancel" || (choice !== "discard" && !(await saveAll()))) return;
     }
+    await flushDictionary();
     await send("/api/updates/install");
   };
   const fileAction = async (work: () => Promise<string>) => {

@@ -8,7 +8,8 @@ export type DraftAction<T> =
   | { type: "loaded"; value: T }
   | { type: "edit"; update: (draft: T) => T }
   | { type: "discard" }
-  | { type: "committed"; value: T };
+  | { type: "committed"; value: T }
+  | { type: "saved"; value: T };
 
 export function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
@@ -30,6 +31,8 @@ export function isDirty<T>(state: Draft<T> | null): boolean {
 /**
  * A fresh copy from the core replaces the draft only while nothing is being
  * edited, so a sync from another page or window never throws away edits.
+ * `saved` is a save that landed while editing went on: the core has that
+ * value, and the edits made since stay.
  */
 export function draftReducer<T>(state: Draft<T> | null, action: DraftAction<T>): Draft<T> | null {
   switch (action.type) {
@@ -38,9 +41,24 @@ export function draftReducer<T>(state: Draft<T> | null, action: DraftAction<T>):
       return { saved: action.value, draft: state.draft };
     case "committed":
       return { saved: action.value, draft: action.value };
+    case "saved":
+      return state === null ? null : { saved: action.value, draft: state.draft };
     case "edit":
       return state === null ? null : { saved: state.saved, draft: action.update(state.draft) };
     case "discard":
       return state === null ? null : { saved: state.saved, draft: state.saved };
   }
+}
+
+/**
+ * Runs *save* one call at a time, each after the one before has finished. A save that reads the newest
+ * draft when its turn comes therefore always lands after any older one: the later edit wins.
+ */
+export function inTurn<T>(save: () => Promise<T>): () => Promise<T> {
+  let last: Promise<unknown> = Promise.resolve();
+  return () => {
+    const next = last.then(save, save);
+    last = next;
+    return next;
+  };
 }

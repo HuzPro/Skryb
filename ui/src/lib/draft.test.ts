@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftReducer, isDirty, sameValue, type Draft } from "./draft";
+import { draftReducer, inTurn, isDirty, sameValue, type Draft } from "./draft";
 
 interface Doc {
   name: string;
@@ -87,5 +87,82 @@ describe("settings draft", () => {
     expect(sameValue([], {})).toBe(false);
     expect(sameValue(null, {})).toBe(false);
     expect(sameValue(0.5, 0.5)).toBe(true);
+  });
+});
+
+describe("the dictionary saving as it changes", () => {
+  it("keeps edits made while a save was on its way, and stays unsaved until they are saved too", () => {
+    let state = loaded(doc());
+    state = draftReducer(state, { type: "edit", update: (d) => ({ ...d, name: "Ñoño, first edit" }) });
+    const sent = state?.draft as Doc;
+    state = draftReducer(state, { type: "edit", update: (d) => ({ ...d, name: "Ñoño, second edit" }) });
+
+    state = draftReducer(state, { type: "saved", value: sent });
+
+    expect(state?.saved.name).toBe("Ñoño, first edit");
+    expect(state?.draft.name).toBe("Ñoño, second edit");
+    expect(isDirty(state)).toBe(true);
+  });
+
+  it("is saved once the save carried the newest edit", () => {
+    let state = loaded(doc(1500));
+    state = draftReducer(state, { type: "edit", update: (d) => ({ ...d, overrides: d.overrides.slice(1) }) });
+
+    state = draftReducer(state, { type: "saved", value: state?.draft as Doc });
+
+    expect(isDirty(state)).toBe(false);
+  });
+
+  it("an edit undone while its save was on its way still gets saved back", () => {
+    let state = loaded(doc());
+    state = draftReducer(state, { type: "edit", update: (d) => ({ ...d, name: "" }) });
+    const sent = state?.draft as Doc;
+    state = draftReducer(state, { type: "edit", update: (d) => ({ ...d, name: doc().name }) });
+
+    state = draftReducer(state, { type: "saved", value: sent });
+
+    expect(isDirty(state)).toBe(true);
+    expect(state?.draft).toEqual(doc());
+  });
+
+  it("runs saves one at a time, so of two quick edits the later one lands last", async () => {
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    let newest = "first";
+    const landed: string[] = [];
+    let onTheWay = 0;
+    let mostAtOnce = 0;
+    const save = inTurn(async () => {
+      const sent = newest;
+      onTheWay += 1;
+      mostAtOnce = Math.max(mostAtOnce, onTheWay);
+      await pause(sent === "first" ? 30 : 0);
+      landed.push(sent);
+      onTheWay -= 1;
+      return sent;
+    });
+
+    const first = save();
+    await pause(5);
+    newest = "second";
+    const second = save();
+
+    expect(await Promise.all([first, second])).toEqual(["first", "second"]);
+    expect(landed).toEqual(["first", "second"]);
+    expect(mostAtOnce).toBe(1);
+  });
+
+  it("a failed save does not stop the ones after it", async () => {
+    let calls = 0;
+    const save = inTurn(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("The core went away");
+      return "saved";
+    });
+
+    const first = save().catch((error: Error) => error.message);
+    const second = save();
+
+    expect(await first).toBe("The core went away");
+    expect(await second).toBe("saved");
   });
 });
