@@ -236,7 +236,7 @@ export function StatusCard({
       <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground" title={detail}>
         {detail}
       </span>
-      {warning ? <span className="mt-1 block text-[11.5px] text-warning">{warning}</span> : null}
+      {warning ? <span className="mt-1 block truncate text-[11.5px] text-warning" title={warning}>{warning}</span> : null}
     </>
   );
   return (

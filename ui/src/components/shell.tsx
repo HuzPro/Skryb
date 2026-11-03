@@ -322,7 +322,8 @@ export function Sidebar({
           );
         })}
       </nav>
-      <div className="mt-auto flex items-stretch gap-1.5 p-3">
+      {/* The settings button is a square as tall as the card, so no line of the card may wrap: its height must not depend on its width. */}
+      <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] gap-1.5 p-3">
         {status}
         <Link
           to="/updates"
@@ -331,7 +332,7 @@ export function Sidebar({
           title="Settings"
           aria-current={settingsOpen ? "page" : undefined}
           className={cn(
-            "surface grid w-9 shrink-0 place-items-center rounded-lg border border-edge bg-card text-muted-foreground shadow-card transition-[color,background-color,scale] hover:bg-accent hover:text-foreground active:scale-[0.97]",
+            "surface grid aspect-square place-items-center rounded-lg border border-edge bg-card text-muted-foreground shadow-card transition-[color,background-color,scale] hover:bg-accent hover:text-foreground active:scale-[0.97]",
             settingsOpen && "text-foreground ring-2 ring-ring/40",
           )}
         >
