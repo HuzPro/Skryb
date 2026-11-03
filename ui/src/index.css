@@ -152,45 +152,47 @@
   }
 }
 
-/* Glass: a solid window with a soft mesh behind translucent, blurred surfaces. */
+/*
+ * Glass: neutral, clear layers on a solid window, like Apple's Liquid Glass. Greys only; colour comes
+ * from the content and the accent. Light catches each layer's top edge, and soft shadows give depth.
+ */
 :root[data-theme="glass"] {
   --app-bg:
-    radial-gradient(70% 65% at 10% 0%, #b4c8ff 0, transparent 70%),
-    radial-gradient(60% 60% at 100% 10%, #efc2fb 0, transparent 70%),
-    radial-gradient(70% 70% at 75% 100%, #aeeadb 0, transparent 70%),
-    radial-gradient(55% 55% at 0% 100%, #ffd2b0 0, transparent 70%),
-    #eef0f7;
-  --background: #eef0f7;
-  --sidebar: rgb(255 255 255 / 0.32);
-  --card: rgb(255 255 255 / 0.56);
-  --popover: rgb(255 255 255 / 0.78);
-  --foreground: #141826;
-  --muted: rgb(20 20 40 / 0.07);
-  --muted-foreground: #565d72;
-  --border: rgb(20 30 60 / 0.09);
-  --edge: rgb(255 255 255 / 0.7);
-  --input: rgb(20 30 60 / 0.14);
-  --ring: #3d6cf0;
-  --primary: #3d6cf0;
-  --accent: rgb(255 255 255 / 0.55);
-  --selected: rgb(214 226 255 / 0.75);
+    radial-gradient(120% 90% at 0% 0%, #ffffff 0, transparent 55%),
+    radial-gradient(90% 70% at 100% 100%, #dcdce1 0, transparent 60%),
+    linear-gradient(180deg, #f3f3f6, #e7e7eb);
+  --background: #ececef;
+  --sidebar: rgb(255 255 255 / 0.3);
+  --card: rgb(255 255 255 / 0.55);
+  --popover: rgb(250 250 252 / 0.78);
+  --foreground: #1d1d1f;
+  --muted: rgb(0 0 0 / 0.05);
+  --muted-foreground: #6e6e73;
+  --border: rgb(0 0 0 / 0.08);
+  --edge: rgb(255 255 255 / 0.85);
+  --input: rgb(0 0 0 / 0.14);
+  --ring: #0066cc;
+  --primary: #0066cc;
+  --primary-foreground: #ffffff;
+  --accent: rgb(255 255 255 / 0.6);
+  --selected: rgb(0 102 204 / 0.08);
   --r-md: 10px;
   --r-lg: 14px;
   --r-xl: 18px;
   --r-button: 10px;
   --r-nav: 10px;
-  --sh-xs: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 1px 2px rgb(20 30 60 / 0.06);
-  --sh-card: inset 0 1px 0 rgb(255 255 255 / 0.75), 0 1px 2px rgb(20 30 60 / 0.04), 0 10px 30px -12px rgb(30 40 90 / 0.18);
-  --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.75), 0 16px 40px -12px rgb(30 40 90 / 0.28);
-  --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 30px 70px -20px rgb(30 40 90 / 0.4);
-  --surface-filter: blur(18px) saturate(170%);
-  --overlay: rgb(30 36 60 / 0.25);
-  --pill-tint: 16%;
-  --pill-ring: inset 0 1px 0 rgb(255 255 255 / 0.55);
+  --sh-xs: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 2px rgb(0 0 0 / 0.06);
+  --sh-card: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 0 rgb(0 0 0 / 0.03), 0 1px 2px rgb(0 0 0 / 0.04), 0 10px 28px -14px rgb(0 0 0 / 0.18);
+  --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 2px rgb(0 0 0 / 0.05), 0 18px 40px -14px rgb(0 0 0 / 0.24);
+  --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 30px 70px -20px rgb(0 0 0 / 0.34);
+  --surface-filter: blur(24px) saturate(150%);
+  --overlay: rgb(0 0 0 / 0.18);
+  --pill-tint: 14%;
+  --pill-ring: inset 0 1px 0 rgb(255 255 255 / 0.6);
   --r-chip: 999px;
-  --chip-ring: inset 0 1px 0 rgb(255 255 255 / 0.55);
+  --chip-ring: inset 0 1px 0 rgb(255 255 255 / 0.7), inset 0 0 0 1px rgb(0 0 0 / 0.04);
   --dot-glow: 0 0 6px currentColor;
-  --thumb-shadow: inset 0 1px 0 #ffffff, 0 1px 4px rgb(20 30 60 / 0.3);
+  --thumb-shadow: inset 0 1px 0 #ffffff, 0 1px 4px rgb(0 0 0 / 0.25);
   --dur: 180ms;
   --spring-dur: 476ms;
   --spring: linear(0, 0.078, 0.259, 0.476, 0.683, 0.854, 0.979, 1.058, 1.097, 1.107, 1.097, 1.077, 1.054, 1.032, 1.014, 1.001, 0.993, 0.989, 0.989, 0.99, 1);
@@ -200,37 +202,36 @@
 @media (prefers-color-scheme: dark) {
   :root[data-theme="glass"] {
     --app-bg:
-      radial-gradient(70% 65% at 10% 0%, #2c45a8 0, transparent 70%),
-      radial-gradient(60% 60% at 100% 10%, #6b2a92 0, transparent 70%),
-      radial-gradient(70% 70% at 75% 100%, #0e6a62 0, transparent 70%),
-      radial-gradient(55% 55% at 0% 100%, #7a4214 0, transparent 70%),
-      #0b0d1a;
-    --background: #0a0c16;
-    --sidebar: rgb(12 14 28 / 0.3);
-    --card: rgb(30 34 60 / 0.4);
-    --popover: rgb(30 34 54 / 0.82);
-    --foreground: #eceef6;
+      radial-gradient(120% 90% at 0% 0%, #2c2c30 0, transparent 55%),
+      radial-gradient(90% 70% at 100% 100%, #1c1c1f 0, transparent 60%),
+      linear-gradient(180deg, #161618, #0b0b0d);
+    --background: #121214;
+    --sidebar: rgb(255 255 255 / 0.03);
+    --card: rgb(255 255 255 / 0.06);
+    --popover: rgb(40 40 44 / 0.8);
+    --foreground: #f5f5f7;
     --muted: rgb(255 255 255 / 0.06);
-    --muted-foreground: #a2a8bf;
+    --muted-foreground: #a1a1a6;
     --border: rgb(255 255 255 / 0.08);
-    --edge: rgb(255 255 255 / 0.12);
+    --edge: rgb(255 255 255 / 0.13);
     --input: rgb(255 255 255 / 0.16);
-    --ring: #7c9bff;
-    --primary: #5b82ff;
+    --ring: #4ea1ff;
+    --primary: #4ea1ff;
+    --primary-foreground: #04111f;
     --accent: rgb(255 255 255 / 0.08);
-    --selected: rgb(91 130 255 / 0.2);
+    --selected: rgb(78 161 255 / 0.14);
     --destructive: #ff7b70;
     --success: #5fe39a;
     --warning: #ffc261;
-    --sh-xs: inset 0 1px 0 rgb(255 255 255 / 0.06);
-    --sh-card: inset 0 1px 0 rgb(255 255 255 / 0.09), 0 12px 32px -12px rgb(0 0 0 / 0.6);
-    --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 18px 44px -12px rgb(0 0 0 / 0.7);
-    --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 30px 70px -20px rgb(0 0 0 / 0.8);
-    --overlay: rgb(4 6 14 / 0.45);
+    --sh-xs: inset 0 1px 0 rgb(255 255 255 / 0.07);
+    --sh-card: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -14px rgb(0 0 0 / 0.65);
+    --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.11), 0 18px 44px -14px rgb(0 0 0 / 0.75);
+    --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 30px 70px -20px rgb(0 0 0 / 0.85);
+    --overlay: rgb(0 0 0 / 0.45);
     --pill-tint: 20%;
     --pill-ring: inset 0 1px 0 rgb(255 255 255 / 0.1);
     --chip-ring: inset 0 1px 0 rgb(255 255 255 / 0.1);
-    --thumb: #eceef6;
+    --thumb: #f5f5f7;
     --thumb-on: #ffffff;
     --thumb-shadow: inset 0 1px 0 #ffffff, 0 1px 4px rgb(0 0 0 / 0.5);
   }

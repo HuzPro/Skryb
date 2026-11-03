@@ -13,7 +13,7 @@ import type { Theme, UpdateStatus } from "../lib/types";
 
 const THEMES: Choice<Theme>[] = [
   { value: "default", title: "Default", description: "Clean and quiet, the way Skryb has always looked." },
-  { value: "glass", title: "Glass", description: "Frosted panels over a soft wash of colour." },
+  { value: "glass", title: "Glass", description: "Clear, neutral glass with light along its edges." },
   { value: "material", title: "Material", description: "Rounded, tonal and springy, grown from one indigo." },
   { value: "paper", title: "Paper", description: "Ink on warm paper, with serif headings." },
 ];
