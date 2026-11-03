@@ -294,7 +294,7 @@ export function Sidebar({
       <SidebarEdge width={width} onResize={setWidth} />
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="pointer-events-none flex">
-          <Mark app={app} />
+          <Mark />
         </span>
         <span className="pointer-events-none text-[13px] font-semibold">Skryb</span>
       </div>

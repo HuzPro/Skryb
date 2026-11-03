@@ -198,7 +198,6 @@ from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version, open_wi
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
 from skryb.ui.meeting_handlers import MeetingApi
-from skryb.ui.voice_feed import VoiceFeed
 
 _logger = logging.getLogger(__name__)
 
@@ -1414,8 +1413,6 @@ def build_app(
         if updater is not None:
             show_page("updates")
             updater.install()
-
-    VoiceFeed(event_bus, api_server.hub.publish, level=lambda: recorder.current_rms)
 
     def meeting_changed(recording: bool) -> None:
         app.meeting_recording_changed(recording)

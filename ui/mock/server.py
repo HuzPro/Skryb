@@ -337,20 +337,14 @@ class Core:
                 self.emit("meter", {"level": round(level, 3)})
 
     def cycle_states(self) -> None:
-        """Dictate on a loop, so the logo can be watched recording, transcribing and loading."""
+        """Dictate on a loop, so the status card can be watched recording, transcribing and loading."""
         steps = (("recording", 5.0), ("transcribing", 2.5), ("idle", 2.0), ("loading", 3.0), ("idle", 2.0))
         while True:
             for state, seconds in steps:
                 with self.lock:
                     self.app["state"] = state
                 self.emit("app", self.app)
-                ends = time.time() + seconds
-                while time.time() < ends:
-                    time.sleep(0.05)
-                    if state == "recording":
-                        t = time.time()
-                        level = max(0.0, 0.5 + 0.5 * math.sin(t * 3.1) * math.sin(t * 8.3))
-                        self.emit("voice", {"level": round(level, 3)})
+                time.sleep(seconds)
 
     def rehearse_update(self) -> None:
         """Quit, play setup's steps into the progress file, then come back as 9.9.9 and reopen the window."""
