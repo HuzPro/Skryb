@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   measure:
-    name: restored cache (${{ matrix.variant }})
+    name: restored cache (${{ matrix.variant }}) run 2
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -48,6 +48,9 @@ jobs:
             ui/src-tauri/target
           key: ${{ steps.cargo-key.outputs.key }}-src
           restore-keys: ${{ steps.cargo-key.outputs.key }}
+      - name: cpu
+        shell: pwsh
+        run: Get-CimInstance Win32_Processor | Select-Object Name, NumberOfLogicalProcessors | Format-List
       - name: extract the crate sources
         shell: bash
         run: time cargo metadata --format-version 1 --manifest-path ui/src-tauri/Cargo.toml > /dev/null
