@@ -72,6 +72,7 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
           className="min-w-0 flex-1 text-left outline-none"
         >
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {model.tier ? <Badge variant="primary">{model.tier}</Badge> : null}
             <span className="text-[13.5px] font-medium">{model.name}</span>
             <span className="text-[12px] text-muted-foreground">{model.display_size}</span>
             {model.installed ? (
@@ -82,6 +83,7 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
             ) : null}
           </div>
           <div className="mt-0.5 text-[12.5px] text-muted-foreground">{model.description}</div>
+          {model.needs ? <div className="mt-0.5 text-[12px] text-muted-foreground">Needs: {model.needs}</div> : null}
         </button>
         <div className="flex shrink-0 gap-2">
           {active ? (

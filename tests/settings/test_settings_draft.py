@@ -51,8 +51,6 @@ class TestChangeSetFromDrafts:
         assert changes.output_changed is False
 
     def test_should_reload_and_rebuild_output_when_model_size_differs(self):
-        # Only a CrisperWhisper model can put the pipeline in passthrough, so
-        # switching model can silently leave the dictionary off.
         original = _make_draft(model_size="parakeet-ultra")
         updated = _make_draft(model_size="nemotron-speech-streaming-en-0.6b")
 
@@ -157,70 +155,3 @@ class TestHearingQuestionsChanges:
         draft = _make_draft(question_marks=False)
 
         assert not ChangeSet.between(draft, draft).any_changed
-
-
-class TestCrisperWhisperModeChanges:
-    def test_should_require_an_engine_reload(self) -> None:
-        original = _make_draft(crisperwhisper_mode="intended")
-        updated = _make_draft(crisperwhisper_mode="verbatim")
-
-        changes = ChangeSet.between(original, updated)
-
-        assert changes.engine_reload_required
-
-    def test_should_rebuild_output_so_the_pipeline_follows(self) -> None:
-        original = _make_draft(crisperwhisper_mode="intended")
-        updated = _make_draft(crisperwhisper_mode="verbatim")
-
-        changes = ChangeSet.between(original, updated)
-
-        assert changes.output_changed
-
-    def test_should_report_nothing_when_the_mode_is_unchanged(self) -> None:
-        draft = _make_draft(crisperwhisper_mode="verbatim")
-
-        assert not ChangeSet.between(draft, draft).any_changed
-
-
-class TestLeavingVerbatimTranscription:
-    def test_should_rebuild_output_when_leaving_a_verbatim_model(self):
-        # Verbatim turns the whole text pipeline off. The mode key stays in
-        # the config when the user picks a model that has no modes, so the
-        # rebuild has to be driven by the model change itself.
-        original = _make_draft(
-            model_size="crisperwhisper-2.0-turbo", crisperwhisper_mode="verbatim",
-        )
-        updated = _make_draft(
-            model_size="parakeet-ultra", crisperwhisper_mode="verbatim",
-        )
-
-        changes = ChangeSet.between(original, updated)
-
-        assert changes.output_changed is True
-
-    def test_should_rebuild_output_when_arriving_at_a_verbatim_model(self):
-        original = _make_draft(
-            model_size="parakeet-ultra", crisperwhisper_mode="verbatim",
-        )
-        updated = _make_draft(
-            model_size="crisperwhisper-2.0-turbo", crisperwhisper_mode="verbatim",
-        )
-
-        changes = ChangeSet.between(original, updated)
-
-        assert changes.output_changed is True
-
-
-class TestLearningChanges:
-    def test_turning_learning_on_asks_for_the_edit_watcher_and_nothing_else(self):
-        changes = ChangeSet.between(_make_draft(learn_words=False), _make_draft(learn_words=True))
-
-        assert changes.learning_turned_on
-        assert not changes.output_changed
-        assert not changes.engine_reload_required
-
-    def test_turning_learning_off_needs_nothing_rebuilt(self):
-        changes = ChangeSet.between(_make_draft(learn_words=True), _make_draft(learn_words=False))
-
-        assert not changes.learning_turned_on
-        assert not changes.output_changed

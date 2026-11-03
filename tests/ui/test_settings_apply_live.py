@@ -57,7 +57,8 @@ def test_a_changed_dictionary_rebuilds_the_text_pipeline(build_output: MagicMock
             "punctuation_model": False,
         },
         "rules": [{"kind": "literal", "spoken": ["jose"], "replacement": "José", "case_sensitive": False,
-                   "whole_words": True, "phonetic": False, "enabled": True, "learned": False}],
+                   "whole_words": True, "phonetic": False, "enabled": True}],
+        "people": [{"written": "Thandiwe", "note": "", "heard_as": ["Tandiwe"], "phonetic": False}],
     }
 
     assert rig.call("PUT", "/api/dictionary", dictionary)[0] == 204

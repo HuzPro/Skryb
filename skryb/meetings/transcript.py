@@ -17,37 +17,23 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from skryb.meetings.segmenter import Segment
+from skryb.people.hints import hint_text
+from skryb.people.terms import load_terms
 
 Event = dict[str, object]
 Publish = Callable[[Event], None]
 
 TRANSCRIPT_JSON = "transcript.json"
 TRANSCRIPT_MD = "transcript.md"
-VOCABULARY = "vocabulary.txt"
-VOCABULARY_TEMPLATE = """\
-# Names and terms the transcript should spell right, one per line, e.g.
-# Launch Board
-# BRIGHTLINE
-# Speaker names you type in the meeting window are added automatically.
-"""
-# On shorter clips the list makes the model invent words ("Oh." became "Boston.").
-_MIN_CONTEXT_SECONDS = 2.0
 _ECHO_SHARE = 0.6
 _TRACKS = ("me", "them")
 _logger = logging.getLogger(__name__)
 
 
-def asr_context(vocabulary: Path, names: dict[str, str], segment: Segment) -> str | None:
-    """The names-and-terms hint for one clip, re-read each time so edits apply mid-meeting."""
-    if segment.end - segment.start < _MIN_CONTEXT_SECONDS:
-        return None
-    try:
-        lines = vocabulary.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        lines = []
-    terms = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
-    terms += [name for name in names.values() if name not in terms]
-    return f"Names and terms that may come up: {', '.join(terms)}." if terms else None
+def asr_context(people: Path, names: dict[str, str]) -> str | None:
+    """The names-and-terms hint for one clip: the people and terms list, re-read each time so edits apply
+    mid-meeting, and the speaker names typed in this meeting."""
+    return hint_text(load_terms(people), names.values())
 
 
 @dataclass

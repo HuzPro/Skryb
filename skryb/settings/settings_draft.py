@@ -25,7 +25,6 @@ class SettingsDraft:
     engine: str
     output_mode: OutputMode
     transcription_mode: TranscriptionMode = TranscriptionMode.BATCH
-    crisperwhisper_mode: str = "intended"
     # Handed to the engine when it is built, like the speech style.
     question_marks: bool = True
     capture_content: bool = False
@@ -33,9 +32,6 @@ class SettingsDraft:
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""
     boost_quiet_speech: bool = True
-    # The Dictionary page's switch; read at each edit, but it needs the
-    # edit watcher, which only runs while something uses it.
-    learn_words: bool = True
     hotkey_bindings: tuple[Binding, ...] = DEFAULT_BINDINGS
     double_tap_locks_hold: bool = True
     # Read where it is used, at each recording or sound, so none of it
@@ -68,25 +64,16 @@ class ChangeSet:
     output_changed: bool
     mode_changed: bool = False
     diagnostics_changed: bool = False
-    # Learning needs the edit watcher, which only runs while something uses it.
-    learning_turned_on: bool = False
     history_retention_changed: bool = False
 
     @classmethod
     def between(cls, original: SettingsDraft, updated: SettingsDraft) -> "ChangeSet":
-        # The intended/verbatim tags are baked into the decoder prefix at
-        # load time, and verbatim also switches the output pipeline off,
-        # so a mode change has to reload the engine and rebuild output.
-        crisperwhisper_mode_changed = (
-            original.crisperwhisper_mode != updated.crisperwhisper_mode
-        )
         engine_reload_required = (
             original.model_size != updated.model_size
             or original.device != updated.device
             or original.language != updated.language
             or original.engine != updated.engine
             or original.transcription_mode != updated.transcription_mode
-            or crisperwhisper_mode_changed
             or original.question_marks != updated.question_marks
         )
         hotkey_changed = (
@@ -94,16 +81,9 @@ class ChangeSet:
             or original.double_tap_locks_hold != updated.double_tap_locks_hold
         )
         mode_changed = original.transcription_mode != updated.transcription_mode
-        # The pipeline runs in passthrough only while the selected model
-        # transcribes verbatim (see transcribes_verbatim), so changing the model alone
-        # can turn the dictionary, filler removal and number formatting back
-        # on or off. That resolution lives in the composition root; rebuilding
-        # output for any model change is what keeps this from having to hold a
-        # second copy of it that can drift.
         output_changed = (
             original.output_mode != updated.output_mode
             or mode_changed
-            or crisperwhisper_mode_changed
             or original.model_size != updated.model_size
         )
         return cls(
@@ -115,7 +95,6 @@ class ChangeSet:
             history_retention_changed=(
                 original.history_retention_days != updated.history_retention_days
             ),
-            learning_turned_on=not original.learn_words and updated.learn_words,
         )
 
     @property

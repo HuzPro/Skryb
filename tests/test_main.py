@@ -109,8 +109,8 @@ class TestStartingTheEnginePreload:
     @staticmethod
     def _start(settings: dict[str, object], tmp_path: Path) -> tuple[object, MagicMock]:
         config = FakeConfig({
-            "transcription.model_size": "crisperwhisper-2.0-turbo",
-            "transcription.engine": "crisperwhisper_ct2",
+            "transcription.model_size": "qwen3-asr-1.7b",
+            "transcription.engine": "native_qwen3_asr",
             "transcription.language": "en",
             "transcription.mode": "batch",
             **settings,
@@ -168,7 +168,7 @@ class TestStartingTheEnginePreload:
             assert build() is create.return_value
 
         assert create.call_args.args[0].get("transcription.model_size") == (
-            "crisperwhisper-2.0-turbo"
+            "qwen3-asr-1.7b"
         )
 
 
@@ -482,7 +482,7 @@ class TestTorchPrewarmGate:
         config = FakeConfig(
             {
                 "transcription.model_size": DEFAULT_MODEL,
-                "transcription.engine": "crisperwhisper",
+                "transcription.engine": "qwen3_asr",
             }
         )
 

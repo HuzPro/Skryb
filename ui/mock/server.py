@@ -30,33 +30,30 @@ DOWNLOAD_SECONDS = 8.0
 ENGINE_LOAD_SECONDS = 1.5
 HISTORY_SIZE = 2500
 
+# No model in the lineup asks for a licence any more; this keeps the licence dialog's shape for the shell.
 LICENSE = {
-    "id": "crisperwhisper-nc",
-    "title": "CrisperWhisper licence (non-commercial research)",
-    "url": "https://huggingface.co/nyralabs/CrisperWhisper2.0_turbo/blob/main/LICENSE.md",
-    "text": (
-        "CrisperWhisper 2.0 - Non-Commercial Research Licence\n\n"
-        "1. You may use the model weights and their outputs for non-commercial research only.\n"
-        "2. You may not use the weights or outputs in any product or service offered for money.\n"
-        "3. Redistribution must keep this licence and the attribution to nyra labs.\n\n"
-    ) + "\n".join(f"{n}. Placeholder clause {n}: the mock repeats this so the dialog scrolls." for n in range(4, 40)),
+    "id": "example-licence",
+    "title": "Example model licence",
+    "url": "https://example.com/licence",
+    "text": "\n".join(f"{n}. Placeholder clause {n}: the mock repeats this so the dialog scrolls." for n in range(1, 40)),
 }
 
 MODELS = [
-    {"name": "parakeet-tdt-0.6b-v3", "display_size": "2.5 GB", "size": 2_510_000_000,
-     "description": "Best accuracy, built-in punctuation (25 languages)", "installed": True,
-     "supports_batch": True, "supports_streaming": False, "has_speech_styles": False, "license_id": None},
+    {"name": "phonon-2.5-english", "display_size": "164 MB", "size": 164_000_000,
+     "description": "Parakeet v3 shrunk to 164 MB by Fermion Research: fast on CPU, English only", "installed": True,
+     "supports_batch": True, "supports_streaming": False, "license_id": None,
+     "tier": "Small", "needs": "No GPU: the CPU or an Intel NPU, with under 1 GB of RAM"},
+    {"name": "parakeet-ultra", "display_size": "1.3 GB", "size": 1_260_000_000,
+     "description": "Parakeet v3 retrained by Moondream: fewer errors, same 25 languages", "installed": True,
+     "supports_batch": True, "supports_streaming": True, "license_id": None,
+     "tier": "Medium", "needs": "A GPU with about 2 GB of VRAM, or an Intel NPU"},
+    {"name": "qwen3-asr-1.7b", "display_size": "4.1 GB", "size": 4_080_000_000,
+     "description": "Qwen3-ASR 1.7B: most accurate. Native engine on the RX 9060 XT, the NPU on Intel, PyTorch elsewhere",
+     "installed": False, "supports_batch": True, "supports_streaming": False, "license_id": None,
+     "tier": "Large", "needs": "A GPU with about 4 GB of VRAM free; an Intel NPU runs it more slowly"},
     {"name": "nemotron-speech-streaming-en-0.6b", "display_size": "2.5 GB", "size": 2_470_000_000,
      "description": "NVIDIA cache-aware streaming (English, low-latency, GPU)", "installed": False,
-     "supports_batch": False, "supports_streaming": True, "has_speech_styles": False, "license_id": None},
-    {"name": "crisperwhisper-2.0-turbo", "display_size": "1.6 GB", "size": 1_630_000_000,
-     "description": "Fast 0.8B intended/verbatim Whisper; weights/outputs under non-commercial research license",
-     "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
-     "license_id": "crisperwhisper-nc"},
-    {"name": "crisperwhisper-2.0-large", "display_size": "3.1 GB", "size": 3_100_000_000,
-     "description": "Accurate 1.55B intended/verbatim Whisper; weights/outputs under non-commercial research license",
-     "installed": False, "supports_batch": True, "supports_streaming": False, "has_speech_styles": True,
-     "license_id": "crisperwhisper-nc"},
+     "supports_batch": False, "supports_streaming": True, "license_id": None, "tier": None, "needs": None},
 ]
 
 BROKEN_MICROPHONE = "Microphone Array (Realtek(R) A"
@@ -89,13 +86,16 @@ MEETING_LINES = [
 ]
 
 ENGINES = {
-    "parakeet-tdt-0.6b-v3": [("nano_parakeet", "Parakeet (ONNX Runtime)", "Runs on the CPU with ONNX Runtime; no GPU needed.")],
-    "nemotron-speech-streaming-en-0.6b": [("nemotron_streaming", "Nemotron streaming (NeMo)", "Needs a CUDA GPU.")],
-    "crisperwhisper-2.0-turbo": [
-        ("crisperwhisper_ct2", "CrisperWhisper (CTranslate2)", "Fastest on this computer: CTranslate2 on the CPU, no torch needed."),
-        ("crisperwhisper", "CrisperWhisper (Transformers)", "Uses torch; slower to start."),
+    "phonon-2.5-english": [("phonon2_cpu", "Phonon-2 (Fermion CPU engine)", "Runs on the CPU; no GPU needed.")],
+    "parakeet-ultra": [
+        ("native_parakeet", "Parakeet (native GPU engine)", "Fastest on this computer: no torch needed."),
+        ("nano_parakeet", "nano-parakeet (PyTorch)", "Uses torch; slower to start."),
     ],
-    "crisperwhisper-2.0-large": [("crisperwhisper", "CrisperWhisper (Transformers)", "Uses torch; the only engine for this model.")],
+    "qwen3-asr-1.7b": [
+        ("native_qwen3_asr", "Qwen3-ASR (native GPU engine)", "Recommended for your AMD GPU (gfx1200)"),
+        ("qwen3_asr", "Qwen3-ASR (Transformers)", "Uses torch; slower to start."),
+    ],
+    "nemotron-speech-streaming-en-0.6b": [("nemotron_streaming", "Nemotron streaming (NeMo)", "Needs a CUDA GPU.")],
 }
 
 SAMPLE_TEXTS = [
@@ -118,9 +118,9 @@ SAMPLE_TEXTS = [
 
 def _default_settings():
     return {
-        "model_size": "parakeet-tdt-0.6b-v3", "language": "en", "device": "auto", "engine": "auto",
-        "output_mode": "direct_paste", "transcription_mode": "batch", "crisperwhisper_mode": "intended",
-        "capture_content": True, "question_marks": True, "input_device": "", "boost_quiet_speech": True, "learn_words": True,
+        "model_size": "parakeet-ultra", "language": "en", "device": "auto", "engine": "auto",
+        "output_mode": "direct_paste", "transcription_mode": "batch",
+        "capture_content": True, "question_marks": True, "input_device": "", "boost_quiet_speech": True,
         "hotkey_bindings": [
             {"keys": "ctrl+alt+m", "mode": "toggle", "action": "dictate"},
             {"keys": "ctrl+shift+f9", "mode": "hold", "action": "dictate"},
@@ -212,7 +212,7 @@ class Core:
                 model["installed"] = False
         self.app = {"version": "0.9.0", "state": "idle",
                     "engine": {"ready": not first_run, "loading": False, "error": None,
-                               "model": "" if first_run else "parakeet-tdt-0.6b-v3",
+                               "model": "" if first_run else "parakeet-ultra",
                                "device": None if first_run else "NPU", "device_note": None},
                     "first_run": first_run, "diagnostics_directory": "D:\\VoiceToText_logs",
                     "history_directory": "D:\\VoiceToText_logs", "pill_default_position": [0.5, 1.0],
@@ -229,15 +229,22 @@ class Core:
             "options": {"remove_fillers": True, "spoken_commands": True, "numbers": False, "punctuation_model": False},
             "rules": [
                 {"kind": "literal", "spoken": ["jason", "jayson"], "replacement": "JSON", "case_sensitive": False,
-                 "whole_words": True, "phonetic": False, "enabled": True, "learned": False},
+                 "whole_words": True, "phonetic": False, "enabled": True, "fired": 41},
                 {"kind": "literal", "spoken": ["siobhan", "shivawn"], "replacement": "Siobhán", "case_sensitive": False,
-                 "whole_words": True, "phonetic": True, "enabled": True, "learned": True},
+                 "whole_words": True, "phonetic": True, "enabled": True, "fired": 3},
                 {"kind": "literal", "spoken": [" dot com"], "replacement": ".com", "case_sensitive": False,
-                 "whole_words": True, "phonetic": False, "enabled": True, "learned": False},
+                 "whole_words": True, "phonetic": False, "enabled": True, "fired": 0},
                 {"kind": "literal", "spoken": ["zurich"], "replacement": "Zürich", "case_sensitive": False,
-                 "whole_words": True, "phonetic": False, "enabled": False, "learned": True},
-                {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True},
+                 "whole_words": True, "phonetic": False, "enabled": False, "fired": 0},
+                {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True, "fired": 12},
             ],
+            "people": [
+                {"written": "Skryb", "note": "the app I'm building", "heard_as": [], "phonetic": False},
+                {"written": "Mikaela", "note": "design lead", "heard_as": ["Mikayla"], "phonetic": False},
+                {"written": "Michaela", "note": "finance", "heard_as": [], "phonetic": False},
+                {"written": "Ngozi Adébáyọ̀", "note": "", "heard_as": ["Ngozi Adebayo"], "phonetic": True},
+            ],
+            "suggestions": [{"heard": "scribe", "written": "Skryb", "times": 2}, {"heard": "Mikala", "written": "Mikaela", "times": 1}],
         }
         self.history = _history()
         self.meeting_models = [dict(model, installed=not first_run, download=None) for model in MEETING_MODELS]
@@ -638,12 +645,11 @@ class Handler(BaseHTTPRequestHandler):
             self._error(409, "Settings can be saved once the current dictation finishes.")
             return
         before = core.settings
-        reload = any(before[key] != draft[key] for key in ("model_size", "engine", "device", "transcription_mode", "crisperwhisper_mode"))
+        reload = any(before[key] != draft[key] for key in ("model_size", "engine", "device", "transcription_mode"))
         changes = {
             "engine_reload_required": reload, "hotkey_changed": before["hotkey_bindings"] != draft["hotkey_bindings"],
             "output_changed": before["output_mode"] != draft["output_mode"], "mode_changed": before["transcription_mode"] != draft["transcription_mode"],
             "diagnostics_changed": before["capture_content"] != draft["capture_content"],
-            "learning_turned_on": not before["learn_words"] and draft["learn_words"],
             "history_retention_changed": before["history_retention_days"] != draft["history_retention_days"],
         }
         core.settings = draft
@@ -736,19 +742,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dictionary(self, method, rest, query) -> None:
         core = self.core
-        if rest == ["forget-learned"]:
-            core.dictionary["rules"] = [r for r in core.dictionary["rules"] if not (r["kind"] == "literal" and r["learned"])]
-            self._send(204)
-        elif method == "DELETE" and rest[:1] == ["learned"] and len(rest) == 2:
-            rules = core.dictionary["rules"]
-            kept = [r for r in rules if not (r["kind"] == "literal" and r["learned"] and r["spoken"][0].strip() == rest[1].strip())]
-            core.dictionary["rules"] = kept
-            self._send(204) if len(kept) < len(rules) else self._error(404, "That learned word is no longer in the dictionary.")
-        elif method == "PUT":
-            core.dictionary = self._body()
+        if method == "PUT":
+            core.dictionary = {**self._body(), "suggestions": core.dictionary["suggestions"]}
             self._send(204)
         else:
             self._send(200, core.dictionary)
+
+    def _people(self, method, rest, query) -> None:
+        dictionary = self.core.dictionary
+        heard = rest[1].strip().casefold() if rest[:1] == ["suggestions"] and len(rest) >= 2 else ""
+        found = next((s for s in dictionary["suggestions"] if s["heard"].casefold() == heard), None)
+        if found is None:
+            self._error(404, "That suggestion is no longer there.")
+            return
+        dictionary["suggestions"] = [s for s in dictionary["suggestions"] if s is not found]
+        if method == "POST" and rest[2:] == ["accept"]:
+            for term in dictionary["people"]:
+                if term["written"] == found["written"]:
+                    term["heard_as"] = [*term["heard_as"], found["heard"]]
+        self._send(204)
 
     def _history(self, method, rest, query) -> None:
         core = self.core
@@ -848,7 +860,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not model["installed"] and not model["download"]:
                     model["download"] = {"state": "downloading", "bytes_done": 0, "bytes_total": model["size"], "error": ""}
             self._send(202)
-        elif rest in (["vocabulary", "open"], ["folder", "open"]):
+        elif rest == ["folder", "open"]:
             self._send(204)
         elif len(rest) == 1 and method == "GET":
             meeting = live if live and live["id"] == rest[0] else core.meetings.get(rest[0])

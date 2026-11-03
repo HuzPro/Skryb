@@ -133,7 +133,7 @@ def test_closing_the_shell_before_a_model_is_installed_ends_the_wait_and_says_th
         spawn=lambda _args: shell, candidates=lambda: [_exe(tmp_path)],
     )
     _after(0.3, lambda: setattr(shell, "exit_code", 0))
-    not_downloaded = FakeConfig({"transcription.model_size": "crisperwhisper-2.0-turbo"})
+    not_downloaded = FakeConfig({"transcription.model_size": "qwen3-asr-1.7b"})
 
     took = _setup(tk_root, tmp_path, server, launcher, not_downloaded)
 

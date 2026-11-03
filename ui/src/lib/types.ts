@@ -41,12 +41,10 @@ export interface Settings {
   engine: string;
   output_mode: OutputMode;
   transcription_mode: TranscriptionMode;
-  crisperwhisper_mode: "intended" | "verbatim";
   question_marks: boolean;
   capture_content: boolean;
   input_device: string;
   boost_quiet_speech: boolean;
-  learn_words: boolean;
   hotkey_bindings: Binding[];
   double_tap_locks_hold: boolean;
   recording: RecordingSettings;
@@ -63,7 +61,6 @@ export interface ChangeSet {
   output_changed: boolean;
   mode_changed: boolean;
   diagnostics_changed: boolean;
-  learning_turned_on: boolean;
   history_retention_changed: boolean;
 }
 
@@ -76,8 +73,11 @@ export interface Model {
   installed: boolean;
   supports_batch: boolean;
   supports_streaming: boolean;
-  has_speech_styles: boolean;
   license_id: string | null;
+  /** Small, Medium or Large in the dictation lineup; null for live and meeting models. */
+  tier?: string | null;
+  /** Roughly what it needs to run well. */
+  needs?: string | null;
   download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
 }
 
@@ -110,7 +110,8 @@ export interface LiteralRule {
   whole_words: boolean;
   phonetic: boolean;
   enabled: boolean;
-  learned: boolean;
+  /** How many times the rule has fired; sent by the core, ignored when saved. */
+  fired?: number;
 }
 
 export interface RegexRule {
@@ -118,13 +119,34 @@ export interface RegexRule {
   pattern: string;
   replacement: string;
   enabled: boolean;
+  fired?: number;
 }
 
 export type DictionaryRule = LiteralRule | RegexRule;
 
+/** A name or term dictation and meetings should spell right; its note tells the model which thing it is. */
+export interface Term {
+  written: string;
+  note: string;
+  /** Spellings the model has written for it, swapped for it. */
+  heard_as: string[];
+  /** Also swap words that only sound like it. */
+  phonetic: boolean;
+}
+
+/** A spelling to swap for an entry, from re-dictating over a selection that held it. */
+export interface Suggestion {
+  heard: string;
+  written: string;
+  times: number;
+}
+
 export interface Dictionary {
   options: { remove_fillers: boolean; spoken_commands: boolean; numbers: boolean; punctuation_model: boolean };
   rules: DictionaryRule[];
+  people: Term[];
+  /** Read-only: accepted or dismissed through their own requests. */
+  suggestions: Suggestion[];
 }
 
 export type HistoryStatus = "" | "Cancelled" | "Failed" | "Empty" | "Not saved";

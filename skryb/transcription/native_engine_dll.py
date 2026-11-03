@@ -1,5 +1,5 @@
-"""Where the native engines are on this machine: ``qasr.dll`` (Qwen3-ASR), ``npk.dll`` (Parakeet TDT),
-``cw.dll`` (CrisperWhisper) and ``nd.dll`` (the meeting diarizer), each with an NVIDIA build beside it
+"""Where the native engines are on this machine: ``qasr.dll`` (Qwen3-ASR), ``npk.dll`` (Parakeet TDT)
+and ``nd.dll`` (the meeting diarizer), each with an NVIDIA build beside it
 (``qasr_cuda.dll`` and so on, from ``native/cuda/build.py``).
 
 Kept free of heavy imports: the engine registry asks at startup.
@@ -21,10 +21,6 @@ DEV_BUILD_DLL = Path(__file__).resolve().parents[2] / "native" / "engine" / "bui
 PARAKEET_DLL_ENV = "NPK_DLL"
 SHIPPED_PARAKEET_DLL = Path(__file__).with_name("npk.dll")
 DEV_BUILD_PARAKEET_DLL = Path(__file__).resolve().parents[2] / "native" / "parakeet" / "build" / "npk.dll"
-
-WHISPER_DLL_ENV = "CW_DLL"
-SHIPPED_WHISPER_DLL = Path(__file__).with_name("cw.dll")
-DEV_BUILD_WHISPER_DLL = Path(__file__).resolve().parents[2] / "native" / "whisper" / "build" / "cw.dll"
 
 DIARIZER_DLL_ENV = "ND_DLL"
 SHIPPED_DIARIZER_DLL = Path(__file__).with_name("nd.dll")
@@ -49,11 +45,6 @@ def native_engine_dll(environ: Mapping[str, str] = os.environ, cuda: bool = Fals
 def native_parakeet_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
     """The same for ``npk.dll``. ``NPK_DLL`` (``NPK_CUDA_DLL``) wins and never falls back."""
     return _find_dll(environ, PARAKEET_DLL_ENV, SHIPPED_PARAKEET_DLL, DEV_BUILD_PARAKEET_DLL, cuda)
-
-
-def native_whisper_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:
-    """The same for ``cw.dll``. ``CW_DLL`` (``CW_CUDA_DLL``) wins and never falls back."""
-    return _find_dll(environ, WHISPER_DLL_ENV, SHIPPED_WHISPER_DLL, DEV_BUILD_WHISPER_DLL, cuda)
 
 
 def native_diarizer_dll(environ: Mapping[str, str] = os.environ, cuda: bool = False) -> Path | None:

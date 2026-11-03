@@ -2,7 +2,7 @@
 
 import threading
 
-from tests.ui.rig import NEMOTRON, TURBO, Rig
+from tests.ui.rig import NEMOTRON, QWEN, Rig
 from skryb.core.events import (
     DownloadCompletedEvent,
     DownloadFailedEvent,
@@ -33,7 +33,7 @@ def test_two_windows_see_the_same_events_in_the_order_they_happened(rig: Rig) ->
     assert first.next()[0] == second.next()[0] == "app"
 
     rig.bus.publish(DownloadProgressEvent(job_id=NEMOTRON, bytes_done=1_000, bytes_total=2_470_000_000))
-    rig.bus.publish(EngineLoadStartedEvent(model_name=TURBO))
+    rig.bus.publish(EngineLoadStartedEvent(model_name=QWEN))
     rig.state_machine.transition_to(AppState.RECORDING)
     rig.state_machine.transition_to(AppState.TRANSCRIBING)
     rig.bus.publish(TranscriptionCompletedEvent(text="Café at 9 with 東京 team"))
@@ -60,21 +60,21 @@ def test_the_stream_says_hello_with_the_app_and_then_keeps_the_line_alive(make_r
 def test_a_download_is_followed_from_progress_to_its_end(rig: Rig) -> None:
     stream = rig.events()
 
-    rig.bus.publish(DownloadStateChangedEvent(job_id=TURBO, state="queued"))
-    rig.bus.publish(DownloadProgressEvent(job_id=TURBO, bytes_done=10, bytes_total=100))
-    rig.bus.publish(DownloadStateChangedEvent(job_id=TURBO, state="paused"))
-    rig.bus.publish(DownloadStateChangedEvent(job_id=TURBO, state="failed"))
-    rig.bus.publish(DownloadFailedEvent(job_id=TURBO, error="HTTP 503 from huggingface.co"))
+    rig.bus.publish(DownloadStateChangedEvent(job_id=QWEN, state="queued"))
+    rig.bus.publish(DownloadProgressEvent(job_id=QWEN, bytes_done=10, bytes_total=100))
+    rig.bus.publish(DownloadStateChangedEvent(job_id=QWEN, state="paused"))
+    rig.bus.publish(DownloadStateChangedEvent(job_id=QWEN, state="failed"))
+    rig.bus.publish(DownloadFailedEvent(job_id=QWEN, error="HTTP 503 from huggingface.co"))
     rig.bus.publish(DownloadStateChangedEvent(job_id=NEMOTRON, state="completed"))
     rig.bus.publish(DownloadCompletedEvent(job_id=NEMOTRON))
 
     states = [stream.until("download") for _ in range(5)]
     stream.close()
     assert [(state["name"], state["state"]) for state in states] == [
-        (TURBO, "queued"), (TURBO, "downloading"), (TURBO, "paused"), (TURBO, "failed"), (NEMOTRON, "completed"),
+        (QWEN, "queued"), (QWEN, "downloading"), (QWEN, "paused"), (QWEN, "failed"), (NEMOTRON, "completed"),
     ]
     assert states[3] == {
-        "name": TURBO, "state": "failed", "bytes_done": 10, "bytes_total": 100,
+        "name": QWEN, "state": "failed", "bytes_done": 10, "bytes_total": 100,
         "error": "HTTP 503 from huggingface.co",
     }
 
@@ -83,21 +83,21 @@ def test_thousands_of_progress_reports_reach_the_shell_as_a_few_updates(rig: Rig
     stream = rig.events()
 
     for done in range(5_000):
-        rig.bus.publish(DownloadProgressEvent(job_id=TURBO, bytes_done=done, bytes_total=5_000))
-    rig.bus.publish(DownloadCompletedEvent(job_id=TURBO))
+        rig.bus.publish(DownloadProgressEvent(job_id=QWEN, bytes_done=done, bytes_total=5_000))
+    rig.bus.publish(DownloadCompletedEvent(job_id=QWEN))
 
     updates = []
     while not updates or updates[-1]["state"] != "completed":
         updates.append(stream.until("download"))
     stream.close()
     assert len(updates) < 100
-    assert updates[-1]["name"] == TURBO
+    assert updates[-1]["name"] == QWEN
 
 
 def test_a_failed_model_load_and_a_new_microphone_are_announced(rig: Rig) -> None:
     stream = rig.events()
 
-    rig.bus.publish(EngineLoadFailedEvent(model_name=TURBO, error="CUDA out of memory"))
+    rig.bus.publish(EngineLoadFailedEvent(model_name=QWEN, error="CUDA out of memory"))
     rig.bus.publish(MicrophoneConnectedEvent(name="Jabra Evolve2 65", will_be_used=True))
     rig.bus.publish(RecordingCancelledEvent(recoverable=True))
 
@@ -106,7 +106,7 @@ def test_a_failed_model_load_and_a_new_microphone_are_announced(rig: Rig) -> Non
     history = stream.until("history")
     stream.close()
     assert engine == {
-        "state": "failed", "loading": False, "ready": False, "error": "CUDA out of memory", "model": TURBO,
+        "state": "failed", "loading": False, "ready": False, "error": "CUDA out of memory", "model": QWEN,
     }
     assert microphone == {"name": "Jabra Evolve2 65", "will_be_used": True}
     assert history == {"event": "changed"}

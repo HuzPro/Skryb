@@ -31,6 +31,7 @@ class Rig:
             make_models=self._models,
             make_capture=self._capture,
             publish=self.events.append,
+            people=self.root / "people.json",
             on_change=self.changes.append,
             clock=lambda: datetime(2026, 10, 29, 14, 5, 33),
         )
@@ -58,7 +59,6 @@ def test_starting_records_into_a_new_folder_named_by_the_minute_and_tells_the_tr
     assert rig.recorder.is_recording()
     assert rig.recorder.recording_started() == datetime(2026, 10, 29, 14, 5, 33)
     assert (rig.root / "2026-10-29 14-05" / "them.flac").exists()
-    assert (rig.root / "vocabulary.txt").exists()
     assert rig.changes == [True]
     assert rig.events[-1]["type"] == "started"
     assert rig.asked_for[0].language == "ur"

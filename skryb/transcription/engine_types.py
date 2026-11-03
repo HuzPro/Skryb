@@ -2,14 +2,11 @@ from dataclasses import dataclass
 from typing import Literal, get_args
 
 EngineId = Literal[
-    "crisperwhisper", "crisperwhisper_ct2", "nano_parakeet",
-    "nemotron_streaming", "phonon2_cpu", "native_qwen3_asr", "openvino_parakeet",
-    "native_parakeet", "native_crisperwhisper",
-    "qwen3_asr", "openvino_qwen3_asr", "openvino_crisperwhisper",
+    "nano_parakeet", "nemotron_streaming", "phonon2_cpu", "native_qwen3_asr", "openvino_parakeet",
+    "native_parakeet", "qwen3_asr", "openvino_qwen3_asr",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 ALL_HARDWARE_KINDS: frozenset[HardwareKind] = frozenset(get_args(HardwareKind))
-CrisperWhisperMode = Literal["intended", "verbatim"]
 
 
 @dataclass(frozen=True)

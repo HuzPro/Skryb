@@ -35,7 +35,7 @@ venv/Scripts/python.exe native/bench/app_engine_check.py
 
 The same sources build for NVIDIA through `engine/gpu.h` (HIP's runtime names mapped onto CUDA's) and `engine/tile.h`
 (the 16x16x16 bf16 tile product: gfx12 WMMA on AMD, two `mma.sync` m16n8k16 on NVIDIA). One DLL per engine
-(`qasr_cuda.dll`, `npk_cuda.dll`, `cw_cuda.dll`, `nd_cuda.dll`) carries code for sm_86 (RTX 30), sm_89 (RTX 40) and
+(`qasr_cuda.dll`, `npk_cuda.dll`, `nd_cuda.dll`) carries code for sm_86 (RTX 30), sm_89 (RTX 40) and
 sm_120 (RTX 50) plus PTX, with the CUDA runtime linked in: users need only the NVIDIA driver. No GPU needed to build:
 
 ```bash

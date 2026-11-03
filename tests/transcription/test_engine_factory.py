@@ -1,17 +1,14 @@
 import importlib.util
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from tests.fakes.config import FakeConfig
 from tests.fakes.hardware import FakeHardwareDetector
 from tests.fakes.licensing import AllowAllLicensePolicy
-from skryb.core.exceptions import ConfigurationError, LicenseNotAcceptedError
-from skryb.transcription.crisperwhisper_adapter import (
-    CrisperWhisperAdapter,
-)
+from skryb.core.exceptions import ConfigurationError
 from skryb.transcription.engine_factory import (
     build_composite_model_manager,
     build_engine_registry,
@@ -25,7 +22,6 @@ from skryb.transcription.engine_factory import (
 )
 from skryb.transcription.engine_registry import EngineRegistry
 from skryb.transcription.engine_types import HardwareProfile
-from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import (
     ALL_MODELS,
     DEFAULT_MODEL,
@@ -41,7 +37,6 @@ def _config(
     model_size: str = DEFAULT_MODEL,
     device: str = "auto",
     engine: str = "auto",
-    crisperwhisper_mode: str = "intended",
 ) -> MagicMock:
     config = MagicMock()
     values = {
@@ -49,7 +44,6 @@ def _config(
         "transcription.device": device,
         "transcription.language": "en",
         "transcription.engine": engine,
-        "transcription.crisperwhisper_mode": crisperwhisper_mode,
     }
     config.get.side_effect = lambda key, default=None: values.get(key, default)
     return config
@@ -222,79 +216,6 @@ class TestTheNativeParakeetEngine:
         assert startup_requires_torch(config, build_engine_registry(), tmp_path) is True
 
 
-class TestTheNativeCrisperWhisperEngine:
-    """Both CrisperWhisper models run on the hand-written gfx1200 engine when its DLL is there."""
-
-    @staticmethod
-    def _ranked(gfx_arch: str | None, dll_installed: bool, model: str) -> list[str]:
-        from skryb.transcription.engine_selector import rank_engines
-
-        descriptors = [
-            replace(d, available=dll_installed) if d.engine_id == "native_crisperwhisper" else d
-            for d in build_engine_registry().all_descriptors()
-        ]
-        hardware = HardwareProfile(kind="amd_rocm", device_name="AMD Radeon", gfx_arch=gfx_arch)
-        return [c.engine_id for c in rank_engines(get_model_info(model), hardware, descriptors)]
-
-    @pytest.mark.parametrize("model", ["crisperwhisper-2.0-large", "crisperwhisper-2.0-turbo"])
-    def test_an_rx_9060_xt_runs_it_on_the_native_engine_first(self, model: str) -> None:
-        assert self._ranked("gfx1200", dll_installed=True, model=model)[0] == "native_crisperwhisper"
-
-    @pytest.mark.parametrize("gfx_arch", ["gfx1100", "gfx1201", None])
-    def test_another_amd_gpu_keeps_the_engines_it_had(self, gfx_arch: str | None) -> None:
-        assert self._ranked(gfx_arch, dll_installed=True, model="crisperwhisper-2.0-large") == ["crisperwhisper"]
-
-    def test_without_the_dll_it_keeps_the_engines_it_had(self) -> None:
-        assert self._ranked("gfx1200", dll_installed=False, model="crisperwhisper-2.0-large") == ["crisperwhisper"]
-
-    def test_it_gets_the_mode_from_settings_and_shares_the_crisperwhisper_downloads(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        from skryb.transcription.native_crisperwhisper_adapter import NativeCrisperWhisperAdapter
-
-        monkeypatch.setattr("skryb.transcription.engine_factory.native_whisper_dll", lambda: tmp_path / "cw.dll")
-        info = get_model_info("crisperwhisper-2.0-large")
-        repo = tmp_path / f"models--{info.repo_id.replace('/', '--')}"
-        (repo / "refs").mkdir(parents=True)
-        (repo / "refs" / "main").write_text(info.revision)
-
-        engine = create_engine_for_active_model(
-            _config(model_size="crisperwhisper-2.0-large", device="cuda", crisperwhisper_mode="verbatim"),
-            _paths(tmp_path), build_engine_registry(), _GPU, license_policy=AllowAllLicensePolicy(),
-        )
-        manager = build_composite_model_manager(
-            tmp_path, MagicMock(), lambda: "native_crisperwhisper", AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, NativeCrisperWhisperAdapter)
-        assert engine._mode == "verbatim"
-        assert engine._model_dir == repo / "snapshots" / info.revision
-        assert "crisperwhisper-2.0-large" in {m.name for m in manager.list_models()}
-
-    def test_the_cpu_fallback_after_it_fails_runs_crisperwhisper_on_pytorch(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr("skryb.transcription.engine_factory.native_whisper_dll", lambda: tmp_path / "cw.dll")
-
-        engine = create_engine_for_active_model(
-            _config(model_size="crisperwhisper-2.0-large", device="cuda"), _paths(tmp_path), build_engine_registry(),
-            _GPU, license_policy=AllowAllLicensePolicy(), device_override="cpu",
-        )
-
-        assert isinstance(engine, CrisperWhisperAdapter)
-        assert engine._device == "cpu"
-
-    def test_startup_skips_torch_when_an_earlier_launch_found_an_rx_9060_xt(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr("skryb.transcription.engine_factory.native_whisper_dll", lambda: tmp_path / "cw.dll")
-        config = FakeConfig({"transcription.model_size": "crisperwhisper-2.0-large", "transcription.engine": "auto"})
-        remembered = HardwareProfile(kind="amd_rocm", device_name="AMD Radeon RX 9060 XT", gfx_arch="gfx1200")
-
-        assert selectable_engine_ids(config, build_engine_registry(), tmp_path, remembered)[0] == "native_crisperwhisper"
-        assert startup_requires_torch(config, build_engine_registry(), tmp_path, remembered) is False
-
-
 class TestTheNativeEnginesOnNvidia:
     """The native engines run their NVIDIA build on an RTX 30, 40 or 50 series card."""
 
@@ -311,7 +232,6 @@ class TestTheNativeEnginesOnNvidia:
     @pytest.mark.parametrize("gfx_arch", ["sm_120", "sm_89", "sm_86"])
     @pytest.mark.parametrize(("model", "native"), [
         ("parakeet-ultra", "native_parakeet"),
-        ("crisperwhisper-2.0-large", "native_crisperwhisper"),
         ("qwen3-asr-1.7b", "native_qwen3_asr"),
     ])
     def test_an_rtx_30_40_or_50_card_runs_each_model_on_the_native_engine_first(
@@ -358,23 +278,9 @@ class TestBuildEngineRegistry:
         registry = build_engine_registry()
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
-            "nano_parakeet", "nemotron_streaming", "phonon2_cpu",
-            "crisperwhisper", "crisperwhisper_ct2", "native_qwen3_asr", "openvino_parakeet",
-            "native_parakeet", "native_crisperwhisper", "qwen3_asr", "openvino_qwen3_asr", "openvino_crisperwhisper",
+            "nano_parakeet", "nemotron_streaming", "phonon2_cpu", "native_qwen3_asr", "openvino_parakeet",
+            "native_parakeet", "qwen3_asr", "openvino_qwen3_asr",
         }
-
-    def test_should_declare_the_ct2_engine_torch_free(self) -> None:
-        registry = build_engine_registry()
-
-        assert registry.requires_torch(("crisperwhisper_ct2",)) is False
-        assert registry.requires_torch(("crisperwhisper",)) is True
-
-    def test_crisperwhisper_should_have_lower_base_priority(self) -> None:
-        by_id = {d.engine_id: d for d in build_engine_registry().all_descriptors()}
-
-        assert by_id["crisperwhisper"].base_priority < (
-            by_id["nano_parakeet"].base_priority
-        )
 
 
 class TestResolveEngineId:
@@ -485,136 +391,6 @@ class TestCreateEngineForActiveModel:
         assert isinstance(engine, NanoParakeetAdapter)
         assert engine._device == "cpu"
 
-    def test_should_build_crisperwhisper_with_default_intended_mode(
-        self, tmp_path: Path,
-    ) -> None:
-        engine = create_engine_for_active_model(
-            _config(
-                model_size="crisperwhisper-2.0-turbo",
-                engine="crisperwhisper",
-                device="cpu",
-            ),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, CrisperWhisperAdapter)
-        assert engine._repo_id == "nyralabs/CrisperWhisper2.0_turbo"
-        assert engine._mode == "intended"
-        assert engine._revision == ALL_MODELS["crisperwhisper-2.0-turbo"].revision
-
-    def test_should_build_crisperwhisper_large_at_its_own_pin(
-        self, tmp_path: Path,
-    ) -> None:
-        engine = create_engine_for_active_model(
-            _config(
-                model_size="crisperwhisper-2.0-large",
-                engine="crisperwhisper",
-                device="cpu",
-            ),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, CrisperWhisperAdapter)
-        assert engine._revision == ALL_MODELS["crisperwhisper-2.0-large"].revision
-
-    def test_should_pass_validated_verbatim_mode(self, tmp_path: Path) -> None:
-        engine = create_engine_for_active_model(
-            _config(
-                model_size="crisperwhisper-2.0-large",
-                engine="crisperwhisper",
-                crisperwhisper_mode="verbatim",
-            ),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _GPU,
-            license_policy=AllowAllLicensePolicy(),
-        )
-
-        assert isinstance(engine, CrisperWhisperAdapter)
-        assert engine._mode == "verbatim"
-
-    def test_should_reject_invalid_crisperwhisper_mode(
-        self, tmp_path: Path,
-    ) -> None:
-        with pytest.raises(ConfigurationError, match="crisperwhisper_mode"):
-            create_engine_for_active_model(
-                _config(
-                    model_size="crisperwhisper-2.0-turbo",
-                    engine="crisperwhisper",
-                    crisperwhisper_mode="raw",
-                ),
-                _paths(tmp_path),
-                build_engine_registry(),
-                _GPU,
-                license_policy=AllowAllLicensePolicy(),
-            )
-
-
-class TestLicenceGatedEngineConstruction:
-    """Engine construction is one of the paths the gate covers: an
-    unaccepted licence must stop the adapter from being built at all, not
-    only stop the download.
-    """
-
-    def test_should_refuse_to_build_an_engine_for_an_unaccepted_licence(
-        self, tmp_path: Path,
-    ) -> None:
-        with pytest.raises(
-            LicenseNotAcceptedError, match="crisperwhisper-2.0-turbo",
-        ):
-            create_engine_for_active_model(
-                _config(
-                    model_size="crisperwhisper-2.0-turbo",
-                    engine="crisperwhisper",
-                    device="cpu",
-                ),
-                _paths(tmp_path),
-                build_engine_registry(),
-                _CPU,
-                license_policy=LicensePolicy(FakeConfig()),
-            )
-
-    def test_should_build_the_engine_once_the_licence_is_accepted(
-        self, tmp_path: Path,
-    ) -> None:
-        config = FakeConfig()
-        policy = LicensePolicy(config)
-        policy.accept(ALL_MODELS["crisperwhisper-2.0-turbo"])
-
-        engine = create_engine_for_active_model(
-            _config(
-                model_size="crisperwhisper-2.0-turbo",
-                engine="crisperwhisper",
-                device="cpu",
-            ),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=policy,
-        )
-
-        assert isinstance(engine, CrisperWhisperAdapter)
-
-    def test_should_leave_an_ungated_model_buildable(
-        self, tmp_path: Path,
-    ) -> None:
-        engine = create_engine_for_active_model(
-            _config(engine="nano_parakeet", device="cpu"),
-            _paths(tmp_path),
-            build_engine_registry(),
-            _CPU,
-            license_policy=LicensePolicy(FakeConfig()),
-        )
-
-        assert isinstance(engine, NanoParakeetAdapter)
-
-
 class TestModelManagers:
     def test_default_manager_should_list_all_models(self, tmp_path: Path) -> None:
         manager = create_model_manager(
@@ -652,10 +428,10 @@ class TestSelectableEngineIds:
 
     def test_should_name_only_the_explicitly_configured_engine(self) -> None:
         ids = selectable_engine_ids(
-            _config(engine="crisperwhisper"), build_engine_registry(),
+            _config(engine="qwen3_asr"), build_engine_registry(),
         )
 
-        assert ids == ("crisperwhisper",)
+        assert ids == ("qwen3_asr",)
 
     def test_should_offer_the_models_compatible_engines_in_auto_mode(
         self,
@@ -744,98 +520,6 @@ class TestEngineResolutionSkipsTheProbe:
         )
 
         assert detector.detect_calls == 1
-
-
-class TestAutoPrefersTheTorchFreeEngine:
-    """``auto`` has to narrow to the one engine it will load.
-
-    Answering the torch question about every compatible engine would
-    report "needs torch" whenever any alternative did, which would
-    reinstate the import the CTranslate2 engine exists to avoid.
-    """
-
-    def _turbo_installed(self, models_dir: Path) -> None:
-        model_info = get_model_info("crisperwhisper-2.0-turbo")
-        repo = models_dir / (
-            f"models--{model_info.repo_id.replace('/', '--')}"
-        )
-        snapshot = repo / "snapshots" / model_info.revision
-        snapshot.mkdir(parents=True)
-        (snapshot / "model.safetensors").write_bytes(b"weights")
-        (snapshot / "config.json").write_text("{}")
-        (repo / "refs").mkdir()
-        (repo / "refs" / "main").write_text(model_info.revision)
-
-    def test_should_select_ct2_and_skip_torch_when_it_is_installed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            "skryb.transcription.engine_factory._ctranslate2_installed",
-            lambda: True,
-        )
-        self._turbo_installed(tmp_path)
-        config = FakeConfig({
-            "transcription.model_size": "crisperwhisper-2.0-turbo",
-            "transcription.engine": "auto",
-        })
-        registry = build_engine_registry()
-        cpu = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
-
-        assert selectable_engine_ids(config, registry, tmp_path, cpu) == (
-            "crisperwhisper_ct2",
-        )
-        assert startup_requires_torch(config, registry, tmp_path, cpu) is False
-
-    def test_with_an_intel_npu_it_selects_the_npu_engine_and_skips_torch(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            "skryb.transcription.engine_factory._ctranslate2_installed",
-            lambda: True,
-        )
-        self._turbo_installed(tmp_path)
-        config = FakeConfig({
-            "transcription.model_size": "crisperwhisper-2.0-turbo",
-            "transcription.engine": "auto",
-        })
-        npu = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None, npu="FD3E")
-
-        assert selectable_engine_ids(config, build_engine_registry(), tmp_path, npu) == ("openvino_crisperwhisper",)
-        assert startup_requires_torch(config, build_engine_registry(), tmp_path, npu) is False
-
-    def test_should_fall_back_to_transformers_without_ctranslate2(
-        self, tmp_path: Path,
-    ) -> None:
-        self._turbo_installed(tmp_path)
-        config = FakeConfig({
-            "transcription.model_size": "crisperwhisper-2.0-turbo",
-            "transcription.engine": "auto",
-        })
-        registry = build_engine_registry()
-        cpu = HardwareProfile(kind="cpu", device_name="CPU", gfx_arch=None)
-
-        with patch(
-            "skryb.transcription.engine_factory."
-            "_ctranslate2_installed",
-            return_value=False,
-        ):
-            assert selectable_engine_ids(config, registry, tmp_path, cpu) == (
-                "crisperwhisper",
-            )
-            assert startup_requires_torch(config, registry, tmp_path, cpu) is True
-
-    def test_should_keep_an_explicit_engine_choice(
-        self, tmp_path: Path,
-    ) -> None:
-        self._turbo_installed(tmp_path)
-        config = FakeConfig({
-            "transcription.model_size": "crisperwhisper-2.0-turbo",
-            "transcription.engine": "crisperwhisper",
-        })
-
-        assert selectable_engine_ids(
-            config, build_engine_registry(), tmp_path,
-        ) == ("crisperwhisper",)
 
 
 class TestPhonon2OnTheCpuEngine:

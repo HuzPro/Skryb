@@ -39,7 +39,7 @@ class FileSession:
         *,
         source: Path,
         models: Models,
-        vocabulary: Path,
+        people: Path,
         publish: Publish,
         on_done: Callable[["FileSession"], None],
         decode: Decode = decode_audio,
@@ -54,7 +54,7 @@ class FileSession:
         self.progress: float | None = None
         self._published: tuple[str, float | None] = ("", None)
         self._models = models
-        self._vocabulary = vocabulary
+        self._people = people
         self._on_done = on_done
         self._decode = decode
         self._cancel = threading.Event()
@@ -148,7 +148,7 @@ class FileSession:
         piece = audio[int(segment.start * RATE):int(segment.end * RATE)]
         if not len(piece):
             return
-        context = asr_context(self._vocabulary, dict(self.transcript.names), segment)
+        context = asr_context(self._people, dict(self.transcript.names))
         self.transcript.add("them", segment, self._models.transcribe(piece, context))
 
     def _save_audio(self, audio: np.ndarray) -> None:

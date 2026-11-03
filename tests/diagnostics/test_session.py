@@ -57,24 +57,22 @@ def _audio() -> AudioSegment:
 
 class TestSessionEvents:
     @pytest.mark.parametrize(
-        ("configured_engine", "ct2_installed", "expected_hardware"),
+        ("model_name", "configured_engine", "expected_hardware"),
         [
-            ("auto", True, "unprobed"),
-            ("auto", False, "amd_rocm"),
-            ("crisperwhisper_ct2", True, "unprobed"),
-            ("crisperwhisper", True, "amd_rocm"),
+            ("qwen3-asr-1.7b", "native_qwen3_asr", "unprobed"),
+            ("qwen3-asr-1.7b", "auto", "amd_rocm"),
+            ("qwen3-asr-1.7b", "qwen3_asr", "amd_rocm"),
         ],
     )
     def test_startup_diagnostics_only_probe_hardware_for_the_selected_engine(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        model_name: str,
         configured_engine: str,
-        ct2_installed: bool,
         expected_hardware: str,
     ) -> None:
         paths = _session_paths(tmp_path / "Skryb – آواز")
-        model = get_model_info("crisperwhisper-2.0-turbo")
+        model = get_model_info(model_name)
         repo = paths.models_dir / f"models--{model.repo_id.replace('/', '--')}"
         snapshot = repo / "snapshots" / model.revision
         snapshot.mkdir(parents=True)
@@ -82,10 +80,6 @@ class TestSessionEvents:
         (snapshot / "config.json").write_text("{}", encoding="utf-8")
         (repo / "refs").mkdir()
         (repo / "refs" / "main").write_text(model.revision, encoding="ascii")
-        monkeypatch.setattr(
-            "skryb.transcription.engine_factory._ctranslate2_installed",
-            lambda: ct2_installed,
-        )
         config = FakeConfig({
             "transcription.model_size": model.name,
             "transcription.engine": configured_engine,

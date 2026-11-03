@@ -7,13 +7,13 @@ from skryb.core.exceptions import ConfigurationError
 from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.transcription.model_info import (
     ALL_MODELS,
-    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     PHONON2_MODELS,
     QWEN3_ASR_MODELS,
     ModelInfo,
+    best_model_left,
     default_model_for,
     get_model_info,
     is_catalog_model,
@@ -46,6 +46,10 @@ _REMOVED_ENGINES = (
     "transformers",
     "granite_speech",
     "granite_turboctc",
+    "crisperwhisper",
+    "crisperwhisper_ct2",
+    "native_crisperwhisper",
+    "openvino_crisperwhisper",
 )
 
 
@@ -80,13 +84,9 @@ class TestModelInfo:
 
 
 class TestPinnedRevisions:
-    """CrisperWhisper ships a licence keyed to each exact commit, so both resolve one audited
-    commit instead of whatever ``main`` points at today.
-    """
+    """Each pinned model resolves one audited commit instead of whatever ``main`` points at today."""
 
     _EXPECTED_PINS: ClassVar[dict[str, str]] = {
-        "crisperwhisper-2.0-turbo": "de0369c8a68025b7f6e86387b6eb5a3b369787c8",
-        "crisperwhisper-2.0-large": "f4334f6e8193f2691212d49b20fa12d370e13896",
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         "phonon-2.5-english": "da200358d638886bc96c758c672ad5568828b119",
         "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
@@ -108,42 +108,12 @@ class TestPinnedRevisions:
         assert unpinned == set(ALL_MODELS) - set(self._EXPECTED_PINS)
 
 
-class TestGatedLicences:
-    """Both CrisperWhisper variants ship the same licence bytes, so they
-    share one ``license_id`` and one acceptance. Their ``license_url``
-    must point at the pinned commit, never at a branch that can be
-    edited under the acceptance.
-    """
-
-    def test_both_crisperwhisper_variants_should_share_one_licence(self) -> None:
-        license_ids = {
-            info.license_id for info in CRISPERWHISPER_MODELS.values()
-        }
-
-        assert license_ids == {"crisperwhisper-nc"}
-
-    @pytest.mark.parametrize("model_name", sorted(CRISPERWHISPER_MODELS))
-    def test_licence_url_should_name_the_pinned_commit(
-        self, model_name: str,
-    ) -> None:
-        info = get_model_info(model_name)
-
-        assert info.revision in info.license_url
-        assert "/main/" not in info.license_url
-
-    def test_every_other_model_should_be_ungated(self) -> None:
-        gated = {name for name, info in ALL_MODELS.items() if info.license_id}
-
-        assert gated == set(CRISPERWHISPER_MODELS)
-
-
 class TestModelCatalog:
     def test_should_contain_only_surviving_model_lineups(self) -> None:
         assert set(ALL_MODELS) == (
             set(PARAKEET_MODELS)
             | set(PHONON2_MODELS)
             | set(NEMOTRON_STREAMING_MODELS)
-            | set(CRISPERWHISPER_MODELS)
             | set(QWEN3_ASR_MODELS)
         )
 
@@ -161,20 +131,14 @@ class TestModelCatalog:
         assert all(is_catalog_model(name) for name in ALL_MODELS)
         assert is_catalog_model("unknown-model") is False
 
-    def test_crisperwhisper_models_should_disclose_restrictive_license(
-        self,
-    ) -> None:
-        assert CRISPERWHISPER_MODELS
-        for model in CRISPERWHISPER_MODELS.values():
-            assert "non-commercial research license" in model.description
-            # PyTorch is the engine every machine has; the others only add speed where they run.
-            assert "crisperwhisper" in model.compatible_engines
-            assert set(model.compatible_engines) <= {
-                "native_crisperwhisper", "openvino_crisperwhisper", "crisperwhisper", "crisperwhisper_ct2",
-            }
+    def test_no_model_in_the_catalogue_asks_for_a_licence(self) -> None:
+        assert not [name for name, info in ALL_MODELS.items() if info.license_id]
 
-    def test_crisperwhisper_should_not_replace_default_model(self) -> None:
-        assert DEFAULT_MODEL not in CRISPERWHISPER_MODELS
+    def test_the_dictation_lineup_is_small_medium_and_large_each_saying_what_it_needs(self) -> None:
+        tiers = {info.tier: name for name, info in ALL_MODELS.items() if info.tier}
+        assert tiers == {"Small": "phonon-2.5-english", "Medium": "parakeet-ultra", "Large": "qwen3-asr-1.7b"}
+        assert all(ALL_MODELS[name].needs for name in tiers.values())
+        assert not NEMOTRON_STREAMING_MODELS["nemotron-speech-streaming-en-0.6b"].tier
 
 
 def _saved_config(path: Path, key: str, value: str) -> JsonConfigAdapter:
@@ -263,7 +227,6 @@ class TestABarkConfigMovesToPhonon:
         for key, value in {
             "transcription.model_size": model,
             "transcription.engine": "openvino_parakeet",
-            "transcription.crisperwhisper_mode": "verbatim",
             "transcription.language": "en",
             "audio.input_device": "USB Microphone (Røde NT-USB Mini)",
             "hotkey.double_tap_locks_hold": False,
@@ -375,20 +338,6 @@ class TestDefaultModelForHardware:
         assert info.display_size == "164 MB"
 
 
-class TestWhichModelsTranscribeVerbatim:
-    def test_crisperwhisper_follows_its_mode_setting(self) -> None:
-        from skryb.transcription.model_info import transcribes_verbatim
-
-        assert transcribes_verbatim("crisperwhisper-2.0-large", "verbatim")
-        assert not transcribes_verbatim("crisperwhisper-2.0-large", "intended")
-
-    def test_a_leftover_verbatim_setting_never_turns_cleanup_off_for_other_models(self) -> None:
-        from skryb.transcription.model_info import transcribes_verbatim
-
-        for name in ("phonon-2.5-english", "parakeet-ultra", "underdog-bark-3.0-plus", "qwen3-asr-1.7b", "", "not-a-model"):
-            assert not transcribes_verbatim(name, "verbatim")
-
-
 class TestModelSizes:
     def test_sizes_round_to_gigabytes_from_a_thousand_megabytes(self) -> None:
         from skryb.transcription.model_info import format_size_mb
@@ -396,3 +345,39 @@ class TestModelSizes:
         assert [format_size_mb(size) for size in (0, 164, 999, 1000, 1254, 4100)] == [
             "0 MB", "164 MB", "999 MB", "1.0 GB", "1.3 GB", "4.1 GB",
         ]
+
+
+class TestACrisperWhisperConfigMovesToTheBestModelLeft:
+    @pytest.mark.parametrize("model", ["crisperwhisper-2.0-turbo", "crisperwhisper-2.0-large"])
+    def test_it_moves_to_the_replacement_with_the_engine_back_on_auto(self, tmp_path: Path, model: str) -> None:
+        path = tmp_path / "config.json"
+        config = _saved_config(path, "transcription.model_size", model)
+        config.set("transcription.engine", "native_crisperwhisper")
+
+        migrate_removed_models(config, lambda: "qwen3-asr-1.7b")
+
+        persisted = _loaded_config(path)
+        assert persisted.get("transcription.model_size") == "qwen3-asr-1.7b"
+        assert persisted.get("transcription.engine") == "auto"
+
+    def test_a_config_on_another_model_never_asks_for_a_replacement(self, tmp_path: Path) -> None:
+        config = _saved_config(tmp_path / "config.json", "transcription.model_size", "qwen3-asr-1.7b")
+
+        migrate_removed_models(config, lambda: pytest.fail("asked for a replacement"))
+
+        assert config.get("transcription.model_size") == "qwen3-asr-1.7b"
+
+    @pytest.mark.parametrize(("kind", "native", "installed", "expected"), [
+        ("amd_rocm", True, set(), "qwen3-asr-1.7b"),
+        ("nvidia_cuda", True, {"parakeet-ultra"}, "parakeet-ultra"),
+        ("nvidia_cuda", True, {"phonon-2.5-english", "qwen3-asr-1.7b"}, "qwen3-asr-1.7b"),
+        ("amd_rocm", False, set(), "parakeet-ultra"),
+        ("amd_rocm", False, {"qwen3-asr-1.7b"}, "parakeet-ultra"),
+        ("nvidia_cuda", False, {"phonon-2.5-english"}, "phonon-2.5-english"),
+        ("cpu", False, {"parakeet-ultra", "qwen3-asr-1.7b"}, "phonon-2.5-english"),
+        (None, False, set(), "phonon-2.5-english"),
+    ])
+    def test_the_replacement_is_the_largest_model_the_gpu_runs_well_preferring_one_already_downloaded(
+        self, kind: str | None, native: bool, installed: set[str], expected: str,
+    ) -> None:
+        assert best_model_left(kind, native, installed.__contains__) == expected

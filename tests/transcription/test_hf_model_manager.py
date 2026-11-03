@@ -10,8 +10,8 @@ from skryb.core.exceptions import LicenseNotAcceptedError
 from skryb.downloads.hf_repo_resolver import ResolvedFile, ResolvedRepo
 from skryb.transcription.hf_model_manager import HuggingFaceModelManager
 from skryb.transcription.license_policy import LicensePolicy
+from skryb.transcription import license_policy as license_policy_module
 from skryb.transcription.model_info import (
-    CRISPERWHISPER_MODELS,
     PARAKEET_MODELS,
     ModelInfo,
 )
@@ -33,7 +33,11 @@ _NEMO_MODEL = ModelInfo(
     repo_id="example/nemo", compatible_engines=("nano_parakeet",),
 )
 
-_GATED_MODEL_NAME = "crisperwhisper-2.0-turbo"
+_GATED_MODEL_NAME = "gated-example"
+_GATED_MODEL = ModelInfo(
+    name=_GATED_MODEL_NAME, size_mb=10, description="Example", repo_id="example/gated",
+    license_id="example-nc", compatible_engines=("nano_parakeet",),
+)
 
 _EXAMPLE_MODEL = ModelInfo(
     name="example-transformers", size_mb=10, description="Example",
@@ -425,6 +429,10 @@ class TestLicenceGatedDownload:
     resolved on its behalf.
     """
 
+    @pytest.fixture(autouse=True)
+    def _shipped_licence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(license_policy_module, "_license_bytes", lambda _license_id: b"Example licence")
+
     def _gated_manager(
         self, tmp_path: Path, config: FakeConfig,
     ) -> tuple[HuggingFaceModelManager, MagicMock, MagicMock]:
@@ -434,7 +442,7 @@ class TestLicenceGatedDownload:
             tmp_path,
             resolver=resolver,
             download_manager=download_manager,
-            models=CRISPERWHISPER_MODELS,
+            models={_GATED_MODEL_NAME: _GATED_MODEL},
             license_policy=LicensePolicy(config),
         )
         return manager, resolver, download_manager
@@ -462,7 +470,7 @@ class TestLicenceGatedDownload:
         resolver.resolve.return_value = ResolvedRepo(
             requested_revision="", canonical_commit="sha123", files=[],
         )
-        LicensePolicy(config).accept(CRISPERWHISPER_MODELS[_GATED_MODEL_NAME])
+        LicensePolicy(config).accept(_GATED_MODEL)
 
         manager.download(_GATED_MODEL_NAME)
 

@@ -1,7 +1,7 @@
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,6 +32,8 @@ from skryb.output.clipboard_write_error import ClipboardWriteError
 from skryb.output.dictation_trace import begin_trace, end_trace
 from skryb.output.handler import TextOutputHandler
 from skryb.output.last_dictation import LastDictation
+from skryb.people.hints import transcribe_with_terms
+from skryb.people.terms import Term
 from skryb.recording.audio_segment import AudioSegment, load_wav
 from skryb.recording.recorder import AudioRecorder
 from skryb.transcription.engine import TranscriptionEngine
@@ -62,6 +64,14 @@ def _never_wake() -> float:
     return 0.0
 
 
+def _no_terms() -> Sequence[Term]:
+    return ()
+
+
+def _english() -> str:
+    return "en"
+
+
 class RecordAndTranscribeUseCase:
 
     def __init__(
@@ -82,6 +92,8 @@ class RecordAndTranscribeUseCase:
         wake_after_idle_seconds: Callable[[], float] = _never_wake,
         clock: Callable[[], float] = time.monotonic,
         engine_turns: EngineTurns | None = None,
+        terms: Callable[[], Sequence[Term]] = _no_terms,
+        language: Callable[[], str] = _english,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -136,6 +148,9 @@ class RecordAndTranscribeUseCase:
         self._wake_after_idle_seconds = wake_after_idle_seconds
         self._clock = clock
         self._engine_used_at = clock()
+        # The people and terms list, read at each decode so an edit applies to the next dictation.
+        self._terms = terms
+        self._language = language
         event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
     def on_hotkey_activated(self) -> None:
@@ -217,7 +232,7 @@ class RecordAndTranscribeUseCase:
         heard = self._prepare_audio(audio)
         with self.engine_turns.dictation():
             try:
-                return self._engine.transcribe(heard)
+                return transcribe_with_terms(self._engine, heard, self._terms(), self._language())
             finally:
                 self._engine_used_at = self._clock()
 

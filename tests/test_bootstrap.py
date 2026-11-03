@@ -22,7 +22,6 @@ from skryb.bootstrap import (
     _delivery_reporter,
     _ignore_delivery,
     _key_observer,
-    _resolve_pipeline_mode,
     _warmup_safely,
     apply_settings,
     migrate_hotkey_bindings,
@@ -533,7 +532,17 @@ class TestLicenceGateAtStartupLoad:
     itself, so both are exercised here.
     """
 
-    _GATED = "crisperwhisper-2.0-turbo"
+    _GATED = "gated-example"
+
+    @pytest.fixture(autouse=True)
+    def _a_gated_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from dataclasses import replace
+
+        from skryb.transcription import license_policy
+        from skryb.transcription.model_info import ALL_MODELS
+
+        monkeypatch.setitem(ALL_MODELS, self._GATED, replace(ALL_MODELS["parakeet-ultra"], name=self._GATED, license_id="example-nc"))
+        monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"Example licence")
 
     def _gated_config(self) -> FakeConfig:
         return FakeConfig({"transcription.model_size": self._GATED})
@@ -592,7 +601,7 @@ class TestLicenceGateAtStartupLoad:
         )
 
         assert len(received) == 1
-        assert "crisperwhisper-nc" in received[0].error
+        assert "example-nc" in received[0].error
         assert state_machine.state == AppState.IDLE
         use_case.set_engine.assert_not_called()
 
@@ -978,7 +987,7 @@ class TestApplySettings:
 
         mock_build_output.assert_called_once_with(
             OutputMode.CLIPBOARD_ONLY, dispatcher, None, PipelineMode.BATCH, None,
-            _ignore_delivery, hooks=None,
+            _ignore_delivery, hooks=None, people_path=None, rule_counts=None,
         )
         use_case.set_output.assert_called_once_with(mock_build_output.return_value)
 
@@ -1103,39 +1112,6 @@ class TestBuildStreamingEngineRouting:
         assert isinstance(engine, CacheAwareStreamingEngine)
 
 
-class TestPipelineModeForVerbatimTranscription:
-    @staticmethod
-    def _config(model: str, mode: str, transcription_mode: str = "batch"):
-        config = JsonConfigAdapter(Path("unused.json"))
-        config.load()
-        config.set("transcription.model_size", model)
-        config.set("transcription.crisperwhisper_mode", mode)
-        config.set("transcription.mode", transcription_mode)
-        return config
-
-    def test_should_bypass_the_pipeline_for_verbatim_crisperwhisper(self) -> None:
-        config = self._config("crisperwhisper-2.0-turbo", "verbatim")
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.VERBATIM
-
-    def test_should_keep_the_pipeline_for_intended_crisperwhisper(self) -> None:
-        config = self._config("crisperwhisper-2.0-turbo", "intended")
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
-
-    def test_should_ignore_a_stale_verbatim_value_on_another_model(self) -> None:
-        config = self._config("parakeet-ultra", "verbatim")
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.BATCH
-
-    def test_should_ignore_a_stale_verbatim_value_when_streaming(self) -> None:
-        config = self._config(
-            "nemotron-speech-streaming-en-0.6b", "verbatim", "streaming",
-        )
-
-        assert _resolve_pipeline_mode(config) is PipelineMode.STREAMING
-
-
 class TestEditCaptureSwitch:
     """Edit capture records keystrokes, so it must stay off unless asked for."""
 
@@ -1229,7 +1205,7 @@ class TestMicrophoneWiring:
         assert config.get("audio.input_device") == "Microphone (Maono PD300X Microp"
 
 
-class TestLearningWiring:
+class TestStartupWiring:
     def _paths(self, tmp_path: Path) -> AppPaths:
         paths = AppPaths(base=tmp_path)
         paths.ensure_dirs()
@@ -1262,43 +1238,6 @@ class TestLearningWiring:
 
         assert config.save_count == 0
 
-    def test_learning_alone_runs_the_edit_watcher_but_writes_no_edits_log(self, tmp_path):
-        paths = self._paths(tmp_path)
-        learner = MagicMock()
-
-        capture = _build_edit_capture(FakeConfig(), paths, learner)
-        assert capture is not None
-        capture._recorder.delivered("Ship it to Jon.", "batch", "direct_paste")
-
-        learner.observe.assert_called_once()
-        assert not (paths.session_dir / "edits.jsonl").exists()
-
-    @pytest.mark.parametrize(
-        "saved",
-        [
-            {"dictionary.learn_words": False},
-            {"writing.learn_words": False, "writing.learn_style": True, "writing.cleanup": "light"},
-        ],
-        ids=["switched-off", "switched-off-in-an-old-config"],
-    )
-    def test_learning_switched_off_in_settings_leaves_the_watcher_off(self, tmp_path, saved):
-        assert _build_edit_capture(FakeConfig(saved), self._paths(tmp_path), MagicMock()) is None
-
-    def test_the_edits_log_and_the_learner_both_receive_events_when_both_are_on(self, tmp_path):
-        paths = self._paths(tmp_path)
-        learner = MagicMock()
-        config = FakeConfig({
-            "diagnostics.capture_edits": True,
-            "diagnostics.capture_content": True,
-        })
-
-        capture = _build_edit_capture(config, paths, learner)
-        assert capture is not None
-        capture._recorder.delivered("Ship it to Jon.", "batch", "direct_paste")
-
-        learner.observe.assert_called_once()
-        assert (paths.session_dir / "edits.jsonl").read_text(encoding="utf-8").count("\n") == 1
-
     def test_background_work_starts_on_the_first_idle_and_only_once(self):
         bus = SimpleEventBus()
         started: list[str] = []
@@ -1319,25 +1258,6 @@ class TestLearningWiring:
         assert actions.paste_last is use_case.paste_last
         assert actions.copy_last is use_case.copy_last
         assert actions.dictate_activate is use_case.on_hotkey_activated
-
-    @patch("skryb.bootstrap._build_hotkey_listener")
-    def test_switching_learning_on_hands_the_new_edit_watcher_to_a_new_listener(
-        self, build_listener,
-    ):
-        app = MagicMock()
-        watcher = MagicMock()
-        changes = ChangeSet.between(_draft(learn_words=False), _draft(learn_words=True))
-
-        with patch("skryb.bootstrap._build_output"):
-            apply_settings(
-                changes, FakeConfig(), MagicMock(), app, gui_dispatcher=MagicMock(),
-                edit_capture=watcher,
-            )
-
-        assert changes.learning_turned_on
-        build_listener.assert_called_once()
-        app.set_hotkey_listener.assert_called_once_with(build_listener.return_value)
-
 
 class TestAppAwareOutputChain:
     @pytest.fixture(autouse=True)
@@ -1459,7 +1379,7 @@ def _draft(**overrides):
     from skryb.settings.settings_draft import SettingsDraft
 
     fields = {
-        "model_size": "crisperwhisper-2.0-turbo",
+        "model_size": "qwen3-asr-1.7b",
         "language": "en",
         "device": "auto",
         "engine": "auto",

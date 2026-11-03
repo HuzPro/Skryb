@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -60,6 +61,7 @@ class Phonon2CpuAdapter(TranscriptionEngine):
     def __init__(self, snapshot: Path) -> None:
         self._snapshot = snapshot
         self._model: object | None = None
+        self._hotwords: tuple[str, ...] = ()
 
     def load_model(self) -> None:
         started_at = time.monotonic()
@@ -80,6 +82,13 @@ class Phonon2CpuAdapter(TranscriptionEngine):
 
     def is_model_loaded(self) -> bool:
         return self._model is not None
+
+    def set_hotwords(self, words: Sequence[str]) -> None:
+        """Names the decoder favours when the audio is close (Fermion takes 25); rebuilt only when they change."""
+        if self._model is None or tuple(words) == self._hotwords:
+            return
+        self._model.set_hotwords(list(words))
+        self._hotwords = tuple(words)
 
     def transcribe(self, audio: AudioSegment) -> TranscriptionResult:
         if self._model is None:

@@ -38,7 +38,6 @@ from skryb.output.dictionary_config import (
 from skryb.output.output_mode import OutputMode
 from skryb.output.paste_method import paste_method_overrides
 from skryb.output.text_filter_decorator import load_dictionary
-from skryb.output.word_learning import LEARN_WORDS_KEY, learns_words
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.recording.preferences import (
     RecordingPreferences,
@@ -69,9 +68,7 @@ from skryb.transcription.model_info import (
     get_model_info,
     is_catalog_model as _is_catalog_model,
 )
-from skryb.transcription.model_info import has_crisperwhisper_modes
 
-CRISPERWHISPER_MODES: tuple[str, ...] = ("intended", "verbatim")
 from skryb.transcription.model_manager import ModelManager
 
 
@@ -282,7 +279,6 @@ class SettingsService:
             transcription_mode=TranscriptionMode.migrate(
                 self._config.get("transcription.mode")
             ),
-            crisperwhisper_mode=self._crisperwhisper_mode(),
             question_marks=self._config.get("transcription.question_marks", True) is not False,
             capture_content=(
                 self._config.get("diagnostics.enabled", True) is True
@@ -292,7 +288,6 @@ class SettingsService:
             boost_quiet_speech=(
                 self._config.get("audio.boost_quiet_speech", True) is not False
             ),
-            learn_words=learns_words(self._config),
             hotkey_bindings=parse_bindings(self._config),
             double_tap_locks_hold=(
                 self._config.get("hotkey.double_tap_locks_hold", True) is not False
@@ -325,16 +320,6 @@ class SettingsService:
             "meetings_language": meetings.language,
         }
 
-    def _crisperwhisper_mode(self) -> str:
-        configured = self._config.get(
-            "transcription.crisperwhisper_mode", "intended",
-        )
-        return configured if configured in CRISPERWHISPER_MODES else "intended"
-
-    @staticmethod
-    def model_has_speech_styles(name: str) -> bool:
-        return has_crisperwhisper_modes(name)
-
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
         original = self.current_draft()
         self._config.set("diagnostics.capture_content", draft.capture_content)
@@ -351,11 +336,7 @@ class SettingsService:
         self._config.set("audio.boost_quiet_speech", draft.boost_quiet_speech)
         draft.recording.save_to(self._config)
         self._config.set("transcription.mode", draft.transcription_mode.value)
-        self._config.set(
-            "transcription.crisperwhisper_mode", draft.crisperwhisper_mode,
-        )
         self._config.set("transcription.question_marks", draft.question_marks)
-        self._config.set(LEARN_WORDS_KEY, draft.learn_words)
         self._config.set("history.retention_days", draft.history_retention_days)
         self._config.set("updates.check_automatically", draft.check_for_updates)
         self._config.set("meetings.folder", draft.meetings_folder.strip())

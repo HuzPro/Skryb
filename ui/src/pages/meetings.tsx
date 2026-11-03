@@ -788,6 +788,9 @@ export function LiveMeetingPage() {
             </dl>
             <div className="mt-2 flex flex-wrap gap-x-4">
               <OpenFolderButton path={live ? `/api/meetings/${encodeURIComponent(live.id)}/open` : "/api/meetings/folder/open"} />
+              <NavLink to="/dictionary" draggable={false} className="text-[12.5px] font-medium text-primary hover:underline">
+                Edit names and terms
+              </NavLink>
             </div>
           </Card>
         </>

@@ -125,11 +125,6 @@ copyright statement in `NOTICE`). Python packages and downloaded model weights
 have separate licenses. The application's license does not grant rights to
 use a model or its outputs.
 
-CrisperWhisper models and outputs have non-commercial restrictions. The app
-requires acceptance of the bundled terms before downloading or loading these
-models. Commercial or production use requires a separate license from the
-model publisher. See `skryb/licenses/crisperwhisper-nc.md`.
-
 Because PyTorch and the other Python packages are downloaded from their
 official indices at install time, the installer does not redistribute them,
 and model weights are downloaded separately. The installer ships:

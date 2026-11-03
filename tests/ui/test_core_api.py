@@ -13,7 +13,7 @@ import pytest
 
 from tests.fakes.installs import without_openvino
 from tests.fakes.hardware import FakeHardwareDetector
-from tests.ui.rig import CRISPERWHISPER_LICENCE, NEMOTRON, PARAKEET, TURBO, Rig
+from tests.ui.rig import GATED, GATED_LICENCE, NEMOTRON, PARAKEET, QWEN, Rig, add_gated_model
 from skryb.core.events import DownloadProgressEvent
 from skryb.core.release_update import UpdateStatus
 from skryb.transcription import engine_factory
@@ -22,12 +22,13 @@ from skryb.output.output_mode import OutputMode
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.settings.settings_draft import SettingsDraft
 from skryb.transcription.engine_types import HardwareProfile
+from skryb.people.terms import suggest
 from skryb.ui.shapes import draft_from_json
 
 _SETTINGS_KEYS = {
     "model_size", "language", "device", "engine", "output_mode", "transcription_mode",
-    "crisperwhisper_mode", "question_marks", "capture_content", "input_device", "boost_quiet_speech",
-    "learn_words", "hotkey_bindings", "double_tap_locks_hold", "recording",
+    "question_marks", "capture_content", "input_device", "boost_quiet_speech",
+    "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings", "theme",
 }
 _RECORDING_KEYS = {
@@ -36,7 +37,7 @@ _RECORDING_KEYS = {
 }
 _CHANGE_KEYS = {
     "engine_reload_required", "hotkey_changed", "output_changed", "mode_changed",
-    "diagnostics_changed", "learning_turned_on",
+    "diagnostics_changed",
     "history_retention_changed",
 }
 
@@ -114,7 +115,6 @@ def test_the_app_and_its_settings_answer_in_the_contracts_shapes(rig: Rig) -> No
 
     settings = _settings(rig)
     assert set(settings) == _SETTINGS_KEYS
-    assert settings["learn_words"] is True
     assert set(settings["recording"]) == _RECORDING_KEYS
     assert set(settings["meetings"]) == {"folder", "record_microphone", "language"}
     assert settings["model_size"] == PARAKEET
@@ -132,7 +132,6 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
         {"keys": "", "mode": "toggle", "action": "paste_last"},
         {"keys": "ctrl+alt+c", "mode": "hold", "action": "copy_last"},
     ]
-    settings["learn_words"] = False
     settings["recording"]["preferred_devices"] = ["Maono PD300X", " ", "Maono PD300X", "Jabra"]
     settings["paste_method_overrides"] = [["Mintty", "shift_insert"], ["code.exe", "ctrl_v"]]
 
@@ -147,11 +146,9 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
     assert len(rig.saved) == 1 and rig.saved[0].hotkey_changed and rig.saved[0].output_changed
     assert rig.config.get("output.mode") == "clipboard_only"
     assert rig.config.get("audio.preferred_devices") == ["Maono PD300X", "Jabra"]
-    assert rig.config.get("dictionary.learn_words") is False
     pushed = stream.until("settings")
     stream.close()
     assert pushed["output_mode"] == "clipboard_only"
-    assert pushed["learn_words"] is False
     assert pushed["hotkey_bindings"] == [
         {"keys": "ctrl+alt+space", "mode": "hold", "action": "dictate"},
         {"keys": "f13", "mode": "toggle", "action": "dictate"},
@@ -162,34 +159,35 @@ def test_saving_settings_applies_them_and_tells_every_open_window(rig: Rig) -> N
     }
 
 
-def test_a_gated_model_is_refused_until_its_licence_is_accepted_then_it_loads(make_rig) -> None:
-    rig = make_rig(installed=(PARAKEET, TURBO))
+def test_a_gated_model_is_refused_until_its_licence_is_accepted_then_it_loads(make_rig, monkeypatch) -> None:
+    add_gated_model(monkeypatch)
+    rig = make_rig(installed=(PARAKEET, GATED))
     stream = rig.events()
     settings = _settings(rig)
-    settings["model_size"] = TURBO
+    settings["model_size"] = GATED
 
     status, refused = rig.call("PUT", "/api/settings", settings)
 
     assert status == 409
-    assert refused["license"]["id"] == CRISPERWHISPER_LICENCE
-    assert "CrisperWhisper" in refused["license"]["text"]
+    assert refused["license"]["id"] == GATED_LICENCE
+    assert "Example Licence" in refused["license"]["text"]
     assert refused["license"]["title"]
     assert rig.config.get("transcription.model_size") == PARAKEET
     assert rig.saved == []
 
-    assert rig.call("POST", "/api/license/accept", {"id": CRISPERWHISPER_LICENCE})[0] == 204
+    assert rig.call("POST", "/api/license/accept", {"id": GATED_LICENCE})[0] == 204
     status, reply = rig.call("PUT", "/api/settings", settings)
 
     assert status == 200
     assert reply["engine_reload_started"] is True
     assert stream.until("engine") == {
-        "state": "loading", "loading": True, "ready": False, "error": None, "model": TURBO,
+        "state": "loading", "loading": True, "ready": False, "error": None, "model": GATED,
     }
     assert stream.until("engine")["state"] == "ready"
     stream.close()
     assert [changes.engine_reload_required for changes in rig.saved] == [True]
     assert rig.call("GET", "/api/app")[1]["engine"] == {
-        "loading": False, "ready": True, "error": None, "model": TURBO, "device": None, "device_note": None,
+        "loading": False, "ready": True, "error": None, "model": GATED, "device": None, "device_note": None,
     }
 
 
@@ -331,10 +329,10 @@ def test_settings_wait_while_a_dictation_is_in_progress(rig: Rig) -> None:
 
 def test_a_model_that_is_not_installed_cannot_be_chosen(rig: Rig) -> None:
     settings = _settings(rig)
-    settings["model_size"] = "crisperwhisper-2.0-large"
+    settings["model_size"] = QWEN
 
     assert rig.call("PUT", "/api/settings", settings) == (
-        400, {"error": "'crisperwhisper-2.0-large' is not installed. Download it first."},
+        400, {"error": "'qwen3-asr-1.7b' is not installed. Download it first."},
     )
 
 
@@ -425,13 +423,13 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
 
     assert status == 200
     by_name = {model["name"]: model for model in models}
-    assert set(by_name) == {
-        PARAKEET, "phonon-2.5-english", NEMOTRON, TURBO, "crisperwhisper-2.0-large", "qwen3-asr-1.7b",
-    }
+    assert set(by_name) == {PARAKEET, "phonon-2.5-english", NEMOTRON, QWEN}
     assert by_name[PARAKEET]["installed"] is True
     assert by_name[PARAKEET]["license_id"] is None
-    assert by_name[TURBO]["license_id"] == CRISPERWHISPER_LICENCE
-    assert by_name[TURBO]["has_speech_styles"] is True
+    assert [by_name[name]["tier"] for name in ("phonon-2.5-english", PARAKEET, QWEN, NEMOTRON)] == [
+        "Small", "Medium", "Large", None,
+    ]
+    assert by_name[QWEN]["needs"] and by_name[NEMOTRON]["needs"] is None
     assert (by_name[NEMOTRON]["supports_streaming"], by_name[NEMOTRON]["supports_batch"]) == (True, False)
     assert by_name[NEMOTRON]["download"] == {
         "state": "downloading", "bytes_done": 512, "bytes_total": 2048, "error": "",
@@ -439,9 +437,8 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
     assert by_name[PARAKEET]["download"] is None
     assert set(by_name[PARAKEET]) == {
         "name", "display_size", "description", "installed", "supports_batch",
-        "supports_streaming", "has_speech_styles", "license_id", "download",
+        "supports_streaming", "license_id", "tier", "needs", "download",
     }
-    assert by_name["phonon-2.5-english"]["has_speech_styles"] is False
 
 
 def test_first_run_setup_lists_this_computers_default_model_first(make_rig) -> None:
@@ -451,7 +448,7 @@ def test_first_run_setup_lists_this_computers_default_model_first(make_rig) -> N
     names = [model["name"] for model in rig.call("GET", "/api/models")[1]]
 
     assert names[0] == "phonon-2.5-english"
-    assert names[1:3] == [PARAKEET, "crisperwhisper-2.0-turbo"]
+    assert names[1:3] == [PARAKEET, QWEN]
     assert len(names) == len(set(names))
 
 
@@ -460,10 +457,11 @@ def test_the_settings_window_keeps_the_catalogue_order(rig: Rig) -> None:
 
     names = [model["name"] for model in rig.call("GET", "/api/models")[1]]
 
-    assert names[:3] == [PARAKEET, "phonon-2.5-english", "crisperwhisper-2.0-turbo"]
+    assert names[:3] == [PARAKEET, "phonon-2.5-english", QWEN]
 
 
-def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(make_rig) -> None:
+def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(make_rig, monkeypatch) -> None:
+    add_gated_model(monkeypatch)
     rig = make_rig(installed=(PARAKEET, NEMOTRON))
     stream = rig.events()
 
@@ -471,11 +469,11 @@ def test_model_downloads_and_deletes_answer_at_once_and_report_over_the_stream(m
     assert rig.call("POST", f"/api/models/{NEMOTRON}/pause")[0] == 202
     assert rig.call("POST", f"/api/models/{NEMOTRON}/resume")[0] == 202
     assert rig.call("POST", f"/api/models/{NEMOTRON}/cancel")[0] == 202
-    assert rig.call("POST", "/api/models/crisperwhisper-2.0-large/cancel")[0] == 202
+    assert rig.call("POST", f"/api/models/{QWEN}/cancel")[0] == 202
     assert rig.manager.download_calls == [NEMOTRON, NEMOTRON]
 
-    status, refused = rig.call("POST", f"/api/models/{TURBO}/download")
-    assert status == 409 and refused["license"]["id"] == CRISPERWHISPER_LICENCE
+    status, refused = rig.call("POST", f"/api/models/{GATED}/download")
+    assert status == 409 and refused["license"]["id"] == GATED_LICENCE
     assert rig.call("POST", f"/api/models/{PARAKEET}/delete")[0] == 409
     assert rig.call("POST", "/api/models/no-such-model/download")[0] == 404
 
@@ -494,14 +492,14 @@ def test_engines_answer_before_the_gpu_probe_and_the_probe_reports_later(make_ri
         rig = make_rig(hardware=detector)
     stream = rig.events()
 
-    status, engines = rig.call("GET", f"/api/engines?model={TURBO}")
+    status, engines = rig.call("GET", f"/api/engines?model={QWEN}")
 
     assert status == 200
     assert engines["hardware"] == {
         "probe_pending": True, "streaming_supported": False, "kind": "", "device_name": "",
     }
     ranked = [candidate["id"] for candidate in engines["candidates"]]
-    assert ranked == ["crisperwhisper_ct2", "crisperwhisper"]
+    assert ranked == ["qwen3_asr"]
     assert set(engines["candidates"][0]) == {"id", "label", "recommended", "reason"}
     assert detector.detect_calls == 0
 
@@ -634,17 +632,23 @@ _DICTIONARY: dict[str, Any] = {
     },
     "rules": [
         {"kind": "literal", "spoken": ["aisha", "ayesha"], "replacement": "Aïsha", "case_sensitive": False,
-         "whole_words": True, "phonetic": True, "enabled": True, "learned": False},
+         "whole_words": True, "phonetic": True, "enabled": True, "fired": 0},
         {"kind": "literal", "spoken": ["farhan"], "replacement": "Farhān", "case_sensitive": False,
-         "whole_words": True, "phonetic": False, "enabled": True, "learned": True},
+         "whole_words": True, "phonetic": False, "enabled": True, "fired": 0},
         {"kind": "literal", "spoken": ["tokyo"], "replacement": "東京", "case_sensitive": True,
-         "whole_words": False, "phonetic": False, "enabled": False, "learned": True},
-        {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True},
+         "whole_words": False, "phonetic": False, "enabled": False, "fired": 0},
+        {"kind": "regex", "pattern": r"\bteh\b", "replacement": "the", "enabled": True, "fired": 0},
     ],
+    "people": [
+        {"written": "Skryb", "note": "the app I'm building", "heard_as": ["Skribe"], "phonetic": False},
+        {"written": "Ngozi Adébáyọ̀", "note": "", "heard_as": [], "phonetic": True},
+        {"written": "Ümit O'Neil", "note": "", "heard_as": ["Umit O'Neil"], "phonetic": False},
+    ],
+    "suggestions": [],
 }
 
 
-def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
+def test_the_dictionary_round_trips_with_the_people_and_terms_list_and_rebuilds_the_pipeline(rig: Rig) -> None:
     status, empty = rig.call("GET", "/api/dictionary")
     assert status == 200
     assert empty == {
@@ -653,6 +657,8 @@ def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
             "punctuation_model": False,
         },
         "rules": [],
+        "people": [],
+        "suggestions": [],
     }
 
     assert rig.call("PUT", "/api/dictionary", _DICTIONARY)[0] == 204
@@ -661,54 +667,76 @@ def test_the_dictionary_round_trips_and_rebuilds_the_pipeline(rig: Rig) -> None:
     assert [changes.output_changed for changes in rig.saved] == [True]
 
 
-def test_removing_learned_words_stops_them_being_learned_again(rig: Rig, monkeypatch) -> None:
-    forgotten: list[tuple[tuple[str, str], ...]] = []
-    monkeypatch.setattr(rig.learner, "block", lambda pairs: forgotten.append(tuple(pairs)))
+def test_each_rule_shows_how_many_times_it_has_fired(rig: Rig) -> None:
     rig.call("PUT", "/api/dictionary", _DICTIONARY)
-    kept = [rule for rule in _DICTIONARY["rules"] if rule.get("spoken") != ["farhan"]]
-    without_farhan = {**_DICTIONARY, "rules": kept}
+    aisha, _farhan, _tokyo, teh = rig.service.dictionary_rules().rules
 
-    rig.call("PUT", "/api/dictionary", without_farhan)
-    assert rig.call("POST", "/api/dictionary/forget-learned")[0] == 204
+    rig.rule_counts.add([aisha, teh])
+    rig.rule_counts.add([teh])
 
-    assert forgotten == [(("farhan", "Farhān"),), (("tokyo", "東京"),)]
-    kinds = [(rule["kind"], rule.get("learned")) for rule in rig.call("GET", "/api/dictionary")[1]["rules"]]
-    assert kinds == [("literal", False), ("regex", None)]
-
-
-def test_forgetting_one_learned_word_removes_only_it_and_stops_it_being_learned_again(
-    rig: Rig, monkeypatch,
-) -> None:
-    forgotten: list[tuple[tuple[str, str], ...]] = []
-    monkeypatch.setattr(rig.learner, "block", lambda pairs: forgotten.append(tuple(pairs)))
-    slashed = {
-        "kind": "literal", "spoken": ["ümit / o'neil"], "replacement": "Ümit O'Neil",
-        "case_sensitive": False, "whole_words": True, "phonetic": False, "enabled": True,
-        "learned": True,
-    }
-    rig.call("PUT", "/api/dictionary", {**_DICTIONARY, "rules": [*_DICTIONARY["rules"], slashed]})
-    rig.saved.clear()
-
-    assert rig.call("DELETE", "/api/dictionary/learned/%C3%BCmit%20%2F%20o'neil")[0] == 204
-    assert rig.call("DELETE", "/api/dictionary/learned/tokyo")[0] == 204
-
-    assert forgotten == [(("ümit / o'neil", "Ümit O'Neil"),), (("tokyo", "東京"),)]
     rules = rig.call("GET", "/api/dictionary")[1]["rules"]
-    assert [rule.get("spoken", rule.get("pattern")) for rule in rules] == [
-        ["aisha", "ayesha"], ["farhan"], r"\bteh\b",
-    ]
-    assert [changes.output_changed for changes in rig.saved] == [True, True]
+    assert [rule["fired"] for rule in rules] == [1, 0, 0, 2]
 
 
-def test_forgetting_a_word_that_was_not_learned_changes_nothing(rig: Rig) -> None:
+def test_accepting_a_suggestion_makes_it_a_heard_as_spelling_and_rebuilds_the_pipeline(rig: Rig) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+    suggest(rig.people_path, "Umit O'Neal", "Ümit O'Neil")
+    suggest(rig.people_path, "Scribe", "Skryb")
+    rig.saved.clear()
+
+    assert rig.call("POST", "/api/people/suggestions/Umit%20O'Neal/accept")[0] == 204
+
+    dictionary = rig.call("GET", "/api/dictionary")[1]
+    assert dictionary["people"][2]["heard_as"] == ["Umit O'Neil", "Umit O'Neal"]
+    assert dictionary["suggestions"] == [{"heard": "Scribe", "written": "Skryb", "times": 1}]
+    assert [changes.output_changed for changes in rig.saved] == [True]
+
+
+def test_a_dismissed_suggestion_goes_and_is_never_offered_again(rig: Rig) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+    suggest(rig.people_path, "Scribe", "Skryb")
+
+    assert rig.call("DELETE", "/api/people/suggestions/scribe")[0] == 204
+    suggest(rig.people_path, "Scribe", "Skryb")
+
+    dictionary = rig.call("GET", "/api/dictionary")[1]
+    assert dictionary["suggestions"] == []
+    assert dictionary["people"][0]["heard_as"] == ["Skribe"]
+
+
+def test_a_suggestion_that_is_gone_answers_not_found_and_changes_nothing(rig: Rig) -> None:
     rig.call("PUT", "/api/dictionary", _DICTIONARY)
     rig.saved.clear()
 
-    assert rig.call("DELETE", "/api/dictionary/learned/aisha")[0] == 404
-    assert rig.call("DELETE", "/api/dictionary/learned/nobody")[0] == 404
+    assert rig.call("POST", "/api/people/suggestions/nobody/accept")[0] == 404
+    assert rig.call("DELETE", "/api/people/suggestions/nobody")[0] == 404
 
     assert rig.call("GET", "/api/dictionary") == (200, _DICTIONARY)
     assert rig.saved == []
+
+
+@pytest.mark.parametrize(("people", "reason"), [
+    ([{"written": "Mara", "note": "", "heard_as": [], "phonetic": False},
+      {"written": "mara", "note": "", "heard_as": [], "phonetic": False}], "“mara” is in the list twice."),
+    ([{"written": "Mara", "note": "", "heard_as": [], "phonetic": False},
+      {"written": "Marra", "note": "", "heard_as": ["Mara"], "phonetic": False}],
+     "“Mara” is an entry of its own, so it can't be swapped for “Marra”."),
+    ([{"written": "Mara", "note": "", "heard_as": ["Mora"], "phonetic": False},
+      {"written": "Marra", "note": "", "heard_as": ["mora"], "phonetic": False}],
+     "“mora” is heard as both “Mara” and “Marra”."),
+    ([{"written": "   ", "note": "", "heard_as": [], "phonetic": False}],
+     "Entry 1 needs how it is written, a note, heard-as spellings and sounds-alike."),
+])
+def test_a_people_list_that_would_swap_one_name_for_another_is_refused_and_the_saved_one_is_kept(
+    rig: Rig, people: list[dict[str, Any]], reason: str,
+) -> None:
+    rig.call("PUT", "/api/dictionary", _DICTIONARY)
+
+    status, body = rig.call("PUT", "/api/dictionary", {**_DICTIONARY, "people": people})
+
+    assert status == 400
+    assert body["detail"] == reason
+    assert rig.call("GET", "/api/dictionary") == (200, _DICTIONARY)
 
 
 def test_a_dictionary_with_a_broken_rule_is_refused_and_the_saved_one_is_kept(rig: Rig) -> None:

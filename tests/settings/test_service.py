@@ -64,10 +64,6 @@ def test_recording_consent_round_trips_through_saved_settings() -> None:
     service.apply_draft(replace(service.current_draft(), capture_content=False))
     assert config.get("diagnostics.capture_content") is False
 _NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-_CRISPERWHISPER = {
-    "crisperwhisper-2.0-turbo",
-    "crisperwhisper-2.0-large",
-}
 
 
 def _build_service(
@@ -180,7 +176,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, "phonon-2.5-english", _NEMOTRON, *_CRISPERWHISPER, "qwen3-asr-1.7b",
+            _PARAKEET, "phonon-2.5-english", _NEMOTRON, "qwen3-asr-1.7b",
         }
 
     def test_should_mark_installed_status_on_view(self):
@@ -561,7 +557,15 @@ class TestLicenceConsent:
     into the loader.
     """
 
-    _GATED = "crisperwhisper-2.0-turbo"
+    _GATED = "gated-example"
+
+    @pytest.fixture(autouse=True)
+    def _a_gated_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from skryb.transcription import license_policy
+
+        gated = replace(ALL_MODELS[_PARAKEET], name=self._GATED, license_id="example-nc", license_url="https://example.com/LICENSE.md")
+        monkeypatch.setitem(ALL_MODELS, self._GATED, gated)
+        monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"# Example Licence\n\nResearch only.\n")
 
     def _gated_service(self, config: FakeConfig):
         service, *_ = _build_service(
@@ -591,9 +595,9 @@ class TestLicenceConsent:
 
         terms = service.license_terms(self._GATED)
 
-        assert terms.license_id == "crisperwhisper-nc"
-        assert terms.url == ALL_MODELS[self._GATED].license_url
-        assert terms.text.startswith("# CrisperWhisper 2.0")
+        assert terms.license_id == "example-nc"
+        assert terms.url == "https://example.com/LICENSE.md"
+        assert terms.text.startswith("# Example Licence")
 
     def test_should_clear_the_requirement_once_the_licence_is_accepted(self):
         service = self._gated_service(FakeConfig())
@@ -862,40 +866,6 @@ def test_microphone_and_boost_choices_round_trip_through_saved_settings() -> Non
     assert config.get("audio.boost_quiet_speech") is False
     assert service.current_draft().input_device == "Microphone (Maono PD300X Microp"
     assert service.current_draft().boost_quiet_speech is False
-
-
-class TestTheWordLearningSwitch:
-    def test_learning_is_on_unless_it_was_turned_off(self):
-        service, *_ = _build_service()
-
-        assert service.current_draft().learn_words is True
-
-    def test_turning_it_off_is_saved_with_the_dictionary_settings(self):
-        service, config, *_ = _build_service()
-
-        changes = service.apply_draft(replace(service.current_draft(), learn_words=False))
-
-        assert config.get("dictionary.learn_words") is False
-        assert service.current_draft().learn_words is False
-        assert not changes.learning_turned_on
-
-    def test_a_config_from_before_the_switch_moved_keeps_learning_off(self):
-        service, *_ = _build_service(config_overrides={
-            "writing.cleanup": "polished",
-            "writing.learn_words": False,
-            "writing.learn_style": True,
-            "writing.model_path": "D:/models/Qwen3.5-4B-Q4_K_M.gguf",
-        })
-
-        assert service.current_draft().learn_words is False
-
-    def test_turning_it_back_on_asks_for_the_edit_watcher(self):
-        service, *_ = _build_service(config_overrides={"writing.learn_words": False})
-
-        changes = service.apply_draft(replace(service.current_draft(), learn_words=True))
-
-        assert changes.learning_turned_on
-        assert service.current_draft().learn_words is True
 
 
 def test_recording_preferences_round_trip_through_saved_settings_without_a_rebuild() -> None:

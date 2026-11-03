@@ -52,8 +52,6 @@ _NATIVE_ENGINE_BUILD = Path("native") / "engine" / "build" / "qasr.dll"
 _NATIVE_ENGINE_IN_WHEEL = "skryb/transcription/qasr.dll"
 _NATIVE_PARAKEET_BUILD = Path("native") / "parakeet" / "build" / "npk.dll"
 _NATIVE_PARAKEET_IN_WHEEL = "skryb/transcription/npk.dll"
-_NATIVE_WHISPER_BUILD = Path("native") / "whisper" / "build" / "cw.dll"
-_NATIVE_WHISPER_IN_WHEEL = "skryb/transcription/cw.dll"
 _NATIVE_DIARIZER_BUILD = Path("native") / "diar" / "build" / "nd.dll"
 _NATIVE_DIARIZER_IN_WHEEL = "skryb/transcription/nd.dll"
 # The NPU engine's CPU decoder, from native/tdt/build.py. Plain C, so there is no NVIDIA build of it.
@@ -207,7 +205,7 @@ def _build_app_wheel(python_dir: Path, repo_root: Path, wheels_dir: Path) -> str
 def _require_built_files_in_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
-    native = (_NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_WHISPER_IN_WHEEL, _NATIVE_DIARIZER_IN_WHEEL)
+    native = (_NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_DIARIZER_IN_WHEEL)
     for member in (
         _UI_SHELL_IN_WHEEL, *native, *(dll.replace(".dll", "_cuda.dll") for dll in native), _NATIVE_TDT_IN_WHEEL,
     ):
@@ -253,7 +251,6 @@ def _copy_native_engine(repo_root: Path, destination: Path) -> None:
     for name, build in (
         ("Qwen3-ASR", _NATIVE_ENGINE_BUILD),
         ("Parakeet", _NATIVE_PARAKEET_BUILD),
-        ("CrisperWhisper", _NATIVE_WHISPER_BUILD),
         ("diarizer", _NATIVE_DIARIZER_BUILD),
     ):
         for built, script in (

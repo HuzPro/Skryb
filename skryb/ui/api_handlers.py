@@ -11,7 +11,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -27,8 +27,16 @@ from skryb.core.state_machine import AppState
 from skryb.history.entries import HistoryEntry
 from skryb.history.service import HistoryService, RetryOutcome
 from skryb.hotkeys.bindings import Binding, BindingError, validate_bindings
-from skryb.output.dictionary_config import LiteralRule
-from skryb.output.word_learning import WordLearner
+from skryb.output.dictionary_config import DictionaryRule
+from skryb.output.rule_counts import RuleCounts
+from skryb.people.terms import (
+    PeopleList,
+    accept_suggestion,
+    dismiss_suggestion,
+    load_people,
+    update_people,
+    with_terms,
+)
 from skryb.recording.input_devices import SYSTEM_DEFAULT, Microphones
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.settings.service import EngineEventListener, SettingsService
@@ -47,7 +55,6 @@ from skryb.ui.shapes import (
     draft_from_json,
     entry_id,
     history_entry_json,
-    learned_pairs,
     settings_json,
     shown_combination,
 )
@@ -250,7 +257,8 @@ class CoreApi:
         diagnostics_dir: Path,
         state: Callable[[], AppState] = _idle,
         on_save: Callable[[ChangeSet], None] = _ignore_changes,
-        learner: WordLearner | None = None,
+        people_path: Path | None = None,
+        rule_counts: RuleCounts | None = None,
         history: HistoryService | None = None,
         first_run: bool = False,
         on_setup_done: Callable[[], None] = _nothing,
@@ -268,7 +276,8 @@ class CoreApi:
         self._state = state
         self._engine_device = engine_device
         self._on_save = on_save
-        self._learner = learner
+        self._people_path = people_path
+        self._rule_counts = rule_counts
         self._history = history
         self._first_run = first_run
         self._on_setup_done = on_setup_done
@@ -308,8 +317,8 @@ class CoreApi:
             ("POST", "/api/shortcuts/validate", self._validate_shortcuts),
             ("GET", "/api/dictionary", self._get_dictionary),
             ("PUT", "/api/dictionary", self._put_dictionary),
-            ("POST", "/api/dictionary/forget-learned", self._forget_learned_words),
-            ("DELETE", "/api/dictionary/learned/{spoken}", self._forget_learned_word),
+            ("POST", "/api/people/suggestions/{heard}/accept", self._accept_suggestion),
+            ("DELETE", "/api/people/suggestions/{heard}", self._dismiss_suggestion),
             ("GET", "/api/history", self._list_history),
             ("DELETE", "/api/history", self._delete_all_history),
             ("POST", "/api/history/export", self._export_history_csv),
@@ -368,7 +377,11 @@ class CoreApi:
     # -- settings --------------------------------------------------------------
 
     def _get_dictionary(self, _request: ApiRequest) -> ApiResponse:
-        return ApiResponse(200, dictionary_json(self._service.dictionary_rules()))
+        people = load_people(self._people_path) if self._people_path is not None else PeopleList()
+        return ApiResponse(200, dictionary_json(self._service.dictionary_rules(), people, self._fired))
+
+    def _fired(self, rule: DictionaryRule) -> int:
+        return self._rule_counts.count(rule) if self._rule_counts is not None else 0
 
     def _get_settings(self, _request: ApiRequest) -> ApiResponse:
         return ApiResponse(200, settings_json(self._service.current_draft()))
@@ -511,8 +524,9 @@ class CoreApi:
                 "installed": view.installed,
                 "supports_batch": self._service.model_supports_batch(view.name),
                 "supports_streaming": self._service.model_supports_streaming(view.name),
-                "has_speech_styles": self._service.model_has_speech_styles(view.name),
                 "license_id": ALL_MODELS[view.name].license_id or None,
+                "tier": ALL_MODELS[view.name].tier or None,
+                "needs": ALL_MODELS[view.name].needs or None,
                 "download": self._hub.download_of(view.name),
             }
             for view in views.values()
@@ -642,43 +656,31 @@ class CoreApi:
     # -- dictionary -----------------------------------------------------------------
 
     def _put_dictionary(self, request: ApiRequest) -> ApiResponse:
-        dictionary = _read(
+        dictionary, terms = _read(
             dictionary_from_contract, request.body, "That dictionary could not be read.",
         )
-        forgotten = learned_pairs(self._service.dictionary_rules()) - learned_pairs(dictionary)
         self._service.save_dictionary_rules(dictionary)
-        self._forget(forgotten)
+        if self._people_path is not None:
+            update_people(self._people_path, lambda people: with_terms(people, terms))
         self._on_save(_OUTPUT_ONLY)
         return _NO_CONTENT
 
-    def _forget_learned_words(self, _request: ApiRequest) -> ApiResponse:
-        self._forget_learned(lambda _spoken: True)
-        return _NO_CONTENT
+    def _accept_suggestion(self, request: ApiRequest) -> ApiResponse:
+        """The suggested spelling joins its entry's heard-as spellings, so it is swapped from the next dictation on."""
+        return self._settle_suggestion(lambda people: accept_suggestion(people, request.params["heard"]))
 
-    def _forget_learned_word(self, request: ApiRequest) -> ApiResponse:
-        spoken = request.params["spoken"].strip()
-        if not self._forget_learned(lambda first: first == spoken):
-            raise ApiError(404, "That learned word is no longer in the dictionary.")
-        return _NO_CONTENT
+    def _dismiss_suggestion(self, request: ApiRequest) -> ApiResponse:
+        return self._settle_suggestion(lambda people: dismiss_suggestion(people, request.params["heard"]))
 
-    def _forget_learned(self, chosen: Callable[[str], bool]) -> bool:
-        """Drop the learned words whose first spoken form is *chosen*, for good."""
-        current = self._service.dictionary_rules()
-        forgotten = {pair for pair in learned_pairs(current) if chosen(pair[0])}
-        if not forgotten:
-            return False
-        kept = tuple(
-            rule for rule in current.rules
-            if not (isinstance(rule, LiteralRule) and rule.learned and chosen(rule.spoken[0].strip()))
-        )
-        self._service.save_dictionary_rules(replace(current, rules=kept))
-        self._forget(forgotten)
+    def _settle_suggestion(self, change: Callable[[PeopleList], PeopleList]) -> ApiResponse:
+        if self._people_path is None:
+            raise ApiError(404, "There is no people and terms list here.")
+        try:
+            update_people(self._people_path, change)
+        except KeyError as exc:
+            raise ApiError(404, "That suggestion is no longer there.") from exc
         self._on_save(_OUTPUT_ONLY)
-        return True
-
-    def _forget(self, pairs: set[tuple[str, str]]) -> None:
-        if self._learner is not None and pairs:
-            self._learner.block(sorted(pairs))
+        return _NO_CONTENT
 
     # -- updates ------------------------------------------------------------------------
 

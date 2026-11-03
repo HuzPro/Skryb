@@ -1,5 +1,6 @@
 import json
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -9,7 +10,8 @@ import pytest
 from skryb.meetings.capture import RATE
 from skryb.meetings.segmenter import Segment
 from skryb.meetings.session import _Audio
-from skryb.meetings.transcript import Entry, Event, Transcript, VOCABULARY_TEMPLATE, asr_context, is_echo, is_speaker_key
+from skryb.meetings.transcript import Entry, Event, Transcript, asr_context, is_echo, is_speaker_key
+from skryb.people.terms import Term, update_people
 
 LONG = Segment(10.0, 14.0, 0)
 
@@ -177,48 +179,45 @@ def test_audio_slices_by_time_across_many_appends() -> None:
     assert len(audio.between(599.0, 700.0)) == RATE
 
 
-# -- the vocabulary hint ---------------------------------------------------------
+# -- the names-and-terms hint ----------------------------------------------------
 
 
-def test_terms_from_the_file_become_the_hint(tmp_path: Path) -> None:
-    vocabulary = tmp_path / "vocabulary.txt"
-    vocabulary.write_text("Launch Board\n\n  BRIGHTLINE  \n# a comment\nQuoteDesk\n", encoding="utf-8")
-    assert asr_context(vocabulary, {}, LONG) == "Names and terms that may come up: Launch Board, BRIGHTLINE, QuoteDesk."
+def _people(tmp_path: Path, *terms: Term) -> Path:
+    path = tmp_path / "people.json"
+    update_people(path, lambda people: replace(people, terms=terms))
+    return path
+
+
+def test_entries_from_the_people_and_terms_list_become_the_hint_with_their_notes(tmp_path: Path) -> None:
+    people = _people(tmp_path, Term("Launch Board"), Term("BRIGHTLINE", note="the client"), Term("QuoteDesk"))
+    assert asr_context(people, {}) == "Names and terms that may come up: Launch Board, BRIGHTLINE (the client), QuoteDesk."
 
 
 def test_speaker_names_typed_in_are_added_once(tmp_path: Path) -> None:
-    vocabulary = tmp_path / "vocabulary.txt"
-    vocabulary.write_text("Leo Brandt\n", encoding="utf-8")
-    names = {"them:0": "Leo Brandt", "them:2": "نادیہ رحمان"}
-    assert asr_context(vocabulary, names, LONG) == "Names and terms that may come up: Leo Brandt, نادیہ رحمان."
+    people = _people(tmp_path, Term("Leo Brandt"))
+    names = {"them:0": "Leo Brandt", "them:1": "leo brandt", "them:2": "نادیہ رحمان"}
+    assert asr_context(people, names) == "Names and terms that may come up: Leo Brandt, نادیہ رحمان."
 
 
-def test_short_clips_get_no_hint_because_it_makes_the_model_invent_words(tmp_path: Path) -> None:
-    vocabulary = tmp_path / "vocabulary.txt"
-    vocabulary.write_text("Launch Board\n", encoding="utf-8")
-    assert asr_context(vocabulary, {}, Segment(10.0, 11.9, 0)) is None
-    assert asr_context(vocabulary, {}, Segment(10.0, 12.0, 0)) is not None
+def test_no_list_and_no_names_means_no_hint(tmp_path: Path) -> None:
+    assert asr_context(tmp_path / "missing.json", {}) is None
 
 
-def test_no_file_and_no_names_means_no_hint(tmp_path: Path) -> None:
-    assert asr_context(tmp_path / "missing.txt", {}, LONG) is None
+def test_an_unreadable_list_still_gives_the_speaker_names(tmp_path: Path) -> None:
+    people = tmp_path / "people.json"
+    people.write_bytes("Zürich".encode("utf-16"))
+    assert asr_context(people, {"them:0": "Omar"}) == "Names and terms that may come up: Omar."
 
 
-def test_a_vocabulary_saved_in_another_encoding_is_skipped_rather_than_crashing(tmp_path: Path) -> None:
-    vocabulary = tmp_path / "vocabulary.txt"
-    vocabulary.write_bytes("Zürich\n".encode("utf-16"))
-    assert asr_context(vocabulary, {"them:0": "Omar"}, LONG) == "Names and terms that may come up: Omar."
+def test_a_list_edited_mid_meeting_applies_to_the_next_clip(tmp_path: Path) -> None:
+    people = _people(tmp_path, Term("Northwind"))
+    assert asr_context(people, {}) == "Names and terms that may come up: Northwind."
+    _people(tmp_path, Term("Northwind"), Term("Tallis"))
+    assert asr_context(people, {}) == "Names and terms that may come up: Northwind, Tallis."
 
 
-def test_the_starter_file_is_all_comments_so_it_adds_nothing(tmp_path: Path) -> None:
-    vocabulary = tmp_path / "vocabulary.txt"
-    vocabulary.write_text(VOCABULARY_TEMPLATE, encoding="utf-8")
-    assert asr_context(vocabulary, {}, LONG) is None
-
-
-def test_a_vocabulary_of_hundreds_of_terms_is_passed_whole(tmp_path: Path) -> None:
-    vocabulary = tmp_path / "vocabulary.txt"
-    vocabulary.write_text("\n".join(f"Term{i}" for i in range(500)), encoding="utf-8")
-    hint = asr_context(vocabulary, {}, LONG)
+def test_a_list_of_hundreds_of_entries_is_passed_whole(tmp_path: Path) -> None:
+    people = _people(tmp_path, *(Term(f"Term{i}") for i in range(500)))
+    hint = asr_context(people, {})
     assert hint is not None
     assert hint.count(", ") == 499 and hint.endswith("Term499.")

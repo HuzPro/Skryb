@@ -7,6 +7,7 @@ from skryb.output.dictionary_config import (
     RegexRule,
 )
 from skryb.output.caret_context import CaretContext
+from skryb.people.terms import Term
 from skryb.output.text_pipeline import (
     PipelineMode,
     TextPipeline,
@@ -59,7 +60,7 @@ class TestFillerRemoval:
     def test_should_match_fillers_case_insensitively(self) -> None:
         options = DictionaryOptions(remove_fillers=True)
 
-        assert _batch("UHH yes", options=options) == "yes"
+        assert _batch("UHH yes", options=options) == "Yes"
 
     def test_should_not_remove_fillers_inside_words_or_expand_the_list(self) -> None:
         options = DictionaryOptions(remove_fillers=True)
@@ -80,7 +81,7 @@ class TestFillerRemoval:
 
         result = _batch("Um, hello", options=options)
 
-        assert result == "hello"
+        assert result == "Hello"
 
     def test_should_drop_the_leading_comma_of_a_sentence_final_filler(self) -> None:
         options = DictionaryOptions(remove_fillers=True)
@@ -96,6 +97,64 @@ class TestFillerRemoval:
         options = DictionaryOptions(remove_fillers=True)
 
         assert _batch("I  agree um now", options=options) == "I  agree now"
+
+    @pytest.mark.parametrize(("spoken", "expected"), [
+        ("Ah.", ""),
+        ("Ahh, can the parcel go today?", "Can the parcel go today? "),
+        ("The oven is hot. Ah, put the tray in.", "The oven is hot. Put the tray in. "),
+        ("Water the, ah. Garden plants", "Water the garden plants"),
+        ("Fine. Ah. The bus was late.", "Fine. The bus was late. "),
+        ("Paint the fence, ah blue.", "Paint the fence, blue. "),
+    ])
+    def test_ah_set_off_by_a_comma_or_a_sentence_edge_is_a_filler(self, spoken: str, expected: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == expected
+
+    @pytest.mark.parametrize("spoken", [
+        "Tea or ah coffee, please",
+        "Aha, found it",
+        "Ahmed said hi",
+        "Ah-ha, there it is",
+        "Ask Ah Lin for the keys",
+    ])
+    def test_ah_inside_a_sentence_or_a_word_stays(self, spoken: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == spoken
+
+    def test_a_filler_that_is_a_sentence_of_its_own_goes_with_its_full_stop(self) -> None:
+        options = DictionaryOptions(remove_fillers=True)
+        assert _batch("Um. Yeah. Just um continue.", options=options) == "Yeah. Just continue. "
+        assert _batch("Right then. Um. Who brought cake?", options=options) == "Right then. Who brought cake? "
+
+    @pytest.mark.parametrize(("spoken", "expected"), [
+        ("Close the the gate.", "Close the gate. "),
+        ("I I think so.", "I think so. "),
+        ("We we, it it it it rained.", "We, it rained. "),
+        ("This, this, this, this one fits.", "This one fits. "),
+        ("Where Where are the scissors?", "Where are the scissors? "),
+        ("In, in Lisbon, sure.", "In Lisbon, sure. "),
+    ])
+    def test_a_short_word_said_twice_by_accident_is_kept_once(self, spoken: str, expected: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == expected
+
+    @pytest.mark.parametrize("spoken", [
+        "He had had enough.",
+        "He said that that was fine.",
+        "What it is is a plan.",
+        "Give her her keys.",
+        "Blah blah blah.",
+        "Very very quiet.",
+        "Born in nineteen nineteen.",
+        "The plug-in in the box.",
+        "Bora Bora.",
+    ])
+    def test_doubles_that_can_be_meant_stay(self, spoken: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(remove_fillers=True)) == spoken + " "
+
+    def test_stutters_stay_with_filler_removal_off(self) -> None:
+        assert _batch("the the gate") == "the the gate"
+
+    def test_stutters_collapse_in_live_mode_too(self) -> None:
+        config = DictionaryConfig(options=DictionaryOptions(remove_fillers=True))
+        assert TextPipeline.for_streaming(config).process("so the the gate") == "so the gate"
 
 
 class TestSpokenCommands:
@@ -284,11 +343,6 @@ class TestPauseBreaks:
 
         assert _batch("Make a plan and um. Do it.", options=options) == "Make a plan and do it. "
 
-    def test_should_leave_verbatim_transcripts_alone(self) -> None:
-        pipeline = build_pipeline(DictionaryConfig(), PipelineMode.VERBATIM)
-
-        assert pipeline.process("Make a plan and. Do it.") == "Make a plan and. Do it."
-
 
 class TestRuleStage:
     def test_should_apply_the_longest_multi_alias_literal_match(self) -> None:
@@ -384,6 +438,65 @@ class TestRuleStage:
         )
 
         assert _batch("foo bar", rules) == "bar baz"
+
+
+class TestPeopleAndTerms:
+    def test_heard_as_spellings_are_swapped_for_the_entry(self) -> None:
+        terms = (Term("Skryb", note="the app", heard_as=("Skribe", "Scryb")), Term("Qwen", heard_as=("Quinn",)))
+
+        result = TextPipeline.for_batch(DictionaryConfig(), terms=terms).process("Skribe runs Quinn; scryb too")
+
+        assert result == "Skryb runs Qwen; Skryb too"
+
+    def test_an_entry_without_heard_as_spellings_changes_nothing_however_it_is_cased(self) -> None:
+        terms = (Term("Slack"), Term("Skryb", note="the app"))
+
+        result = TextPipeline.for_batch(DictionaryConfig(), terms=terms).process("cut me some slack, scribe")
+
+        assert result == "cut me some slack, scribe"
+
+    def test_an_entry_marked_sounds_alike_catches_a_spelling_not_listed(self) -> None:
+        terms = (Term("Thandiwe", heard_as=("Tandiwe",), phonetic=True),)
+
+        result = TextPipeline.for_batch(DictionaryConfig(), terms=terms).process("ask Thandeewe")
+
+        assert result == "ask Thandiwe"
+
+    def test_a_dictionary_rule_wins_over_an_entry_for_the_same_words(self) -> None:
+        config = DictionaryConfig(rules=(LiteralRule(("quinn",), "Quinn Ellery"),))
+        terms = (Term("Qwen", heard_as=("Quinn",)),)
+
+        assert TextPipeline.for_batch(config, terms=terms).process("ask quinn") == "ask Quinn Ellery"
+
+
+class TestRuleCounting:
+    def test_each_rule_that_fires_is_reported_once_per_replacement(self) -> None:
+        rules = (
+            LiteralRule(("teh",), "the"),
+            RegexRule(r"\bissue (\d+)\b", r"#\1"),
+            LiteralRule(("never",), "Never Fires"),
+            LiteralRule(("github",), "GitHub", phonetic=True),
+        )
+        fired: list[list[object]] = []
+
+        TextPipeline.for_batch(DictionaryConfig(rules=rules), on_fired=fired.append).process(
+            "teh fix for issue 12 and teh get hub link",
+        )
+
+        assert sorted(rule.replacement for rule in fired[0]) == ["#\\1", "GitHub", "the", "the"]
+
+    def test_nothing_fired_reports_nothing(self) -> None:
+        fired: list[object] = []
+        TextPipeline.for_batch(DictionaryConfig(rules=(LiteralRule(("teh",), "the"),)), on_fired=fired.append).process("fine")
+        assert fired == []
+
+    def test_live_mode_counts_a_firing_against_the_rule_as_saved(self) -> None:
+        rule = LiteralRule(("git hub", "github"), "GitHub")
+        fired: list[list[object]] = []
+
+        TextPipeline.for_streaming(DictionaryConfig(rules=(rule,)), on_fired=fired.append).process("github")
+
+        assert fired == [[rule]]
 
 
 class TestPhoneticRules:
@@ -595,34 +708,6 @@ class TestStreamingPipeline:
         result = TextPipeline.for_streaming(config).process("get hub twenty percent")
 
         assert result == "get hub twenty percent"
-
-
-def _everything_on() -> DictionaryConfig:
-    return DictionaryConfig(
-        options=DictionaryOptions(
-            remove_fillers=True, spoken_commands=True, numbers=True,
-        ),
-        rules=(LiteralRule(spoken=("cloud",), replacement="Claude"),),
-    )
-
-
-class TestVerbatimPipeline:
-    def test_should_return_the_text_untouched(self) -> None:
-        pipeline = build_pipeline(_everything_on(), PipelineMode.VERBATIM)
-        spoken = "um cloud said uh twenty five percent period"
-
-        assert pipeline.process(spoken) == spoken
-
-    def test_should_keep_what_the_batch_pipeline_would_rewrite(self) -> None:
-        config = _everything_on()
-        spoken = "um cloud said uh twenty five percent period"
-
-        verbatim = build_pipeline(config, PipelineMode.VERBATIM).process(spoken)
-        batch = build_pipeline(config, PipelineMode.BATCH).process(spoken)
-
-        assert "um" in verbatim and "uh" in verbatim
-        assert "cloud" in verbatim
-        assert batch != verbatim
 
 
 class TestCaretContextStage:

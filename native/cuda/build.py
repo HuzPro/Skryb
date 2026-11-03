@@ -1,10 +1,10 @@
-"""Builds the NVIDIA engines: qasr_cuda.dll, npk_cuda.dll, cw_cuda.dll and nd_cuda.dll, from the same sources as
+"""Builds the NVIDIA engines: qasr_cuda.dll, npk_cuda.dll and nd_cuda.dll, from the same sources as
 the AMD ones. One DLL per engine covers the RTX 30 (sm_86), 40 (sm_89) and 50 (sm_120) series, with PTX for
 newer cards; the CUDA runtime is linked in, so users need only the NVIDIA driver (R525+, R570+ on an RTX 50).
 
 Needs the toolkit from fetch_toolkit.py (or CUDA_PATH) and Visual Studio 2022's C++ build tools; no GPU.
 
-    python native/cuda/build.py [engine ...]    # engine: engine, parakeet, whisper, diar
+    python native/cuda/build.py [engine ...]    # engine: engine, parakeet, diar
 """
 
 import os
@@ -16,7 +16,6 @@ NATIVE = Path(__file__).resolve().parent.parent
 ENGINES = {
     "engine": ("qasr_cuda.dll", ["kernels.hip", "engine.hip"]),
     "parakeet": ("npk_cuda.dll", ["../engine/kernels.hip", "pk_kernels.hip", "engine.hip"]),
-    "whisper": ("cw_cuda.dll", ["../engine/kernels.hip", "wh_kernels.hip", "engine.hip"]),
     "diar": ("nd_cuda.dll", ["../engine/kernels.hip", "nd_kernels.hip", "engine.hip"]),
 }
 ARCHS = ["-gencode=arch=compute_86,code=sm_86", "-gencode=arch=compute_89,code=sm_89",

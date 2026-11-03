@@ -1,6 +1,7 @@
 """A whole meeting through the real session, on fake devices and fake models."""
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import soundfile
 from skryb.meetings.capture import RATE
 from skryb.meetings.session import Session
 from skryb.meetings.transcript import Event
+from skryb.people.terms import Term, update_people
 from tests.meetings.fakes import PHRASES, FakeCapture, FakeModels, silence, voice
 
 _WAIT_SECONDS = 10.0
@@ -23,7 +25,7 @@ def _run(
     events: list[Event] = []
     session = Session(
         tmp_path / "2026-10-29 14-05", STARTED,
-        capture=capture, models=models, vocabulary=tmp_path / "vocabulary.txt",
+        capture=capture, models=models, people=tmp_path / "people.json",
         publish=events.append, record_microphone=record_microphone,
     )
     session.start()
@@ -109,14 +111,14 @@ def test_with_the_microphone_off_only_the_speakers_are_recorded(tmp_path: Path) 
     assert {e.track for e in session.transcript.entries} == {"them"}
 
 
-def test_long_clips_get_the_vocabulary_and_names_given_mid_meeting(tmp_path: Path) -> None:
-    (tmp_path / "vocabulary.txt").write_text("Northwind\nBRIGHTLINE\n", encoding="utf-8")
+def test_every_clip_is_handed_the_people_and_terms_list(tmp_path: Path) -> None:
+    update_people(tmp_path / "people.json", lambda people: replace(people, terms=(Term("Northwind"), Term("BRIGHTLINE"))))
     them = np.concatenate([voice(0, 3), silence(1), voice(1, 1), silence(1)])
     models = FakeModels()
 
     _run(tmp_path, FakeCapture(them), models, record_microphone=False)
 
-    assert models.contexts == ["Names and terms that may come up: Northwind, BRIGHTLINE.", None]
+    assert models.contexts == ["Names and terms that may come up: Northwind, BRIGHTLINE."] * 2
 
 
 def test_when_speech_to_text_fails_the_audio_is_still_saved_and_the_window_is_told(tmp_path: Path) -> None:
@@ -143,7 +145,7 @@ def test_when_nothing_can_be_recorded_no_meeting_folder_is_left_behind(tmp_path:
     session = Session(
         tmp_path / "2026-10-29 14-05", STARTED,
         capture=FakeCapture(silence(1), fails=RuntimeError("No speaker output found to record.")),
-        models=FakeModels(), vocabulary=tmp_path / "vocabulary.txt", publish=lambda _event: None,
+        models=FakeModels(), people=tmp_path / "people.json", publish=lambda _event: None,
     )
 
     with pytest.raises(RuntimeError, match="No speaker output"):
@@ -156,7 +158,7 @@ def test_quitting_mid_meeting_closes_the_audio_files_and_keeps_the_lines_so_far(
     capture = FakeCapture(np.concatenate([voice(0, 2), silence(1)] * 20))
     session = Session(
         tmp_path / "2026-10-29 14-05", STARTED,
-        capture=capture, models=FakeModels(), vocabulary=tmp_path / "vocabulary.txt", publish=lambda _event: None,
+        capture=capture, models=FakeModels(), people=tmp_path / "people.json", publish=lambda _event: None,
     )
     session.start()
 

@@ -80,16 +80,15 @@ the compiled copies and take dictation in under a second. The NPU needs
 Intel's NPU driver 32.0.100.5540 or newer. Without a working NPU the same
 engine runs the encoder on the CPU, and Settings says so and why.
 
-The NPU also runs `qwen3-asr-1.7b` (dictation and meetings), CrisperWhisper
-2.0 and the meeting-only models, all without torch. Their OpenVINO graphs are
+The NPU also runs `qwen3-asr-1.7b` (dictation and meetings) and the
+meeting-only models, all without torch. Their OpenVINO graphs are
 built from `model.safetensors` in the snapshot's `.openvino` folder the first
 time, in seconds, and compiled once (under a minute each). Qwen3-ASR's decoder
 runs with int8 weights in the NPU plugin's LLM pipeline, and in meetings it
 checks Phonon's transcript of each line as a draft, up to 16 tokens a pass,
 which keeps the text exactly what Qwen3-ASR alone writes and cuts a 10 s line
-from about 2.5 s to 0.6 s. Whisper models (CrisperWhisper, and Whisper
-Hindi2Hinglish Apex for Urdu meetings) run their encoder on the NPU and their
-decoder on the CPU. The diarizer's model step runs on the NPU, so meetings on
+from about 2.5 s to 0.6 s. Whisper Hindi2Hinglish Apex (for Urdu meetings)
+runs its encoder on the NPU and its decoder on the CPU. The diarizer's model step runs on the NPU, so meetings on
 a laptop without a GPU tell speakers apart.
 `python scripts\check_npu.py` proves the work reaches the NPU with Windows'
 own NPU counters, and races it against the Intel GPU and the CPU.
@@ -104,83 +103,6 @@ Streaming mode types text live as you speak, instead of recording first and tran
 - **Parakeet is a core dependency.** Every supported requirements path and a plain `pip install -e .` install `nano-parakeet` (which pulls `sentencepiece`).
 - **Models:** `parakeet-ultra` (windowed) and `nemotron-speech-streaming-en-0.6b` (cache-aware, lowest latency). Choose **Streaming** on the Transcription page, then download a streaming model.
 
-## CTranslate2 (fast CrisperWhisper launch, optional)
-
-CrisperWhisper runs on PyTorch + Transformers out of the box. Importing
-Transformers costs 10.5 s of a 15.5 s cold start in a development benchmark. The same
-model under CTranslate2 reaches ready in 3.4 s and produces byte-identical
-transcripts in both intended and verbatim modes, so this is worth
-installing if you dictate with CrisperWhisper.
-
-Installing it changes nothing else: no other engine uses CTranslate2, and
-without it CrisperWhisper keeps working on Transformers.
-
-**Uninstall any CTranslate2 you already have first.**
-
-```powershell
-pip uninstall -y ctranslate2
-```
-
-Two reasons, both real. A CPU/CUDA CTranslate2 in a ROCm PyTorch venv
-aborts the process (`OMP: Error #15`, no Python traceback) the moment it
-loads a model, because it brings its own Intel OpenMP alongside PyTorch's
-LLVM one. And every build carries the same `4.8.2` version, so pip
-considers an already-installed wrong wheel to satisfy the requirement and
-leaves it in place.
-
-### NVIDIA and CPU
-
-```powershell
-pip install "ctranslate2>=4.8.2,<5"      # or: pip install -e .[ct2]
-```
-
-### AMD (Windows)
-
-The ROCm build is not on PyPI. It ships as a release asset on
-CTranslate2's GitHub release, `rocm-python-wheels-Windows.zip` under
-https://github.com/OpenNMT/CTranslate2/releases/tag/v4.8.2, holding one
-wheel: `temp-windows/ctranslate2-4.8.2-cp312-cp312-win_amd64.whl`. Python
-3.12 only, same as the AMD PyTorch wheels.
-
-```powershell
-# after downloading and extracting the zip
-pip install .\temp-windows\ctranslate2-4.8.2-cp312-cp312-win_amd64.whl
-```
-
-The wheel needs `amdhip64_7.dll` and `hipblas.dll`, which
-`requirements-amd.txt` already installs via `rocm-sdk-core` and
-`rocm-sdk-libraries-custom`. Nothing else to wire up.
-
-### Check you got the right wheel
-
-```powershell
-python -m skryb --doctor
-```
-
-The `[ctranslate2]` section must report at least one GPU device on a GPU
-machine:
-
-```
-[ctranslate2]
-  version: 4.8.2
-  gpu devices: 1
-  gpu compute types: bfloat16, float16, float32, int8, ...
-```
-
-`gpu devices: 0` on a machine where the `[torch]` section lists a GPU
-means the wrong wheel is installed. Uninstall and repeat.
-
-### Disk cost
-
-The first time a CrisperWhisper model is downloaded, the app builds a
-CTranslate2 copy of it next to the weights (about 9 s of CPU work, once).
-That copy is a second full set of weights: roughly 1.6 GB for
-`crisperwhisper-2.0-turbo` and 3.1 GB for `crisperwhisper-2.0-large`, on
-top of the download. Deleting the model in Settings deletes both. If you
-already downloaded a CrisperWhisper model before installing CTranslate2,
-the copy is built on the next engine load instead, which makes that one
-launch about 9 s slower.
-
 ## Notes per platform
 
 ### Windows AMD (RDNA3 / RDNA4)
@@ -194,7 +116,7 @@ launch about 9 s slower.
 ### NVIDIA
 
 - The CUDA wheel index defaults to `cu130`, which covers the RTX 20 series through the RTX 50 series and needs NVIDIA driver 580 or newer. On a GTX 10-series card or older, change it to `cu126` in `requirements-nvidia.txt` (those builds don't run on an RTX 50). PyTorch wheels bundle the CUDA runtime, so only the host driver version matters - no CUDA Toolkit install required.
-- The native engines (Parakeet, CrisperWhisper, Qwen3-ASR and the meeting diarizer) have an experimental NVIDIA build for the RTX 30, 40 and 50 series, picked automatically. It checks its own kernels when it loads and falls back to the CPU if they disagree.
+- The native engines (Parakeet, Qwen3-ASR and the meeting diarizer) have an experimental NVIDIA build for the RTX 30, 40 and 50 series, picked automatically. It checks its own kernels when it loads and falls back to the CPU if they disagree.
 
 ### "I already have a custom torch installed"
 
@@ -213,13 +135,6 @@ Output lists Python / PyTorch versions, which engine backends are installed, CUD
 ### "Cannot install torch>=X because these package versions have conflicting dependencies"
 
 Check that PyTorch and torchaudio use matching versions and runtimes. Use the matching platform requirements in a fresh environment, or provide constraints for your custom builds.
-
-### The app dies with no traceback, or `OMP: Error #15`
-
-A CTranslate2 built for the wrong runtime is installed next to a ROCm
-PyTorch. Run `pip uninstall -y ctranslate2`, then reinstall following the
-CTranslate2 section above. `python -m skryb --doctor` tells you
-which build you have.
 
 ### "Could not find a version that satisfies the requirement torch==2.9.1+rocm7.2.1"
 

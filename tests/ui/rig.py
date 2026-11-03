@@ -21,7 +21,7 @@ from tests.fakes.model_manager import FakeModelManager
 from skryb.core.event_bus import SimpleEventBus
 from skryb.core.state_machine import AppStateMachine
 from skryb.history.service import HistoryService, RetryOutcome
-from skryb.output.word_learning import WordLearner
+from skryb.output.rule_counts import RuleCounts
 from skryb.recording.input_devices import Microphones
 from skryb.settings.download_coordinator import DownloadCoordinator
 from skryb.settings.engine_hot_swap import EngineHotSwapCoordinator
@@ -36,10 +36,23 @@ from skryb.ui.api_server import ApiServer
 from skryb.ui.event_hub import EventHub
 
 PARAKEET = "parakeet-ultra"
-TURBO = "crisperwhisper-2.0-turbo"
+QWEN = "qwen3-asr-1.7b"
 NEMOTRON = "nemotron-speech-streaming-en-0.6b"
-CRISPERWHISPER_LICENCE = "crisperwhisper-nc"
+GATED = "gated-example"
+GATED_LICENCE = "example-nc"
 _TIMEOUT_SECONDS = 10.0
+
+
+def add_gated_model(monkeypatch: Any) -> None:
+    """A made-up model that asks for a licence: none in the catalogue does any more."""
+    from dataclasses import replace
+
+    from skryb.transcription import license_policy
+    from skryb.transcription.model_info import ALL_MODELS
+
+    gated = replace(ALL_MODELS[PARAKEET], name=GATED, license_id=GATED_LICENCE, license_url="https://example.com/LICENSE.md")
+    monkeypatch.setitem(ALL_MODELS, GATED, gated)
+    monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"# Example Licence\n\nResearch only.\n")
 
 
 class FakeCaptureBridge:
@@ -142,10 +155,8 @@ class Rig:
         self.played: list[Path] = []
         self.previewed: list[tuple[str, float]] = []
         self.stopped = 0
-        self.learner = WordLearner(
-            tmp_path / "learning.json", tmp_path / "dictionary.json",
-            lambda: True, lambda: None, "rig",
-        )
+        self.people_path = tmp_path / "people.json"
+        self.rule_counts = RuleCounts(tmp_path / "rule_counts.json")
         self.hub = EventHub(self.bus, heartbeat_seconds=heartbeat_seconds)
         self.server = ApiServer(self.hub, poll_seconds=0.02)
         self.server.start()
@@ -163,7 +174,8 @@ class Rig:
             diagnostics_dir=self.history_dir,
             state=lambda: self.state_machine.state,
             on_save=on_save or self.saved.append,
-            learner=None if first_run else self.learner,
+            people_path=None if first_run else self.people_path,
+            rule_counts=None if first_run else self.rule_counts,
             history=None if first_run else HistoryService(
                 self.history_dir,
                 retranscribe or _never_retranscribes,

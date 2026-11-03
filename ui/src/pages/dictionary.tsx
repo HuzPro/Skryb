@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Check as CheckIcon, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Card, InlineError, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
 import { Badge } from "../components/ui/badge";
@@ -10,10 +10,10 @@ import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { isDirty } from "../lib/draft";
 import { useStore, useSyncedDraft } from "../lib/store";
-import type { Dictionary, DictionaryRule, LiteralRule } from "../lib/types";
+import type { Dictionary, DictionaryRule, LiteralRule, Suggestion, Term } from "../lib/types";
 
 const OPTIONS: { key: keyof Dictionary["options"]; title: string; description: string }[] = [
-  { key: "remove_fillers", title: "Remove fillers", description: "Drops um, uh, uhh, umm and erm." },
+  { key: "remove_fillers", title: "Remove fillers", description: "Drops um, uh, ah and erm, and short words said twice by accident, like “the the”." },
   { key: "spoken_commands", title: "Spoken commands", description: "Say “new line” or “period” to type them." },
   { key: "numbers", title: "Format numbers", description: "Writes “twenty five” as 25." },
   { key: "punctuation_model", title: "Restore punctuation", description: "Adds punctuation with a small extra model." },
@@ -85,13 +85,49 @@ function ruleFrom(editor: Editor, original: DictionaryRule | undefined): Diction
     whole_words: editor.whole_words,
     phonetic: editor.phonetic,
     enabled: original?.enabled ?? true,
-    learned: original?.kind === "literal" && original.learned && sameAliases(original.spoken, spoken) && original.replacement === editor.replacement,
   };
   return rule;
 }
 
-function sameAliases(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((alias, index) => alias === b[index]);
+interface TermEditor {
+  written: string;
+  note: string;
+  heard: string;
+  phonetic: boolean;
+}
+
+const EMPTY_TERM: TermEditor = { written: "", note: "", heard: "", phonetic: false };
+
+function termEditorFor(term: Term): TermEditor {
+  return { written: term.written, note: term.note, heard: term.heard_as.join(", "), phonetic: term.phonetic };
+}
+
+/** The entry as typed: trimmed, its heard-as spellings split on commas, without repeats or its own spelling. */
+export function termFrom(editor: TermEditor): Term {
+  const written = editor.written.trim();
+  const seen = new Set([written.toLowerCase()]);
+  const heard_as = editor.heard.split(",").map((spelling) => spelling.trim()).filter((spelling) => {
+    const key = spelling.toLowerCase();
+    if (!spelling || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { written, note: editor.note.trim().replace(/\s+/g, " "), heard_as, phonetic: editor.phonetic };
+}
+
+/** Why *candidate* can't join *terms* (ignoring the one at *ignoredIndex*), or "" when it can. The core checks the same on save. */
+export function termProblem(terms: Term[], candidate: Term, ignoredIndex: number): string {
+  if (!candidate.written) return "Write the name or term the way it should appear.";
+  const others = terms.filter((_, index) => index !== ignoredIndex);
+  const key = (text: string) => text.toLowerCase();
+  if (others.some((term) => key(term.written) === key(candidate.written))) return `“${candidate.written}” is already in the list.`;
+  for (const spelling of candidate.heard_as) {
+    if (others.some((term) => key(term.written) === key(spelling))) return `“${spelling}” is an entry of its own, so it can't be swapped for “${candidate.written}”.`;
+    const owner = others.find((term) => term.heard_as.some((other) => key(other) === key(spelling)));
+    if (owner) return `“${spelling}” is already heard as “${owner.written}”.`;
+  }
+  const taken = others.find((term) => term.heard_as.some((spelling) => key(spelling) === key(candidate.written)));
+  return taken ? `“${candidate.written}” is a heard-as spelling of “${taken.written}”. Remove it there first.` : "";
 }
 
 function Check({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
@@ -128,18 +164,55 @@ function RuleEditor({ editor, onChange, children }: { editor: Editor; onChange: 
   );
 }
 
+function TermFields({ editor, onChange, children }: { editor: TermEditor; onChange: (editor: TermEditor) => void; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+        <Input aria-label="Written as" placeholder="Written as, e.g. Skryb" value={editor.written} onChange={(event) => onChange({ ...editor, written: event.target.value })} />
+        <Input aria-label="Note" placeholder="Note, e.g. the app I'm building" value={editor.note} onChange={(event) => onChange({ ...editor, note: event.target.value })} />
+        <Input aria-label="Heard as" placeholder="Heard as, e.g. skribe, scryb" value={editor.heard} onChange={(event) => onChange({ ...editor, heard: event.target.value })} />
+      </div>
+      <div className="flex items-center gap-4">
+        <Check label="Sounds alike" checked={editor.phonetic} onChange={(phonetic) => onChange({ ...editor, phonetic })} />
+        <span className="ml-auto flex gap-2">{children}</span>
+      </div>
+    </div>
+  );
+}
+
+function SuggestionRow({ suggestion, onAccept, onDismiss }: { suggestion: Suggestion; onAccept: () => void; onDismiss: () => void }) {
+  return (
+    <div className="flex items-center gap-2 bg-primary/5 px-4 py-2">
+      <span className="min-w-0 flex-1 truncate text-[13px]">
+        Swap “{suggestion.heard}” for <span className="font-medium">{suggestion.written}</span>
+      </span>
+      <span className="text-[12px] text-muted-foreground">{suggestion.times === 1 ? "re-dictated once" : `re-dictated ${suggestion.times} times`}</span>
+      <Button size="sm" onClick={onAccept}>
+        <CheckIcon />
+        Accept
+      </Button>
+      <Button variant="ghost" size="icon" aria-label="Dismiss suggestion" title="Dismiss suggestion" onClick={onDismiss}>
+        <X />
+      </Button>
+    </div>
+  );
+}
+
 /** The list shows the newest rule first; the saved order, which rules apply in, stays oldest first. */
 export function newestFirst<T>(rules: T[]): { rule: T; index: number }[] {
   return rules.map((rule, index) => ({ rule, index })).reverse();
 }
 
 export function DictionaryPage() {
-  const { dictionary, dispatchDictionary, saveDictionary, confirm, settings, editSettings } = useStore();
+  const { dictionary, dispatchDictionary, saveDictionary } = useStore();
   const client = useQueryClient();
   const failed = useSyncedDraft<Dictionary>("dictionary", "/api/dictionary", dispatchDictionary);
   const [adding, setAdding] = useState<Editor>(EMPTY_EDITOR);
   const [editing, setEditing] = useState<{ index: number; editor: Editor } | null>(null);
+  const [addingTerm, setAddingTerm] = useState<TermEditor>(EMPTY_TERM);
+  const [editingTerm, setEditingTerm] = useState<{ index: number; editor: TermEditor } | null>(null);
   const [error, setError] = useState("");
+  const [termError, setTermError] = useState("");
   const draft = dictionary?.draft;
   if (!draft) return <PageBody><PageTitle title="Dictionary" />{failed ? <InlineError>The dictionary could not be loaded.</InlineError> : null}</PageBody>;
 
@@ -153,27 +226,35 @@ export function DictionaryPage() {
     editRules((rules) => (index < rules.length ? rules.map((other, at) => (at === index ? rule : other)) : [...rules, rule]));
     return true;
   };
-  /** Forgetting is saved at once, so it cannot be discarded; unsaved edits to other rules stay. */
-  const forget = async (request: () => Promise<void>, gone: (rule: LiteralRule) => boolean) => {
+  const editTerms = (update: (people: Term[]) => Term[]) =>
+    dispatchDictionary({ type: "edit", update: (current) => ({ ...current, people: update(current.people) }) });
+  const placeTerm = (editor: TermEditor, index: number): boolean => {
+    const term = termFrom(editor);
+    const problem = termProblem(draft.people, term, index);
+    if (problem) return setTermError(problem), false;
+    setTermError("");
+    editTerms((people) => (index < people.length ? people.map((other, at) => (at === index ? term : other)) : [...people, term]));
+    return true;
+  };
+  /** Settled at once, so it cannot be discarded; unsaved edits elsewhere on the page stay. */
+  const settle = async (request: () => Promise<void>, change: (current: Dictionary) => Dictionary) => {
     try {
       await request();
       const fresh = await api.get<Dictionary>("/api/dictionary");
-      editRules((rules) => rules.filter((rule) => !(rule.kind === "literal" && rule.learned && gone(rule))));
+      dispatchDictionary({ type: "edit", update: (current) => ({ ...change(current), suggestions: fresh.suggestions }) });
       dispatchDictionary({ type: "loaded", value: fresh });
       client.setQueryData(["dictionary"], fresh);
     } catch (failure) {
-      setError(errorText(failure));
+      setTermError(errorText(failure));
     }
   };
-  const forgetLearned = async () => {
-    if (!(await confirm("Forget all learned words?", "Removes every word the app learned from your corrections. It will not learn them again.", "Forget"))) return;
-    await forget(() => api.post("/api/dictionary/forget-learned"), () => true);
-  };
-  const forgetWord = async (word: LiteralRule) => {
-    const spoken = word.spoken[0]?.trim() ?? "";
-    if (!(await confirm("Forget this learned word?", `Removes “${spoken}” → “${word.replacement}”. It will not be learned again.`, "Forget"))) return;
-    await forget(() => api.del(`/api/dictionary/learned/${encodeURIComponent(spoken)}`), (rule) => rule.spoken[0]?.trim() === spoken);
-  };
+  const path = (suggestion: Suggestion) => `/api/people/suggestions/${encodeURIComponent(suggestion.heard)}`;
+  const accept = (suggestion: Suggestion) =>
+    settle(() => api.post(`${path(suggestion)}/accept`), (current) => ({
+      ...current,
+      people: current.people.map((term) => (term.written === suggestion.written ? { ...term, heard_as: [...term.heard_as, suggestion.heard] } : term)),
+    }));
+  const dismiss = (suggestion: Suggestion) => settle(() => api.del(path(suggestion)), (current) => current);
 
   return (
     <PageBody>
@@ -192,19 +273,68 @@ export function DictionaryPage() {
         </Rows>
       </Section>
 
-      {settings ? (
-        <Section title="Learning" note="Learning watches edits you make to text this app pasted, for up to 15 minutes after each dictation. Everything stays on this device.">
-          <Rows>
-            <Row title="Learn words I correct" description="Names and terms you fix after pasting are spelled right next time.">
-              <Switch
-                aria-label="Learn words I correct"
-                checked={settings.draft.learn_words}
-                onCheckedChange={(learn_words) => editSettings((current) => ({ ...current, learn_words }))}
-              />
-            </Row>
-          </Rows>
-        </Section>
-      ) : null}
+      <Section
+        title="People and terms"
+        note="Names and words dictation and meetings should spell right. Dictation and meetings tell the model about them, notes included, so it can tell your app from the ordinary word. Heard-as spellings are swapped for the entry. Dictating over a selected name again picks the other spelling, and suggests what it heard here."
+      >
+        <Card className="divide-y">
+          {draft.suggestions.map((suggestion) => (
+            <SuggestionRow key={suggestion.heard} suggestion={suggestion} onAccept={() => void accept(suggestion)} onDismiss={() => void dismiss(suggestion)} />
+          ))}
+          <form
+            className="px-4 py-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (placeTerm(addingTerm, draft.people.length)) setAddingTerm(EMPTY_TERM);
+            }}
+          >
+            <TermFields editor={addingTerm} onChange={setAddingTerm}>
+              <Button type="submit" size="sm" disabled={!addingTerm.written.trim()}>
+                <Plus />
+                Add
+              </Button>
+            </TermFields>
+          </form>
+          {draft.people.length ? (
+            newestFirst(draft.people).map(({ rule: term, index }) =>
+              editingTerm?.index === index ? (
+                <div key={index} className="bg-muted/40 px-4 py-3">
+                  <TermFields editor={editingTerm.editor} onChange={(editor) => setEditingTerm({ index, editor })}>
+                    <Button size="sm" variant="ghost" onClick={() => (setEditingTerm(null), setTermError(""))}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={() => placeTerm(editingTerm.editor, index) && setEditingTerm(null)}>
+                      Done
+                    </Button>
+                  </TermFields>
+                </div>
+              ) : (
+                <div key={index} className="flex items-center gap-2 px-4 py-2">
+                  <span className="truncate text-[13px] font-medium">{term.written}</span>
+                  {term.note ? <span className="truncate text-[12.5px] text-muted-foreground">{term.note}</span> : null}
+                  <span className="flex min-w-0 flex-1 flex-wrap justify-end gap-1">
+                    {term.heard_as.map((spelling) => (
+                      <span key={spelling} className="max-w-full truncate rounded-md bg-muted px-1.5 py-px text-[12.5px]">
+                        {spelling}
+                      </span>
+                    ))}
+                  </span>
+                  {term.phonetic ? <Badge>Sounds alike</Badge> : null}
+                  <Button variant="ghost" size="icon" aria-label="Edit entry" onClick={() => setEditingTerm({ index, editor: termEditorFor(term) })}>
+                    <Pencil />
+                  </Button>
+                  <Button variant="ghost" size="icon" aria-label="Delete entry" onClick={() => editTerms((people) => people.filter((_, at) => at !== index))}>
+                    <Trash2 />
+                  </Button>
+                </div>
+              ),
+            )
+          ) : (
+            <p className="px-4 py-6 text-center text-[12.5px] text-muted-foreground">No names yet. Add the people, products and terms you say most.</p>
+          )}
+        </Card>
+        {termError ? <InlineError>{termError}</InlineError> : null}
+      </Section>
 
       <Section
         title="Words and replacements"
@@ -254,7 +384,10 @@ export function DictionaryPage() {
                   <ArrowRight className="size-3.5 text-muted-foreground" />
                   <span className="truncate text-[13px]">{rule.replacement || <span className="text-muted-foreground">(nothing)</span>}</span>
                   <span className="flex items-center justify-end gap-1">
-                    {rule.kind === "regex" ? <Badge>Regex</Badge> : rule.learned ? <Badge variant="primary">Learned</Badge> : null}
+                    <span className="text-[11.5px] text-muted-foreground" title="Times this rule has changed a dictation">
+                      {rule.fired ? `${rule.fired}×` : "never"}
+                    </span>
+                    {rule.kind === "regex" ? <Badge>Regex</Badge> : null}
                     <Switch
                       aria-label="Rule on"
                       className="mx-1 scale-90"
@@ -264,32 +397,23 @@ export function DictionaryPage() {
                     <Button variant="ghost" size="icon" aria-label="Edit rule" onClick={() => setEditing({ index, editor: editorFor(rule) })}>
                       <Pencil />
                     </Button>
-                    {rule.kind === "literal" && rule.learned ? (
-                      <Button variant="ghost" size="icon" aria-label="Forget learned word" title="Forget learned word" onClick={() => void forgetWord(rule)}>
-                        <Trash2 />
-                      </Button>
-                    ) : (
-                      <Button variant="ghost" size="icon" aria-label="Delete rule" onClick={() => editRules((rules) => rules.filter((_, at) => at !== index))}>
-                        <Trash2 />
-                      </Button>
-                    )}
+                    <Button variant="ghost" size="icon" aria-label="Delete rule" onClick={() => editRules((rules) => rules.filter((_, at) => at !== index))}>
+                      <Trash2 />
+                    </Button>
                   </span>
                 </div>
               ),
             )
           ) : (
-            <p className="px-4 py-6 text-center text-[12.5px] text-muted-foreground">No words yet. Add one above, or correct a pasted word and it is learned.</p>
+            <p className="px-4 py-6 text-center text-[12.5px] text-muted-foreground">No words yet. Add one above.</p>
           )}
         </Card>
         {error ? <InlineError>{error}</InlineError> : null}
         <div className="mt-2.5 flex items-center gap-2">
-          <Button variant="link" onClick={() => void forgetLearned()}>
-            Forget all learned words
-          </Button>
           {isDirty(dictionary) ? (
             <>
               <span className="ml-auto text-[12.5px] text-muted-foreground">Dictionary changed</span>
-              <Button variant="ghost" size="sm" onClick={() => (dispatchDictionary({ type: "discard" }), setError(""))}>
+              <Button variant="ghost" size="sm" onClick={() => (dispatchDictionary({ type: "discard" }), setError(""), setTermError(""))}>
                 Discard
               </Button>
               <Button size="sm" onClick={async () => setError(await saveDictionary())}>

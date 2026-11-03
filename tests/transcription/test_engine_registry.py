@@ -94,13 +94,13 @@ class TestEngineSpec:
 
     def test_should_carry_a_pinned_revision(self):
         spec = EngineSpec(
-            model_name="crisperwhisper-2.0-turbo",
-            repo_id="nyralabs/CrisperWhisper2.0_turbo",
+            model_name="qwen3-asr-1.7b",
+            repo_id="Qwen/Qwen3-ASR-1.7B-hf",
             device="cuda", language="en", beam_size=1, model_dir=Path("/m"),
-            revision="de0369c8a68025b7f6e86387b6eb5a3b369787c8",
+            revision="bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
         )
 
-        assert spec.revision == "de0369c8a68025b7f6e86387b6eb5a3b369787c8"
+        assert spec.revision == "bcd2b5b7f32b480ab5790554cfa8347f246a14f3"
 
 
 class TestRequiresTorch:
@@ -125,13 +125,13 @@ class TestRequiresTorch:
         registry = EngineRegistry(
             descriptors=[
                 replace(_DESCRIPTOR, requires_torch=False),
-                replace(_DESCRIPTOR, engine_id="crisperwhisper"),
+                replace(_DESCRIPTOR, engine_id="qwen3_asr"),
             ],
             builders={},
         )
 
         assert registry.requires_torch(
-            ["nano_parakeet", "crisperwhisper"],
+            ["nano_parakeet", "qwen3_asr"],
         ) is True
 
     def test_should_report_torch_for_an_unregistered_engine(self):
@@ -140,7 +140,7 @@ class TestRequiresTorch:
             builders={},
         )
 
-        assert registry.requires_torch(["crisperwhisper"]) is True
+        assert registry.requires_torch(["qwen3_asr"]) is True
 
     def test_should_assume_torch_when_nothing_is_selectable(self):
         # An empty list means selection failed, not that the launch runs

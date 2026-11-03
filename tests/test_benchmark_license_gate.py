@@ -6,22 +6,34 @@ benchmark paths - the pre-download step and the per-combo runner -
 therefore consult the same acceptance record the app writes.
 """
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from tests.fakes.config import FakeConfig
 from tests.performance._combos import BenchmarkCombo
 from tests.performance._pre_download import ensure_models_downloaded
 from tests.performance._runner import BenchmarkResult, run_benchmark
 from skryb.recording.audio_segment import AudioSegment
+from skryb.transcription import license_policy
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import ALL_MODELS
 
 
-_GATED_COMBO = BenchmarkCombo("crisperwhisper-2.0-turbo", "crisperwhisper", "cpu")
+_GATED = "gated-example"
+_GATED_COMBO = BenchmarkCombo(_GATED, "nano_parakeet", "cpu")
 _UNGATED_COMBO = BenchmarkCombo("parakeet-ultra", "nano_parakeet", "cpu")
+
+
+@pytest.fixture(autouse=True)
+def _a_gated_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No model in the catalogue asks for a licence any more, so the gate is tested on a made-up one."""
+    gated = replace(ALL_MODELS["parakeet-ultra"], name=_GATED, license_id="example-nc", revision="0123456789abcdef")
+    monkeypatch.setitem(ALL_MODELS, _GATED, gated)
+    monkeypatch.setattr(license_policy, "_license_bytes", lambda _license_id: b"Example licence")
 
 
 def _refusing_policy() -> LicensePolicy:
@@ -30,7 +42,7 @@ def _refusing_policy() -> LicensePolicy:
 
 def _accepting_policy() -> LicensePolicy:
     policy = LicensePolicy(FakeConfig())
-    policy.accept(ALL_MODELS["crisperwhisper-2.0-turbo"])
+    policy.accept(ALL_MODELS[_GATED])
     return policy
 
 
@@ -74,7 +86,7 @@ class TestBenchmarkPreDownload:
             )
 
         assert download.call_args.kwargs["revision"] == (
-            ALL_MODELS["crisperwhisper-2.0-turbo"].revision
+            ALL_MODELS[_GATED].revision
         )
 
     def test_should_leave_an_ungated_model_alone(self, tmp_path: Path) -> None:

@@ -16,7 +16,6 @@ from skryb.transcription.engine_registry import (
 from skryb.transcription.engine_selector import rank_engines
 from skryb.transcription.engine_types import (
     ALL_HARDWARE_KINDS,
-    CrisperWhisperMode,
     EngineCandidate,
     EngineDescriptor,
     EngineId,
@@ -26,7 +25,6 @@ from skryb.transcription.hardware_detector import HardwareDetector
 from skryb.transcription.hf_model_manager import repo_has_loadable_snapshot
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import (
-    CRISPERWHISPER_MODELS,
     DEFAULT_MODEL,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
@@ -40,7 +38,6 @@ from skryb.transcription.native_engine_dll import (
     NATIVE_GPU_ARCHS,
     native_engine_dll,
     native_parakeet_dll,
-    native_whisper_dll,
 )
 
 _NANO_PARAKEET_DESCRIPTOR = EngineDescriptor(
@@ -68,23 +65,6 @@ _PHONON2_CPU_DESCRIPTOR = EngineDescriptor(
     base_priority=80,
 )
 
-_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
-    engine_id="crisperwhisper",
-    display_name="CrisperWhisper 2.0 (Transformers)",
-    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
-    base_priority=40,
-)
-
-
-_CRISPERWHISPER_CT2_DESCRIPTOR = EngineDescriptor(
-    engine_id="crisperwhisper_ct2",
-    display_name="CrisperWhisper 2.0 (CTranslate2)",
-    supported_hardware=("nvidia_cuda", "amd_rocm", "cpu"),
-    base_priority=45,
-    requires_torch=False,
-)
-
-
 # Hand-written kernels behind a DLL, no torch import: tuned and checked on the
 # RX 9060 XT (gfx1200), with an experimental NVIDIA build for the RTX 30-50 series.
 _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
@@ -102,18 +82,6 @@ _NATIVE_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 _NATIVE_PARAKEET_DESCRIPTOR = EngineDescriptor(
     engine_id="native_parakeet",
     display_name="Parakeet (native GPU engine)",
-    supported_hardware=("amd_rocm", "nvidia_cuda"),
-    base_priority=95,
-    requires_torch=False,
-    supported_gfx=NATIVE_GPU_ARCHS,
-)
-
-
-# CrisperWhisper on the same kernels: about 2 s to load where the
-# Transformers engine takes 20-60, and no torch or Transformers import.
-_NATIVE_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
-    engine_id="native_crisperwhisper",
-    display_name="CrisperWhisper 2.0 (native GPU engine)",
     supported_hardware=("amd_rocm", "nvidia_cuda"),
     base_priority=95,
     requires_torch=False,
@@ -156,31 +124,15 @@ _OPENVINO_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 )
 
 
-# CrisperWhisper with its encoder on an Intel NPU, its decoder on the CPU, through
-# OpenVINO, no torch. Without an NPU the encoder would run on the CPU, where the
-# CTranslate2 engine is the better pick, so it only leads on NPU machines.
-_OPENVINO_CRISPERWHISPER_DESCRIPTOR = EngineDescriptor(
-    engine_id="openvino_crisperwhisper",
-    display_name="CrisperWhisper 2.0 on the NPU (OpenVINO)",
-    supported_hardware=("cpu",),
-    base_priority=30,
-    requires_torch=False,
-)
-
-
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
     "phonon2_cpu": 1,
-    "crisperwhisper": 1,
-    "crisperwhisper_ct2": 1,
-    "native_crisperwhisper": 1,
     "native_qwen3_asr": 1,
     "openvino_parakeet": 1,
     "native_parakeet": 1,
     "qwen3_asr": 1,
     "openvino_qwen3_asr": 1,
-    "openvino_crisperwhisper": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -192,11 +144,8 @@ def build_engine_registry() -> EngineRegistry:
             _NANO_PARAKEET_DESCRIPTOR,
             _NEMOTRON_STREAMING_DESCRIPTOR,
             _PHONON2_CPU_DESCRIPTOR,
-            _CRISPERWHISPER_DESCRIPTOR,
-            _CRISPERWHISPER_CT2_DESCRIPTOR,
             replace(_NATIVE_QWEN3_ASR_DESCRIPTOR, available=_either_build(native_engine_dll)),
             replace(_NATIVE_PARAKEET_DESCRIPTOR, available=_either_build(native_parakeet_dll)),
-            replace(_NATIVE_CRISPERWHISPER_DESCRIPTOR, available=_either_build(native_whisper_dll)),
             _QWEN3_ASR_DESCRIPTOR,
             replace(
                 _OPENVINO_PARAKEET_DESCRIPTOR,
@@ -206,24 +155,16 @@ def build_engine_registry() -> EngineRegistry:
                 _OPENVINO_QWEN3_ASR_DESCRIPTOR,
                 available=importlib.util.find_spec("openvino") is not None,
             ),
-            replace(
-                _OPENVINO_CRISPERWHISPER_DESCRIPTOR,
-                available=importlib.util.find_spec("openvino") is not None,
-            ),
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
             "nemotron_streaming": _build_nemotron_streaming_engine,
             "phonon2_cpu": _build_phonon2_cpu_engine,
-            "crisperwhisper": _build_crisperwhisper_engine,
-            "crisperwhisper_ct2": _build_crisperwhisper_ct2_engine,
             "native_qwen3_asr": _build_native_qwen3_asr_engine,
             "openvino_parakeet": _build_openvino_parakeet_engine,
             "native_parakeet": _build_native_parakeet_engine,
-            "native_crisperwhisper": _build_native_crisperwhisper_engine,
             "qwen3_asr": _build_qwen3_asr_engine,
             "openvino_qwen3_asr": _build_openvino_qwen3_asr_engine,
-            "openvino_crisperwhisper": _build_openvino_crisperwhisper_engine,
         },
     )
 
@@ -317,69 +258,6 @@ def _build_openvino_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
     from skryb.transcription.openvino_qwen3_asr_adapter import OpenVinoQwen3AsrAdapter
 
     return OpenVinoQwen3AsrAdapter(spec.model_dir, spec.repo_id, spec.revision, language=spec.language)
-
-
-def _build_openvino_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
-    from skryb.transcription.hf_model_manager import loadable_snapshot_dir
-    from skryb.transcription.openvino_crisperwhisper_adapter import OpenVinoCrisperWhisperAdapter
-
-    return OpenVinoCrisperWhisperAdapter(
-        loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
-        language=spec.language,
-        mode=spec.crisperwhisper_mode,
-    )
-
-
-def _build_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
-    from skryb.transcription.crisperwhisper_adapter import (
-        CrisperWhisperAdapter,
-    )
-
-    return CrisperWhisperAdapter(
-        repo_id=spec.repo_id,
-        revision=spec.revision,
-        device=spec.device,
-        model_dir=spec.model_dir,
-        language=spec.language,
-        mode=spec.crisperwhisper_mode,
-    )
-
-
-def _build_native_crisperwhisper_engine(spec: EngineSpec) -> TranscriptionEngine:
-    from skryb.transcription.hf_model_manager import (
-        loadable_snapshot_dir,
-    )
-    from skryb.transcription.native_crisperwhisper_adapter import (
-        NativeCrisperWhisperAdapter,
-    )
-
-    return NativeCrisperWhisperAdapter(
-        model_dir=loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision),
-        language=spec.language,
-        mode=spec.crisperwhisper_mode,
-        cuda=_on_nvidia(spec),
-    )
-
-
-def _build_crisperwhisper_ct2_engine(spec: EngineSpec) -> TranscriptionEngine:
-    from skryb.transcription.crisperwhisper_ct2_adapter import (
-        CrisperWhisperCt2Adapter,
-    )
-    from skryb.transcription.ct2_conversion import ensure_ct2_model
-    from skryb.transcription.hf_model_manager import (
-        loadable_snapshot_dir,
-    )
-
-    return CrisperWhisperCt2Adapter(
-        model_dir=ensure_ct2_model(
-            loadable_snapshot_dir(
-                spec.model_dir, spec.repo_id, spec.revision,
-            ),
-        ),
-        device=spec.device,
-        language=spec.language,
-        mode=spec.crisperwhisper_mode,
-    )
 
 
 def selectable_engine_ids(
@@ -607,19 +485,8 @@ def engines_with_model_on_disk(
         repo_dir = models_dir / f"models--{repo_id.replace('/', '--')}"
         if not repo_has_loadable_snapshot(repo_dir, model_info.revision):
             continue
-        if engine_id == "crisperwhisper_ct2" and not _ctranslate2_installed():
-            continue
         installed.add(engine_id)
     return frozenset(installed)
-
-
-def _ctranslate2_installed() -> bool:
-    """Whether the CTranslate2 runtime is importable, without importing it.
-
-    Selection runs before startup decides about torch, so this has to
-    answer from the module finder rather than by loading a backend.
-    """
-    return importlib.util.find_spec("ctranslate2") is not None
 
 
 def _engine_repo_ids(model_info: ModelInfo) -> list[tuple[EngineId, str]]:
@@ -662,7 +529,6 @@ def create_engine_for_active_model(
         beam_size=_resolve_beam_size(config, engine_id),
         model_dir=paths.models_dir,
         revision=model_info.revision,
-        crisperwhisper_mode=_resolve_crisperwhisper_mode(config, engine_id),
         question_marks=config.get("transcription.question_marks", True) is not False,
         hardware_kind=(
             hardware_detector.detect().kind if registry.descriptor(engine_id).supported_gfx else None
@@ -691,21 +557,6 @@ def _resolve_beam_size(
     if explicit is None:
         return _DEFAULT_BEAM_SIZE_BY_ENGINE.get(engine_id, _FALLBACK_BEAM_SIZE)
     return explicit  # type: ignore[return-value]
-
-
-def _resolve_crisperwhisper_mode(
-    config: ConfigurationStore,
-    engine_id: EngineId,
-) -> CrisperWhisperMode:
-    if engine_id not in ("crisperwhisper", "crisperwhisper_ct2", "native_crisperwhisper"):
-        return "intended"
-    from skryb.transcription.crisperwhisper_adapter import (
-        resolve_crisperwhisper_mode,
-    )
-
-    return resolve_crisperwhisper_mode(
-        config.get("transcription.crisperwhisper_mode", "intended")
-    )
 
 
 def create_model_manager(
@@ -757,9 +608,6 @@ def build_composite_model_manager(
     phonon2_models = {
         name: info for name, info in PHONON2_MODELS.items() if info.repo_id
     }
-    crisperwhisper_models = {
-        name: info for name, info in CRISPERWHISPER_MODELS.items() if info.repo_id
-    }
     qwen3_asr_models = {
         name: info for name, info in QWEN3_ASR_MODELS.items() if info.repo_id
     }
@@ -788,15 +636,6 @@ def build_composite_model_manager(
         models=phonon2_models,
         license_policy=license_policy,
     )
-    crisperwhisper_manager = HuggingFaceModelManager(
-        models_dir=models_dir,
-        download_manager=download_manager,
-        resolver=resolver,
-        file_downloader=file_downloader,
-        models=crisperwhisper_models,
-        license_policy=license_policy,
-    )
-
     qwen3_asr_manager = HuggingFaceModelManager(
         models_dir=models_dir,
         download_manager=download_manager,
@@ -813,10 +652,6 @@ def build_composite_model_manager(
             "native_parakeet": nano_parakeet_manager,
             "nemotron_streaming": nemotron_streaming_manager,
             "phonon2_cpu": phonon2_manager,
-            "crisperwhisper": crisperwhisper_manager,
-            "crisperwhisper_ct2": crisperwhisper_manager,
-            "native_crisperwhisper": crisperwhisper_manager,
-            "openvino_crisperwhisper": crisperwhisper_manager,
             "native_qwen3_asr": qwen3_asr_manager,
             "qwen3_asr": qwen3_asr_manager,
             "openvino_qwen3_asr": qwen3_asr_manager,

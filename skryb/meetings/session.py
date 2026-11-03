@@ -73,7 +73,7 @@ class Session:
         *,
         capture: MeetingCapture,
         models: Models,
-        vocabulary: Path,
+        people: Path,
         publish: Publish,
         record_microphone: bool = True,
     ) -> None:
@@ -85,7 +85,7 @@ class Session:
         self.warning: str | None = None
         self._capture = capture
         self._models = models
-        self._vocabulary = vocabulary
+        self._people = people
         self._tracks = _TRACKS if record_microphone else ("them",)
         self._audio = {track: _Audio() for track in self._tracks}
         self._files: dict[str, Any] = {}  # soundfile.SoundFile, imported when a meeting starts
@@ -237,7 +237,7 @@ class Session:
         audio = self._audio[track].between(segment.start, segment.end)
         if not len(audio):
             return
-        context = asr_context(self._vocabulary, dict(self.transcript.names), segment)
+        context = asr_context(self._people, dict(self.transcript.names))
         self.transcript.add(track, segment, self._models.transcribe(audio, context))
 
     def _drain(self, block: bool) -> list[tuple[str, object]]:
