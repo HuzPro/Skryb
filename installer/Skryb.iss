@@ -59,6 +59,7 @@ Compression=lzma2/max
 SolidCompression=yes
 ; The 64-bit compressor in its own process: the same output, about a fifth faster to build.
 LZMAUseSeparateProcess=yes
+LZMANumBlockThreads=4
 WizardStyle=modern
 SetupIconFile=..\brand\skryb.ico
 UninstallDisplayName={#AppName} {#AppVersion}
