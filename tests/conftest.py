@@ -177,6 +177,16 @@ def app_caplog(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
         logger.removeHandler(caplog.handler)
 
 
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """With SKRYB_TEST_SHARD="K/N", run only every Nth test from the Kth: CI splits the suite over N runners."""
+    shard = os.environ.get("SKRYB_TEST_SHARD")
+    if not shard:
+        return
+    number, count = (int(part) for part in shard.split("/"))
+    config.hook.pytest_deselected(items=[item for index, item in enumerate(items) if index % count != number - 1])
+    items[:] = [item for index, item in enumerate(items) if index % count == number - 1]
+
+
 _captured_exit_status = 0
 
 

@@ -1,55 +1,137 @@
 name: CI
 
+# One pipeline for every push to `main`, every pull request and manual runs: the
+# tests, the native engines, the settings window and the installer, built in
+# parallel. A push to `main` whose head-commit message opens with `release:` and a
+# version (e.g. `release: v0.2.0`) also tags that version and publishes the
+# installer. Nothing else ever publishes, except a manual run with "release" ticked.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release (only from main)"
+        type: boolean
+        default: false
+      version:
+        description: "Version to release (e.g. 0.2.0). Blank = pyproject.toml."
+        required: false
+        default: ""
 
-# Newer pushes to the same ref supersede in-flight runs.
+# On `main` a run is never cancelled: it may be publishing. Elsewhere a newer push
+# supersedes the run in flight.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
 
 jobs:
+  gate:
+    name: Decide whether to release
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The commit message is parsed by the unit-tested Python gate, not a
+      # shell regex, and passed through an env var (never interpolated into
+      # the script) so a crafted message cannot inject shell.
+      - id: decide
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_RELEASE: ${{ inputs.release }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$DISPATCH_RELEASE" != "true" ]; then
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              echo "Manual run without \"release\"; nothing to publish."
+              exit 0
+            fi
+            version="$DISPATCH_VERSION"
+            if [ -z "$version" ]; then
+              version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+            fi
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch: releasing $version."
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = "push" ] && version="$(python -m release.release_request "$HEAD_COMMIT_MESSAGE")"; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "Release commit detected: releasing $version."
+          else
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Head commit is not a release request; nothing to publish."
+          fi
+
+      # The installed app reports pyproject.toml's version. A release tagged
+      # anything else would have the app's updater offer it forever.
+      - name: Check the version matches pyproject.toml
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: python -c "import os, pathlib; from release.version import resolve_version; resolve_version(os.environ['VERSION'], pathlib.Path('pyproject.toml'))"
+
   test:
-    name: Tests (Ubuntu, CPU)
+    name: Tests (Python ${{ matrix.python }}, part ${{ matrix.shard }} of 4)
     # Pinned: on ubuntu-26.04 PortAudio can't reach the audio server, and importing
     # sounddevice fails test collection.
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the oldest Python the app supports; 3.12 is the one the installer bundles.
+        python: ["3.11", "3.12"]
+        # The suite is CPU-bound (about 6 CPU-minutes), so it is split over four
+        # runners of four cores each; tests/conftest.py picks this runner's quarter.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # Downloading the wheels is as fast as restoring them from a cache.
+          enable-cache: false
 
       # System libraries the suite pulls in at import time on Linux:
       #   libportaudio2 -> sounddevice (recording adapter)
       #   libsndfile1   -> soundfile (audio test dep)
       #   xvfb + xauth  -> virtual X display for the Tkinter widget tests
       #                    (the native Win32 modules are excluded on Linux)
-      - name: Install system libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libportaudio2 libsndfile1 \
-            xvfb xauth
-
+      # apt runs alongside the Python install. The runner image's package lists are
+      # recent enough; `apt-get update` only runs if they aren't.
       # CPU PyTorch from the dedicated index (skips the large CUDA wheels),
       # then the project with its test deps and the parakeet engine (the
       # cache-aware streaming tests import nano_parakeet directly), plus
       # OpenVINO so the NPU engine's CPU-device tests run instead of skipping.
-      - name: Install Python dependencies
+      # uv resolves the same latest versions pip would, in seconds. It compiles the
+      # bytecode once here, as pip did, instead of in each of the four pytest workers.
+      - name: Install dependencies
+        env:
+          UV_COMPILE_BYTECODE: "1"
         run: |
-          python -m pip install --upgrade pip
-          pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          pip install -e ".[dev,npu]"
+          packages="libportaudio2 libsndfile1 xvfb xauth"
+          { sudo apt-get install -y --no-install-recommends $packages || {
+              sudo apt-get update && sudo apt-get install -y --no-install-recommends $packages; }; } > apt.log 2>&1 &
+          apt=$!
+          uv pip install --system --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+          uv pip install --system -e ".[dev,npu]"
+          wait $apt || { cat apt.log; exit 1; }
 
       # The NPU engine's CPU decoder is plain C; its tests load this build.
       - name: Build the CPU TDT decoder
@@ -58,6 +140,346 @@ jobs:
       # `python -m pytest` puts the repo root on sys.path (the `tests`
       # package imports need it). `-m "not slow"` (pyproject.toml addopts)
       # and the Windows-only module exclusions (tests/conftest.py) apply
-      # automatically.
+      # automatically. `-n auto` runs a worker per core.
       - name: Run tests
-        run: xvfb-run -a python -m pytest -q
+        env:
+          SKRYB_TEST_SHARD: ${{ matrix.shard }}/4
+        run: xvfb-run -a python -m pytest -q -n auto --dist worksteal
+
+  # The settings window (Tauri), rebuilt only when its sources or the Rust compiler
+  # changed; otherwise the exe from the last build of the same sources.
+  ui:
+    name: Settings window
+    runs-on: windows-2022
+    env:
+      NODE_VERSION: "22"
+    steps:
+      - uses: actions/checkout@v5
+      - id: key
+        shell: bash
+        run: echo "exe=ui-exe-rust$(rustc -V | cut -d' ' -f2)-node$NODE_VERSION-${{ hashFiles('ui/**', '!ui/mock/**', '!ui/README.md', 'scripts/build_ui.ps1') }}" >> "$GITHUB_OUTPUT"
+      - id: exe
+        uses: actions/cache/restore@v4
+        with:
+          path: ui/src-tauri/target/release/skryb-ui.exe
+          key: ${{ steps.key.outputs.exe }}
+
+      - if: steps.exe.outputs.cache-hit != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - if: steps.exe.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      # The compiled dependencies (the crates in Cargo.lock), so only the window's
+      # own crate is compiled; with fat LTO that alone takes 65 to 110 s here.
+      # Cargo's home goes on D:, the runner's local disk: unpacking the crates there
+      # takes a third of the time it takes on C:.
+      - if: steps.exe.outputs.cache-hit != 'true'
+        id: cargo-key
+        shell: bash
+        run: |
+          echo "CARGO_HOME=$RUNNER_TEMP/cargo" >> "$GITHUB_ENV"
+          echo "key=cargo-${{ runner.os }}-rust$(rustc -V | cut -d' ' -f2)-${{ hashFiles('ui/src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+      - if: steps.exe.outputs.cache-hit != 'true'
+        id: cargo
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/cargo/registry/index
+            ${{ runner.temp }}/cargo/registry/cache
+            ui/src-tauri/target
+          key: ${{ steps.cargo-key.outputs.key }}
+      - if: steps.exe.outputs.cache-hit != 'true'
+        name: Build settings window
+        shell: pwsh
+        run: ./scripts/build_ui.ps1
+      - if: steps.exe.outputs.cache-hit != 'true' && steps.cargo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/cargo/registry/index
+            ${{ runner.temp }}/cargo/registry/cache
+            ui/src-tauri/target
+          key: ${{ steps.cargo-key.outputs.key }}
+      - if: steps.exe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ui/src-tauri/target/release/skryb-ui.exe
+          key: ${{ steps.key.outputs.exe }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui
+          path: ui/src-tauri/target/release/skryb-ui.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  # The native engines (qasr.dll for Qwen3-ASR, npk.dll for Parakeet, nd.dll for
+  # the meeting diarizer; gfx1200), rebuilt only when their sources or the
+  # compilers changed. AMD's rocm-sdk-core wheel carries hipcc, clang and the HIP
+  # headers; the runner's Visual Studio supplies the C runtime headers. Compiling
+  # needs no GPU. (rocm-sdk-devel isn't needed: the DLLs come out the same without it.)
+  # Also the NPU engine's CPU decoder (tdt_cpu.dll), plain C built with MSVC.
+  rocm:
+    name: Native engines (AMD) and CPU decoder
+    # Pinned, not windows-latest: Visual Studio 2026's C++ library made <cmath>
+    # constexpr, and ROCm 7.2.1's HIP compiler then rejects its own GPU math
+    # overloads ("__device__ function cannot overload __host__ __device__").
+    # Visual Studio 2022 predates that change.
+    runs-on: windows-2022
+    env:
+      ROCM_VERSION: "7.2.1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - id: key
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
+          "rocm=native-rocm$env:ROCM_VERSION-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**') }}" >> $env:GITHUB_OUTPUT
+          "tdt=native-tdt-vs$vs-${{ hashFiles('native/tdt/**') }}" >> $env:GITHUB_OUTPUT
+      - id: rocm
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
+          key: ${{ steps.key.outputs.rocm }}
+      # The 645 MB wheel as AMD's server sent it, kept so a rebuild doesn't fetch it again.
+      - if: steps.rocm.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: rocm-wheel
+          key: rocm-sdk-core-${{ env.ROCM_VERSION }}-win_amd64
+      - if: steps.rocm.outputs.cache-hit != 'true'
+        name: Install the ROCm SDK
+        shell: bash
+        run: |
+          ls rocm-wheel/rocm_sdk_core-$ROCM_VERSION-*.whl 2>/dev/null || python -m pip download --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-$ROCM_VERSION/ rocm-sdk-core==$ROCM_VERSION -d rocm-wheel
+          python -m pip install --no-deps rocm-wheel/rocm_sdk_core-$ROCM_VERSION-*.whl
+      # The three engines build independently, so at the same time.
+      - if: steps.rocm.outputs.cache-hit != 'true'
+        name: Build native engines
+        shell: bash
+        run: |
+          pids=()
+          for engine in engine parakeet diar; do bash native/$engine/build.sh > $engine.log 2>&1 & pids+=($!); done
+          for pid in "${pids[@]}"; do wait $pid || { cat engine.log parakeet.log diar.log; exit 1; }; done
+          tail -n 1 engine.log parakeet.log diar.log
+      - if: steps.rocm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
+          key: ${{ steps.key.outputs.rocm }}
+      - id: tdt
+        uses: actions/cache/restore@v4
+        with:
+          path: native/tdt/build/tdt_cpu.dll
+          key: ${{ steps.key.outputs.tdt }}
+      - if: steps.tdt.outputs.cache-hit != 'true'
+        name: Build the CPU TDT decoder
+        run: python native/tdt/build.py
+      - if: steps.tdt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/tdt/build/tdt_cpu.dll
+          key: ${{ steps.key.outputs.tdt }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rocm
+          path: |
+            native/engine/build/qasr.dll
+            native/parakeet/build/npk.dll
+            native/diar/build/nd.dll
+            native/tdt/build/tdt_cpu.dll
+          if-no-files-found: error
+          retention-days: 1
+
+  # Their NVIDIA builds (qasr_cuda.dll and the rest, for the RTX 30-50 series) from
+  # the same sources, one engine per runner: nvcc and the CUDA runtime from NVIDIA's
+  # redistributable archives, and the runner's Visual Studio. No GPU.
+  cuda:
+    name: Native engine for NVIDIA (${{ matrix.engine }})
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        include:
+          - engine: engine
+            dll: qasr_cuda.dll
+          - engine: parakeet
+            dll: npk_cuda.dll
+          - engine: diar
+            dll: nd_cuda.dll
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - id: key
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
+          "key=native-cuda-${{ matrix.engine }}-vs$vs-${{ hashFiles('native/engine/**', 'native/parakeet/**', 'native/diar/**', 'native/cuda/**') }}" >> $env:GITHUB_OUTPUT
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/${{ matrix.engine }}/build/${{ matrix.dll }}
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Build native engine for NVIDIA
+        shell: bash
+        run: |
+          python native/cuda/fetch_toolkit.py
+          python native/cuda/build.py ${{ matrix.engine }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/${{ matrix.engine }}/build/${{ matrix.dll }}
+          key: ${{ steps.key.outputs.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cuda-${{ matrix.engine }}
+          path: native/${{ matrix.engine }}/build/${{ matrix.dll }}
+          if-no-files-found: error
+          retention-days: 1
+
+  installer:
+    name: Build installer
+    needs: [ui, rocm, cuda]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui
+          path: ui/src-tauri/target/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: rocm
+          path: native
+      - uses: actions/download-artifact@v4
+        with:
+          name: cuda-engine
+          path: native/engine/build
+      - uses: actions/download-artifact@v4
+        with:
+          name: cuda-parakeet
+          path: native/parakeet/build
+      - uses: actions/download-artifact@v4
+        with:
+          name: cuda-diar
+          path: native/diar/build
+
+      # The runner image comes with Inno Setup.
+      - name: Install Inno Setup
+        shell: pwsh
+        run: if (-not (Get-Command ISCC -ErrorAction SilentlyContinue)) { choco install innosetup --no-progress -y }
+
+      # Bundle a relocatable CPython 3.12 (python-build-standalone). AMD's
+      # Windows ROCm wheels are cp312-only, so the bundled runtime is 3.12.
+      - name: Fetch standalone CPython 3.12
+        id: cpython
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "skryb-release" }
+          $release = Invoke-RestMethod -Headers $headers `
+            -Uri "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+          $asset = $release.assets |
+            Where-Object { $_.name -match 'cpython-3\.12\.\d+\+.*-x86_64-pc-windows-msvc-install_only\.tar\.gz$' } |
+            Select-Object -First 1
+          if (-not $asset) { throw "No cp312 install_only Windows asset found in the latest release." }
+          Write-Host "Using $($asset.name)"
+          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile cpython.tar.gz
+          New-Item -ItemType Directory -Force -Path cpython | Out-Null
+          tar -xzf cpython.tar.gz -C cpython
+          # The archive extracts to a top-level `python/` directory.
+          "dir=$(Resolve-Path cpython\python)" >> $env:GITHUB_OUTPUT
+
+      # The version comes from pyproject.toml, which the gate holds a release to.
+      - name: Build installer
+        shell: pwsh
+        run: python build_installer.py --python-dir "${{ steps.cpython.outputs.dir }}"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Skryb-Setup
+          path: dist/*.exe
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [gate, test, installer]
+    if: needs.gate.outputs.should_release == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: Skryb-Setup
+          merge-multiple: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The installed app finds new versions through this file, not GitHub's
+      # rate-limited API.
+      - name: Describe the release for the app's updater
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: python -m release.latest_manifest "$VERSION" artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.gate.outputs.version }}
+          name: Skryb v${{ needs.gate.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.exe
+            artifacts/latest.json
+          body: |
+            Skryb v${{ needs.gate.outputs.version }} for Windows x64.
+
+            Run the installer. It detects your GPU and lets you choose a
+            runtime (NVIDIA CUDA / AMD ROCm / CPU); the matching PyTorch
+            build is downloaded during installation, so this download stays
+            small. After install, run `skryb` from any terminal or
+            launch it from the Start Menu. Speech-to-text models download on
+            first run.
+
+            Skryb installs for your Windows account only, so setup never asks
+            for admin rights. Once installed, it checks GitHub for new versions
+            and offers to install each one itself, so this is the only download
+            you do by hand. Turn the checks off in Settings > Updates.
+
+            The installer is not code-signed yet, so Windows SmartScreen may
+            say it "protected your PC". Click **More info**, then **Run
+            anyway**.
+
+            Third-party license notices are written to the install folder
+            (`THIRD-PARTY-NOTICES.txt`) and `NOTICE.txt` covers the bundled
+            Python runtime.

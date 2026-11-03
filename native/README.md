@@ -3,16 +3,18 @@
 Hand-written HIP kernels behind `qasr.dll`, loaded by
 `skryb/transcription/native_qwen3_asr_adapter.py` for the `qwen3-asr-1.7b` model. No torch.
 
-Build (needs AMD's `rocm-sdk-core` and `rocm-sdk-devel` 7.2.1 wheels in the Python 3.12 on
-`PATH`, plus Visual Studio 2022's C++ build tools; no GPU needed). Visual Studio 2026's C++ library
-(MSVC 14.51) doesn't compile with ROCm 7.2.1's HIP headers, so the Release workflow builds on `windows-2022`:
+Build (needs AMD's `rocm-sdk-core` 7.2.1 wheel in the Python 3.12 on `PATH`, plus Visual Studio
+2022's C++ build tools; no GPU needed). `rocm-sdk-devel` isn't needed: with or without it the DLLs
+differ only in their link timestamp. Visual Studio 2026's C++ library
+(MSVC 14.51) doesn't compile with ROCm 7.2.1's HIP headers, so CI builds on `windows-2022`:
 
 ```bash
-python -m pip install --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1 rocm-sdk-devel==7.2.1
+python -m pip install --no-deps --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/ rocm-sdk-core==7.2.1
 bash native/engine/build.sh
 ```
 
-The Release workflow does the same and ships `qasr.dll` inside the app wheel as
+The three engines build independently, so `build.sh` for engine, parakeet and diar can run at the
+same time (16 s instead of 41 s here). CI does the same and ships `qasr.dll` inside the app wheel as
 `skryb/transcription/qasr.dll`. The app loads that copy, then `native/engine/build/qasr.dll` in a
 source checkout; `QASR_DLL` overrides both. The kernels are compiled for gfx1200 only, so the
 `qwen3-asr-1.7b` model is offered only on a gfx1200 GPU with the DLL present.
