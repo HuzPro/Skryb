@@ -42,7 +42,7 @@ function sendMeter(device: string, on: boolean): Promise<unknown> {
 }
 
 /** Streams the level of `device` into the bars while mounted; the core only holds the microphone open meanwhile. */
-function LevelMeter({ device }: { device: string }) {
+export function LevelMeter({ device }: { device: string }) {
   const bars = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<MeterState>("listening");
   const [failure, setFailure] = useState(COULD_NOT_OPEN);

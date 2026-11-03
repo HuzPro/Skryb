@@ -21,6 +21,7 @@ from skryb.history.management import (
     export_audio,
     export_csv,
 )
+from skryb.history.usage import Usage, usage, week_start
 from skryb.recording.audio_segment import load_wav
 
 RetryOutcome = str | Exception
@@ -70,6 +71,13 @@ class HistoryService:
     def entries(self, query: str = "", limit: int | None = None) -> list[HistoryEntry]:
         """The newest *limit* (all by default) whose text holds *query*, ignoring case."""
         return filter_entries(load_history(self._dir), query)[:limit]
+
+    def usage(self) -> tuple[Usage, Usage]:
+        """Over all of history, and over this week from Monday, in local time."""
+        entries = load_history(self._dir)
+        monday = week_start(self._now().astimezone().date())
+        this_week = [entry for entry in entries if entry.at.astimezone().date() >= monday]
+        return usage(entries), usage(this_week)
 
     def find(self, entry_id: str) -> HistoryEntry | None:
         key = parse_entry_id(entry_id)

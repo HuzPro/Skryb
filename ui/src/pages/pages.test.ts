@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { launchPath, rememberPage } from "../app";
+import { launchPath, restoredPath } from "../app";
 import type { HistoryEntry, Model, Settings, UpdateStatus } from "../lib/types";
 import { duplicateAlias, joinAliases, newestFirst, splitAliases, termFrom, termProblem } from "./dictionary";
 import { finalText, formatDuration, groupByDay, preview } from "./history";
+import { formatSaved, timeSaved } from "./home";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
@@ -199,47 +200,41 @@ describe("settings helpers", () => {
   });
 });
 
+describe("time saved on Home", () => {
+  it("is typing time at 40 words a minute minus the time spent speaking", () => {
+    expect(timeSaved({ words: 400, seconds: 120 })).toBe(480);
+    expect(formatSaved(timeSaved({ words: 400, seconds: 120 }))).toBe("8 min");
+  });
+
+  it("never goes below nothing, and an empty history saved nothing", () => {
+    expect(timeSaved({ words: 3, seconds: 600 })).toBe(0);
+    expect(timeSaved({ words: 0, seconds: 0 })).toBe(0);
+    expect(formatSaved(0)).toBe("0 min");
+  });
+
+  it("reads in minutes, then hours, for a year of dictation", () => {
+    expect(formatSaved(20)).toBe("Under a minute");
+    expect(formatSaved(3 * 3600 + 5 * 60)).toBe("3 h 5 min");
+    const year = timeSaved({ words: 1_250_000, seconds: 180_000 });
+    expect(formatSaved(year)).toBe(`${(470).toLocaleString()} h 50 min`);
+  });
+});
+
 describe("the page a launch opens", () => {
-  const memory = () => {
-    const saved = new Map<string, string>();
-    return { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value) };
-  };
-
-  it("opens settings on the Model page the first time, and History and setup on themselves", () => {
-    const fresh = memory();
-    expect(launchPath("settings", fresh)).toBe("/transcription");
-    expect(launchPath("history", fresh)).toBe("/history");
-    expect(launchPath("setup", fresh)).toBe("/setup");
-    expect(launchPath("settings", null)).toBe("/transcription");
+  it("opens the window on Home, the tray's Meetings on meeting Home, and History, setup and updates on themselves", () => {
+    expect(launchPath("settings")).toBe("/home");
+    expect(launchPath("meetings")).toBe("/meeting-home");
+    expect(launchPath("history")).toBe("/history");
+    expect(launchPath("setup")).toBe("/setup");
+    expect(launchPath("updates")).toBe("/updates");
   });
 
-  it("reopens settings on the settings page shown last, never on History or setup", () => {
-    const used = memory();
-    for (const path of ["/dictionary", "/shortcuts", "/history", "/setup", "/nowhere", "/"]) rememberPage(path, used);
-    expect(launchPath("settings", used)).toBe("/shortcuts");
-    expect(launchPath("history", used)).toBe("/history");
-  });
-
-  it("reopens a meeting settings page, but never meeting History or a meeting", () => {
-    const used = memory();
-    for (const path of ["/meeting-model", "/meetings", "/meetings/live", "/meetings/2026-10-29 09-00 Standup"]) rememberPage(path, used);
-    expect(launchPath("settings", used)).toBe("/meeting-model");
-  });
-
-  it("falls back to the Model page when the stored page is unknown or storage is blocked", () => {
-    const tampered = memory();
-    tampered.setItem("last-settings-page", "../../etc");
-    expect(launchPath("settings", tampered)).toBe("/transcription");
-    const blocked = {
-      getItem: () => {
-        throw new Error("SecurityError");
-      },
-      setItem: () => {
-        throw new Error("QuotaExceededError");
-      },
-    };
-    expect(() => rememberPage("/output", blocked)).not.toThrow();
-    expect(launchPath("settings", blocked)).toBe("/transcription");
+  it("reopens the page an update handed over, unless this version has no such page", () => {
+    expect(restoredPath("/updates")).toBe("/updates");
+    expect(restoredPath("/meeting-home")).toBe("/meeting-home");
+    expect(restoredPath("/meetings/live")).toBeNull();
+    expect(restoredPath("/../etc")).toBeNull();
+    expect(restoredPath(null)).toBeNull();
   });
 });
 

@@ -57,6 +57,7 @@ from skryb.ui.shapes import (
     history_entry_json,
     settings_json,
     shown_combination,
+    usage_json,
 )
 
 _logger = logging.getLogger(__name__)
@@ -320,6 +321,7 @@ class CoreApi:
             ("POST", "/api/people/suggestions/{heard}/accept", self._accept_suggestion),
             ("DELETE", "/api/people/suggestions/{heard}", self._dismiss_suggestion),
             ("GET", "/api/history", self._list_history),
+            ("GET", "/api/history/usage", self._history_usage),
             ("DELETE", "/api/history", self._delete_all_history),
             ("POST", "/api/history/export", self._export_history_csv),
             ("DELETE", "/api/history/{id}", self._delete_history_entry),
@@ -718,6 +720,10 @@ class CoreApi:
             request.query.get("query", ""), _history_limit(request),
         )
         return ApiResponse(200, [history_entry_json(entry) for entry in entries])
+
+    def _history_usage(self, _request: ApiRequest) -> ApiResponse:
+        everything, this_week = self._require_history().usage()
+        return ApiResponse(200, {"all": usage_json(everything), "week": usage_json(this_week)})
 
     def _delete_history_entry(self, request: ApiRequest) -> ApiResponse:
         self._require_history().delete(self._find_entry(request))

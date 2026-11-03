@@ -181,10 +181,10 @@ describe("coming back to the live page", () => {
 
 describe("the mode a page belongs to", () => {
   it("puts the meetings pages in meeting mode and the dictation pages in dictation", () => {
-    for (const page of ["/meetings", "/meetings/live", "/meetings/2026-10-16 Ops Onboarding", "/meeting-microphone", "/meeting-output", "/meeting-model"]) {
+    for (const page of ["/meeting-home", "/meetings", "/meetings/2026-10-16 Ops Onboarding", "/meeting-microphone", "/meeting-output", "/meeting-model"]) {
       expect(modeOf(page)).toBe("meetings");
     }
-    for (const page of ["/history", "/transcription", "/microphone", "/output", "/meetingsroom", "/meeting-settings"]) {
+    for (const page of ["/home", "/history", "/transcription", "/microphone", "/output", "/meetingsroom", "/meeting-settings"]) {
       expect(modeOf(page)).toBe("dictation");
     }
   });
@@ -193,21 +193,22 @@ describe("the mode a page belongs to", () => {
     for (const page of ["/dictionary", "/shortcuts", "/updates", "/setup"]) expect(modeOf(page)).toBeNull();
   });
 
-  it("opens meeting History when the tray asks for meetings", () => {
-    expect(launchPath("meetings", null)).toBe("/meetings");
+  it("opens meeting mode's Home when the tray asks for meetings", () => {
+    expect(launchPath("meetings")).toBe("/meeting-home");
   });
 });
 
 describe("switching mode", () => {
   it("keeps the same sidebar item and swaps the page behind it", () => {
+    expect(pageInMode("/home", "meetings")).toBe("/meeting-home");
+    expect(pageInMode("/meeting-home", "dictation")).toBe("/home");
     expect(pageInMode("/history", "meetings")).toBe("/meetings");
     expect(pageInMode("/transcription", "meetings")).toBe("/meeting-model");
     expect(pageInMode("/meeting-output", "dictation")).toBe("/output");
     expect(pageInMode("/meeting-microphone", "dictation")).toBe("/microphone");
   });
 
-  it("leaves a live or saved meeting for dictation History", () => {
-    expect(pageInMode("/meetings/live", "dictation")).toBe("/history");
+  it("leaves a saved meeting for dictation History", () => {
     expect(pageInMode("/meetings/2026-10-16 14-03 Café ☕ sync", "dictation")).toBe("/history");
   });
 
@@ -218,10 +219,11 @@ describe("switching mode", () => {
     }
   });
 
-  it("lights History up for every meeting, live or saved", () => {
-    const history = NAV[0]!;
-    for (const page of ["/history", "/meetings", "/meetings/live", "/meetings/2026-10-16 Ops Onboarding"]) expect(isNavActive(history, page)).toBe(true);
-    expect(isNavActive(history, "/meeting-model")).toBe(false);
+  it("lights Home up for the live meeting and History for every saved one", () => {
+    const [home, history] = NAV;
+    for (const page of ["/history", "/meetings", "/meetings/2026-10-16 Ops Onboarding"]) expect(isNavActive(history!, page)).toBe(true);
+    for (const page of ["/home", "/meeting-home"]) expect(NAV.filter((item) => isNavActive(item, page))).toEqual([home]);
+    expect(isNavActive(history!, "/meeting-model")).toBe(false);
     expect(NAV.filter((item) => isNavActive(item, "/dictionary"))).toHaveLength(1);
   });
 });
