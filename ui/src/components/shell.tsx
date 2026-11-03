@@ -290,7 +290,7 @@ export function Sidebar({
   const app = useAppInfo();
   const settingsOpen = pathname === "/updates";
   return (
-    <aside style={{ width }} className="surface relative flex shrink-0 flex-col border-r bg-sidebar">
+    <aside style={{ width }} className="surface relative flex shrink-0 flex-col border-r border-[var(--sidebar-edge)] bg-sidebar">
       <SidebarEdge width={width} onResize={setWidth} />
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="pointer-events-none flex">

@@ -105,7 +105,11 @@ const LaunchContext = createContext<LaunchArgs | null>(null);
 // Rust shows the window after four seconds whatever happens; this is the shell's own limit.
 const SHOW_ANYWAY_MS = 1500;
 
-/** Shows the window once nothing the first page asked for is still loading, then fetches the other pages' data. */
+/**
+ * Shows the window once nothing the first page asked for is still loading, then fetches the other
+ * pages' data. Rendered after the page, so its effect runs after the page's queries have started;
+ * a hidden window gets no animation frames and throttled timers, so it shows from the effect itself.
+ */
 function ShowWhenReady() {
   const client = useQueryClient();
   const fetching = useIsFetching();
@@ -114,14 +118,9 @@ function ShowWhenReady() {
     return () => clearTimeout(timer);
   }, []);
   useEffect(() => {
-    if (fetching) return;
-    // A frame later, so a query a page starts as this one settles still counts.
-    const frame = requestAnimationFrame(() => {
-      if (client.isFetching()) return;
-      showWindow();
-      prefetchPages(client);
-    });
-    return () => cancelAnimationFrame(frame);
+    if (fetching || client.isFetching()) return;
+    showWindow();
+    prefetchPages(client);
   }, [fetching, client]);
   return null;
 }
@@ -196,7 +195,6 @@ function Shell() {
     <LostContext.Provider value={lost}>
       <InstallContext.Provider value={install}>
         <ThemeSync />
-        <ShowWhenReady />
         <div className="relative flex h-full">
           {setup ? null : (
             <Sidebar
@@ -226,6 +224,7 @@ function Shell() {
           </div>
           <Prompts />
         </div>
+        <ShowWhenReady />
       </InstallContext.Provider>
     </LostContext.Provider>
   );

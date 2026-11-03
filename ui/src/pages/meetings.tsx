@@ -110,7 +110,7 @@ export function MeetingStatusCard({ onOpen }: { onOpen: () => void }) {
   const file = running && Boolean(live?.source);
   const elapsed = useElapsed(live?.started, running && !file);
   const { tone, label } = meetingStatus(live, overview, elapsed);
-  const detail = file ? (live?.source ?? "") : saved?.meetings.record_microphone === false ? "Records what your PC plays" : "Records your PC and your microphone";
+  const detail = file ? (live?.source ?? "") : saved?.meetings.record_microphone === false ? "PC audio only" : "PC audio and your mic";
   return (
     <StatusCard
       tone={tone}
@@ -332,7 +332,7 @@ function LiveCard({ live, overview, meetings, onOpen }: { live: LiveMeeting | nu
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StartStopButton live={live} overview={overview} onStarted={onOpen} />
             {live ? (
-              <Button variant="outline" className="h-10 rounded-lg px-4" onClick={onOpen}>
+              <Button variant="outline" className="h-10 px-4" onClick={onOpen}>
                 {running ? "Open the live meeting" : "Open the last meeting"}
               </Button>
             ) : null}
@@ -370,7 +370,7 @@ function StartStopButton({ live, overview, onStarted }: { live: LiveMeeting | nu
         variant={file ? "outline" : recording ? "destructive" : "default"}
         disabled={busy || finishing || (!recording && overview?.models_ready === false)}
         onClick={() => void run()}
-        className="h-10 min-w-[188px] rounded-lg px-5 text-[14px] [&_svg]:size-4"
+        className="h-10 min-w-[188px] px-5 text-[14px] [&_svg]:size-4"
       >
         {busy || finishing ? <LoaderCircle className="animate-spin" /> : file ? <X /> : recording ? <Square className="fill-current" /> : <Circle className="fill-current" />}
         {finishing ? "Finishing the transcript" : file ? "Cancel" : recording ? "Stop recording" : "Start meeting"}

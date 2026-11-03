@@ -89,6 +89,7 @@
   --overlay: rgb(0 0 0 / 0.4);
 
   /* Content sits straight on the window; Paper insets it in a panel. */
+  --sidebar-edge: var(--border);
   --panel: transparent;
   --panel-inset: 0px;
   --panel-radius: 0px;
@@ -137,10 +138,10 @@
 /* Glass: a solid window with a soft mesh behind translucent, blurred surfaces. */
 :root[data-theme="glass"] {
   --app-bg:
-    radial-gradient(60% 55% at 8% 0%, #c7d6ff 0, transparent 70%),
-    radial-gradient(50% 50% at 100% 8%, #f1d3fb 0, transparent 70%),
-    radial-gradient(60% 60% at 75% 100%, #c4efe4 0, transparent 70%),
-    radial-gradient(45% 45% at 0% 100%, #ffe1c8 0, transparent 70%),
+    radial-gradient(70% 65% at 10% 0%, #b4c8ff 0, transparent 70%),
+    radial-gradient(60% 60% at 100% 10%, #efc2fb 0, transparent 70%),
+    radial-gradient(70% 70% at 75% 100%, #aeeadb 0, transparent 70%),
+    radial-gradient(55% 55% at 0% 100%, #ffd2b0 0, transparent 70%),
     #eef0f7;
   --background: #eef0f7;
   --sidebar: rgb(255 255 255 / 0.32);
@@ -176,14 +177,14 @@
 @media (prefers-color-scheme: dark) {
   :root[data-theme="glass"] {
     --app-bg:
-      radial-gradient(60% 55% at 8% 0%, #1f2c63 0, transparent 70%),
-      radial-gradient(50% 50% at 100% 8%, #3d1d55 0, transparent 70%),
-      radial-gradient(60% 60% at 75% 100%, #0f3b3d 0, transparent 70%),
-      radial-gradient(45% 45% at 0% 100%, #3a2412 0, transparent 70%),
-      #0a0c16;
+      radial-gradient(70% 65% at 10% 0%, #2c45a8 0, transparent 70%),
+      radial-gradient(60% 60% at 100% 10%, #6b2a92 0, transparent 70%),
+      radial-gradient(70% 70% at 75% 100%, #0e6a62 0, transparent 70%),
+      radial-gradient(55% 55% at 0% 100%, #7a4214 0, transparent 70%),
+      #0b0d1a;
     --background: #0a0c16;
-    --sidebar: rgb(16 18 32 / 0.38);
-    --card: rgb(32 36 58 / 0.46);
+    --sidebar: rgb(12 14 28 / 0.3);
+    --card: rgb(30 34 60 / 0.4);
     --popover: rgb(30 34 54 / 0.82);
     --foreground: #eceef6;
     --muted: rgb(255 255 255 / 0.06);
@@ -306,6 +307,7 @@
   --title-tracking: 0;
   --sh-xs: 0 1px 1px rgb(60 45 20 / 0.05);
   --sh-card: 0 1px 2px rgb(60 45 20 / 0.05);
+  --sidebar-edge: transparent;
   --panel-inset: 8px;
   --panel-radius: 14px;
   --panel-shadow: 0 0 0 1px #ddd4c2, 0 2px 8px -2px rgb(60 45 20 / 0.08);
