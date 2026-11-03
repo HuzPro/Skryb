@@ -1,14 +1,19 @@
 @import "tailwindcss";
 
+/*
+ * One token layer. Each theme (data-theme on <html>) sets the variables below
+ * for light and for dark; the components only ever read the tokens.
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-sidebar: var(--sidebar);
   --color-card: var(--card);
-  --color-popover: var(--card);
+  --color-popover: var(--popover);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
+  --color-edge: var(--edge);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-primary: var(--primary);
@@ -18,17 +23,33 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --font-sans: Inter, system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-head);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-button: var(--r-button);
+  --radius-nav: var(--r-nav);
+  --shadow-xs: var(--sh-xs);
+  --shadow-card: var(--sh-card);
+  --shadow-lg: var(--sh-lg);
+  --shadow-2xl: var(--sh-2xl);
+  --default-transition-duration: var(--dur);
+  --default-transition-timing-function: var(--ease);
 }
 
+/* Default: the original look. */
 :root {
+  --app-bg: var(--background);
   --background: #f7f7f8;
   --sidebar: #efeff1;
   --card: #ffffff;
+  --popover: var(--card);
   --foreground: #18181b;
   --muted: #f1f1f3;
   --muted-foreground: #6b6b74;
   --border: #e3e3e7;
+  --edge: var(--border);
   --input: #d6d6dc;
   --ring: #2563eb;
   --primary: #2563eb;
@@ -48,6 +69,36 @@
   --speaker-6: #059669;
   --speaker-7: #b45309;
   --speaker-me: #475569;
+
+  --font-body: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-head: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --title-size: 20px;
+  --title-weight: 600;
+  --title-tracking: -0.01em;
+
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-button: 6px;
+  --r-nav: 6px;
+  --sh-xs: 0 1px 2px rgb(0 0 0 / 0.05);
+  --sh-card: 0 1px 2px rgb(0 0 0 / 0.03);
+  --sh-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --sh-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --surface-filter: none;
+  --overlay: rgb(0 0 0 / 0.4);
+
+  /* Content sits straight on the window; Paper insets it in a panel. */
+  --panel: transparent;
+  --panel-inset: 0px;
+  --panel-radius: 0px;
+  --panel-shadow: none;
+
+  --dur: 150ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --spring-dur: 330ms;
+  --spring: linear(0, 0.048, 0.164, 0.309, 0.461, 0.602, 0.725, 0.825, 0.902, 0.958, 0.996, 1.02, 1.033, 1.038, 1.038, 1.034, 1.029, 1.023, 1.017, 1.012, 1);
+  --page-dur: 200ms;
   color-scheme: light;
 }
 
@@ -78,14 +129,312 @@
     --speaker-6: #34d399;
     --speaker-7: #f59e0b;
     --speaker-me: #94a3b8;
+    --overlay: rgb(0 0 0 / 0.55);
     color-scheme: dark;
   }
+}
+
+/* Glass: a solid window with a soft mesh behind translucent, blurred surfaces. */
+:root[data-theme="glass"] {
+  --app-bg:
+    radial-gradient(60% 55% at 8% 0%, #c7d6ff 0, transparent 70%),
+    radial-gradient(50% 50% at 100% 8%, #f1d3fb 0, transparent 70%),
+    radial-gradient(60% 60% at 75% 100%, #c4efe4 0, transparent 70%),
+    radial-gradient(45% 45% at 0% 100%, #ffe1c8 0, transparent 70%),
+    #eef0f7;
+  --background: #eef0f7;
+  --sidebar: rgb(255 255 255 / 0.32);
+  --card: rgb(255 255 255 / 0.56);
+  --popover: rgb(255 255 255 / 0.78);
+  --foreground: #141826;
+  --muted: rgb(255 255 255 / 0.42);
+  --muted-foreground: #565d72;
+  --border: rgb(20 30 60 / 0.09);
+  --edge: rgb(255 255 255 / 0.7);
+  --input: rgb(20 30 60 / 0.14);
+  --ring: #3d6cf0;
+  --primary: #3d6cf0;
+  --accent: rgb(255 255 255 / 0.55);
+  --selected: rgb(214 226 255 / 0.75);
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-button: 10px;
+  --r-nav: 10px;
+  --sh-xs: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 1px 2px rgb(20 30 60 / 0.06);
+  --sh-card: inset 0 1px 0 rgb(255 255 255 / 0.75), 0 1px 2px rgb(20 30 60 / 0.04), 0 10px 30px -12px rgb(30 40 90 / 0.18);
+  --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.75), 0 16px 40px -12px rgb(30 40 90 / 0.28);
+  --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 30px 70px -20px rgb(30 40 90 / 0.4);
+  --surface-filter: blur(18px) saturate(170%);
+  --overlay: rgb(30 36 60 / 0.25);
+  --dur: 180ms;
+  --spring-dur: 476ms;
+  --spring: linear(0, 0.078, 0.259, 0.476, 0.683, 0.854, 0.979, 1.058, 1.097, 1.107, 1.097, 1.077, 1.054, 1.032, 1.014, 1.001, 0.993, 0.989, 0.989, 0.99, 1);
+  --page-dur: 240ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="glass"] {
+    --app-bg:
+      radial-gradient(60% 55% at 8% 0%, #1f2c63 0, transparent 70%),
+      radial-gradient(50% 50% at 100% 8%, #3d1d55 0, transparent 70%),
+      radial-gradient(60% 60% at 75% 100%, #0f3b3d 0, transparent 70%),
+      radial-gradient(45% 45% at 0% 100%, #3a2412 0, transparent 70%),
+      #0a0c16;
+    --background: #0a0c16;
+    --sidebar: rgb(16 18 32 / 0.38);
+    --card: rgb(32 36 58 / 0.46);
+    --popover: rgb(30 34 54 / 0.82);
+    --foreground: #eceef6;
+    --muted: rgb(255 255 255 / 0.06);
+    --muted-foreground: #a2a8bf;
+    --border: rgb(255 255 255 / 0.08);
+    --edge: rgb(255 255 255 / 0.12);
+    --input: rgb(255 255 255 / 0.16);
+    --ring: #7c9bff;
+    --primary: #5b82ff;
+    --accent: rgb(255 255 255 / 0.08);
+    --selected: rgb(91 130 255 / 0.2);
+    --destructive: #ff7b70;
+    --success: #5fe39a;
+    --warning: #ffc261;
+    --sh-xs: inset 0 1px 0 rgb(255 255 255 / 0.06);
+    --sh-card: inset 0 1px 0 rgb(255 255 255 / 0.09), 0 12px 32px -12px rgb(0 0 0 / 0.6);
+    --sh-lg: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 18px 44px -12px rgb(0 0 0 / 0.7);
+    --sh-2xl: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 30px 70px -20px rgb(0 0 0 / 0.8);
+    --overlay: rgb(4 6 14 / 0.45);
+  }
+}
+
+/* Material: Material 3 Expressive, a tonal palette from one seed (indigo, hue 278), precomputed. */
+:root[data-theme="material"] {
+  --background: oklch(0.983 0.006 278);
+  --sidebar: oklch(0.962 0.012 278);
+  --card: oklch(0.948 0.016 278);
+  --popover: oklch(0.935 0.02 278);
+  --foreground: oklch(0.22 0.02 278);
+  --muted: oklch(0.925 0.02 278);
+  --muted-foreground: oklch(0.47 0.025 278);
+  --border: oklch(0.885 0.022 278);
+  --edge: transparent;
+  --input: oklch(0.8 0.03 278);
+  --ring: oklch(0.5 0.17 278);
+  --primary: oklch(0.5 0.17 278);
+  --primary-foreground: oklch(1 0 0);
+  --accent: oklch(0.91 0.03 278);
+  --selected: oklch(0.89 0.06 278);
+  --destructive: oklch(0.53 0.19 27);
+  --success: oklch(0.52 0.13 150);
+  --warning: oklch(0.58 0.13 65);
+  --font-head: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --title-size: 24px;
+  --title-weight: 700;
+  --title-tracking: -0.02em;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-button: 999px;
+  --r-nav: 999px;
+  --sh-xs: 0 0 #0000;
+  --sh-card: 0 0 #0000;
+  --sh-lg: 0 1px 2px rgb(0 0 0 / 0.2), 0 3px 8px 3px rgb(0 0 0 / 0.1);
+  --sh-2xl: 0 2px 4px rgb(0 0 0 / 0.2), 0 8px 24px 6px rgb(0 0 0 / 0.12);
+  --overlay: oklch(0.2 0.03 278 / 0.38);
+  --dur: 200ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --spring-dur: 296ms;
+  --spring: linear(0, 0.074, 0.244, 0.45, 0.649, 0.817, 0.944, 1.028, 1.075, 1.093, 1.092, 1.078, 1.06, 1.04, 1.023, 1.009, 1, 0.994, 0.992, 0.991, 1);
+  --page-dur: 250ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="material"] {
+    --background: oklch(0.17 0.012 278);
+    --sidebar: oklch(0.205 0.016 278);
+    --card: oklch(0.235 0.02 278);
+    --popover: oklch(0.26 0.022 278);
+    --foreground: oklch(0.92 0.012 278);
+    --muted: oklch(0.27 0.022 278);
+    --muted-foreground: oklch(0.74 0.025 278);
+    --border: oklch(0.32 0.024 278);
+    --input: oklch(0.42 0.03 278);
+    --ring: oklch(0.8 0.1 278);
+    --primary: oklch(0.8 0.1 278);
+    --primary-foreground: oklch(0.3 0.12 278);
+    --accent: oklch(0.29 0.026 278);
+    --selected: oklch(0.36 0.07 278);
+    --destructive: oklch(0.78 0.12 27);
+    --success: oklch(0.8 0.12 150);
+    --warning: oklch(0.82 0.11 75);
+    --sh-lg: 0 1px 3px rgb(0 0 0 / 0.5), 0 4px 10px 3px rgb(0 0 0 / 0.3);
+    --sh-2xl: 0 2px 6px rgb(0 0 0 / 0.5), 0 10px 28px 6px rgb(0 0 0 / 0.35);
+    --overlay: rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Paper: ink on cream, serif headings, the content inset in one panel on darker chrome. */
+:root[data-theme="paper"] {
+  --background: #e9e3d6;
+  --sidebar: #e9e3d6;
+  --panel: #faf7f0;
+  --card: #fffdf8;
+  --foreground: #1d1a16;
+  --muted: #f2ede3;
+  --muted-foreground: #6c6457;
+  --border: #e4dccb;
+  --input: #d3c9b5;
+  --ring: #9a4b2c;
+  --primary: #9a4b2c;
+  --primary-foreground: #fffaf3;
+  --accent: #efe8db;
+  --selected: #f5e7dc;
+  --destructive: #b3261e;
+  --success: #3d7a3a;
+  --warning: #9a5b10;
+  --speaker-0: #2f5d8a;
+  --speaker-1: #9a3f7a;
+  --speaker-2: #2f7a6e;
+  --speaker-3: #a2641c;
+  --speaker-4: #6a4d9a;
+  --speaker-5: #a53e57;
+  --speaker-6: #3f7a3a;
+  --speaker-7: #8a5a2b;
+  --speaker-me: #5c5a55;
+  --font-head: "Sitka Heading", "Sitka Text", Georgia, Cambria, serif;
+  --title-size: 24px;
+  --title-weight: 600;
+  --title-tracking: 0;
+  --sh-xs: 0 1px 1px rgb(60 45 20 / 0.05);
+  --sh-card: 0 1px 2px rgb(60 45 20 / 0.05);
+  --panel-inset: 8px;
+  --panel-radius: 14px;
+  --panel-shadow: 0 0 0 1px #ddd4c2, 0 2px 8px -2px rgb(60 45 20 / 0.08);
+  --overlay: rgb(40 30 15 / 0.35);
+  --dur: 200ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --spring-dur: 308ms;
+  --spring: linear(0, 0.047, 0.152, 0.276, 0.4, 0.513, 0.612, 0.694, 0.761, 0.815, 0.858, 0.892, 0.918, 0.938, 0.953, 0.965, 0.974, 0.98, 0.985, 0.989, 1);
+  --page-dur: 240ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="paper"] {
+    --background: #141210;
+    --sidebar: #141210;
+    --panel: #1c1a17;
+    --card: #23201c;
+    --foreground: #ece5d8;
+    --muted: #2a2621;
+    --muted-foreground: #a69d8d;
+    --border: #322d27;
+    --input: #443d34;
+    --ring: #e0906b;
+    --primary: #e0906b;
+    --primary-foreground: #1d1410;
+    --accent: #2b2722;
+    --selected: #3a2a21;
+    --destructive: #f2867a;
+    --success: #8fcf8a;
+    --warning: #e7b264;
+    --speaker-0: #8db4dc;
+    --speaker-1: #d79bc6;
+    --speaker-2: #85c9bd;
+    --speaker-3: #e2b06b;
+    --speaker-4: #b7a1e0;
+    --speaker-5: #e797ab;
+    --speaker-6: #9fcf8f;
+    --speaker-7: #d3a679;
+    --speaker-me: #b3ada3;
+    --sh-xs: 0 0 #0000;
+    --sh-card: 0 0 #0000;
+    --panel-shadow: 0 0 0 1px #2c2823;
+    --overlay: rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Blur reads what is behind a surface; a surface on its own window has nothing to blur. */
+@utility surface {
+  backdrop-filter: var(--surface-filter);
+}
+
+@utility page-title {
+  font-family: var(--font-head);
+  font-size: var(--title-size);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+  line-height: 1.25;
+}
+
+/* Springs move things; colours fade on the theme's plain easing. */
+@utility spring {
+  transition-property: transform, translate, scale, opacity;
+  transition-duration: var(--spring-dur);
+  transition-timing-function: var(--spring);
+}
+
+/* Paper sets the content in one inset, rounded panel; the other themes leave it flush. */
+@utility content-panel {
+  margin: 0 var(--panel-inset) var(--panel-inset) 0;
+  border-radius: var(--panel-radius);
+  background: var(--panel);
+  box-shadow: var(--panel-shadow);
+  scrollbar-gutter: stable;
 }
 
 @keyframes fade-in {
   from {
     opacity: 0;
   }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+@utility enter-fade {
+  animation: fade-in var(--dur) var(--ease) both;
+}
+@utility enter-pop {
+  animation: pop-in var(--spring-dur) var(--spring) both;
+}
+@utility exit-fade {
+  animation: fade-out calc(var(--dur) * 0.8) ease-in both;
+}
+@utility exit-pop {
+  animation: pop-out calc(var(--dur) * 0.8) ease-in both;
+}
+
+/* Page and mode changes: the old page fades out, the new one rises in on the theme's spring. */
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(page) {
+  animation-duration: var(--page-dur);
+}
+::view-transition-old(page) {
+  animation: fade-out calc(var(--page-dur) * 0.5) ease-out both;
+}
+::view-transition-new(page) {
+  animation: rise-in var(--page-dur) var(--spring) both;
 }
 
 /* The logo's motion, matching the tray icon's: see components/mark.tsx. */
@@ -128,7 +477,18 @@
     opacity: 1;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 1ms !important;
+    --spring-dur: 1ms !important;
+    --page-dur: 1ms !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
   .mark .mark-bar,
   .mark .mark-caret {
     animation: none !important;
@@ -147,7 +507,7 @@
   }
   body {
     margin: 0;
-    background: var(--background);
+    background: var(--app-bg);
     color: var(--foreground);
     font-family: var(--font-sans);
     font-size: 13px;

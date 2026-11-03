@@ -30,7 +30,7 @@ export function Select({
       <SelectPrimitive.Trigger
         aria-label={label}
         className={cn(
-          "flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-2.5 text-[13px] shadow-xs outline-none transition-colors duration-150 hover:bg-accent/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-50 [&>span]:truncate",
+          "flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-2.5 text-[13px] shadow-xs outline-none transition-colors hover:bg-accent/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-50 [&>span]:truncate",
           className,
         )}
       >
@@ -41,7 +41,7 @@ export function Select({
         <SelectPrimitive.Content
           position="popper"
           sideOffset={4}
-          className="z-50 max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border bg-popover p-1 shadow-lg"
+          className="surface enter-pop z-50 max-h-72 min-w-[var(--radix-select-trigger-width)] origin-[var(--radix-select-content-transform-origin)] overflow-hidden rounded-lg border border-edge bg-popover p-1 shadow-lg"
         >
           <SelectPrimitive.Viewport>
             {options.map((option) => (

@@ -107,7 +107,7 @@ describe("history list", () => {
       const iso = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}T${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}:00`;
       return entry(iso, i % 7 ? `dictation ${i}` : "");
     });
-    const items = groupByDay(entries, new Date(2026, 8, 27, 23, 59));
+    const items = groupByDay(entries, new Date(2026, 8, 27, 23, 59), (entry) => entry.at);
     const days = items.filter((item) => item.kind === "day");
     expect(items.length - days.length).toBe(2500);
     expect(days[0]).toEqual({ kind: "day", label: "Today" });
@@ -181,6 +181,12 @@ describe("the page a launch opens", () => {
     for (const path of ["/dictionary", "/shortcuts", "/history", "/setup", "/nowhere", "/"]) rememberPage(path, used);
     expect(launchPath("settings", used)).toBe("/shortcuts");
     expect(launchPath("history", used)).toBe("/history");
+  });
+
+  it("reopens a meeting settings page, but never meeting History or a meeting", () => {
+    const used = memory();
+    for (const path of ["/meeting-model", "/meetings", "/meetings/live", "/meetings/2026-10-29 09-00 Standup"]) rememberPage(path, used);
+    expect(launchPath("settings", used)).toBe("/meeting-model");
   });
 
   it("falls back to the Model page when the stored page is unknown or storage is blocked", () => {

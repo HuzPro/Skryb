@@ -20,6 +20,7 @@ const MODE_CHOICES = [
 const OPTIONAL: { action: BindingAction; title: string; description: string }[] = [
   { action: "paste_last", title: "Paste last dictation", description: "Paste it again where the cursor is." },
   { action: "copy_last", title: "Copy last dictation", description: "Put it on the clipboard." },
+  { action: "toggle_meeting", title: "Start or stop a meeting", description: "Starts recording a meeting, or stops the one recording." },
 ];
 
 export function setBindingKeys(bindings: Binding[], index: number, keys: string): Binding[] {
@@ -115,7 +116,7 @@ export function ShortcutField({
         onClick={recording ? onStop : onRecord}
         aria-label={recording ? "Recording a shortcut" : "Record a shortcut"}
         className={cn(
-          "flex h-9 w-[300px] min-w-0 items-center rounded-lg border bg-card px-2 text-left shadow-xs outline-none transition-colors duration-150 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
+          "flex h-9 w-[300px] min-w-0 items-center rounded-lg border bg-card px-2 text-left shadow-xs outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
           recording && "border-primary ring-2 ring-primary/20",
         )}
       >

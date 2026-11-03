@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Radio, Settings2, Square, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Search, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { NavLink, useLocation, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { formatGigabytes } from "../components/models";
-import { Card, ContextMenu, InlineError, PageBody, PageTitle, ProgressBar, Row, Rows, Section } from "../components/parts";
+import { Card, ContextMenu, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, StatusCard, type Tone } from "../components/parts";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -12,11 +12,12 @@ import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, labelOf, MEDIA_EXTENSIONS, meetingName, percent, talkShares, turnsOf } from "../lib/meetings";
 import { chooseFolder, chooseMediaFile, onFileDrag } from "../lib/platform";
+import { queries } from "../lib/queries";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
-import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingSummary, MeetingTranscript } from "../lib/types";
+import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingSettings, MeetingSummary, MeetingTranscript } from "../lib/types";
 import { cn } from "../lib/utils";
-import { dayLabel, formatDuration } from "./history";
+import { dayLabel, formatDuration, groupByDay, useDebounced } from "./history";
 
 const NEAR_BOTTOM_PX = 120;
 // Progress updates the cached list in place; a finished, failed or cancelled download fetches it again.
@@ -32,15 +33,12 @@ const FILE_LANGUAGES: { value: FileLanguage; label: string }[] = [
 ];
 
 export function useMeetingOverview(): MeetingOverview | undefined {
-  return useQuery({ queryKey: ["meetings"], queryFn: () => api.get<MeetingOverview>("/api/meetings") }).data;
+  return useQuery(queries.meetings).data;
 }
 
 /** The meeting being recorded, or the last one recorded since Skryb started; `useMeetingEvents` keeps it current. */
 export function useLiveMeeting(): LiveMeeting | null | undefined {
-  return useQuery({
-    queryKey: ["meeting-live"],
-    queryFn: async () => (await api.get<{ meeting: LiveMeeting | null }>("/api/meetings/live")).meeting,
-  }).data;
+  return useQuery(queries.liveMeeting).data;
 }
 
 /** Folds `meeting` events into the live meeting and the saved meetings; mounted once, by the shell. */
@@ -87,28 +85,80 @@ function when(started: string): string {
   return `${dayLabel(started, new Date())}, ${started.slice(11, 16)}`;
 }
 
-// -- the sidebar in meeting mode ---------------------------------------------------
+function stopMeeting(): Promise<unknown> {
+  return api.post("/api/meetings/stop");
+}
 
-export function MeetingsNav() {
+/** What the footer card says in meeting mode: Ready, the recording's running time, or a file's progress. */
+export function meetingStatus(live: LiveMeeting | null | undefined, overview: MeetingOverview | undefined, elapsed: number): { tone: Tone; label: string } {
+  const running = live?.recording ?? overview?.recording ?? false;
+  if (live?.status === "Finishing") return { tone: "primary", label: "Finishing" };
+  if (running && live?.source) return { tone: "primary", label: live.progress == null ? live.status : `${live.status} ${percent(live.progress)}` };
+  if (running && live && live.status !== "Recording") return { tone: "warning", label: live.status };
+  if (running) return { tone: "destructive", label: `Recording ${formatDuration(elapsed)}` };
+  if (overview && !overview.models_ready) return { tone: "warning", label: "Needs its models" };
+  if (!overview) return { tone: "muted", label: "Connecting" };
+  return { tone: "success", label: "Ready" };
+}
+
+/** Meeting mode's footer card: opens the live meeting; while one records, Stop ends it from here. */
+export function MeetingStatusCard({ onOpen }: { onOpen: () => void }) {
+  const overview = useMeetingOverview();
+  const live = useLiveMeeting();
+  const saved = useQuery(queries.settings).data;
+  const running = live?.recording ?? false;
+  const file = running && Boolean(live?.source);
+  const elapsed = useElapsed(live?.started, running && !file);
+  const { tone, label } = meetingStatus(live, overview, elapsed);
+  const detail = file ? (live?.source ?? "") : saved?.meetings.record_microphone === false ? "Records what your PC plays" : "Records your PC and your microphone";
+  return (
+    <StatusCard
+      tone={tone}
+      label={label}
+      detail={detail}
+      onOpen={onOpen}
+      action={
+        running && live?.status !== "Finishing" ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={file ? "Cancel the file" : "Stop recording"}
+            title={file ? "Cancel the file" : "Stop recording"}
+            onClick={() => void stopMeeting().catch(() => undefined)}
+            className="text-destructive hover:text-destructive"
+          >
+            {file ? <X /> : <Square className="fill-current" />}
+          </Button>
+        ) : null
+      }
+    />
+  );
+}
+
+// -- past meetings, under History ----------------------------------------------------
+
+/** Past meetings whose name or date holds `search`, ignoring case; the meeting recording now is not past yet. */
+export function pastMeetings(meetings: MeetingSummary[], recordingId: string | null, search: string): MeetingSummary[] {
+  const needle = search.trim().toLocaleLowerCase();
+  return meetings.filter((meeting) => meeting.id !== recordingId && (!needle || meeting.id.toLocaleLowerCase().includes(needle)));
+}
+
+export function MeetingHistoryPage() {
   const overview = useMeetingOverview();
   const live = useLiveMeeting();
   const recording = live?.recording ?? overview?.recording ?? false;
-  const transcribingFile = recording && Boolean(live?.source);
-  const link = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      "flex items-center gap-2.5 rounded-md px-2.5 text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground",
-      isActive && "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)] hover:bg-card",
-    );
-  const past = (overview?.meetings ?? []).filter((meeting) => !(recording && meeting.id === live?.id));
-  const { confirm } = useStore();
+  const { settings, confirm } = useStore();
   const client = useQueryClient();
   const navigate = useNavigate();
-  const location = useLocation();
+  const [query, setQuery] = useState("");
+  const search = useDebounced(query, 120);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [problem, setProblem] = useState("");
   const closeMenu = useCallback(() => setMenu(null), []);
-  const showing = (id: string) => location.pathname.startsWith("/meetings/") && decodeURIComponent(location.pathname.slice("/meetings/".length)) === id;
+  const past = useMemo(() => pastMeetings(overview?.meetings ?? [], recording ? (live?.id ?? null) : null, search), [overview, recording, live?.id, search]);
+  const items = useMemo(() => groupByDay(past, new Date(), (meeting) => meeting.started), [past]);
+
   const rename = async (id: string, name: string | null) => {
     setRenaming(null);
     if (name === null || name.trim() === meetingName(id)) return;
@@ -116,11 +166,10 @@ export function MeetingsNav() {
     try {
       const renamed = await api.post<{ id: string }>(`/api/meetings/${encodeURIComponent(id)}/name`, { name });
       // Shown at once, so the old name doesn't flash back while the list reloads.
-      client.setQueryData<MeetingOverview>(["meetings"], (overview) =>
-        overview && { ...overview, meetings: overview.meetings.map((meeting) => (meeting.id === id ? { ...meeting, id: renamed.id } : meeting)) },
+      client.setQueryData<MeetingOverview>(["meetings"], (current) =>
+        current && { ...current, meetings: current.meetings.map((meeting) => (meeting.id === id ? { ...meeting, id: renamed.id } : meeting)) },
       );
       await client.invalidateQueries({ queryKey: ["meetings"] });
-      if (showing(id)) navigate(`/meetings/${encodeURIComponent(renamed.id)}`, { replace: true });
     } catch (error) {
       setProblem(errorText(error));
     }
@@ -135,7 +184,6 @@ export function MeetingsNav() {
     setProblem("");
     try {
       await api.del(`/api/meetings/${encodeURIComponent(id)}`);
-      if (showing(id)) navigate("/meetings", { replace: true });
       client.removeQueries({ queryKey: ["meeting", id] });
       await client.invalidateQueries({ queryKey: ["meetings"] });
     } catch (error) {
@@ -155,45 +203,65 @@ export function MeetingsNav() {
     else return;
     event.preventDefault();
   };
+
+  const empty = !overview ? "Loading…" : search ? "No meetings match your search." : "Meetings you record or transcribe show up here.";
+  const meetings = settings?.saved.meetings;
+
   return (
-    <>
-      <nav className="flex flex-col gap-0.5 px-2 pt-2">
-        <NavLink to="/meetings" end draggable={false} className={(state) => cn(link(state), "h-8")}>
-          {transcribingFile ? <FileAudio className="size-4 text-primary" /> : <Radio className={cn("size-4", recording && "text-destructive")} />}
-          {transcribingFile ? "Transcribing a file" : recording ? "Recording now" : "Live meeting"}
-          {recording ? <span className={cn("ml-auto size-1.5 animate-pulse rounded-full", transcribingFile ? "bg-primary" : "bg-destructive")} /> : null}
-        </NavLink>
-      </nav>
-      <div className="mt-4 px-4 pb-1 text-[11.5px] font-semibold text-muted-foreground">Past meetings</div>
-      <nav aria-label="Past meetings" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2">
-        {past.map((meeting) =>
-          renaming === meeting.id ? (
-            <RenameField key={meeting.id} meeting={meeting} onDone={(name) => void rename(meeting.id, name)} />
-          ) : (
-            <NavLink
-              key={meeting.id}
-              to={`/meetings/${encodeURIComponent(meeting.id)}`}
-              draggable={false}
-              onContextMenu={(event) => openMenu(meeting.id, event)}
-              onKeyDown={(event) => keys(meeting.id, event)}
-              className={(state) => cn(link(state), "flex-col items-start gap-0 py-1.5", menu?.id === meeting.id && "bg-accent text-foreground")}
-            >
-              <span className="w-full truncate" title={meeting.id}>
-                {meetingName(meeting.id)}
-              </span>
-              <span className="w-full truncate text-[11.5px] font-normal text-muted-foreground">
-                {when(meeting.started)} · {formatDuration(meeting.seconds)}
-              </span>
-            </NavLink>
-          ),
-        )}
-        {overview && !past.length ? <p className="px-2.5 py-1 text-[12px] text-muted-foreground">Meetings you record show up here.</p> : null}
-        {problem ? (
-          <p role="alert" className="px-2.5 py-1 text-[12px] text-destructive">
-            {problem}
-          </p>
-        ) : null}
-      </nav>
+    <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-5")}>
+      <PageTitle title="History">
+        <div className="relative w-72">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input aria-label="Search meetings" placeholder="Search meetings" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </div>
+      </PageTitle>
+      {overview && !overview.models_ready ? <MeetingModels overview={overview} compact /> : null}
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] grid-rows-[minmax(0,1fr)] gap-3">
+        <Card className="relative min-w-0 overflow-hidden">
+          <nav aria-label="Past meetings" className="h-full overflow-y-auto px-1.5 pb-1.5">
+            {items.map((item) =>
+              item.kind === "day" ? (
+                <div key={`day-${item.label}`} className="flex h-[30px] items-end px-2.5 pb-1 text-[11.5px] font-semibold text-muted-foreground">
+                  {item.label}
+                </div>
+              ) : renaming === item.entry.id ? (
+                <RenameField key={item.entry.id} meeting={item.entry} onDone={(name) => void rename(item.entry.id, name)} />
+              ) : (
+                <Link
+                  key={item.entry.id}
+                  to={`/meetings/${encodeURIComponent(item.entry.id)}`}
+                  draggable={false}
+                  onContextMenu={(event) => openMenu(item.entry.id, event)}
+                  onKeyDown={(event) => keys(item.entry.id, event)}
+                  className={cn(
+                    "flex h-[50px] items-center gap-3 rounded-lg px-2.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40",
+                    menu?.id === item.entry.id && "bg-accent/60",
+                  )}
+                >
+                  <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{item.entry.started.slice(11, 16)}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px]" title={item.entry.id}>
+                    {meetingName(item.entry.id)}
+                  </span>
+                  <span className="shrink-0 text-[12px] text-muted-foreground">
+                    {item.entry.speakers} {item.entry.speakers === 1 ? "voice" : "voices"}
+                  </span>
+                  <span className="w-12 shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">{formatDuration(item.entry.seconds)}</span>
+                </Link>
+              ),
+            )}
+          </nav>
+          {!past.length ? <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12.5px] text-muted-foreground">{empty}</p> : null}
+          {problem ? (
+            <p role="alert" className="absolute inset-x-0 bottom-0 border-t bg-card px-4 py-2 text-[12px] text-destructive">
+              {problem}
+            </p>
+          ) : null}
+        </Card>
+        <div className="flex min-w-0 flex-col gap-3 overflow-y-auto">
+          <LiveCard live={live} overview={overview} meetings={meetings} onOpen={() => void navigate("/meetings/live")} />
+          <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} />
+        </div>
+      </div>
       {menu ? (
         <ContextMenu
           x={menu.x}
@@ -206,13 +274,7 @@ export function MeetingsNav() {
           ]}
         />
       ) : null}
-      <nav className="flex flex-col gap-0.5 px-2 pt-2">
-        <NavLink to="/meeting-settings" draggable={false} className={(state) => cn(link(state), "h-8")}>
-          <Settings2 className="size-4" />
-          Meeting settings
-        </NavLink>
-      </nav>
-    </>
+    </div>
   );
 }
 
@@ -225,7 +287,8 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
     onDone(name);
   };
   return (
-    <div className="flex flex-col rounded-md bg-card px-2.5 py-1.5 shadow-[0_0_0_1px_var(--border)]">
+    <div className="flex h-[50px] items-center gap-3 rounded-lg bg-selected px-2.5">
+      <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{meeting.started.slice(11, 16)}</span>
       <input
         autoFocus
         defaultValue={meetingName(meeting.id)}
@@ -239,18 +302,50 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
           else return;
           event.preventDefault();
         }}
-        className="-mx-1 rounded-sm bg-transparent px-1 text-[13px] font-medium text-foreground outline-none ring-1 ring-primary"
+        className="min-w-0 flex-1 rounded-sm bg-transparent px-1 text-[13px] text-foreground outline-none ring-1 ring-primary"
       />
-      <span className="truncate text-[11.5px] text-muted-foreground">
-        {when(meeting.started)} · {formatDuration(meeting.seconds)}
-      </span>
     </div>
+  );
+}
+
+/** Starts a meeting, or shows the one recording with Stop, at the top of meeting History. */
+function LiveCard({ live, overview, meetings, onOpen }: { live: LiveMeeting | null | undefined; overview: MeetingOverview | undefined; meetings: MeetingSettings | undefined; onOpen: () => void }) {
+  const running = live?.recording ?? false;
+  const file = running && Boolean(live?.source);
+  const elapsed = useElapsed(live?.started, running && !file);
+  const language = LANGUAGES.find((choice) => choice.value === meetings?.language)?.label ?? "English";
+  return (
+    <Card className="px-5 py-4">
+      <div className="flex items-start gap-3.5">
+        <Circle className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", running && !file && "animate-pulse fill-current text-destructive")} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-medium tabular-nums">
+            {file ? "Transcribing a file" : running ? `${live?.status === "Recording" ? "Recording" : (live?.status ?? "Recording")} · ${formatDuration(elapsed)}` : "Ready when your meeting is"}
+          </p>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+            {file
+              ? live?.source
+              : running
+                ? `Listening to ${live?.device || "what your PC plays"}.`
+                : `Start here, from the tray icon or your meeting shortcut. Skryb records what your PC plays${meetings?.record_microphone === false ? "" : " and your microphone"}, tells the voices apart and writes it down in ${language}.`}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <StartStopButton live={live} overview={overview} onStarted={onOpen} />
+            {live ? (
+              <Button variant="outline" className="h-10 rounded-lg px-4" onClick={onOpen}>
+                {running ? "Open the live meeting" : "Open the last meeting"}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
 // -- shared pieces ---------------------------------------------------------------------
 
-function StartStopButton({ live, overview }: { live: LiveMeeting | null | undefined; overview: MeetingOverview | undefined }) {
+function StartStopButton({ live, overview, onStarted }: { live: LiveMeeting | null | undefined; overview: MeetingOverview | undefined; onStarted?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const recording = live?.recording ?? false;
@@ -261,6 +356,7 @@ function StartStopButton({ live, overview }: { live: LiveMeeting | null | undefi
     setProblem("");
     try {
       await api.post(recording ? "/api/meetings/stop" : "/api/meetings/start");
+      if (!recording) onStarted?.();
     } catch (error) {
       setProblem(errorText(error));
     } finally {
@@ -356,7 +452,7 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
         )}
       </div>
       {!atEnd && live ? (
-        <Button size="sm" onClick={jump} className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-lg">
+        <Button size="sm" onClick={jump} className="enter-pop absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-lg">
           <ArrowDown />
           Jump to latest
         </Button>
@@ -448,9 +544,20 @@ function OpenFolderButton({ path }: { path: string }) {
   );
 }
 
+/** Back to the list of meetings, beside the meeting's own title. */
+function BackToHistory() {
+  return (
+    <Button asChild variant="ghost" size="icon" aria-label="Back to History" title="Back to History">
+      <Link to="/meetings" draggable={false}>
+        <ArrowLeft />
+      </Link>
+    </Button>
+  );
+}
+
 function MeetingLayout({ header, warning, transcript, aside }: { header: ReactNode; warning?: string | null; transcript: ReactNode; aside: ReactNode }) {
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1880px] flex-col gap-3 px-6 pt-3 pb-5">
+    <div className={cn(PAGE_EDGE, "flex h-full w-full flex-col gap-3 pb-5")}>
       {header}
       {warning ? (
         <div role="alert" className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2 text-[12.5px] text-warning">
@@ -558,7 +665,7 @@ function FileDropCard({ ready, meetingLanguage, className }: { ready: boolean; m
     [ready],
   );
   return (
-    <Card className={cn("border-dashed px-5 py-4 transition-colors duration-150", over && "border-primary bg-primary/5", className)}>
+    <Card className={cn("border-dashed px-5 py-4 transition-colors", over && "border-primary bg-primary/5", className)}>
       <div className="flex items-start gap-3.5">
         <FileAudio className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", over && "text-primary")} aria-hidden />
         <div className="min-w-0 flex-1">
@@ -603,8 +710,9 @@ export function LiveMeetingPage() {
 
   const header = (
     <div className="flex min-h-10 items-center gap-4">
-      <div className="flex min-w-0 flex-1 items-center gap-x-4">
-        <h1 className="shrink-0 text-[20px] font-semibold tracking-tight">{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Meetings"}</h1>
+      <div className="flex min-w-0 flex-1 items-center gap-x-3">
+        <BackToHistory />
+        <h1 className="page-title shrink-0">{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Live meeting"}</h1>
         {live ? <StatusBadge live={live} /> : null}
         {live && running && !file ? <span className="text-[13px] text-muted-foreground tabular-nums">{formatDuration(elapsed)}</span> : null}
         {live?.device && running ? <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">Listening to {live.device}</span> : null}
@@ -628,7 +736,7 @@ export function LiveMeetingPage() {
     <div className="max-w-[460px] text-center">
       <p className="text-[15px] font-medium text-foreground">Ready when your meeting is</p>
       <p className="mt-1.5">
-        Start here or from the tray icon. Skryb records what your PC plays{meetings?.record_microphone === false ? "" : " and your microphone"}, tells the voices apart and writes it all down as it goes, in {language}.
+        Start here, from the tray icon or your meeting shortcut. Skryb records what your PC plays{meetings?.record_microphone === false ? "" : " and your microphone"}, tells the voices apart and writes it all down as it goes, in {language}.
       </p>
       <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} className="mt-6 text-left" />
     </div>
@@ -675,9 +783,6 @@ export function LiveMeetingPage() {
             </dl>
             <div className="mt-2 flex flex-wrap gap-x-4">
               <OpenFolderButton path={live ? `/api/meetings/${encodeURIComponent(live.id)}/open` : "/api/meetings/folder/open"} />
-              <Button variant="link" className="text-[12.5px]" onClick={() => void api.post("/api/meetings/vocabulary/open")}>
-                Edit names and terms
-              </Button>
             </div>
           </Card>
         </>
@@ -696,8 +801,9 @@ export function SavedMeetingPage() {
   const seconds = transcript ? Math.max(0, ...transcript.entries.map((entry) => entry.end)) : 0;
   const words = transcript ? transcript.entries.reduce((sum, entry) => sum + entry.text.split(/\s+/).filter(Boolean).length, 0) : 0;
   const header = (
-    <div className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1">
-      <h1 className="truncate text-[20px] font-semibold tracking-tight" title={id}>
+    <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
+      <BackToHistory />
+      <h1 className="page-title truncate" title={id}>
         {meetingName(id)}
       </h1>
       {transcript ? <span className="text-[13px] text-muted-foreground">{when(transcript.started)}</span> : null}
@@ -740,58 +846,79 @@ export function SavedMeetingPage() {
   );
 }
 
-// -- meeting settings -------------------------------------------------------------------
+// -- meeting settings, one per sidebar item ----------------------------------------------
 
-export function MeetingSettingsPage() {
+function useMeetingDraft(): { draft: MeetingSettings | undefined; edit: (change: Partial<MeetingSettings>) => void } {
   const { settings, editSettings } = useStore();
-  const overview = useMeetingOverview();
+  return {
+    draft: settings?.draft.meetings,
+    edit: (change) => editSettings((current) => ({ ...current, meetings: { ...current.meetings, ...change } })),
+  };
+}
+
+export function MeetingMicrophonePage() {
+  const { draft, edit } = useMeetingDraft();
+  return (
+    <PageBody>
+      <PageTitle title="Microphone & sounds" />
+      {draft ? (
+        <Section title="Meetings" note="Meetings record what your PC plays. Your own voice comes from the Windows default microphone.">
+          <Rows>
+            <Row title="Record my microphone too" description="Your voice is labelled Me. Off records only what your PC plays.">
+              <Switch aria-label="Record my microphone too" checked={draft.record_microphone} onCheckedChange={(on) => edit({ record_microphone: on })} />
+            </Row>
+          </Rows>
+        </Section>
+      ) : null}
+    </PageBody>
+  );
+}
+
+export function MeetingOutputPage() {
+  const { draft, edit } = useMeetingDraft();
   const [note, setNote] = useState("");
-  const draft = settings?.draft.meetings;
-  if (!draft) return <PageBody><PageTitle title="Meeting settings" /></PageBody>;
-  const edit = (change: Partial<typeof draft>) => editSettings((current) => ({ ...current, meetings: { ...current.meetings, ...change } }));
-  const changeFolder = async () => {
-    const path = await chooseFolder("Choose where meetings are saved", draft.folder);
+  const changeFolder = async (current: string) => {
+    const path = await chooseFolder("Choose where meetings are saved", current);
     if (path) edit({ folder: path });
   };
   return (
     <PageBody>
-      <PageTitle title="Meeting settings" />
-      <Section title="Recording">
-        <Rows>
-          <Row title="Meetings folder" description="Each meeting gets its own folder here, named by date and time, with its audio and transcript." stacked>
-            <Input aria-label="Meetings folder" value={draft.folder} onChange={(event) => edit({ folder: event.target.value })} className="flex-1" />
-            <Button variant="outline" onClick={() => void changeFolder()}>
-              Change…
-            </Button>
-            <Button variant="outline" onClick={() => void api.post("/api/meetings/folder/open").catch((error: unknown) => setNote(errorText(error)))}>
-              Open
-            </Button>
-          </Row>
-          <Row title="Record my microphone too" description="Your own voice is labelled Me. Off records only what your PC plays.">
-            <Switch aria-label="Record my microphone too" checked={draft.record_microphone} onCheckedChange={(on) => edit({ record_microphone: on })} />
-          </Row>
-          <Row title="Language" description="Urdu is always written in Roman Urdu, never in Hindi script.">
-            <Select
-              label="Meeting language"
-              className="w-72"
-              value={draft.language}
-              options={LANGUAGES}
-              onChange={(language) => edit({ language: language as MeetingLanguage })}
-            />
-          </Row>
-        </Rows>
-      </Section>
-      <Section title="Names and terms" note="Names, companies and jargon the transcript should spell right, one per line. Names you give speakers are added on their own.">
-        <Rows>
-          <Row title="vocabulary.txt" description={draft.folder ? `In ${draft.folder}, shared by every meeting.` : undefined}>
-            <Button variant="outline" onClick={() => void api.post("/api/meetings/vocabulary/open").catch((error: unknown) => setNote(errorText(error)))}>
-              Edit
-            </Button>
-          </Row>
-        </Rows>
-        {note ? <InlineError>{note}</InlineError> : null}
-      </Section>
-      <Section title="Models">{overview ? <MeetingModels overview={overview} /> : null}</Section>
+      <PageTitle title="Output" />
+      {draft ? (
+        <Section title="Meetings folder">
+          <Rows>
+            <Row title="Saved to" description="Each meeting gets its own folder here, named by date and time, with its audio and transcript." stacked error={note}>
+              <Input aria-label="Meetings folder" value={draft.folder} onChange={(event) => edit({ folder: event.target.value })} className="flex-1" />
+              <Button variant="outline" onClick={() => void changeFolder(draft.folder)}>
+                Change…
+              </Button>
+              <Button variant="outline" onClick={() => void api.post("/api/meetings/folder/open").catch((error: unknown) => setNote(errorText(error)))}>
+                Open
+              </Button>
+            </Row>
+          </Rows>
+        </Section>
+      ) : null}
+    </PageBody>
+  );
+}
+
+export function MeetingModelPage() {
+  const { draft, edit } = useMeetingDraft();
+  const overview = useMeetingOverview();
+  return (
+    <PageBody>
+      <PageTitle title="Model" />
+      {draft ? (
+        <Section title="Speech">
+          <Rows>
+            <Row title="Language" description="Urdu is always written in Roman Urdu, never in Hindi script.">
+              <Select label="Meeting language" className="w-72" value={draft.language} options={LANGUAGES} onChange={(language) => edit({ language: language as MeetingLanguage })} />
+            </Row>
+          </Rows>
+        </Section>
+      ) : null}
+      <Section title="Models">{overview ? <MeetingModels overview={overview} /> : <Card className="h-40" />}</Section>
     </PageBody>
   );
 }

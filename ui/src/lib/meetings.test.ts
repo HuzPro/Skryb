@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { launchPath, modeOf } from "../app";
+import { isNavActive, launchPath, modeOf, NAV, pageInMode } from "../app";
+import { groupByDay } from "../pages/history";
+import { meetingStatus, pastMeetings } from "../pages/meetings";
 import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
-import type { LiveMeeting, MeetingEntry } from "./types";
+import type { LiveMeeting, MeetingEntry, MeetingOverview, MeetingSummary } from "./types";
 
 const line = (id: number, key: string, start: number, end: number, text: string): MeetingEntry => {
   const [track, speaker] = key.split(":");
@@ -178,16 +180,115 @@ describe("coming back to the live page", () => {
 });
 
 describe("the mode a page belongs to", () => {
-  it("puts the meetings pages in meeting mode and everything else in dictation", () => {
-    expect(modeOf("/meetings")).toBe("meetings");
-    expect(modeOf("/meetings/2026-10-16 Ops Onboarding")).toBe("meetings");
-    expect(modeOf("/meeting-settings")).toBe("meetings");
-    expect(modeOf("/history")).toBe("dictation");
-    expect(modeOf("/transcription")).toBe("dictation");
-    expect(modeOf("/meetingsroom")).toBe("dictation");
+  it("puts the meetings pages in meeting mode and the dictation pages in dictation", () => {
+    for (const page of ["/meetings", "/meetings/live", "/meetings/2026-10-16 Ops Onboarding", "/meeting-microphone", "/meeting-output", "/meeting-model"]) {
+      expect(modeOf(page)).toBe("meetings");
+    }
+    for (const page of ["/history", "/transcription", "/microphone", "/output", "/meetingsroom", "/meeting-settings"]) {
+      expect(modeOf(page)).toBe("dictation");
+    }
   });
 
-  it("opens the meetings page when the tray asks for it", () => {
+  it("leaves the pages both modes share to whichever mode opened them", () => {
+    for (const page of ["/dictionary", "/shortcuts", "/updates", "/setup"]) expect(modeOf(page)).toBeNull();
+  });
+
+  it("opens meeting History when the tray asks for meetings", () => {
     expect(launchPath("meetings", null)).toBe("/meetings");
+  });
+});
+
+describe("switching mode", () => {
+  it("keeps the same sidebar item and swaps the page behind it", () => {
+    expect(pageInMode("/history", "meetings")).toBe("/meetings");
+    expect(pageInMode("/transcription", "meetings")).toBe("/meeting-model");
+    expect(pageInMode("/meeting-output", "dictation")).toBe("/output");
+    expect(pageInMode("/meeting-microphone", "dictation")).toBe("/microphone");
+  });
+
+  it("leaves a live or saved meeting for dictation History", () => {
+    expect(pageInMode("/meetings/live", "dictation")).toBe("/history");
+    expect(pageInMode("/meetings/2026-10-16 14-03 Café ☕ sync", "dictation")).toBe("/history");
+  });
+
+  it("stays on a page both modes share", () => {
+    for (const page of ["/dictionary", "/shortcuts", "/updates"]) {
+      expect(pageInMode(page, "meetings")).toBe(page);
+      expect(pageInMode(page, "dictation")).toBe(page);
+    }
+  });
+
+  it("lights History up for every meeting, live or saved", () => {
+    const history = NAV[0]!;
+    for (const page of ["/history", "/meetings", "/meetings/live", "/meetings/2026-10-16 Ops Onboarding"]) expect(isNavActive(history, page)).toBe(true);
+    expect(isNavActive(history, "/meeting-model")).toBe(false);
+    expect(NAV.filter((item) => isNavActive(item, "/dictionary"))).toHaveLength(1);
+  });
+});
+
+function summary(id: string, started: string): MeetingSummary {
+  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true };
+}
+
+describe("past meetings under History", () => {
+  const meetings = [
+    summary("2026-10-29 16-10 Ünïcode review 🎧", "2026-10-29T16:10:00"),
+    summary("2026-10-29 09-00 Standup", "2026-10-29T09:00:00"),
+    summary("2026-10-28 09-00 Standup", "2026-10-28T09:00:00"),
+    summary("2026-10-28 09-00 Standup (2)", "2026-10-28T09:00:00"),
+    summary("2026-10-27 11-30", "2026-10-27T11:30:00"),
+  ];
+
+  it("finds meetings by name or date, ignoring case and accents typed as written", () => {
+    expect(pastMeetings(meetings, null, "standup").map((meeting) => meeting.id)).toEqual([
+      "2026-10-29 09-00 Standup",
+      "2026-10-28 09-00 Standup",
+      "2026-10-28 09-00 Standup (2)",
+    ]);
+    expect(pastMeetings(meetings, null, "ÜNÏCODE")).toHaveLength(1);
+    expect(pastMeetings(meetings, null, "2026-10-27")).toHaveLength(1);
+    expect(pastMeetings(meetings, null, "   ")).toHaveLength(5);
+    expect(pastMeetings(meetings, null, "nothing like this")).toEqual([]);
+  });
+
+  it("leaves out the meeting being recorded until it is saved", () => {
+    expect(pastMeetings(meetings, "2026-10-29 16-10 Ünïcode review 🎧", "").map((meeting) => meeting.id)).not.toContain("2026-10-29 16-10 Ünïcode review 🎧");
+  });
+
+  it("groups thousands of meetings under one heading per day", () => {
+    const many = Array.from({ length: 3000 }, (_, index) => {
+      const day = String(28 - Math.floor(index / 1000)).padStart(2, "0");
+      return summary(`2026-10-${day} ${String(index % 24).padStart(2, "0")}-00 Call ${index}`, `2026-10-${day}T10:00:00`);
+    });
+    const items = groupByDay(many, new Date(2026, 9, 28, 12), (meeting) => meeting.started);
+    expect(items.filter((item) => item.kind === "day").map((item) => (item.kind === "day" ? item.label : ""))).toEqual(["Today", "Yesterday", "Mon 26 Oct 2026"]);
+    expect(items).toHaveLength(3003);
+  });
+});
+
+describe("the footer card in meeting mode", () => {
+  const overview = (ready = true): MeetingOverview => ({ recording: false, folder: "D:\\Meetings", models_ready: ready, models: [], meetings: [] });
+
+  it("is Ready when nothing records and the models are in", () => {
+    expect(meetingStatus(null, overview(), 0)).toEqual({ tone: "success", label: "Ready" });
+  });
+
+  it("asks for the models before the first meeting", () => {
+    expect(meetingStatus(null, overview(false), 0).label).toBe("Needs its models");
+  });
+
+  it("counts a recording up in minutes and seconds, past the hour too", () => {
+    const recording = { ...live(), status: "Recording" as const };
+    expect(meetingStatus(recording, overview(), 754)).toEqual({ tone: "destructive", label: "Recording 12:34" });
+    expect(meetingStatus(recording, overview(), 3725)).toEqual({ tone: "destructive", label: "Recording 1:02:05" });
+  });
+
+  it("says how far a dropped file has got", () => {
+    const file = { ...live(), status: "Transcribing" as const, source: "Interview – Ana Lúcia.mp4", progress: 0.42 };
+    expect(meetingStatus(file, overview(), 0)).toEqual({ tone: "primary", label: "Transcribing 42%" });
+  });
+
+  it("says Finishing while the last lines are written", () => {
+    expect(meetingStatus({ ...live(), recording: false, status: "Finishing" }, overview(), 0).label).toBe("Finishing");
   });
 });

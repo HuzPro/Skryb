@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Download, FileDown, Play, RotateCcw, Search, Square, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Card } from "../components/parts";
+import { Card, PAGE_EDGE, PageTitle } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -11,6 +11,7 @@ import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { chooseFolder, chooseSavePath, copyText } from "../lib/platform";
+import { HISTORY_PAGE, queries } from "../lib/queries";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
 import type { HistoryEntry } from "../lib/types";
@@ -23,10 +24,10 @@ const DAY_HEIGHT = 30;
 const ROW_HEIGHT = 50;
 // Each listed entry costs the core a disk check for its recording, so the
 // list asks for this many more whenever the last LOAD_AHEAD rows come into view.
-const PAGE_SIZE = 100;
+const PAGE_SIZE = HISTORY_PAGE;
 const LOAD_AHEAD = 20;
 
-type Item = { kind: "day"; label: string } | { kind: "entry"; entry: HistoryEntry };
+type Item<T> = { kind: "day"; label: string } | { kind: "entry"; entry: T };
 type Retry = { state: "running" } | { state: "done"; text: string } | { state: "failed"; error: string };
 
 /** `at` is ISO local time; read its parts directly so the Windows date format never reorders them. */
@@ -66,11 +67,12 @@ export function preview(entry: HistoryEntry): string {
   return entry.status === "Cancelled" ? "(cancelled - not transcribed)" : "(no text)";
 }
 
-export function groupByDay(entries: HistoryEntry[], today: Date): Item[] {
-  const items: Item[] = [];
+/** Newest first, as given, with a heading wherever the day changes; `at` reads each entry's ISO local time. */
+export function groupByDay<T>(entries: T[], today: Date, at: (entry: T) => string): Item<T>[] {
+  const items: Item<T>[] = [];
   let last = "";
   for (const entry of entries) {
-    const label = dayLabel(entry.at, today);
+    const label = dayLabel(at(entry), today);
     if (label !== last) items.push({ kind: "day", label });
     last = label;
     items.push({ kind: "entry", entry });
@@ -78,7 +80,7 @@ export function groupByDay(entries: HistoryEntry[], today: Date): Item[] {
   return items;
 }
 
-function useDebounced(value: string, ms: number): string {
+export function useDebounced(value: string, ms: number): string {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(value), ms);
@@ -102,7 +104,7 @@ function HistorySettings() {
     if (event.event === "changed" && event.error) setNote(`Could not delete everything: ${event.error}`);
   });
   const draft = settings?.draft;
-  if (!draft) return null;
+  if (!draft) return <Card className="h-[46px]" />;
   const days = draft.history_retention_days;
   const choices = [...new Set([...RETENTION_DAYS, Math.max(days, 0)])].sort((a, b) => a - b);
   const changeFolder = async (current: string) => {
@@ -168,15 +170,11 @@ export function HistoryPage() {
   const search = useDebounced(query.trim(), 150);
   const [shown, setShown] = useState({ search, limit: PAGE_SIZE });
   const limit = shown.search === search ? shown.limit : PAGE_SIZE;
-  const history = useQuery({
-    queryKey: ["history", search, limit],
-    queryFn: () => api.get<HistoryEntry[]>(`/api/history?query=${encodeURIComponent(search)}&limit=${limit}`),
-    placeholderData: keepPreviousData,
-  });
+  const history = useQuery({ ...queries.history(search, limit), placeholderData: keepPreviousData });
   const entries = useMemo(() => history.data ?? [], [history.data]);
   // Fewer than asked for means the end; previous data shown while more load is always fewer.
   const hasMore = entries.length === limit;
-  const items = useMemo(() => groupByDay(entries, new Date()), [entries]);
+  const items = useMemo(() => groupByDay(entries, new Date(), (entry) => entry.at), [entries]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [retries, setRetries] = useState<Record<string, Retry>>({});
   const [playing, setPlaying] = useState<string | null>(null);
@@ -308,9 +306,8 @@ export function HistoryPage() {
           : "No dictations yet. Press your shortcut and speak.";
 
   return (
-    <div className="flex h-full flex-col gap-3 px-6 pt-3 pb-5">
-      <div className="flex min-h-8 items-center justify-between gap-4">
-        <h1 className="text-[20px] font-semibold tracking-tight">History</h1>
+    <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-5")}>
+      <PageTitle title="History">
         <div className="flex items-center gap-2">
           {exportNote.text ? <span className={cn("text-[12.5px]", exportNote.error ? "text-destructive" : "text-muted-foreground")}>{exportNote.text}</span> : null}
           <Button variant="outline" size="sm" disabled={!entries.length} onClick={() => void exportAll()}>
@@ -322,7 +319,7 @@ export function HistoryPage() {
             <Input aria-label="Search history" placeholder="Search dictations" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
         </div>
-      </div>
+      </PageTitle>
       <HistorySettings />
       {/* Fixed proportions: what an entry holds must never move the split. */}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] grid-rows-[minmax(0,1fr)] gap-3">
@@ -351,7 +348,7 @@ export function HistoryPage() {
                     style={style}
                     onClick={() => select(entry.id)}
                     className={cn(
-                      "absolute inset-x-1.5 top-0 flex items-center gap-3 rounded-lg px-2.5 transition-colors duration-150 hover:bg-accent/60",
+                      "absolute inset-x-1.5 top-0 flex items-center gap-3 rounded-lg px-2.5 transition-colors hover:bg-accent/60",
                       active && "bg-selected hover:bg-selected",
                     )}
                   >

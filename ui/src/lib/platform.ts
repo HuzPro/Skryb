@@ -65,6 +65,20 @@ export const windowControls = {
   close: () => (appWindow ? void appWindow.destroy() : window.close()),
 };
 
+let shown = false;
+
+/** The window starts hidden and shows once, when its first page has what it needs; Rust shows it anyway after four seconds. */
+export function showWindow(): void {
+  if (shown) return;
+  shown = true;
+  void appWindow?.show();
+}
+
+/** Themes hang off `data-theme` on <html>; anything unknown is the default look. */
+export function applyTheme(theme: string | undefined): void {
+  document.documentElement.dataset.theme = theme ?? "default";
+}
+
 /** Alt+F4 and the taskbar close ask first; `ask` returns true when the window may close. */
 export function guardClose(ask: () => Promise<boolean>): void {
   void appWindow?.onCloseRequested(async (event) => {

@@ -7,6 +7,7 @@ import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { onBeforeClose } from "../lib/platform";
+import { queries } from "../lib/queries";
 import { onServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
 import type { Duck, Microphone, RecordingSettings, Settings } from "../lib/types";
@@ -22,7 +23,7 @@ const NO_SIGNAL_AFTER_MS = 2000;
 
 export function useMicrophones(): { microphones: Microphone[]; rescan: () => Promise<void> } {
   const client = useQueryClient();
-  const microphones = useQuery({ queryKey: ["microphones"], queryFn: () => api.get<Microphone[]>("/api/microphones") }).data ?? [];
+  const microphones = useQuery(queries.microphones).data ?? [];
   const rescan = async () => {
     client.setQueryData(["microphones"], await api.get<Microphone[]>("/api/microphones?rescan=1"));
   };
@@ -136,7 +137,7 @@ export function MicrophonePicker({ settings, onChoose }: { settings: Settings; o
               aria-checked={selected}
               onClick={() => onChoose(choice.name)}
               className={cn(
-                "rounded-xl border bg-card px-4 py-3 text-left shadow-[0_1px_2px_rgb(0_0_0/0.03)] outline-none transition-colors duration-150 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
+                "surface rounded-xl border border-edge bg-card px-4 py-3 text-left shadow-card outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
                 selected && "border-primary bg-selected hover:bg-selected",
               )}
             >

@@ -4,7 +4,9 @@ export type TranscriptionMode = "batch" | "streaming";
 export type Duck = "off" | "lower" | "mute";
 export type PasteMethod = "ctrl_v" | "ctrl_shift_v" | "shift_insert" | "type";
 export type BindingMode = "toggle" | "hold" | "press";
-export type BindingAction = "dictate" | "paste_last" | "copy_last";
+export type BindingAction = "dictate" | "paste_last" | "copy_last" | "toggle_meeting";
+/** The window's look; each follows Windows' light or dark setting. */
+export type Theme = "default" | "glass" | "material" | "paper";
 
 export interface Binding {
   keys: string;
@@ -52,6 +54,7 @@ export interface Settings {
   paste_method_overrides: [string, PasteMethod][];
   check_for_updates: boolean;
   meetings: MeetingSettings;
+  theme: Theme;
 }
 
 export interface ChangeSet {

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{webview::PageLoadEvent, Emitter, Manager, PhysicalPosition};
 
 const PAGES: [&str; 5] = ["settings", "history", "setup", "updates", "meetings"];
-// Shown on first page load; this only covers a page that never finishes loading.
+// The page shows the window once its first view has its data; this only covers a page that never does.
 const SHOW_ANYWAY_AFTER: Duration = Duration::from_secs(4);
 // In the updates folder: the installer's progress during an in-app update,
 // and the window the old version hands over to the new one.
@@ -176,7 +176,7 @@ fn main() {
         route: saved.route.clone(),
         scroll: saved.scroll,
     });
-    // Maximising a hidden window shows it at once, so it waits for the first page load.
+    // Maximising a hidden window shows it at once, so it waits for the page to load.
     let maximize_on_show = AtomicBool::new(saved.as_ref().is_some_and(|saved| saved.maximized));
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -211,12 +211,8 @@ fn main() {
             Ok(())
         })
         .on_page_load(move |webview, payload| {
-            if payload.event() == PageLoadEvent::Finished {
-                let window = webview.window();
-                if maximize_on_show.swap(false, Ordering::Relaxed) {
-                    let _ = window.maximize();
-                }
-                let _ = window.show();
+            if payload.event() == PageLoadEvent::Finished && maximize_on_show.swap(false, Ordering::Relaxed) {
+                let _ = webview.window().maximize();
             }
         })
         .run(tauri::generate_context!())

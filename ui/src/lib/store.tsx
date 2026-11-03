@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ApiError, api, errorText } from "./api";
 import { draftReducer, isDirty, type Draft, type DraftAction } from "./draft";
 import { engineState } from "./events";
 import { validateBindings } from "./keys";
+import { queries } from "./queries";
 import { onServerEvent } from "./sse";
 import type { Dictionary, License, SaveResult, Settings } from "./types";
 
@@ -40,11 +41,19 @@ interface Store {
 }
 
 const StoreContext = createContext<Store | null>(null);
+const StoreRefContext = createContext<RefObject<Store> | null>(null);
 
 export function useStore(): Store {
   const store = useContext(StoreContext);
   if (!store) throw new Error("useStore outside StoreProvider");
   return store;
+}
+
+/** The store without re-rendering on every edit, for components that only act on it, like the shell. */
+export function useStoreRef(): RefObject<Store> {
+  const ref = useContext(StoreRefContext);
+  if (!ref) throw new Error("useStoreRef outside StoreProvider");
+  return ref;
 }
 
 /** Bindings without keys are rows the user added and left empty; the core never sees them. */
@@ -61,7 +70,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [saveError, setSaveError] = useState("");
   const [prompt, setPrompt] = useState<Prompt | null>(null);
 
-  const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
+  const settingsQuery = useQuery(queries.settings);
   useEffect(() => {
     if (settingsQuery.data) dispatchSettings({ type: "loaded", value: settingsQuery.data });
   }, [settingsQuery.data]);
@@ -185,7 +194,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [settings, saveSettings, savePhase, saveNote, saveError, dictionary, saveDictionary, anyDirty, prompt, confirm, askUnsaved, withLicense, saveAll],
   );
 
-  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+  const storeRef = useRef(store);
+  storeRef.current = store;
+
+  return (
+    <StoreRefContext.Provider value={storeRef}>
+      <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+    </StoreRefContext.Provider>
+  );
 }
 
 /** Loads a page-level document (the dictionary) into its draft once, and again after the core changes it. */

@@ -1,17 +1,20 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { keyCaps } from "../lib/keys";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
 
+/** Every page starts at the same left edge and top; settings pages keep to a readable width. */
+export const PAGE_EDGE = "px-8 pt-3";
+
 export function PageBody({ children }: { children: ReactNode }) {
-  return <div className="mx-auto w-full max-w-[720px] px-8 pt-3 pb-28">{children}</div>;
+  return <div className={cn(PAGE_EDGE, "w-full max-w-[760px] pb-28")}>{children}</div>;
 }
 
-export function PageTitle({ title, children }: { title: string; children?: ReactNode }) {
+export function PageTitle({ title, children }: { title: ReactNode; children?: ReactNode }) {
   return (
-    <div className="mb-1 flex min-h-8 items-center justify-between gap-4">
-      <h1 className="text-[20px] font-semibold tracking-tight">{title}</h1>
+    <div className="mb-1 flex min-h-10 items-center justify-between gap-4">
+      <h1 className="page-title min-w-0 truncate">{title}</h1>
       {children}
     </div>
   );
@@ -30,8 +33,8 @@ export function Section({ title, note, children, action }: { title: string; note
   );
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("rounded-xl border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.03)]", className)}>{children}</div>;
+export function Card({ className, children }: { className?: string; children?: ReactNode }) {
+  return <div className={cn("surface rounded-xl border border-edge bg-card shadow-card", className)}>{children}</div>;
 }
 
 /** Rows inside one card, separated by hairlines. */
@@ -91,7 +94,7 @@ export function ChoiceCards<T extends string>({ value, choices, onChange, label 
             disabled={choice.disabled}
             onClick={() => onChange(choice.value)}
             className={cn(
-              "flex flex-col items-start rounded-xl border bg-card px-3.5 py-3 text-left shadow-[0_1px_2px_rgb(0_0_0/0.03)] outline-none transition-colors duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-55",
+              "flex flex-col items-start surface rounded-xl border border-edge bg-card px-3.5 py-3 text-left shadow-card outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-55",
               selected && "border-primary bg-selected hover:bg-selected",
             )}
           >
@@ -185,14 +188,16 @@ export function Disclosure({ label, children, defaultOpen = false }: { label: st
     <details className="group mt-3" open={defaultOpen}>
       <summary className="inline-flex cursor-default list-none items-center gap-1 text-[13px] font-medium text-primary [&::-webkit-details-marker]:hidden">
         {label}
-        <ChevronRight className="size-3.5 transition-transform duration-150 group-open:rotate-90" />
+        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
       </summary>
       <div className="mt-2">{children}</div>
     </details>
   );
 }
 
-export function StatusDot({ tone }: { tone: "success" | "warning" | "destructive" | "muted" | "primary" }) {
+export type Tone = "success" | "warning" | "destructive" | "muted" | "primary";
+
+export function StatusDot({ tone }: { tone: Tone }) {
   const color = {
     success: "bg-success",
     warning: "bg-warning",
@@ -202,6 +207,50 @@ export function StatusDot({ tone }: { tone: "success" | "warning" | "destructive
   }[tone];
   return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", color)} />;
 }
+
+/** The sidebar's footer card, one status line over one detail line in either mode, so switching mode moves nothing. */
+export function StatusCard({
+  tone,
+  label,
+  detail,
+  warning,
+  onOpen,
+  action,
+}: {
+  tone: Tone;
+  label: string;
+  detail: string;
+  warning?: string | undefined;
+  onOpen?: () => void;
+  action?: ReactNode;
+}) {
+  const body = (
+    <>
+      <span className="flex items-center gap-1.5 text-[12px] font-medium">
+        <StatusDot tone={tone} />
+        <span className="truncate tabular-nums">{label}</span>
+      </span>
+      <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground" title={detail}>
+        {detail}
+      </span>
+      {warning ? <span className="mt-1 block text-[11.5px] text-warning">{warning}</span> : null}
+    </>
+  );
+  return (
+    <div className="surface flex min-w-0 flex-1 items-center rounded-lg border border-edge bg-card shadow-card">
+      {onOpen ? (
+        <button onClick={onOpen} className="min-w-0 flex-1 self-stretch rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40">
+          {body}
+        </button>
+      ) : (
+        <div className="min-w-0 flex-1 px-3 py-2">{body}</div>
+      )}
+      {action ? <div className="shrink-0 pr-1.5">{action}</div> : null}
+    </div>
+  );
+}
+
+const EXIT_MS = 160;
 
 export interface MenuItem {
   label: string;
@@ -213,10 +262,18 @@ export interface MenuItem {
 }
 
 /** A right-click menu at (x, y), kept inside the window. Escape, a click elsewhere, scrolling or leaving the window closes it. */
-export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: number; label: string; items: MenuItem[]; onClose: () => void }) {
+export function ContextMenu({ x, y, label, items, onClose: closed }: { x: number; y: number; label: string; items: MenuItem[]; onClose: () => void }) {
   const menu = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
   const [place, setPlace] = useState({ left: x, top: y });
+  const [leaving, setLeaving] = useState(false);
+  // It fades out before it goes; reduced motion makes that fade a millisecond.
+  const onClose = useCallback(() => setLeaving(true), []);
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = setTimeout(closed, EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [leaving, closed]);
   useLayoutEffect(() => {
     opener.current = document.activeElement;
     const box = menu.current!.getBoundingClientRect();
@@ -262,7 +319,7 @@ export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: num
       onKeyDown={keys}
       onContextMenu={(event) => event.preventDefault()}
       style={place}
-      className="fixed z-50 min-w-[176px] animate-[fade-in_100ms_ease-out] rounded-lg border bg-card p-1 shadow-lg"
+      className={cn("surface fixed z-50 min-w-[176px] rounded-lg border border-edge bg-popover p-1 shadow-lg", leaving ? "pointer-events-none exit-pop" : "enter-pop")}
     >
       {items.map(({ label: name, icon: Icon, onSelect, shortcut, danger }) => (
         <button

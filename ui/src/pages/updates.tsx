@@ -1,14 +1,24 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { FileDown, FileUp, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { installDescription, installTitle, useInstall } from "../components/install";
-import { PageBody, PageTitle, ProgressBar, Row, Rows, Section } from "../components/parts";
+import { ChoiceCards, PageBody, PageTitle, ProgressBar, Row, Rows, Section, type Choice } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
+import { chooseOpenPath, chooseSavePath } from "../lib/platform";
 import { useStore } from "../lib/store";
-import type { UpdateStatus } from "../lib/types";
+import type { Theme, UpdateStatus } from "../lib/types";
 
-/** What the Updates page says about *update*; null means a git checkout, which updates through git. */
+const THEMES: Choice<Theme>[] = [
+  { value: "default", title: "Default", description: "Clean and quiet, the way Skryb has always looked." },
+  { value: "glass", title: "Glass", description: "Frosted panels over a soft wash of colour." },
+  { value: "material", title: "Material", description: "Rounded, tonal and springy, grown from one indigo." },
+  { value: "paper", title: "Paper", description: "Ink on warm paper, with serif headings." },
+];
+
+/** What the Updates section says about *update*; null means a git checkout, which updates through git. */
 export function describeUpdate(update: UpdateStatus | null, running: string): { title: string; description: string } {
   if (update === null) {
     return { title: `Skryb ${running}`, description: "This copy runs from a source folder and updates through git, not from GitHub releases." };
@@ -36,18 +46,21 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
   }
 }
 
-export function UpdatesPage() {
+/** Skryb's own settings, the same in both modes: updates, the look, the settings file and the logs. */
+export function SettingsPage() {
   const app = useAppInfo();
   const install = useInstall();
-  const { settings, editSettings, anyDirty, askUnsaved, saveAll } = useStore();
+  const { settings, editSettings, discardSettings, anyDirty, askUnsaved, saveAll } = useStore();
+  const client = useQueryClient();
   const [requestError, setRequestError] = useState("");
+  const [fileNote, setFileNote] = useState({ text: "", error: false });
   const draft = settings?.draft;
   // Skryb is closed while setup runs, so this shows without it.
   if (install) {
     return (
       <PageBody>
-        <PageTitle title="Updates" />
-        <Section title="Version">
+        <PageTitle title="Settings" />
+        <Section title="Updates">
           <Rows>
             <Row title={installTitle(install)} description={<span className="selectable">{installDescription(install)}</span>} stacked>
               {install.progress.step === "failed" ? null : <ProgressBar value={install.estimate.fraction} className="w-full" />}
@@ -57,7 +70,7 @@ export function UpdatesPage() {
       </PageBody>
     );
   }
-  if (!app || !draft) return <PageBody><PageTitle title="Updates" /></PageBody>;
+  if (!app || !draft) return <PageBody><PageTitle title="Settings" /></PageBody>;
 
   const update = app.update;
   const { title, description } = describeUpdate(update, app.version);
@@ -78,11 +91,34 @@ export function UpdatesPage() {
     }
     await send("/api/updates/install");
   };
+  const fileAction = async (work: () => Promise<string>) => {
+    try {
+      setFileNote({ text: await work(), error: false });
+    } catch (error) {
+      setFileNote({ text: errorText(error), error: true });
+    }
+  };
+  const exportSettings = () =>
+    fileAction(async () => {
+      const path = await chooseSavePath("Export settings", "skryb-settings.json", "Settings", "json");
+      if (!path) return "";
+      await api.post("/api/settings/export", { path });
+      return "Settings exported.";
+    });
+  const importSettings = () =>
+    fileAction(async () => {
+      const path = await chooseOpenPath("Import settings", "Settings", "json");
+      if (!path) return "";
+      await api.post("/api/settings/import", { path });
+      discardSettings();
+      await client.invalidateQueries({ queryKey: ["settings"] });
+      return "Settings imported.";
+    });
 
   return (
     <PageBody>
-      <PageTitle title="Updates" />
-      <Section title="Version">
+      <PageTitle title="Settings" />
+      <Section title="Updates">
         <Rows>
           <Row
             title={title}
@@ -100,11 +136,6 @@ export function UpdatesPage() {
               </Button>
             )}
           </Row>
-        </Rows>
-      </Section>
-
-      <Section title="Automatic checks">
-        <Rows>
           <Row
             title="Check for updates automatically"
             description="Once an hour Skryb asks GitHub for a newer version and downloads it in the background. Nothing installs until you say so."
@@ -114,6 +145,36 @@ export function UpdatesPage() {
               checked={draft.check_for_updates}
               onCheckedChange={(check_for_updates) => editSettings((current) => ({ ...current, check_for_updates }))}
             />
+          </Row>
+        </Rows>
+      </Section>
+
+      <Section title="Theme" note="Each theme follows Windows' light or dark setting. You see it as you pick; Save keeps it.">
+        <ChoiceCards<Theme> label="Theme" value={draft.theme} choices={THEMES} onChange={(theme) => editSettings((current) => ({ ...current, theme }))} />
+      </Section>
+
+      <Section title="Settings and logs">
+        <Rows>
+          <Row
+            title="Settings file"
+            description="Copy every setting to a file, or load one, to move Skryb to another PC."
+            error={fileNote.error ? fileNote.text : undefined}
+          >
+            {!fileNote.error && fileNote.text ? <span className="text-[12.5px] text-muted-foreground">{fileNote.text}</span> : null}
+            <Button variant="outline" onClick={() => void exportSettings()}>
+              <FileDown />
+              Export
+            </Button>
+            <Button variant="outline" onClick={() => void importSettings()}>
+              <FileUp />
+              Import
+            </Button>
+          </Row>
+          <Row title="Logs" description={<span className="selectable">{app.diagnostics_directory}</span>}>
+            <Button variant="outline" onClick={() => void fileAction(async () => (await api.post("/api/logs/open"), ""))}>
+              <FolderOpen />
+              Open folder
+            </Button>
           </Row>
         </Rows>
       </Section>

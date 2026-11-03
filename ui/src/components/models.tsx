@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { api, errorText } from "../lib/api";
+import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { Model } from "../lib/types";
 import { cn } from "../lib/utils";
@@ -12,7 +13,7 @@ import { Button } from "./ui/button";
 const GB = 1_000_000_000;
 
 export function useModels(): Model[] | undefined {
-  return useQuery({ queryKey: ["models"], queryFn: () => api.get<Model[]>("/api/models") }).data;
+  return useQuery(queries.models).data;
 }
 
 export function formatGigabytes(bytes: number): string {
@@ -57,7 +58,7 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
     <div
       onClick={() => model.installed && onSelect()}
       className={cn(
-        "rounded-xl border bg-card px-4 py-3 shadow-[0_1px_2px_rgb(0_0_0/0.03)] transition-colors duration-150 has-[[role=radio]:focus-visible]:ring-2 has-[[role=radio]:focus-visible]:ring-ring/40",
+        "surface rounded-xl border border-edge bg-card px-4 py-3 shadow-card transition-colors has-[[role=radio]:focus-visible]:ring-2 has-[[role=radio]:focus-visible]:ring-ring/40",
         model.installed && "hover:bg-accent/40",
         selected && "border-primary bg-selected hover:bg-selected",
       )}

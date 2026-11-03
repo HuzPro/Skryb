@@ -1,38 +1,68 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AudioLines, BookA, ClipboardPaste, Download, History, Keyboard, Mic } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
+import { QueryClientProvider, useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { AudioLines, BookA, ClipboardPaste, History, Keyboard, Mic } from "lucide-react";
+import { createContext, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
-import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type Mode, type NavItem } from "./components/shell";
-import { guardClose, onRelaunch, runBeforeClose, windowControls, type LaunchArgs, type Page } from "./lib/platform";
+import { ConnectionBanner, DictationStatusCard, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type Mode, type NavItem } from "./components/shell";
+import { applyTheme, guardClose, onRelaunch, runBeforeClose, showWindow, windowControls, type LaunchArgs, type Page } from "./lib/platform";
+import { prefetchPages, queryClient } from "./lib/queries";
 import { useServerEvents } from "./lib/sse";
-import { StoreProvider, useStore } from "./lib/store";
+import { StoreProvider, useStore, useStoreRef } from "./lib/store";
 import { DictionaryPage } from "./pages/dictionary";
 import { HistoryPage } from "./pages/history";
-import { LiveMeetingPage, MeetingSettingsPage, MeetingsNav, SavedMeetingPage, useMeetingEvents } from "./pages/meetings";
+import {
+  LiveMeetingPage,
+  MeetingHistoryPage,
+  MeetingMicrophonePage,
+  MeetingModelPage,
+  MeetingOutputPage,
+  MeetingStatusCard,
+  SavedMeetingPage,
+  useMeetingEvents,
+} from "./pages/meetings";
 import { MicrophonePage } from "./pages/microphone";
 import { OutputPage } from "./pages/output";
 import { SetupPage } from "./pages/setup";
 import { ShortcutsPage } from "./pages/shortcuts";
 import { TranscriptionPage } from "./pages/transcription";
-import { UpdatesPage } from "./pages/updates";
+import { SettingsPage } from "./pages/updates";
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: Infinity, retry: 1, refetchOnWindowFocus: false } },
-});
-
-const NAV: NavItem[] = [
-  { path: "history", label: "History", icon: History },
-  { path: "dictionary", label: "Dictionary", icon: BookA },
-  { path: "shortcuts", label: "Shortcuts", icon: Keyboard },
-  { path: "microphone", label: "Microphone & sounds", icon: Mic },
-  { path: "output", label: "Output", icon: ClipboardPaste },
-  { path: "transcription", label: "Model", icon: AudioLines },
-  { path: "updates", label: "Updates", icon: Download },
+/** The same items in the same order in both modes; only the page behind each changes with the mode. */
+export const NAV: NavItem[] = [
+  { label: "History", icon: History, dictation: "/history", meetings: "/meetings" },
+  { label: "Dictionary", icon: BookA, dictation: "/dictionary", meetings: "/dictionary" },
+  { label: "Shortcuts", icon: Keyboard, dictation: "/shortcuts", meetings: "/shortcuts" },
+  { label: "Microphone & sounds", icon: Mic, dictation: "/microphone", meetings: "/meeting-microphone" },
+  { label: "Output", icon: ClipboardPaste, dictation: "/output", meetings: "/meeting-output" },
+  { label: "Model", icon: AudioLines, dictation: "/transcription", meetings: "/meeting-model" },
 ];
 
+// Pages both modes share: opening one keeps the mode it was opened from.
+const SHARED = new Set(["/dictionary", "/shortcuts", "/updates", "/setup"]);
+// A live or saved meeting sits under History in meeting mode.
+const MEETING = /^\/meetings\/./;
+
 const LAST_SETTINGS_PAGE = "last-settings-page";
-const SETTINGS_PAGES = NAV.map((item) => item.path).filter((path) => path !== "history");
+const SETTINGS_PAGES = [...new Set([...NAV.flatMap((item) => [item.dictation, item.meetings]), "/updates"])]
+  .filter((path) => path !== "/history" && path !== "/meetings")
+  .map((path) => path.slice(1));
+
+/** Whether `pathname` is one of `item`'s pages. */
+export function isNavActive(item: NavItem, pathname: string): boolean {
+  return pathname === item.dictation || pathname === item.meetings || (item.meetings === "/meetings" && MEETING.test(pathname));
+}
+
+/** The mode a page belongs to; null for a page both modes share. */
+export function modeOf(pathname: string): Mode | null {
+  if (SHARED.has(pathname)) return null;
+  return MEETING.test(pathname) || NAV.some((item) => item.meetings === pathname) ? "meetings" : "dictation";
+}
+
+/** The page behind the same sidebar item in `mode`; a shared page, or one outside the sidebar, stays put. */
+export function pageInMode(pathname: string, mode: Mode): string {
+  const item = NAV.find((candidate) => isNavActive(candidate, pathname));
+  return item ? item[mode] : pathname;
+}
 
 type PageMemory = Pick<Storage, "getItem" | "setItem">;
 
@@ -71,45 +101,77 @@ export function restoredPath(route: string | null | undefined): string | null {
   return route && PAGES.some((page) => `/${page.path}` === route) ? route : null;
 }
 
-/** Meetings and its settings belong to meeting mode; every other page to dictation. */
-export function modeOf(pathname: string): Mode {
-  return pathname === "/meetings" || pathname.startsWith("/meetings/") || pathname === "/meeting-settings" ? "meetings" : "dictation";
+const LaunchContext = createContext<LaunchArgs | null>(null);
+// Rust shows the window after four seconds whatever happens; this is the shell's own limit.
+const SHOW_ANYWAY_MS = 1500;
+
+/** Shows the window once nothing the first page asked for is still loading, then fetches the other pages' data. */
+function ShowWhenReady() {
+  const client = useQueryClient();
+  const fetching = useIsFetching();
+  useEffect(() => {
+    const timer = setTimeout(showWindow, SHOW_ANYWAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (fetching) return;
+    // A frame later, so a query a page starts as this one settles still counts.
+    const frame = requestAnimationFrame(() => {
+      if (client.isFetching()) return;
+      showWindow();
+      prefetchPages(client);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fetching, client]);
+  return null;
 }
 
-const LaunchContext = createContext<LaunchArgs | null>(null);
+/** Shows the theme being picked before it is saved; discarding puts the saved one back. */
+function ThemeSync() {
+  const theme = useStore().settings?.draft.theme;
+  useEffect(() => applyTheme(theme), [theme]);
+  return null;
+}
 
 function Shell() {
   const launch = useContext(LaunchContext);
   const lost = useServerEvents();
-  const store = useStore();
-  const storeRef = useRef(store);
-  storeRef.current = store;
+  const store = useStoreRef();
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const location = useLocation();
+  const { pathname } = useLocation();
   const main = useRef<HTMLElement>(null);
-  const install = useInstallWatch(useAppInfo(), lost, () => ({ route: location.pathname, scroll: main.current?.scrollTop ?? 0 }));
+  const install = useInstallWatch(useAppInfo(), lost, () => ({ route: pathname, scroll: main.current?.scrollTop ?? 0 }));
   useRestoredScroll(main, launch?.restored?.scroll);
-  const setup = location.pathname === "/setup";
-  const mode = modeOf(location.pathname);
+  const setup = pathname === "/setup";
+  const [chosenMode, setChosenMode] = useState<Mode>(() => modeOf(pathname) ?? "dictation");
+  const mode = modeOf(pathname) ?? chosenMode;
   useMeetingEvents();
-  useEffect(() => rememberPage(location.pathname), [location.pathname]);
-  // The page each mode showed last, so the toggle goes back to it.
-  const lastPage = useRef<Record<Mode, string>>({ dictation: launchPath("settings"), meetings: "/meetings" });
   useEffect(() => {
-    lastPage.current[modeOf(location.pathname)] = location.pathname;
-  }, [location.pathname]);
-  const switchMode = useCallback((next: Mode) => {
-    if (next !== modeOf(location.pathname)) void navigateRef.current(lastPage.current[next]);
-  }, [location.pathname]);
+    rememberPage(pathname);
+    const owner = modeOf(pathname);
+    if (owner) setChosenMode(owner);
+  }, [pathname]);
+  // The page area stays mounted across pages; each page opens at its top.
+  useLayoutEffect(() => {
+    if (main.current) main.current.scrollTop = 0;
+  }, [pathname]);
+  const switchMode = useCallback(
+    (next: Mode) => {
+      startTransition(() => setChosenMode(next));
+      const target = pageInMode(pathname, next);
+      if (target !== pathname) void navigateRef.current(target);
+    },
+    [pathname],
+  );
 
   const mayClose = useCallback(async (): Promise<boolean> => {
-    if (!storeRef.current.anyDirty()) return true;
-    const choice = await storeRef.current.askUnsaved();
+    if (!store.current.anyDirty()) return true;
+    const choice = await store.current.askUnsaved();
     if (choice === "cancel") return false;
-    return choice === "discard" || storeRef.current.saveAll();
-  }, []);
+    return choice === "discard" || store.current.saveAll();
+  }, [store]);
 
   const close = useCallback(async () => {
     if (!(await mayClose())) return;
@@ -131,18 +193,31 @@ function Shell() {
   return (
     <LostContext.Provider value={lost}>
       <InstallContext.Provider value={install}>
+        <ThemeSync />
+        <ShowWhenReady />
         <div className="relative flex h-full">
-          {setup ? null : <Sidebar items={NAV} mode={mode} onMode={switchMode} meetings={<MeetingsNav />} />}
+          {setup ? null : (
+            <Sidebar
+              items={NAV}
+              mode={mode}
+              onMode={switchMode}
+              pathname={pathname}
+              isActive={isNavActive}
+              status={mode === "meetings" ? <MeetingStatusCard onOpen={() => void navigateRef.current("/meetings/live")} /> : <DictationStatusCard />}
+            />
+          )}
           <div className="relative flex min-w-0 flex-1 flex-col">
-            <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()}>
+            <TopBar nativeTitlebar={launch?.native_titlebar ?? false} onClose={() => void close()} showStatus={setup}>
               {setup ? <span className="pointer-events-none text-[13px] font-semibold">Skryb</span> : null}
             </TopBar>
-            <main ref={main} key={location.pathname} className="min-h-0 flex-1 overflow-y-auto">
-              <Outlet />
-            </main>
+            <ViewTransition name="page">
+              <main ref={main} className="content-panel min-h-0 flex-1 overflow-y-auto">
+                <Outlet />
+              </main>
+            </ViewTransition>
             {setup ? null : <SaveBar />}
             {install ? (
-              location.pathname === "/updates" ? null : <InstallBanner view={install} />
+              pathname === "/updates" ? null : <InstallBanner view={install} />
             ) : lost ? (
               <ConnectionBanner onQuit={windowControls.close} />
             ) : null}
@@ -161,11 +236,14 @@ const PAGES = [
   { path: "microphone", element: <MicrophonePage /> },
   { path: "output", element: <OutputPage /> },
   { path: "transcription", element: <TranscriptionPage /> },
-  { path: "updates", element: <UpdatesPage /> },
+  { path: "updates", element: <SettingsPage /> },
   { path: "setup", element: <SetupPage /> },
-  { path: "meetings", element: <LiveMeetingPage /> },
+  { path: "meetings", element: <MeetingHistoryPage /> },
+  { path: "meetings/live", element: <LiveMeetingPage /> },
   { path: "meetings/:id", element: <SavedMeetingPage /> },
-  { path: "meeting-settings", element: <MeetingSettingsPage /> },
+  { path: "meeting-microphone", element: <MeetingMicrophonePage /> },
+  { path: "meeting-output", element: <MeetingOutputPage /> },
+  { path: "meeting-model", element: <MeetingModelPage /> },
 ];
 
 export function App({ launch }: { launch: LaunchArgs }) {
