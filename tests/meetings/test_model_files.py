@@ -3,12 +3,14 @@
 import pytest
 
 from skryb.meetings.model_files import MeetingModelFiles
+from skryb.meetings.models import DIARIZER, DIARIZER_CPU
+from skryb.transcription.model_info import ModelInfo
 
-_ALL = ("nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex")
+_ALL = ("nemotron-3-diarization", "nemotron-3-diarization-cpu", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex")
 
 
 class Rig:
-    def __init__(self, language: str, *, missing: tuple[str, ...] = ()) -> None:
+    def __init__(self, language: str, *, missing: tuple[str, ...] = (), diarizer: ModelInfo = DIARIZER) -> None:
         self.language = language
         self.installed = {name: name not in missing for name in _ALL}
         self.meeting_only_downloads: list[str] = []
@@ -19,6 +21,7 @@ class Rig:
             download_meeting_only=self.meeting_only_downloads.append,
             is_installed=self._dictation_installed,
             start_download=self.dictation_downloads.append,
+            diarizer=lambda: diarizer,
         )
 
     def _meeting_only_installed(self, name: str) -> bool:
@@ -94,3 +97,36 @@ def test_with_everything_installed_the_download_button_fetches_nothing() -> None
     rig.files.download_missing()
 
     assert rig.meeting_only_downloads == [] and rig.dictation_downloads == []
+
+
+def test_a_computer_without_a_gpu_downloads_only_nvidias_cpu_diarizer_not_the_gpu_checkpoint() -> None:
+    rig = Rig("en", missing=_ALL, diarizer=DIARIZER_CPU)
+
+    rig.files.download_missing()
+
+    assert rig.meeting_only_downloads == ["nemotron-3-diarization-cpu"]
+    assert rig.dictation_downloads == ["qwen3-asr-1.7b"]
+
+
+def test_a_computer_without_a_gpu_is_ready_with_the_cpu_diarizer_even_though_the_gpu_checkpoint_is_missing() -> None:
+    rig = Rig("auto", missing=("nemotron-3-diarization",), diarizer=DIARIZER_CPU)
+
+    assert rig.files.missing() == []
+
+
+def test_the_models_card_on_a_computer_without_a_gpu_shows_the_107_mb_cpu_diarizer() -> None:
+    rig = Rig("en", missing=("nemotron-3-diarization-cpu",), diarizer=DIARIZER_CPU)
+
+    views = rig.files.views()
+
+    assert (views[0]["name"], views[0]["label"], views[0]["display_size"], views[0]["installed"]) == (
+        "nemotron-3-diarization-cpu", "Speaker labels", "107 MB", False)
+    assert "experimental" in str(views[0]["description"])
+
+
+def test_with_nothing_the_meeting_setting_needs_missing_the_download_button_never_fetches_the_other_diarizer() -> None:
+    rig = Rig("en", missing=("nemotron-3-diarization", "whisper-hindi2hinglish-apex"), diarizer=DIARIZER_CPU)
+
+    rig.files.download_missing()
+
+    assert rig.meeting_only_downloads == ["whisper-hindi2hinglish-apex"]

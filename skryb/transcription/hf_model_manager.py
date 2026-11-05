@@ -55,6 +55,19 @@ def repo_has_loadable_snapshot(repo_dir: Path, revision: str = "") -> bool:
     )
 
 
+def _has_files(repo_dir: Path, revision: str, files: tuple[str, ...]) -> bool:
+    """A model that is just these files: present in the snapshot ``refs/main`` names, at *revision* when pinned.
+
+    A repo holding two such models (say the GPU and the CPU build of one checkpoint) shares ``refs/main``, so the
+    files themselves are checked too; each lands under its own name only once whole (``.part`` until then).
+    """
+    commit_sha = _resolved_main_revision(repo_dir)
+    if commit_sha is None or (revision and commit_sha != revision):
+        return False
+    snapshot = repo_dir / "snapshots" / commit_sha
+    return all((snapshot / name).is_file() for name in files)
+
+
 def loadable_snapshot_dir(
     models_dir: Path, repo_id: str, revision: str = "",
 ) -> Path:
@@ -154,9 +167,10 @@ class HuggingFaceModelManager(ModelManager):
     def is_installed(self, name: str) -> bool:
         if name not in self._models:
             return False
-        return repo_has_loadable_snapshot(
-            self._model_cache_dir(name), self._models[name].revision,
-        )
+        info = self._models[name]
+        if info.files:
+            return _has_files(self._model_cache_dir(name), info.revision, info.files)
+        return repo_has_loadable_snapshot(self._model_cache_dir(name), info.revision)
 
     @staticmethod
     def _snapshot_has_complete_model(snapshot: Path) -> bool:
@@ -199,7 +213,7 @@ class HuggingFaceModelManager(ModelManager):
     def download(self, name: str) -> DownloadHandle:
         info = self._models[name]
         self._license_policy.assert_accepted(info)
-        resolved = self._resolver.resolve(info.repo_id, info.revision)
+        resolved = self._resolver.resolve(info.repo_id, info.revision, info.files)
         job = ModelDownloadJob(
             job_id=name,
             repo_id=info.repo_id,

@@ -23,6 +23,15 @@ DIARIZER = ModelInfo(
     repo_id="nvidia/Nemotron-3-Diarization",
     revision="f667ed73aee57d40cc39428eb768b4fd87a0a29e",
 )
+# The same checkpoint as NVIDIA's q8_0 GGUF in the same repo, for NeMo-Speech.cpp on computers with no GPU or NPU.
+DIARIZER_CPU = ModelInfo(
+    name="nemotron-3-diarization-cpu",
+    size_mb=107,
+    description="Tells up to 8 speakers apart as they talk, on the CPU (NVIDIA Nemotron 3 Diarization, experimental)",
+    repo_id=DIARIZER.repo_id,
+    revision=DIARIZER.revision,
+    files=("Nemotron-3-Diarization.q8_0.gguf",),
+)
 # Oriserve's whisper-large-v3-turbo fine-tune for Urdu and Hindi meetings: Latin letters, English words left in English.
 ROMAN_URDU = ModelInfo(
     name="whisper-hindi2hinglish-apex",

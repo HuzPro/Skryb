@@ -16,13 +16,15 @@ from pathlib import Path
 
 import numpy as np
 
-from skryb.core.exceptions import TranscriptionError
+from skryb.core.exceptions import ConfigurationError, TranscriptionError
 from skryb.core.paths import AppPaths
 from skryb.meetings.capture import RATE
+from skryb.meetings.cpu_diarizer import CpuDiarizer
 from skryb.meetings.diarization import NativeDiarizer
 from skryb.meetings.openvino_diarizer import OpenVinoDiarizer
 from skryb.meetings.models import (
-    DIARIZER, ROMAN_URDU, Diarizer, Labeller, NpuRomanUrduAsr, RomanUrduAsr, Vad, gpu_available, release_gpu,
+    DIARIZER, DIARIZER_CPU, ROMAN_URDU, Diarizer, Labeller, NpuRomanUrduAsr, RomanUrduAsr, Vad, gpu_available,
+    release_gpu,
 )
 from skryb.people.hints import transcribe_with_hint
 from skryb.recording.audio_segment import AudioSegment
@@ -33,7 +35,7 @@ from skryb.transcription.engine_turns import EngineTurns
 from skryb.transcription.hardware_detector import HardwareDetector
 from skryb.transcription.hf_model_manager import loadable_snapshot_dir
 from skryb.transcription.license_policy import LicensePolicy
-from skryb.transcription.model_info import get_model_info
+from skryb.transcription.model_info import ModelInfo, get_model_info
 from skryb.transcription.native_engine_dll import NATIVE_GPU_ARCHS, native_diarizer_dll
 from skryb.transcription.qwen3_asr_prompt import PromptedTranscriber
 from skryb.transcription.roman_urdu import urdu_spelling
@@ -47,6 +49,9 @@ _URDU_WORDS = re.compile(
     r"|bhi|se|ko|par)\b", re.IGNORECASE)
 _LOOP = re.compile(r"\b(\w+)( \1\b){5,}")
 NO_GPU_WARNING = "No GPU or NPU found, so speakers are not told apart: everyone on the call is Speaker 1."
+# Hardware the GPU diarizers run on. These and a tuned Intel NPU use the safetensors checkpoint; every other computer
+# gets NVIDIA's CPU build of it.
+_GPU_KINDS = ("amd_rocm", "nvidia_cuda")
 
 _logger = logging.getLogger(__name__)
 
@@ -67,6 +72,22 @@ def build_meeting_asr(
 
 def diarizer_snapshot(models_dir: Path) -> Path:
     return loadable_snapshot_dir(models_dir, DIARIZER.repo_id, DIARIZER.revision)
+
+
+def cpu_diarizer_model(models_dir: Path) -> Path:
+    """NVIDIA's GGUF of the diarizer, for the CPU diarizer."""
+    return loadable_snapshot_dir(models_dir, DIARIZER_CPU.repo_id, DIARIZER_CPU.revision) / DIARIZER_CPU.files[0]
+
+
+def _not_downloaded(info: ModelInfo) -> Path:
+    raise ConfigurationError(f"{info.repo_id} is not installed")
+
+
+def diarizer_model_for(hardware_detector: HardwareDetector) -> ModelInfo:
+    """The speaker-label model this computer downloads: the checkpoint with a GPU or a tuned Intel NPU, NVIDIA's CPU
+    build without."""
+    hardware = hardware_detector.detect()
+    return DIARIZER if hardware.kind in _GPU_KINDS or hardware.npu else DIARIZER_CPU
 
 
 def roman_urdu_snapshot(models_dir: Path) -> Path:
@@ -105,6 +126,7 @@ class MeetingModels:
         diarizer_snapshot: Callable[[], Path],
         roman_urdu_snapshot: Callable[[], Path],
         native_diarizer: Callable[[], Path | None] = lambda: None,
+        cpu_diarizer_model: Callable[[], Path] = lambda: _not_downloaded(DIARIZER_CPU),
     ) -> None:
         self._urdu = language in URDU_LANGUAGES
         self._dictation_engine = dictation_engine
@@ -113,6 +135,7 @@ class MeetingModels:
         self._diarizer_snapshot = diarizer_snapshot
         self._roman_urdu_snapshot = roman_urdu_snapshot
         self._native_diarizer = native_diarizer
+        self._cpu_diarizer_model = cpu_diarizer_model
         self._own: TranscriptionEngine | None = None
         self._diarizer: Labeller | None = None
         self._roman_urdu: RomanUrduAsr | NpuRomanUrduAsr | None = None
@@ -139,19 +162,31 @@ class MeetingModels:
         return self._diarizer, None
 
     def _npu_diarizer(self) -> tuple[Labeller, str | None]:
-        """Without a GPU the model step runs on an Intel NPU through OpenVINO; on the CPU alone it falls far
-        behind live audio, so then everyone on the call is one speaker."""
+        """Without a GPU the model step runs on an Intel NPU through OpenVINO; without one either, NVIDIA's CPU
+        build takes over."""
         if importlib.util.find_spec("openvino") is None:
-            return Vad(), NO_GPU_WARNING
+            return self._cpu_labeller()
         try:
             self._diarizer = OpenVinoDiarizer(self._diarizer_snapshot())
         except Exception:
-            _logger.warning("The NPU diarizer didn't load, so speakers are not told apart", exc_info=True)
-            return Vad(), NO_GPU_WARNING
+            _logger.warning("The NPU diarizer didn't load, so the CPU one runs", exc_info=True)
+            return self._cpu_labeller()
         if self._diarizer.device != "NPU":
             self._diarizer = None
+            return self._cpu_labeller()
+        return self._diarizer, None
+
+    def _cpu_labeller(self) -> tuple[Labeller, str | None]:
+        """NVIDIA's CPU diarizer, or speech detection alone with a warning when it can't load."""
+        try:
+            self._diarizer = self._load_cpu_diarizer()
+        except (TranscriptionError, ConfigurationError) as error:
+            _logger.warning("The CPU diarizer didn't load, so everyone is Speaker 1: %s", error)
             return Vad(), NO_GPU_WARNING
         return self._diarizer, None
+
+    def _load_cpu_diarizer(self) -> CpuDiarizer:
+        return CpuDiarizer(self._cpu_diarizer_model())
 
     def transcribe(self, audio: np.ndarray, context: str | None) -> str:
         audio = np.ascontiguousarray(audio, dtype=np.float32)
@@ -168,7 +203,7 @@ class MeetingModels:
         return transcribe_with_hint(self._own_engine(), clip, context, "en").text
 
     def release(self) -> None:
-        if isinstance(self._diarizer, (NativeDiarizer, OpenVinoDiarizer)):
+        if isinstance(self._diarizer, (NativeDiarizer, OpenVinoDiarizer, CpuDiarizer)):
             self._diarizer.dispose()
         self._diarizer = None
         if isinstance(self._roman_urdu, NpuRomanUrduAsr):

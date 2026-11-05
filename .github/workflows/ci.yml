@@ -384,6 +384,12 @@ jobs:
           name: cuda-diar
           path: native/diar/build
 
+      # NVIDIA's NeMo-Speech.cpp CPU release, the meeting diarizer on computers with neither a supported GPU nor an
+      # Intel NPU: its official zip, checked against a pinned sha256. Only its DLLs and licences ship.
+      - name: Fetch the CPU diarizer
+        shell: bash
+        run: python native/nemo_speech/fetch.py
+
       # The runner image comes with Inno Setup.
       - name: Install Inno Setup
         shell: pwsh

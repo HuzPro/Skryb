@@ -39,6 +39,12 @@ _GATED_MODEL = ModelInfo(
     license_id="example-nc", compatible_engines=("nano_parakeet",),
 )
 
+# The GGUF build in the same repo as _PINNED_MODEL, as NVIDIA's diarizer ships both.
+_GGUF_MODEL = ModelInfo(
+    name="pinned-example-gguf", size_mb=10, description="Example",
+    repo_id="example/pinned", revision=_PINNED_SHA, files=("Model Zoë.q8_0.gguf",),
+)
+
 _EXAMPLE_MODEL = ModelInfo(
     name="example-transformers", size_mb=10, description="Example",
     repo_id="example/transformers", compatible_engines=("nano_parakeet",),
@@ -185,6 +191,50 @@ class TestHuggingFaceModelManagerInstallation:
         _write_transformers_snapshot(tmp_path, {"model.safetensors": ""})
 
         assert _example_model_is_installed(tmp_path) is True
+
+
+class TestOneFileModelInstallation:
+    """A model that is named files of a repo, such as a GGUF beside the safetensors checkpoint."""
+
+    @staticmethod
+    def _manager(tmp_path: Path) -> HuggingFaceModelManager:
+        return _make_manager(tmp_path, models={m.name: m for m in (_PINNED_MODEL, _GGUF_MODEL)})
+
+    @staticmethod
+    def _snapshot(tmp_path: Path, refs_sha: str = _PINNED_SHA) -> Path:
+        model_dir = tmp_path / "models--example--pinned"
+        snapshot = model_dir / "snapshots" / _PINNED_SHA
+        snapshot.mkdir(parents=True)
+        _write_refs_main(model_dir, refs_sha)
+        return snapshot
+
+    def test_it_is_installed_once_its_file_is_in_the_pinned_snapshot(self, tmp_path: Path) -> None:
+        (self._snapshot(tmp_path) / "Model Zoë.q8_0.gguf").write_bytes(b"GGUF")
+
+        manager = self._manager(tmp_path)
+
+        assert manager.is_installed(_GGUF_MODEL.name)
+        assert not manager.is_installed(_PINNED_MODEL.name)
+
+    def test_the_full_checkpoint_in_the_same_repo_does_not_count_as_the_one_file_model(self, tmp_path: Path) -> None:
+        snapshot = self._snapshot(tmp_path)
+        (snapshot / "config.json").write_text("{}", encoding="utf-8")
+        (snapshot / "model.safetensors").write_bytes(b"weights")
+
+        manager = self._manager(tmp_path)
+
+        assert manager.is_installed(_PINNED_MODEL.name)
+        assert not manager.is_installed(_GGUF_MODEL.name)
+
+    def test_a_file_still_downloading_is_not_installed(self, tmp_path: Path) -> None:
+        (self._snapshot(tmp_path) / "Model Zoë.q8_0.gguf.part").write_bytes(b"GG")
+
+        assert not self._manager(tmp_path).is_installed(_GGUF_MODEL.name)
+
+    def test_a_file_from_another_commit_is_not_installed(self, tmp_path: Path) -> None:
+        (self._snapshot(tmp_path, refs_sha=_LEGACY_SHA) / "Model Zoë.q8_0.gguf").write_bytes(b"GGUF")
+
+        assert not self._manager(tmp_path).is_installed(_GGUF_MODEL.name)
 
 
 class TestPackedArchiveInstallation:
@@ -371,7 +421,7 @@ class TestHuggingFaceModelManagerOperations:
 
         handle = manager.download(_NEMO_MODEL.name)
 
-        resolver.resolve.assert_called_once_with("example/nemo", "")
+        resolver.resolve.assert_called_once_with("example/nemo", "", ())
         job = download_manager.enqueue.call_args.args[0]
         assert job.job_id == _NEMO_MODEL.name
         assert job.repo_id == "example/nemo"
@@ -397,8 +447,17 @@ class TestHuggingFaceModelManagerOperations:
 
         manager.download(_PINNED_MODEL.name)
 
-        resolver.resolve.assert_called_once_with("example/pinned", _PINNED_SHA)
+        resolver.resolve.assert_called_once_with("example/pinned", _PINNED_SHA, ())
         assert download_manager.enqueue.call_args.args[0].commit_sha == _PINNED_SHA
+
+    def test_a_model_that_is_one_file_of_a_repo_downloads_only_that_file(self, tmp_path: Path) -> None:
+        resolver = MagicMock()
+        resolver.resolve.return_value = ResolvedRepo(_PINNED_SHA, _PINNED_SHA, [])
+        manager = _make_manager(tmp_path, resolver=resolver, models={_GGUF_MODEL.name: _GGUF_MODEL})
+
+        manager.download(_GGUF_MODEL.name)
+
+        resolver.resolve.assert_called_once_with("example/pinned", _PINNED_SHA, ("Model Zoë.q8_0.gguf",))
 
     def test_delete_should_remove_model_directory(self, tmp_path: Path) -> None:
         model_dir = _write_nemo_snapshot(tmp_path)
