@@ -121,6 +121,7 @@ def settings_json(draft: SettingsDraft) -> Json:
             "record_microphone": draft.meetings_record_microphone,
             "language": draft.meetings_language,
         },
+        "show_english": draft.show_english,
         "theme": draft.theme,
         "colourways": dict(draft.colourways),
     }
@@ -177,6 +178,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         meetings_folder=meetings_folder,
         meetings_record_microphone=meetings.flag("record_microphone"),
         meetings_language=meetings.one_of("language", MEETING_LANGUAGES),
+        show_english=settings.flag("show_english"),
         theme=settings.one_of("theme", UI_THEMES),
         colourways={theme: colourways.one_of(theme, COLOURWAYS) for theme in UI_THEMES},
     )

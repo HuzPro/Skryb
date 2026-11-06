@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Download, FileDown, Play, RotateCcw, Search, Square, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Interlinear } from "../components/english";
 import { Card, PAGE_EDGE, PageTitle } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Badge } from "../components/ui/badge";
@@ -10,11 +11,12 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
+import { hasArabic } from "../lib/english";
 import { chooseFolder, chooseSavePath, copyText } from "../lib/platform";
 import { HISTORY_PAGE, queries } from "../lib/queries";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
-import type { HistoryEntry } from "../lib/types";
+import type { EnglishLine, HistoryEntry } from "../lib/types";
 import { cn } from "../lib/utils";
 
 const RETENTION_DAYS = [0, 7, 30, 90];
@@ -98,6 +100,31 @@ function statusVariant(status: HistoryEntry["status"]): "destructive" | "default
   return status === "Failed" ? "destructive" : "default";
 }
 
+/** A dictation with Arabic in it: each Arabic line word by word over its English, asked of the core once per text. */
+function EnglishText({ text }: { text: string }) {
+  const english = useQuery({
+    queryKey: ["english", text],
+    queryFn: () => api.post<{ lines: (EnglishLine | null)[] }>("/api/translation", { text }),
+    retry: false,
+  });
+  return (
+    <div className="selectable">
+      {text.split("\n").map((line, index) => {
+        const annotated = english.data?.lines[index];
+        return annotated ? (
+          <Interlinear key={index} line={annotated} className="mb-3 last:mb-0" />
+        ) : (
+          <p key={index} dir="auto" className="mb-1 whitespace-pre-wrap">
+            {line || "\u00a0"}
+          </p>
+        );
+      })}
+      {english.isPending ? <p className="mt-2 text-[12.5px] text-muted-foreground">Translating…</p> : null}
+      {english.isError ? <p className="mt-2 text-[12.5px] text-destructive">{errorText(english.error)}</p> : null}
+    </div>
+  );
+}
+
 function HistorySettings() {
   const { settings, editSettings, confirm } = useStore();
   const app = useAppInfo();
@@ -136,6 +163,10 @@ function HistorySettings() {
       <label className="flex items-center gap-2.5 font-medium">
         <Switch checked={draft.capture_content} onCheckedChange={(on) => editSettings((current) => ({ ...current, capture_content: on }))} />
         Save history
+      </label>
+      <label className="flex items-center gap-2.5 font-medium" title="Arabic dictations word by word, with the English under each word and the whole line in English.">
+        <Switch checked={draft.show_english} onCheckedChange={(on) => editSettings((current) => ({ ...current, show_english: on }))} />
+        Show English
       </label>
       <label className="flex items-center gap-2 text-muted-foreground">
         Keep for
@@ -409,7 +440,11 @@ export function HistoryPage() {
               </div>
               {statusNote ? <p className={cn("px-5 pt-3 text-[12.5px]", noteIsError ? "selectable text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-[14px] leading-relaxed">
-                <div dir="auto" className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
+                {settings?.saved.show_english && hasArabic(shownText) ? (
+                  <EnglishText text={shownText} />
+                ) : (
+                  <div dir="auto" className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
+                )}
               </div>
             </>
           ) : (

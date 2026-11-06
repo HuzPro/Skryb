@@ -69,6 +69,10 @@ DEFAULT_CONFIG = {
         "record_microphone": True,
         "language": "en",
     },
+    # Arabic lines in meetings and History shown with their English and a word-by-word gloss.
+    "translation": {
+        "show_english": False,
+    },
     "ui": {
         "theme": "default",
         "colourways": {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"},

@@ -54,6 +54,8 @@ export interface Settings {
   paste_method_overrides: [string, PasteMethod][];
   check_for_updates: boolean;
   meetings: MeetingSettings;
+  /** Arabic lines in meetings and History show their English and a gloss under each word; on downloads the model. */
+  show_english: boolean;
   theme: Theme;
   /** Each theme remembers its own colourway. */
   colourways: Record<Theme, Colourway>;
@@ -250,6 +252,31 @@ export interface MeetingEntry {
   end: number;
   text: string;
   key: string;
+  /** Show English: the line in English, sent again once it is ready. */
+  english?: string;
+  /** Each written word with its English gloss, in the order written. */
+  words?: [string, string][];
+}
+
+/** An Arabic line's English, and each written word with its gloss. */
+export interface EnglishLine {
+  english: string;
+  words: [string, string][];
+}
+
+/** The translation model this computer downloads for Show English, and where it runs once loaded. */
+export interface TranslationStatus {
+  name: string;
+  label: string;
+  description: string;
+  display_size: string;
+  installed: boolean;
+  /** "GPU", "NPU" or "CPU" once the model has started; null before. */
+  device: string | null;
+  device_name: string | null;
+  /** Why the model could not start. */
+  error: string | null;
+  download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
 }
 
 export interface MeetingTranscript {

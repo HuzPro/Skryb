@@ -19,7 +19,8 @@ from skryb.meetings.recorder import MeetingRecorder
 from skryb.meetings.segmenter import Segment
 from skryb.meetings.storage import MeetingSettings
 from skryb.meetings.thumbnail import Grab
-from skryb.meetings.transcript import Transcript
+from skryb.meetings.transcript import English, Transcript
+from skryb.translation.translator import Translation
 from skryb.ui.api_server import ApiServer
 from skryb.ui.event_hub import EventHub
 from skryb.ui.meeting_handlers import MeetingApi
@@ -38,6 +39,7 @@ class MeetingRig:
         self.downloads: list[str] = []
         self.opened: list[Path] = []
         self.captures: list[FakeCapture] = []
+        self.english: English | None = None
         self.hub = EventHub(SimpleEventBus())
         self.server = ApiServer(self.hub, poll_seconds=0.02)
         self.server.start()
@@ -60,6 +62,7 @@ class MeetingRig:
         self.server.bind(MeetingApi(
             self.recorder, self.hub, folder=lambda: self.root, model_files=files,
             open_path=self.opened.append, run_in_background=lambda action: action(), recycle=self._recycle,
+            english=lambda: self.english,
         ).routes())
 
     def _recycle(self, folder: Path) -> None:
@@ -137,6 +140,27 @@ def test_the_overview_lists_saved_meetings_the_folder_and_whether_the_models_are
         "nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex", "jais-asr",
     ]
     assert all(m["download"] is None for m in overview["models"])
+
+
+def test_asking_for_english_while_show_english_is_off_is_refused(rig: MeetingRig) -> None:
+    rig.saved_meeting("2026-10-16 Souq", [("them", 0, 0.0, "وين المفاتيح؟")])
+
+    status, body = rig.call("POST", "/api/meetings/2026-10-16 Souq/english")
+
+    assert status == 409 and "Show English" in body["error"]
+
+
+def test_a_saved_meeting_gets_english_for_its_arabic_lines_and_keeps_it(rig: MeetingRig) -> None:
+    folder = rig.saved_meeting("2026-10-16 Souq", [
+        ("them", 0, 0.0, "وين المفاتيح؟"), ("me", 0, 3.0, "In the car."), ("them", 1, 6.0, "زين، بجيبها بكرة"),
+    ])
+    rig.english = lambda line, done: done(Translation(f"EN {line}", [(word, "g") for word in line.split()]))
+
+    assert rig.call("POST", "/api/meetings/2026-10-16 Souq/english") == (200, {"lines": 2})
+
+    saved = Transcript.load(folder)
+    assert [e.english for e in saved.entries] == ["EN وين المفاتيح؟", "", "EN زين، بجيبها بكرة"]
+    assert rig.call("POST", "/api/meetings/2026-10-16 Souq/english") == (200, {"lines": 0})
 
 
 def test_starting_without_the_models_says_what_to_download_and_the_download_button_fetches_only_those(rig: MeetingRig) -> None:
