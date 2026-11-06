@@ -153,9 +153,11 @@ export function meetingStats(meetings: MeetingSummary[], now: Date = new Date())
   const weekday = (now.getDay() + 6) % 7;
   const monday = today - weekday;
   const dated = meetings.map((meeting) => ({ meeting, day: dayNumber(new Date(meeting.started)) })).filter(({ day }) => !Number.isNaN(day));
-  // A day number counts calendar days, so its weekday is read in UTC whatever the time zone.
-  const firstDay = dated.length ? Math.min(...dated.map(({ day }) => day)) : today;
-  const firstWeek = firstDay - ((new Date(firstDay * DAY_MS).getUTCDay() + 6) % 7);
+  const earliest = dated.reduce<Date | null>((first, { meeting }) => {
+    const started = new Date(meeting.started);
+    return !first || started < first ? started : first;
+  }, null);
+  const firstWeek = earliest ? dayNumber(earliest) - ((earliest.getDay() + 6) % 7) : today;
   const seconds = (from: number, to: number) => dated.filter(({ day }) => day >= from && day <= to).reduce((sum, { meeting }) => sum + meeting.seconds, 0);
   const thisWeek = dated.filter(({ day }) => day >= monday && day <= today);
   const soFar: number[] = [];

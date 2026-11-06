@@ -70,7 +70,7 @@ export function OutputPage() {
 
       <Section
         title="Paste method per app"
-        note="For apps that ignore Ctrl+V: add the app's .exe name and how to paste into it."
+        note="For apps that ignore Ctrl+V: add the app's .exe name and how to paste into it. mintty needs none."
       >
         <Card className="divide-y">
           <div className="grid grid-cols-[1fr_180px_28px] gap-3 px-4 py-2 text-[12px] font-medium text-muted-foreground">

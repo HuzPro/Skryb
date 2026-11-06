@@ -774,10 +774,11 @@ function MeetingNumbers({ meetings, recordsMicrophone }: { meetings: MeetingSumm
   const stats = useMemo(() => meetingStats(meetings), [meetings]);
   const plural = (value: number, one: string, many: string) => `${value.toLocaleString()} ${value === 1 ? one : many}`;
   const compare = versusUsual(stats.week.seconds, stats.usualWeek);
+  const bars = weekBars(stats.weeks);
   const typicalVoices = stats.typicalSpeakers === null ? "" : `usually ${plural(Math.round(stats.typicalSpeakers), "voice", "voices")}`;
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-3 min-[1500px]:grid-cols-4">
+      <div className={cn("grid grid-cols-2 gap-3", stats.talk && recordsMicrophone ? "min-[1500px]:grid-cols-4" : "min-[1500px]:grid-cols-3")}>
         <Stat label="This week so far" value={formatSaved(stats.week.seconds)} detail={[plural(stats.week.count, "meeting", "meetings"), compare ?? ""].filter(Boolean).join(" · ")} />
         <Stat label="Typical meeting" value={stats.typicalSeconds === null ? "–" : formatSaved(stats.typicalSeconds)} detail={typicalVoices || undefined} />
         {stats.talk && recordsMicrophone ? (
@@ -792,9 +793,9 @@ function MeetingNumbers({ meetings, recordsMicrophone }: { meetings: MeetingSumm
       </div>
       <Bars
         title="Meeting time a week, last 12 weeks"
-        bars={weekBars(stats.weeks)}
+        bars={bars}
         format={(seconds) => formatSaved(seconds)}
-        axis={[weekBars(stats.weeks)[0]?.label ?? "", "This week"]}
+        axis={[bars[0]?.label ?? "", "This week"]}
         usual={stats.usualFullWeek}
       />
     </div>

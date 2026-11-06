@@ -381,7 +381,9 @@ export function Bars({
         })}
         {usualAt !== null ? (
           <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-foreground/40" style={{ bottom: `${usualAt}%` }}>
-            <span className="absolute -top-[17px] right-0 bg-card pl-1 text-[11px] text-muted-foreground tabular-nums">usual {format(usual ?? 0)}</span>
+            <span className={cn("absolute right-0 bg-card pl-1 text-[11px] text-muted-foreground tabular-nums", usualAt > 80 ? "top-[2px]" : "-top-[17px]")}>
+              usual {format(usual ?? 0)}
+            </span>
           </div>
         ) : null}
       </div>
