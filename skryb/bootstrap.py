@@ -11,6 +11,7 @@ from skryb.core.action_dispatcher import (
     ActionDispatcher,
     ThreadedActionDispatcher,
 )
+from skryb.core.app_icon import paint_app_icon_in_background
 from skryb.core.build_info import (
     RunningBuild,
     source_changed_since,
@@ -136,6 +137,7 @@ from skryb.recording.notice import Notice
 from skryb.recording.overlay import RecordingOverlay
 from skryb.recording.preferences import (
     RecordingPreferences,
+    active_colourway,
     fold_paper_colourway,
     load_pill_position,
     load_pill_skin,
@@ -254,6 +256,11 @@ def migrate_paper_colourway(config: JsonConfigAdapter) -> None:
         return
     _logger.info("Moved Paper's colourway into the colourways of every theme.")
     config.save()
+
+
+def _app_icon_painter(config: JsonConfigAdapter) -> Callable[[], None]:
+    """Repaint the installed app icon in the chosen colourway, off the calling thread."""
+    return functools.partial(paint_app_icon_in_background, functools.partial(active_colourway, config))
 
 
 def _ignore_delivery(text: str) -> None:
@@ -1159,6 +1166,7 @@ def _build_settings_service(
         license_policy=license_policy,
         registry=registry,
         hardware_detector=hardware_detector,
+        repaint_app_icon=_app_icon_painter(config),
     )
     # Populate the cache on a background thread so the first settings
     # open doesn't pay the filesystem-scan cost.
@@ -1563,6 +1571,8 @@ def build_app(
     # Keys observed before this only queue up; the observer catches up.
     if edit_capture is not None:
         _start_once_idle(event_bus, edit_capture.start)
+    # Every start, as an update's Setup puts the emerald icon back.
+    _start_once_idle(event_bus, _app_icon_painter(config))
     _spawn_engine_load_thread(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,

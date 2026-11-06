@@ -3,6 +3,9 @@
 One set of shapes on a 256 grid draws every copy of the mark: the app
 icon files, the README logo and the animated tray icon. The Settings
 window draws the same grid in ``ui/src/components/mark.tsx``.
+
+The tile is emerald unless a caller picks another colourway's gradient
+from ``TILE_GRADIENTS``; the installed app icon follows the chosen one.
 """
 
 import math
@@ -24,9 +27,21 @@ CARET_SERIF = 48
 CARET_CAP = 14
 _MIDDLE = GRID / 2
 
+Rgb = tuple[int, int, int]
+Gradient = tuple[Rgb, Rgb]
+
 EMERALD_LIGHT = (52, 211, 153)
 EMERALD_DEEP = (4, 120, 87)
 WHITE = (255, 255, 255)
+EMERALD: Gradient = (EMERALD_LIGHT, EMERALD_DEEP)
+# Each colourway's tile, light at the top left to deep at the bottom right; the window's twin uses the same.
+TILE_GRADIENTS: dict[str, Gradient] = {
+    "green": EMERALD,
+    "terracotta": ((240, 148, 108), (165, 62, 24)),
+    "ink": ((96, 165, 250), (29, 78, 216)),
+    "plum": ((224, 154, 210), (126, 48, 112)),
+    "graphite": ((161, 161, 170), (63, 63, 70)),
+}
 
 _SUPERSAMPLE = 4
 
@@ -51,14 +66,15 @@ def render_mark(
     tile: bool = True,
     pose: Pose = STILL,
     zoom: float = 1.0,
+    gradient: Gradient = EMERALD,
 ) -> Image.Image:
-    """The mark at ``size`` pixels, on the emerald tile or on transparency.
+    """The mark at ``size`` pixels, on the ``gradient`` tile or on transparency.
 
     ``zoom`` scales the mark about the centre; without the tile the mark
     can fill more of a small tray square.
     """
     big = size * _SUPERSAMPLE
-    image = _tile(big) if tile else Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    image = _tile(big, gradient) if tile else Image.new("RGBA", (big, big), (0, 0, 0, 0))
     unit = big / GRID * zoom
     offset = big / 2 - _MIDDLE * unit
 
@@ -123,11 +139,11 @@ def loading_pose(t: float) -> Pose:
     return Pose(alphas=(glow(0.0), glow(0.15), glow(0.3)), caret_alpha=glow(0.45))
 
 
-def svg(*, tile: bool = True, ink: str = "#FFFFFF") -> str:
+def svg(*, tile: bool = True, ink: str = "#FFFFFF", gradient: Gradient = EMERALD) -> str:
     """The still mark as SVG markup on the 256 grid."""
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {GRID} {GRID}" width="{GRID}" height="{GRID}">']
     if tile:
-        light, deep = (_hex(EMERALD_LIGHT), _hex(EMERALD_DEEP))
+        light, deep = (_hex(gradient[0]), _hex(gradient[1]))
         parts.append(
             '<defs><linearGradient id="skryb-tile" x1="0" y1="0" x2="1" y2="1">'
             f'<stop offset="0" stop-color="{light}"/><stop offset="1" stop-color="{deep}"/>'
@@ -145,11 +161,11 @@ def svg(*, tile: bool = True, ink: str = "#FFFFFF") -> str:
     return "".join(parts) + "\n"
 
 
-def _tile(big: int) -> Image.Image:
-    """The emerald squircle, its gradient running from top left to bottom right."""
+def _tile(big: int, gradient: Gradient) -> Image.Image:
+    """The squircle, its gradient running from top left to bottom right."""
     ramp = numpy.add.outer(numpy.arange(big), numpy.arange(big)) / max(2 * (big - 1), 1)
-    light = numpy.array(EMERALD_LIGHT, dtype=numpy.float32)
-    deep = numpy.array(EMERALD_DEEP, dtype=numpy.float32)
+    light = numpy.array(gradient[0], dtype=numpy.float32)
+    deep = numpy.array(gradient[1], dtype=numpy.float32)
     rgb = light + (deep - light) * ramp[:, :, None]
     mask = Image.new("L", (big, big), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, big - 1, big - 1), radius=TILE_RADIUS * big / GRID, fill=255)

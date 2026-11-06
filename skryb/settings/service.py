@@ -41,6 +41,7 @@ from skryb.output.text_filter_decorator import load_dictionary
 from skryb.recording.pill import DEFAULT_PILL_POSITION
 from skryb.recording.preferences import (
     RecordingPreferences,
+    active_colourway,
     fold_paper_colourway,
     load_colourways,
     save_pill_position,
@@ -138,8 +139,10 @@ class SettingsService:
         license_policy: LicensePolicy,
         registry: EngineRegistry | None = None,
         hardware_detector: HardwareDetector | None = None,
+        repaint_app_icon: Callable[[], None] = lambda: None,
     ) -> None:
         self._config = config
+        self._repaint_app_icon = repaint_app_icon
         self._dictionary_path = dictionary_path
         self._model_manager = model_manager
         self._event_bus = event_bus
@@ -325,6 +328,7 @@ class SettingsService:
 
     def apply_draft(self, draft: SettingsDraft) -> ChangeSet:
         original = self.current_draft()
+        colourway = active_colourway(self._config)
         self._config.set("diagnostics.capture_content", draft.capture_content)
         if draft.capture_content:
             self._config.set("diagnostics.enabled", True)
@@ -354,8 +358,13 @@ class SettingsService:
             cast(ConfigValue, dict(draft.paste_method_overrides)),
         )
         self._config.save()
+        self._repaint_app_icon_if_changed(colourway)
         self._invalidate_cache_on_engine_change(original, draft)
         return ChangeSet.between(original, draft)
+
+    def _repaint_app_icon_if_changed(self, before: str) -> None:
+        if active_colourway(self._config) != before:
+            self._repaint_app_icon()
 
     def _invalidate_cache_on_engine_change(
         self, original: SettingsDraft, updated: SettingsDraft,
@@ -395,10 +404,12 @@ class SettingsService:
 
     def import_settings(self, path: Path) -> None:
         imported = load_json_object(path)
+        colourway = active_colourway(self._config)
         self._config.replace_all(deep_merge_config(DEFAULT_CONFIG, imported))
         migrate_legacy_hotkey(self._config)
         fold_paper_colourway(self._config)
         self._config.save()
+        self._repaint_app_icon_if_changed(colourway)
 
     # ------------------------------------------------------------------
     # Personal dictionary
