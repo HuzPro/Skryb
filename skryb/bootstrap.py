@@ -119,11 +119,12 @@ from skryb.output.win32_modifier_key_state_reader import (
 )
 from skryb.history.retention import HistoryPruner, history_retention_days
 from skryb.meetings.asr import (
-    MeetingModels, build_meeting_asr, diarizer_snapshot, native_diarizer_for, roman_urdu_snapshot,
+    MeetingModels, build_meeting_asr, cpu_diarizer_model, diarizer_model_for, diarizer_snapshot,
+    native_diarizer_for, roman_urdu_snapshot,
 )
 from skryb.meetings.capture import Capture
 from skryb.meetings.model_files import MeetingModelFiles
-from skryb.meetings.models import DIARIZER, ROMAN_URDU
+from skryb.meetings.models import DIARIZER, DIARIZER_CPU, ROMAN_URDU
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import meeting_settings_from
 from skryb.meetings.transcript import English
@@ -1074,7 +1075,8 @@ def _build_meetings(
 ) -> tuple[MeetingRecorder, MeetingModelFiles]:
     """Meeting recording, sharing dictation's Qwen3-ASR when dictation has it loaded."""
     meeting_only = build_hf_model_manager(
-        paths.models_dir, download_manager, license_policy, {DIARIZER.name: DIARIZER, ROMAN_URDU.name: ROMAN_URDU},
+        paths.models_dir, download_manager, license_policy,
+        {info.name: info for info in (DIARIZER, DIARIZER_CPU, ROMAN_URDU)},
     )
     meeting_only_downloads = DownloadCoordinator(meeting_only)
     files = MeetingModelFiles(
@@ -1083,6 +1085,7 @@ def _build_meetings(
         download_meeting_only=meeting_only_downloads.start,
         is_installed=settings_service.is_installed,
         start_download=settings_service.start_download,
+        diarizer=functools.partial(diarizer_model_for, hardware_detector),
     )
     recorder = MeetingRecorder(
         settings=functools.partial(meeting_settings_from, config),
@@ -1099,6 +1102,7 @@ def _build_meetings(
             diarizer_snapshot=functools.partial(diarizer_snapshot, paths.models_dir),
             roman_urdu_snapshot=functools.partial(roman_urdu_snapshot, paths.models_dir),
             native_diarizer=functools.partial(native_diarizer_for, hardware_detector),
+            cpu_diarizer_model=functools.partial(cpu_diarizer_model, paths.models_dir),
         ),
         make_capture=Capture,
         publish=publish,

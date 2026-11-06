@@ -29,6 +29,9 @@ class ModelInfo:
     to, so entries sharing one ``license_id`` share one acceptance.
     ``license_url`` points at the upstream copy of that text at the
     pinned revision, never at a moving branch.
+
+    ``files`` names the only files to fetch from the repo, ignored or not;
+    empty means every file the downloader doesn't skip.
     """
     name: str
     size_mb: int
@@ -44,6 +47,7 @@ class ModelInfo:
     # Where it sits in the dictation lineup (Small, Medium, Large) and roughly what it needs to run well.
     tier: str = ""
     needs: str = ""
+    files: tuple[str, ...] = ()
 
     @property
     def display_size(self) -> str:

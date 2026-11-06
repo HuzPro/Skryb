@@ -8,6 +8,7 @@ thin I/O steps exercised in CI. The launcher shim and the runtime NOTICE
 text are also pinned down, since both ship verbatim to users.
 """
 
+import fnmatch
 from pathlib import Path
 
 import pytest
@@ -127,6 +128,12 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
         decoder = repo / "native" / "tdt" / "build" / "tdt_cpu.dll"
         decoder.parent.mkdir(parents=True)
         decoder.write_bytes(b"MZ cpu decoder")
+        nemo_speech = repo / "native" / "nemo_speech" / "build"
+        (nemo_speech / "licenses" / "third_party" / "ggml").mkdir(parents=True)
+        (nemo_speech / "nemo_speech_asr_c.dll").write_bytes(b"MZ nemo speech")
+        (nemo_speech / "ggml-cpu.dll").write_bytes(b"MZ ggml")
+        (nemo_speech / "licenses" / "LICENSE").write_text("Apache License 2.0", encoding="utf-8")
+        (nemo_speech / "licenses" / "third_party" / "ggml" / "LICENSE").write_text("MIT", encoding="utf-8")
     (repo / "skryb" / "transcription").mkdir()
     (root / "scratch").mkdir()
     return repo
@@ -203,3 +210,49 @@ class TestStageWheelSource:
 
         with pytest.raises(InstallerBuildError, match=r"build_ui\.ps1"):
             _stage_wheel_source(repo, tmp_path / "scratch")
+
+
+
+class TestNvidiasCpuDiarizer:
+    def test_ships_its_dlls_and_licences_as_one_folder_beside_the_native_engines(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+
+        source = _stage_wheel_source(repo, tmp_path / "scratch")
+
+        shipped = source / "skryb" / "transcription" / "nemo-speech"
+        assert (shipped / "nemo_speech_asr_c.dll").read_bytes() == b"MZ nemo speech"
+        assert (shipped / "ggml-cpu.dll").read_bytes() == b"MZ ggml"
+        assert (shipped / "licenses" / "LICENSE").read_text(encoding="utf-8") == "Apache License 2.0"
+        assert (shipped / "licenses" / "third_party" / "ggml" / "LICENSE").is_file()
+
+    def test_refuses_to_build_an_installer_without_it(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        (repo / "native" / "nemo_speech" / "build" / "nemo_speech_asr_c.dll").unlink()
+
+        with pytest.raises(InstallerBuildError, match=r"native/nemo_speech/fetch\.py"):
+            _stage_wheel_source(repo, tmp_path / "scratch")
+
+
+def _package_data_ships(path: str, patterns: list[str]) -> bool:
+    """Whether a setuptools package-data glob ships *path*: ``*`` stays within one folder."""
+    parts = path.split("/")
+    return any(
+        len(pattern.split("/")) == len(parts) and all(map(fnmatch.fnmatchcase, parts, pattern.split("/")))
+        for pattern in patterns
+    )
+
+
+def test_the_wheel_declares_every_file_of_nvidias_cpu_diarizer_that_fetch_keeps() -> None:
+    import tomllib
+
+    pyproject = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = pyproject["tool"]["setuptools"]["package-data"]["skryb"]
+    kept = [
+        "nemo_speech_asr_c.dll", "ggml-cpu.dll", "msvcp140.dll", "licenses/LICENSE", "licenses/NOTICE",
+        "licenses/THIRD_PARTY_NOTICES.md", "licenses/third_party/ggml/LICENSE", "licenses/third_party/llama.cpp/LICENSE",
+        "licenses/third_party/vcpkg/abseil/LICENSE", "licenses/third_party/vcpkg/utf8-range/LICENSE",
+    ]
+
+    unshipped = [name for name in kept if not _package_data_ships(f"transcription/nemo-speech/{name}", patterns)]
+
+    assert unshipped == []

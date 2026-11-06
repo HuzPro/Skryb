@@ -90,7 +90,8 @@ class HfRepoResolver:
     def __init__(self, api: HfApiProtocol) -> None:
         self._api = api
 
-    def resolve(self, repo_id: str, revision: str = "") -> ResolvedRepo:
+    def resolve(self, repo_id: str, revision: str = "", only: tuple[str, ...] = ()) -> ResolvedRepo:
+        """*only*, when given, keeps exactly those files, even ones the ignore list would skip."""
         # HuggingFace reads ``None`` as "default branch"; an empty string
         # would select the ``/revision/`` endpoint and fail to resolve.
         info = self._api.repo_info(
@@ -101,11 +102,11 @@ class HfRepoResolver:
         return ResolvedRepo(
             requested_revision=revision,
             canonical_commit=canonical_commit,
-            files=self._resolved_files(repo_id, canonical_commit, info),
+            files=self._resolved_files(repo_id, canonical_commit, info, only),
         )
 
     def _resolved_files(
-        self, repo_id: str, commit_sha: str, info: _RepoInfo,
+        self, repo_id: str, commit_sha: str, info: _RepoInfo, only: tuple[str, ...],
     ) -> list[ResolvedFile]:
         files: list[ResolvedFile] = []
         for sibling in info.siblings:
@@ -113,7 +114,7 @@ class HfRepoResolver:
             size = sibling.size
             if size is None:
                 continue
-            if self._is_ignored(filename):
+            if not self._is_wanted(filename, only):
                 continue
             files.append(
                 ResolvedFile(
@@ -138,6 +139,12 @@ class HfRepoResolver:
             f"{repo_id} pinned to {revision} but resolved to "
             f"{canonical_commit}"
         )
+
+    @staticmethod
+    def _is_wanted(filename: str, only: tuple[str, ...]) -> bool:
+        if only:
+            return filename in only
+        return not HfRepoResolver._is_ignored(filename)
 
     @staticmethod
     def _is_ignored(filename: str) -> bool:

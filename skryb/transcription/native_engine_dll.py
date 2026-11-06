@@ -1,6 +1,7 @@
 """Where the native engines are on this machine: ``qasr.dll`` (Qwen3-ASR), ``npk.dll`` (Parakeet TDT)
 and ``nd.dll`` (the meeting diarizer), each with an NVIDIA build beside it
-(``qasr_cuda.dll`` and so on, from ``native/cuda/build.py``).
+(``qasr_cuda.dll`` and so on, from ``native/cuda/build.py``). Also NVIDIA's NeMo-Speech.cpp CPU build, the meeting
+diarizer on computers with neither a supported GPU nor an Intel NPU.
 
 Kept free of heavy imports: the engine registry asks at startup.
 """
@@ -32,6 +33,13 @@ _TDT_LIBRARY = "tdt_cpu.dll" if sys.platform == "win32" else "libtdt_cpu.so"
 SHIPPED_TDT_DLL = Path(__file__).with_name(_TDT_LIBRARY)
 DEV_BUILD_TDT_DLL = Path(__file__).resolve().parents[2] / "native" / "tdt" / "build" / _TDT_LIBRARY
 
+# NVIDIA's NeMo-Speech.cpp CPU build, for the meeting diarizer on computers without a supported GPU: its C ABI DLL
+# and the DLLs beside it, from native/nemo_speech/fetch.py.
+NEMO_SPEECH_DLL_ENV = "NEMO_SPEECH_DLL"
+NEMO_SPEECH_DLL = "nemo_speech_asr_c.dll"
+SHIPPED_NEMO_SPEECH_DLL = Path(__file__).with_name("nemo-speech") / NEMO_SPEECH_DLL
+DEV_BUILD_NEMO_SPEECH_DLL = Path(__file__).resolve().parents[2] / "native" / "nemo_speech" / "build" / NEMO_SPEECH_DLL
+
 # GPU architectures the kernels are compiled for: the RX 9060 XT, and NVIDIA's RTX 30 (sm_86, and the sm_87
 # that runs its code), 40 (sm_89) and 50 (sm_120, sm_121) series.
 NATIVE_GPU_ARCHS = ("gfx1200", "sm_86", "sm_87", "sm_89", "sm_120", "sm_121")
@@ -55,6 +63,10 @@ def native_diarizer_dll(environ: Mapping[str, str] = os.environ, cuda: bool = Fa
 def native_tdt_dll(environ: Mapping[str, str] = os.environ) -> Path | None:
     """The same for the CPU TDT decoder. ``TDT_CPU_DLL`` wins and never falls back."""
     return _find_dll(environ, TDT_DLL_ENV, SHIPPED_TDT_DLL, DEV_BUILD_TDT_DLL, cuda=False)
+
+def nemo_speech_library(environ: Mapping[str, str] = os.environ) -> Path | None:
+    """The NeMo-Speech.cpp C ABI DLL. ``NEMO_SPEECH_DLL`` wins and never falls back."""
+    return _find_dll(environ, NEMO_SPEECH_DLL_ENV, SHIPPED_NEMO_SPEECH_DLL, DEV_BUILD_NEMO_SPEECH_DLL, cuda=False)
 
 
 def cuda_dll_name(dll: Path) -> Path:

@@ -109,3 +109,21 @@ def test_each_build_has_its_own_override(tmp_path, places):
     assert finder.native_engine_dll({"QASR_CUDA_DLL": str(chosen)}) == shipped
     assert finder.native_engine_dll({"QASR_DLL": str(chosen)}, cuda=True) == shipped.with_name("qasr_cuda.dll")
 
+
+
+def test_nvidias_cpu_diarizer_is_found_in_the_installed_wheel_then_the_fetched_build_and_the_variable_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    shipped = tmp_path / "site-packages" / "skryb" / "transcription" / "nemo-speech" / "nemo_speech_asr_c.dll"
+    fetched = tmp_path / "checkout" / "native" / "nemo_speech" / "build" / "nemo_speech_asr_c.dll"
+    chosen = _make(tmp_path / "Zoë's tools" / "nemo_speech_asr_c.dll")
+    monkeypatch.setattr(finder, "SHIPPED_NEMO_SPEECH_DLL", shipped)
+    monkeypatch.setattr(finder, "DEV_BUILD_NEMO_SPEECH_DLL", fetched)
+
+    assert finder.nemo_speech_library({}) is None
+    _make(fetched)
+    assert finder.nemo_speech_library({}) == fetched
+    _make(shipped)
+    assert finder.nemo_speech_library({}) == shipped
+    assert finder.nemo_speech_library({"NEMO_SPEECH_DLL": str(chosen)}) == chosen
+    assert finder.nemo_speech_library({"NEMO_SPEECH_DLL": str(tmp_path / "gone.dll")}) is None

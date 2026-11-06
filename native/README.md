@@ -65,3 +65,14 @@ python native/tdt/build.py   # MSVC on Windows (found through vswhere), gcc else
 The app loads `skryb/transcription/tdt_cpu.dll` when installed, then the build folder; `TDT_CPU_DLL` overrides
 both, and without it the engine decodes through OpenVINO. On a Core 5 320 it decodes 10 s of speech in about
 17 ms against OpenVINO's 44, with the same tokens as NumPy's fp32 decoder on the clips it was checked on.
+
+## CPU diarizer (NVIDIA NeMo-Speech.cpp, experimental)
+
+Computers with neither a supported GPU nor an Intel NPU tell meeting speakers apart with NVIDIA's own CPU build of
+NeMo-Speech.cpp, not code from this repo. `fetch.py` downloads its official Windows release, checks the pinned sha256,
+and keeps the C ABI DLL, the DLLs it links against and its licences in `native/nemo_speech/build`. The installer ships
+that folder as `skryb/transcription/nemo-speech`. Skryb's side is `skryb/meetings/cpu_diarizer.py`.
+
+```bash
+python native/nemo_speech/fetch.py
+```

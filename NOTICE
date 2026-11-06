@@ -3,3 +3,8 @@ Copyright 2026 Huzaifa Tatari
 
 This product includes software developed by Huzaifa Tatari
 (https://github.com/HuzPro/Skryb).
+
+The installed app also ships NVIDIA NeMo-Speech.cpp's Windows CPU build
+(https://github.com/NVIDIA/NeMo-Speech.cpp), Copyright (c) 2026 NVIDIA
+CORPORATION & AFFILIATES, under the Apache License 2.0. Its licence,
+NOTICE and third-party notices are in skryb/transcription/nemo-speech/licenses.
