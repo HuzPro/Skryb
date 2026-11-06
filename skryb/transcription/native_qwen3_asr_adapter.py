@@ -66,7 +66,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 
     def load_model(self) -> None:
         started_at = time.perf_counter()
-        packed = packed_model_path(self._snapshot)
+        packed = self._packed_path()
         if not packed.exists():
             self._pack_snapshot(packed)
         if self._cuda:
@@ -100,7 +100,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         if not hasattr(lib, "qasr_transcribe_prompted"):
             self._warn_unprompted_once()
             return self.transcribe(audio)
-        prefix, suffix = (np.array(self._token_ids(text), np.int32) for text in prompt_text(context, language))
+        prefix, suffix = (np.array(self._token_ids(text), np.int32) for text in self._prompt(context, language))
         ints = ctypes.POINTER(ctypes.c_int)
         return self._decoded(lambda: lib.qasr_transcribe_prompted(
             handle, samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), samples.size,
@@ -123,12 +123,21 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         _logger.debug("native qwen3-asr %s", self._stats())
         text = self._text.raw[:length].decode("utf-8", errors="replace")
         return TranscriptionResult(
-            # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
-            text=romanize(self._with_heard_question(text, language)),
+            text=self._finish(text, language),
             language=language or "",
             language_probability=0.0,
             transcription_seconds=time.perf_counter() - started_at,
         )
+
+    def _packed_path(self) -> Path:
+        return packed_model_path(self._snapshot)
+
+    def _prompt(self, context: str | None, language: str | None) -> tuple[str, str]:
+        return prompt_text(context, language)
+
+    def _finish(self, text: str, language: str | None) -> str:
+        # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
+        return romanize(self._with_heard_question(text, language))
 
     def _with_heard_question(self, text: str, language: str | None) -> str:
         """The final full stop as a question mark when the engine nearly chose one."""

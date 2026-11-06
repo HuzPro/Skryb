@@ -148,6 +148,33 @@ QWEN3_ASR_MODELS: dict[str, ModelInfo] = {
 }
 
 
+_JAIS_ASR_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"native_jais_asr": 100, "openvino_jais_asr": 90},
+)
+_JAIS_ASR_NPU_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
+    {"openvino_jais_asr": 110},
+)
+
+# Jais-ASR (IFM / MBZUAI, Oct 2026): the most accurate open model on Gulf Arabic, and on Arabic overall, on
+# the Open Universal Arabic ASR and QCRI AURA leaderboards. English words inside Arabic stay in English. The
+# native engine runs it packed in 4 bits, OpenVINO in 8. Pinned: the packer is written against this checkpoint.
+JAIS_ASR_MODELS: dict[str, ModelInfo] = {
+    "jais-asr": ModelInfo(
+        name="jais-asr",
+        size_mb=11460,
+        description="Jais-ASR: Arabic in every dialect, Gulf best, English words kept in English",
+        repo_id="IFM/Jais-ASR",
+        revision="1323995fa189c479369a3929be0e95039eba5cba",
+        compatible_engines=("native_jais_asr", "openvino_jais_asr"),
+        engine_priorities=_JAIS_ASR_ENGINE_PRIORITIES,
+        npu_engine_priorities=_JAIS_ASR_NPU_ENGINE_PRIORITIES,
+        needs="A GPU with about 6 GB of VRAM free, or an Intel NPU; Arabic only",
+    ),
+}
+# The models that hear Arabic, best first.
+ARABIC_MODELS = ("jais-asr", "qwen3-asr-1.7b")
+
+
 _NEMOTRON_STREAMING_ENGINE_PRIORITIES: Mapping[EngineId, int] = MappingProxyType(
     {"nemotron_streaming": 100},
 )
@@ -166,7 +193,7 @@ NEMOTRON_STREAMING_MODELS: dict[str, ModelInfo] = {
 
 
 ALL_MODELS: dict[str, ModelInfo] = {
-    **PARAKEET_MODELS, **PHONON2_MODELS, **NEMOTRON_STREAMING_MODELS, **QWEN3_ASR_MODELS,
+    **PARAKEET_MODELS, **PHONON2_MODELS, **NEMOTRON_STREAMING_MODELS, **QWEN3_ASR_MODELS, **JAIS_ASR_MODELS,
 }
 
 

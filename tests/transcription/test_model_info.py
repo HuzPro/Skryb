@@ -8,6 +8,7 @@ from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.transcription.model_info import (
     ALL_MODELS,
     DEFAULT_MODEL,
+    JAIS_ASR_MODELS,
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     PHONON2_MODELS,
@@ -90,6 +91,7 @@ class TestPinnedRevisions:
         "parakeet-ultra": "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b",
         "phonon-2.5-english": "da200358d638886bc96c758c672ad5568828b119",
         "qwen3-asr-1.7b": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
+        "jais-asr": "1323995fa189c479369a3929be0e95039eba5cba",
     }
 
     @pytest.mark.parametrize(
@@ -115,6 +117,7 @@ class TestModelCatalog:
             | set(PHONON2_MODELS)
             | set(NEMOTRON_STREAMING_MODELS)
             | set(QWEN3_ASR_MODELS)
+            | set(JAIS_ASR_MODELS)
         )
 
     def test_default_is_parakeet_ultra(self) -> None:

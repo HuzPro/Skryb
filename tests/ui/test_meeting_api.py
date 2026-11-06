@@ -43,9 +43,9 @@ class MeetingRig:
         self.server.start()
         files = MeetingModelFiles(
             language=lambda: "en",
-            meeting_only_installed=lambda name: self.installed[name],
+            meeting_only_installed=lambda name: self.installed.get(name, False),
             download_meeting_only=self.downloads.append,
-            is_installed=lambda name: self.installed[name],
+            is_installed=lambda name: self.installed.get(name, False),
             start_download=self.downloads.append,
         )
         self.recorder = MeetingRecorder(
@@ -133,7 +133,9 @@ def test_the_overview_lists_saved_meetings_the_folder_and_whether_the_models_are
     assert overview["recording"] is False and overview["models_ready"] is True
     assert overview["folder"] == str(rig.root)
     assert [m["id"] for m in overview["meetings"]] == ["2026-10-16 Ops Onboarding"]
-    assert [m["name"] for m in overview["models"]] == ["nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex"]
+    assert [m["name"] for m in overview["models"]] == [
+        "nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex", "jais-asr",
+    ]
     assert all(m["download"] is None for m in overview["models"])
 
 

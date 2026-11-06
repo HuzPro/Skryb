@@ -218,9 +218,9 @@ def test_a_draft_of_thousands_of_tokens_with_scattered_edits_lets_most_of_them_t
 
 
 def _on_cpu(monkeypatch) -> None:
-    monkeypatch.setattr(adapter_module, "_compile_encoder", lambda core, path, cache: (core.compile_model(str(path), "CPU"), "CPU"))
+    monkeypatch.setattr(adapter_module, "_compile_encoder", lambda core, path, cache, name: (core.compile_model(str(path), "CPU"), "CPU"))
     monkeypatch.setattr(adapter_module, "_compile_decoder",
-                        lambda core, path, cache: (core.compile_model(str(path), "CPU"), "CPU", None))
+                        lambda core, path, cache, name: (core.compile_model(str(path), "CPU"), "CPU", None))
 
 
 @pytest.fixture

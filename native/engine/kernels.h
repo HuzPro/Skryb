@@ -38,8 +38,11 @@ struct AttnArgs {
     float* part_ml = nullptr;
 };
 
-// 4-bit weights for the speculative draft: per row, groups of 32 along K, nibble = q + 8, fp16 scale.
+// 4-bit weights (the speculative draft, and the main weights of a model packed in 4 bits): per row, groups of
+// 32 along K, nibble = q + 8, fp16 scale.
 struct Q4 { const uint4* q; const f16* s; };
+// The longest row gemv_q4 stages: the down projection of a 10240-wide MLP.
+constexpr int kMaxQ4K = 10240;
 
 // C[M][N] = A[M][K] * W[N][K]^T, K a multiple of 32 (8 when M <= 8).
 void gemm(hipStream_t s, const bf16* A, int lda, const bf16* W, int M, int N, int K, const Epi& e);
@@ -54,21 +57,27 @@ void conv1(hipStream_t s, const bf16* melT, int fpad, int chunk0, int chunks, co
 void log_mel(hipStream_t s, const float* pcm, int n, int frames, int fpad, const float* tables,
              const float* filters, float* scratch, unsigned* gmax, bf16* melT);
 void layer_norm(hipStream_t s, const bf16* x, const bf16* w, const bf16* b, bf16* y, int rows, int d);
-void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int rows, int d);
+// groups > 1 normalises each d / groups wide slice of a row on its own (a grouped RMSNorm).
+void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int rows, int d, int groups = 1);
+// Rope over q_heads query and kv_heads key heads of 128, after a per-head RMSNorm when qn is set; keys and
+// values go to the caches.
 void qk_norm_rope(hipStream_t s, bf16* qkv, const bf16* qn, const bf16* kn, bf16* kc, bf16* vc,
-                  int rows, int pos0, const float* inv_freq);
+                  int rows, int pos0, const float* inv_freq, int q_heads = 16, int kv_heads = 8);
 void attention(hipStream_t s, const AttnArgs& a, int head_dim);
 // Merges split-key partials for rows [0, rows) into a.o.
 void attention_combine(hipStream_t s, const AttnArgs& a, int rows, int splits, int head_dim = 128);
 void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, f16* scale);
 // One activation row times 4-bit weights, same epilogue rules as gemm.
 void gemv_q4(hipStream_t s, const bf16* x, const Q4& w, int N, int K, const Epi& e);
+// The 4-bit weights as bf16 [N][K], for a GEMM over many rows.
+void dequant_q4(hipStream_t s, const Q4& w, int N, int K, bf16* out);
 void silu_mul(hipStream_t s, const bf16* gu, bf16* out, int rows, int d);
 // Decoder input rows: ids[r] >= 0 takes that embedding row, -1 takes the next audio row.
 void embed(hipStream_t s, const int* ids, const bf16* table, const bf16* audio, int audio_start, bf16* out, int rows, int d);
+void embed_q4(hipStream_t s, const int* ids, const Q4& table, const bf16* audio, int audio_start, bf16* out, int rows, int d);
 void argmax_ids(hipStream_t s, const unsigned long long* keys, int* ids, int rows);
-// fp32 logits of two tokens for each of M normalised rows (d = 2048): out[2 m + j] = x[m] . W[id_j].
-void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out);
+// fp32 logits of two tokens for each of M normalised rows: out[2 m + j] = x[m] . W[id_j].
+void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out, int d = 2048);
 // Runs the GEMM paths and attention on small random inputs against a CPU reference; empty when they agree,
 // else what was off. Engines call it at load, so a GPU these kernels misbehave on refuses to load instead of
 // transcribing nonsense.

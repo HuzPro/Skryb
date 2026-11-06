@@ -14,19 +14,22 @@ export const LANGUAGES = [
   { value: "en", label: "English" },
   { value: "ar", label: "Arabic" },
 ];
-// Only Qwen3-ASR knows Arabic.
-const ARABIC_MODEL = "qwen3-asr-1.7b";
+// The models that hear Arabic, best first (the core's `ARABIC_MODELS`); Jais-ASR hears nothing else as well.
+const ARABIC_MODELS = ["jais-asr", "qwen3-asr-1.7b"];
+const ARABIC_ONLY = "jais-asr";
 
-/** Picking Arabic picks Qwen3-ASR, which only runs in batch mode. */
-export function withLanguage(settings: Settings, language: string): Settings {
-  return language === "ar"
-    ? { ...settings, language, transcription_mode: "batch", model_size: ARABIC_MODEL, engine: "auto" }
-    : { ...settings, language };
+/** Picking Arabic keeps a downloaded model that hears it, else picks the best one downloaded; both run in batch mode. */
+export function withLanguage(settings: Settings, language: string, models: Model[]): Settings {
+  if (language !== "ar") return { ...settings, language };
+  const installed = ARABIC_MODELS.filter((name) => models.some((model) => model.name === name && model.installed));
+  if (installed.includes(settings.model_size)) return { ...settings, language, transcription_mode: "batch" };
+  return { ...settings, language, transcription_mode: "batch", model_size: installed[0] ?? settings.model_size, engine: "auto" };
 }
 
-/** Arabic goes back to English when the model changes to one that can't hear it. */
+/** Jais-ASR means Arabic; any other model that can't hear Arabic means English. */
 export function fitLanguageToModel(settings: Settings): Settings {
-  return settings.language === "ar" && settings.model_size !== ARABIC_MODEL ? { ...settings, language: "en" } : settings;
+  if (settings.model_size === ARABIC_ONLY) return settings.language === "ar" ? settings : { ...settings, language: "ar" };
+  return settings.language === "ar" && !ARABIC_MODELS.includes(settings.model_size) ? { ...settings, language: "en" } : settings;
 }
 
 const TIERS = ["Small", "Medium", "Large"];
@@ -76,7 +79,7 @@ export function TranscriptionPage() {
       ? ""
       : "Needs a CUDA or ROCm GPU, and none was detected.";
   const shown = byTier(models.filter((model) => fitsMode(model, draft.transcription_mode)));
-  const arabicReady = models.some((model) => model.name === ARABIC_MODEL && model.installed);
+  const arabicReady = models.some((model) => ARABIC_MODELS.includes(model.name) && model.installed);
   const languages = LANGUAGES.map((language) => (language.value === "ar" && !arabicReady ? { ...language, disabled: true } : language));
   const candidates = engines?.candidates ?? [];
   const engineOptions = [
@@ -119,13 +122,18 @@ export function TranscriptionPage() {
       </Section>
       <Section title="Speech">
         <Rows>
-          <Row title="Language" description={arabicReady ? "The language you speak in. Arabic uses the Large model." : "The language you speak in. Arabic needs the Large model: download it above."}>
+          <Row
+            title="Language"
+            description={arabicReady
+              ? "The language you speak in. Arabic runs on Jais-ASR when it is downloaded, else on the Large model."
+              : "The language you speak in. Arabic needs Jais-ASR or the Large model: download one above."}
+          >
             <Select
               label="Language"
               className="w-56"
               value={draft.language}
               options={languages.some((language) => language.value === draft.language) ? languages : [...languages, { value: draft.language, label: draft.language }]}
-              onChange={(language) => editSettings((current) => withLanguage(current, language))}
+              onChange={(language) => editSettings((current) => withLanguage(current, language, models))}
             />
           </Row>
           <Row

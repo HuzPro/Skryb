@@ -3,7 +3,7 @@ from typing import Literal, get_args
 
 EngineId = Literal[
     "nano_parakeet", "nemotron_streaming", "phonon2_cpu", "native_qwen3_asr", "openvino_parakeet",
-    "native_parakeet", "qwen3_asr", "openvino_qwen3_asr",
+    "native_parakeet", "qwen3_asr", "openvino_qwen3_asr", "native_jais_asr", "openvino_jais_asr",
 ]
 HardwareKind = Literal["nvidia_cuda", "amd_rocm", "cpu"]
 ALL_HARDWARE_KINDS: frozenset[HardwareKind] = frozenset(get_args(HardwareKind))

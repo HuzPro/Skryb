@@ -1,4 +1,7 @@
-"""Qwen3-ASR as OpenVINO graphs, built straight from ``model.safetensors`` with no torch.
+"""Qwen3-ASR and Jais-ASR as OpenVINO graphs, built straight from the safetensors with no torch.
+
+Jais-ASR is the same layout grown: a wider, deeper audio tower, an adapter into its decoder, a decoder with
+grouped RMSNorms and no per-head norms, and an untied head.
 
 Two graphs, both written beside the download once and compiled for the NPU from then on:
 
@@ -19,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from skryb.transcription.openvino_graph import Graph, Safetensors, opset, save
+from skryb.transcription.openvino_graph import Graph, Safetensors, open_checkpoint, opset, save
 
 # Qwen3-ASR's audio windowing, from the model's config: 100 mel frames a chunk, 13 tokens a chunk, 8 chunks a window.
 CHUNK_FRAMES = 100
@@ -30,6 +33,7 @@ ENCODER_FILENAME = "audio-encoder.xml"
 DECODER_FILENAME = "text-decoder.xml"
 _AUDIO_PREFIX = "model.audio_tower."
 _PROJECTOR_PREFIX = "model.multi_modal_projector."
+_JAIS_ADAPTER_PREFIX = "model.embed_audio."
 TEXT_PREFIX = "model.language_model."
 EMBEDDING = TEXT_PREFIX + "embed_tokens.weight"
 
@@ -49,15 +53,16 @@ def window_tokens(frames: int) -> int:
 def build(openvino: object, snapshot: Path, target: Path) -> None:
     """Write both graphs for *snapshot* into *target*; each ``.xml`` lands last, so a half-written one never loads."""
     config = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
-    weights = Safetensors(snapshot / "model.safetensors")
+    weights = open_checkpoint(snapshot)
     target.mkdir(parents=True, exist_ok=True)
     save(openvino, build_audio(openvino, weights, config), target / ENCODER_FILENAME, compress_to_fp16=True)
-    save(openvino, build_decoder(openvino, weights, config["text_config"]), target / DECODER_FILENAME,
-          compress_to_fp16=False)
+    jais = config.get("model_type") == "jais_asr"
+    save(openvino, build_decoder(openvino, weights, config["text_config"], head="lm_head.weight" if jais else None),
+         target / DECODER_FILENAME, compress_to_fp16=False)
 
 
 def build_audio(openvino: object, weights: Safetensors, config: dict) -> object:
-    """mel [1, 128, 800] and the window's real token count -> [104, 2048] audio embeddings for the decoder."""
+    """mel [1, 128, 800] and the window's real token count -> [104, hidden] audio embeddings for the decoder."""
     g, ops = Graph(openvino, weights), opset(openvino)
     audio = config["audio_config"]
     bins, d_model, heads = audio["num_mel_bins"], audio["d_model"], audio["encoder_attention_heads"]
@@ -74,7 +79,7 @@ def build_audio(openvino: object, weights: Safetensors, config: dict) -> object:
     freq = (((bins + 1) // 2 + 1) // 2 + 1) // 2
     x = ops.reshape(ops.transpose(x, g.const([0, 3, 1, 2])), g.const([WINDOW_CHUNKS, TOKENS_PER_CHUNK, channels * freq]), False)
     x = g.dense(x, f"{_AUDIO_PREFIX}conv_out", bias=False)
-    x = ops.add(x, g.const(_sinusoids(audio["max_position_embeddings"], d_model)[:TOKENS_PER_CHUNK]))
+    x = ops.add(x, g.const(_sinusoids(TOKENS_PER_CHUNK, d_model)))
     length = WINDOW_CHUNKS * TOKENS_PER_CHUNK
     x = ops.reshape(x, g.const([1, length, d_model]), False)
 
@@ -91,7 +96,12 @@ def build_audio(openvino: object, weights: Safetensors, config: dict) -> object:
         h = g.layer_norm(x, p + "final_layer_norm")
         x = ops.add(x, g.dense(ops.gelu(g.dense(h, p + "fc1"), "erf"), p + "fc2"))
     x = g.layer_norm(x, f"{_AUDIO_PREFIX}ln_post")
-    x = g.dense(ops.gelu(g.dense(x, f"{_PROJECTOR_PREFIX}linear_1"), "erf"), f"{_PROJECTOR_PREFIX}linear_2")
+    if config.get("model_type") == "jais_asr":
+        x = g.dense(ops.gelu(g.dense(x, f"{_AUDIO_PREFIX}proj1"), "erf"), f"{_AUDIO_PREFIX}proj2")
+        x = g.layer_norm(x, f"{_JAIS_ADAPTER_PREFIX}norm")
+        x = g.dense(ops.gelu(g.dense(x, f"{_JAIS_ADAPTER_PREFIX}linear_1"), "erf"), f"{_JAIS_ADAPTER_PREFIX}linear_2")
+    else:
+        x = g.dense(ops.gelu(g.dense(x, f"{_PROJECTOR_PREFIX}linear_1"), "erf"), f"{_PROJECTOR_PREFIX}linear_2")
     out = ops.reshape(x, g.const([length, -1]), False)
     out.output(0).get_tensor().set_names({"audio"})
     return openvino.Model([ops.result(out)], [mel, valid], "qwen3-asr-audio")
@@ -105,14 +115,20 @@ def _sinusoids(length: int, channels: int) -> np.ndarray:
     return np.concatenate([np.sin(scaled), np.cos(scaled)], axis=1).astype(np.float32)
 
 
-def build_decoder(openvino: object, weights: Safetensors, config: dict, prefix: str = TEXT_PREFIX) -> object:
-    """inputs_embeds, attention_mask, position_ids, beam_idx -> logits, with each layer's K/V kept as state."""
+def build_decoder(
+    openvino: object, weights: Safetensors, config: dict, prefix: str = TEXT_PREFIX, head: str | None = None,
+) -> object:
+    """inputs_embeds, attention_mask, position_ids, beam_idx -> logits, with each layer's K/V kept as state.
+
+    *head* names an untied output head; without one the head is the embedding table.
+    """
     from openvino.op.util import Variable, VariableInfo
 
     g, ops, f32, i64 = Graph(openvino, weights), opset(openvino), openvino.Type.f32, openvino.Type.i64
     hidden, layers = config["hidden_size"], config["num_hidden_layers"]
     heads, kv_heads, head_dim = config["num_attention_heads"], config["num_key_value_heads"], config["head_dim"]
     eps, theta = config["rms_norm_eps"], config["rope_parameters"]["rope_theta"]
+    qk_norm, groups = config.get("query_key_norm", True), config.get("layernorm_num_groups", 1)
 
     embeds = g.parameter([1, -1, hidden], f32, "inputs_embeds")
     mask = g.parameter([1, -1], i64, "attention_mask")
@@ -169,18 +185,21 @@ def build_decoder(openvino: object, weights: Safetensors, config: dict, prefix: 
     x = embeds
     for i in range(layers):
         p = f"{prefix}layers.{i}."
-        h = g.rms(x, p + "input_layernorm.weight", eps)
-        q = rotate(g.rms(split(g.int8_linear(h, p + "self_attn.q_proj.weight"), heads), p + "self_attn.q_norm.weight", eps))
-        k = rotate(g.rms(split(g.int8_linear(h, p + "self_attn.k_proj.weight"), kv_heads), p + "self_attn.k_norm.weight", eps))
+        h = g.rms(x, p + "input_layernorm.weight", eps, groups)
+        q = split(g.int8_linear(h, p + "self_attn.q_proj.weight"), heads)
+        k = split(g.int8_linear(h, p + "self_attn.k_proj.weight"), kv_heads)
+        if qk_norm:
+            q, k = g.rms(q, p + "self_attn.q_norm.weight", eps), g.rms(k, p + "self_attn.k_norm.weight", eps)
+        q, k = rotate(q), rotate(k)
         v = split(g.int8_linear(h, p + "self_attn.v_proj.weight"), kv_heads)
         keys, values = cached(k, caches[i][0]), cached(v, caches[i][1])
         o = ops.scaled_dot_product_attention(q, expand(keys), expand(values), allowed, causal=False)
         o = ops.reshape(ops.transpose(o, g.const([0, 2, 1, 3])), g.const([1, -1, heads * head_dim]), False)
         x = ops.add(x, g.int8_linear(o, p + "self_attn.o_proj.weight"))
-        h = g.rms(x, p + "post_attention_layernorm.weight", eps)
+        h = g.rms(x, p + "post_attention_layernorm.weight", eps, groups)
         gate, up = g.int8_linear(h, p + "mlp.gate_proj.weight"), g.int8_linear(h, p + "mlp.up_proj.weight")
         x = ops.add(x, g.int8_linear(ops.multiply(ops.swish(gate), up), p + "mlp.down_proj.weight"))
-    # Qwen3-ASR ties its output head to the embedding table.
-    logits = g.int8_linear(g.rms(x, f"{prefix}norm.weight", eps), f"{prefix}embed_tokens.weight")
+    # Qwen3-ASR ties its output head to the embedding table; Jais-ASR has a head of its own.
+    logits = g.int8_linear(g.rms(x, f"{prefix}norm.weight", eps, groups), head or f"{prefix}embed_tokens.weight")
     logits.output(0).get_tensor().set_names({"logits"})
     return openvino.Model([ops.result(logits)], sinks, [embeds, mask, positions, beam], variables, "qwen3-text-decoder")

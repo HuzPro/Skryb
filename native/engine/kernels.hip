@@ -335,41 +335,54 @@ __global__ __launch_bounds__(256) void layer_norm_kernel(const bf16* __restrict_
     }
 }
 
+// One block per (row, group): each group of D columns is normalised on its own, with its own slice of w.
 template <int D>
-__global__ __launch_bounds__(256) void rms_norm_kernel(const bf16* __restrict__ x, int ldx, const bf16* __restrict__ w, bf16* y) {
+__global__ __launch_bounds__(256) void rms_norm_kernel(const bf16* __restrict__ x, int ldx, const bf16* __restrict__ w, bf16* y,
+                                                       int groups) {
     constexpr int PER = D / 256;
     __shared__ float red[8];
-    const bf16* xr = x + (size_t)blockIdx.x * ldx;
+    const int row = blockIdx.x / groups, g = blockIdx.x - row * groups;
+    const bf16* xr = x + (size_t)row * ldx + g * D;
+    const bf16* wg = w + g * D;
     float v[PER], s = 0.f;
     for (int i = 0; i < PER; i++) { v[i] = f(xr[threadIdx.x * PER + i]); s += v[i] * v[i]; }
     const float r = rsqrtf(block_sum(s, red) / D + 1e-6f);
     for (int i = 0; i < PER; i++) {
         int c = threadIdx.x * PER + i;
-        y[(size_t)blockIdx.x * D + c] = b(f(w[c]) * f(b(v[i] * r)));
+        y[(size_t)blockIdx.x * D + c] = b(f(wg[c]) * f(b(v[i] * r)));
     }
 }
 
-// grid (rows, 32): slots 0-15 query heads, 16-23 key heads, 24-31 value heads; block 128 = head_dim.
+// grid (rows, qh + 2 kvh): query heads, then key heads, then value heads; block 128 = head_dim. Each row of
+// qkv is [qh][128] [kvh][128] [kvh][128]; keys and values land in the caches. NORM: a per-head RMSNorm first.
+// The norm is a template switch, not a runtime branch: as a branch it changed the code Qwen3-ASR runs, and 3 of
+// 24 clips transcribed differently.
+template <bool NORM>
 __global__ __launch_bounds__(128) void qk_norm_rope_kernel(bf16* qkv, const bf16* __restrict__ qn, const bf16* __restrict__ kn,
-                                                           bf16* kc, bf16* vc, int pos0, const float* __restrict__ inv_freq) {
+                                                           bf16* kc, bf16* vc, int pos0, const float* __restrict__ inv_freq,
+                                                           int qh, int kvh) {
     __shared__ float red[4], ys[128];
-    const int r = blockIdx.x, slot = blockIdx.y, d = threadIdx.x, pos = pos0 + r;
-    bf16* row = qkv + (size_t)r * 4096;
-    if (slot >= 24) {
-        vc[(size_t)pos * 1024 + (slot - 24) * 128 + d] = row[3072 + (slot - 24) * 128 + d];
+    const int r = blockIdx.x, slot = blockIdx.y, d = threadIdx.x, pos = pos0 + r, kvw = kvh * 128;
+    bf16* row = qkv + (size_t)r * (qh + 2 * kvh) * 128;
+    if (slot >= qh + kvh) {
+        const int h = slot - qh - kvh;
+        vc[(size_t)pos * kvw + h * 128 + d] = row[(qh + kvh) * 128 + h * 128 + d];
         return;
     }
     const float x = f(row[slot * 128 + d]);
-    const float rr = rsqrtf(block_sum(x * x, red) / 128.f + 1e-6f);
-    const float y = f(b(f(slot < 16 ? qn[d] : kn[d]) * f(b(x * rr))));
+    float y = x;
+    if constexpr (NORM) {
+        const float rr = rsqrtf(block_sum(x * x, red) / 128.f + 1e-6f);
+        y = f(b(f(slot < qh ? qn[d] : kn[d]) * f(b(x * rr))));
+    }
     ys[d] = y;
     __syncthreads();
     const float partner = d < 64 ? -ys[d + 64] : ys[d - 64];
     const float fr = (float)pos * inv_freq[d & 63];
     const float c = f(b(cosf(fr))), s = f(b(sinf(fr)));
     const bf16 out = b(f(b(y * c)) + f(b(partner * s)));
-    if (slot < 16) row[slot * 128 + d] = out;
-    else kc[(size_t)pos * 1024 + (slot - 16) * 128 + d] = out;
+    if (slot < qh) row[slot * 128 + d] = out;
+    else kc[(size_t)pos * kvw + (slot - qh) * 128 + d] = out;
 }
 
 // ---- attention: one wave per (16 query rows, head), online softmax over 16-key tiles ----
@@ -503,7 +516,7 @@ __device__ __forceinline__ float dot32_q4(uint4 qv, const uint4* x) {
 
 // 256 threads, 2 output columns per wave, the activation row staged in LDS.
 __global__ __launch_bounds__(256) void gemv_q4_kernel(const bf16* __restrict__ X, Q4 w, int N, int K, Epi e) {
-    __shared__ uint4 xs[6144 / 8];
+    __shared__ uint4 xs[kMaxQ4K / 8];
     __shared__ unsigned long long best[8];
     const int lane = threadIdx.x & 31, wave = threadIdx.x >> 5, n0 = blockIdx.x * 16 + wave * 2, groups = K / 32;
     for (int i = threadIdx.x; i < K / 8; i += 256) xs[i] = ((const uint4*)X)[i];
@@ -539,6 +552,36 @@ __global__ __launch_bounds__(256) void gemv_q4_kernel(const bf16* __restrict__ X
     }
 }
 
+// Each weight as bf16 for the prefill GEMM: one thread per group of 32.
+__global__ void dequant_q4_kernel(Q4 w, int N, int K, bf16* out) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x, groups = K / 32;
+    if (i >= N * groups) return;
+    const uint4 qv = w.q[i];
+    const unsigned qw[4] = {qv.x, qv.y, qv.z, qv.w};
+    const float sc = (float)w.s[i];
+    bf16* dst = out + (size_t)i * 32;
+    for (int j = 0; j < 32; j++) dst[j] = b(sc * (float)((int)((qw[j >> 3] >> ((j & 7) * 4)) & 15) - 8));
+}
+
+// Like embed_kernel, with the token rows read from 4-bit weights.
+__global__ void embed_q4_kernel(const int* __restrict__ ids, Q4 table, const bf16* __restrict__ audio, int audio_start,
+                                bf16* out, int d) {
+    const int r = blockIdx.x, id = ids[r];
+    bf16* dst = out + (size_t)r * d;
+    if (id < 0) {
+        const bf16* src = audio + (size_t)(r - audio_start) * d;
+        for (int i = threadIdx.x; i < d; i += blockDim.x) dst[i] = src[i];
+        return;
+    }
+    const int groups = d / 32;
+    for (int i = threadIdx.x; i < d; i += blockDim.x) {
+        const int g = i >> 5, j = i & 31;
+        const uint4 qv = table.q[(size_t)id * groups + g];
+        const unsigned qw[4] = {qv.x, qv.y, qv.z, qv.w};
+        dst[i] = b((float)table.s[(size_t)id * groups + g] * (float)((int)((qw[j >> 3] >> ((j & 7) * 4)) & 15) - 8));
+    }
+}
+
 __global__ void silu_mul_kernel(const bf16* __restrict__ gu, bf16* out, int rows, int d) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= rows * d) return;
@@ -561,13 +604,13 @@ __global__ void argmax_ids_kernel(const unsigned long long* keys, int* ids, int 
 }
 
 __global__ __launch_bounds__(256) void pair_logits_kernel(const bf16* __restrict__ x, const bf16* __restrict__ W,
-                                                          int id0, int id1, float* out) {
+                                                          int id0, int id1, float* out, int d) {
     __shared__ float red[8];
     const int m = blockIdx.x, j = blockIdx.y;
-    const bf16* xr = x + (size_t)m * 2048;
-    const bf16* wr = W + (size_t)(j ? id1 : id0) * 2048;
+    const bf16* xr = x + (size_t)m * d;
+    const bf16* wr = W + (size_t)(j ? id1 : id0) * d;
     float acc = 0.f;
-    for (int i = threadIdx.x; i < 2048; i += 256) acc = fmaf(f(xr[i]), f(wr[i]), acc);
+    for (int i = threadIdx.x; i < d; i += 256) acc = fmaf(f(xr[i]), f(wr[i]), acc);
     acc = block_sum(acc, red);
     if (threadIdx.x == 0) out[m * 2 + j] = acc;
 }
@@ -662,15 +705,22 @@ void layer_norm(hipStream_t s, const bf16* x, const bf16* w, const bf16* bb, bf1
     if (d == 1024) layer_norm_kernel<1024><<<rows, 256, 0, s>>>(x, w, bb, y);
     else if (d == 1280) layer_norm_kernel<1280><<<rows, 256, 0, s>>>(x, w, bb, y);
     else if (d == 512) layer_norm_kernel<512><<<rows, 256, 0, s>>>(x, w, bb, y);
+    else if (d == 2048) layer_norm_kernel<2048><<<rows, 256, 0, s>>>(x, w, bb, y);
+    else throw std::runtime_error("layer_norm: no kernel for width " + std::to_string(d));
 }
 
-void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int rows, int d) {
-    if (d == 2048) rms_norm_kernel<2048><<<rows, 256, 0, s>>>(x, ldx, w, y);
+void rms_norm(hipStream_t s, const bf16* x, int ldx, const bf16* w, bf16* y, int rows, int d, int groups) {
+    const int D = d / groups;
+    if (D == 2048) rms_norm_kernel<2048><<<rows * groups, 256, 0, s>>>(x, ldx, w, y, groups);
+    else if (D == 1280) rms_norm_kernel<1280><<<rows * groups, 256, 0, s>>>(x, ldx, w, y, groups);
+    else throw std::runtime_error("rms_norm: no kernel for width " + std::to_string(D));
 }
 
 void qk_norm_rope(hipStream_t s, bf16* qkv, const bf16* qn, const bf16* kn, bf16* kc, bf16* vc, int rows, int pos0,
-                  const float* inv_freq) {
-    qk_norm_rope_kernel<<<dim3(rows, 32), 128, 0, s>>>(qkv, qn, kn, kc, vc, pos0, inv_freq);
+                  const float* inv_freq, int q_heads, int kv_heads) {
+    const dim3 grid(rows, q_heads + 2 * kv_heads);
+    if (qn) qk_norm_rope_kernel<true><<<grid, 128, 0, s>>>(qkv, qn, kn, kc, vc, pos0, inv_freq, q_heads, kv_heads);
+    else qk_norm_rope_kernel<false><<<grid, 128, 0, s>>>(qkv, qn, kn, kc, vc, pos0, inv_freq, q_heads, kv_heads);
 }
 
 void attention(hipStream_t s, const AttnArgs& a, int head_dim) {
@@ -689,7 +739,16 @@ void quantize_q4(hipStream_t s, const bf16* w, int N, int K, uint4* q, f16* scal
 }
 
 void gemv_q4(hipStream_t s, const bf16* x, const Q4& w, int N, int K, const Epi& e) {
+    if (K > kMaxQ4K) throw std::runtime_error("gemv_q4: K " + std::to_string(K) + " is past " + std::to_string(kMaxQ4K));
     gemv_q4_kernel<<<cdiv(N, 16), 256, 0, s>>>(x, w, N, K, e);
+}
+
+void dequant_q4(hipStream_t s, const Q4& w, int N, int K, bf16* out) {
+    dequant_q4_kernel<<<cdiv(N * (K / 32), 256), 256, 0, s>>>(w, N, K, out);
+}
+
+void embed_q4(hipStream_t s, const int* ids, const Q4& table, const bf16* audio, int audio_start, bf16* out, int rows, int d) {
+    embed_q4_kernel<<<rows, 256, 0, s>>>(ids, table, audio, audio_start, out, d);
 }
 
 void silu_mul(hipStream_t s, const bf16* gu, bf16* out, int rows, int d) {
@@ -700,8 +759,8 @@ void embed(hipStream_t s, const int* ids, const bf16* table, const bf16* audio, 
     embed_kernel<<<rows, 256, 0, s>>>(ids, table, audio, audio_start, out, d);
 }
 
-void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out) {
-    pair_logits_kernel<<<dim3(M, 2), 256, 0, s>>>(x, W, id0, id1, out);
+void pair_logits(hipStream_t s, const bf16* x, int M, const bf16* W, int id0, int id1, float* out, int d) {
+    pair_logits_kernel<<<dim3(M, 2), 256, 0, s>>>(x, W, id0, id1, out, d);
 }
 
 void argmax_ids(hipStream_t s, const unsigned long long* keys, int* ids, int rows) {
@@ -835,6 +894,56 @@ float attention_error(DeviceScratch& dev, int D, bool causal) {
     return relative_error(dev.download(a.o, ref.size()), ref);
 }
 
+// 4-bit weights quantized on the GPU, then multiplied (gemv_q4) and unpacked (dequant_q4) against the CPU
+// reading the same nibbles and scales back. Returns the worse of the two errors.
+float q4_error(DeviceScratch& dev, int N, int K) {
+    const Bf16Data w = random_bf16((size_t)N * K, 11 + N), x = random_bf16(K, 12 + K);
+    uint4* q = dev.zeros<uint4>((size_t)N * K / 32);
+    f16* sc = dev.zeros<f16>((size_t)N * K / 32);
+    quantize_q4(dev.s, (const bf16*)dev.upload(w.bits), N, K, q, sc);
+    Epi e;
+    e.out = dev.zeros<bf16>(N);
+    e.ldo = N;
+    gemv_q4(dev.s, (const bf16*)dev.upload(x.bits), Q4{q, sc}, N, K, e);
+    bf16* unpacked = dev.zeros<bf16>((size_t)N * K);
+    dequant_q4(dev.s, Q4{q, sc}, N, K, unpacked);
+    std::vector<uint32_t> qh((size_t)N * K / 8);
+    std::vector<uint16_t> sh((size_t)N * K / 32);
+    gpu_ok(hipMemcpyAsync(qh.data(), q, qh.size() * 4, hipMemcpyDeviceToHost, dev.s), "hipMemcpyAsync");
+    gpu_ok(hipMemcpyAsync(sh.data(), sc, sh.size() * 2, hipMemcpyDeviceToHost, dev.s), "hipMemcpyAsync");
+    gpu_ok(hipStreamSynchronize(dev.s), "quantize_q4");
+    auto weight = [&](size_t i) {
+        const int nib = (int)((qh[i / 8] >> ((i % 8) * 4)) & 15) - 8;
+        return (double)(float)*(const f16*)&sh[i / 32] * nib;
+    };
+    std::vector<double> ref(N), ref_w((size_t)N * K);
+    for (int n = 0; n < N; n++)
+        for (int k = 0; k < K; k++) {
+            const size_t i = (size_t)n * K + k;
+            ref_w[i] = weight(i);
+            ref[n] += ref_w[i] * x.values[k];
+        }
+    return std::max(relative_error(dev.download(e.out, N), ref), relative_error(dev.download(unpacked, ref_w.size()), ref_w));
+}
+
+// A grouped RMSNorm of two 1280-wide halves, the second half far louder than the first.
+float grouped_rms_error(DeviceScratch& dev) {
+    const int rows = 3, D = 1280, G = 2;
+    Bf16Data x = random_bf16((size_t)rows * D * G, 21), w = random_bf16((size_t)D * G, 22);
+    bf16* y = dev.zeros<bf16>((size_t)rows * D * G);
+    rms_norm(dev.s, (const bf16*)dev.upload(x.bits), D * G, (const bf16*)dev.upload(w.bits), y, rows, D * G, G);
+    std::vector<double> ref((size_t)rows * D * G);
+    for (int r = 0; r < rows; r++)
+        for (int g = 0; g < G; g++) {
+            double ss = 0;
+            for (int c = 0; c < D; c++) ss += (double)x.values[(size_t)r * D * G + g * D + c] * x.values[(size_t)r * D * G + g * D + c];
+            const double inv = 1.0 / std::sqrt(ss / D + 1e-6);
+            for (int c = 0; c < D; c++)
+                ref[(size_t)r * D * G + g * D + c] = x.values[(size_t)r * D * G + g * D + c] * inv * w.values[g * D + c];
+        }
+    return relative_error(dev.download(y, ref.size()), ref);
+}
+
 std::string run_self_checks(hipStream_t s) {
     DeviceScratch dev{s};
     std::string failed;
@@ -848,6 +957,8 @@ std::string run_self_checks(hipStream_t s) {
     expect("gemv 3x50x256", gemm_error(dev, 3, 50, 256), 1e-2f);
     expect("attention 128 causal", attention_error(dev, 128, true), 2e-2f);
     expect("attention 64", attention_error(dev, 64, false), 2e-2f);
+    expect("q4 50x256", q4_error(dev, 50, 256), 1e-2f);
+    expect("grouped rms_norm", grouped_rms_error(dev), 1e-2f);
     return failed;
 }
 

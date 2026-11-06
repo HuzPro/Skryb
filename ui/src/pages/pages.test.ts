@@ -214,18 +214,22 @@ describe("settings helpers", () => {
     expect(withMode(settings, "batch", models)).toMatchObject({ model_size: "parakeet", engine: "nano_parakeet" });
   });
 
-  it("picking Arabic picks Qwen3-ASR in batch mode, and English leaves the model alone", () => {
+  it("picking Arabic picks the best downloaded model that hears it, in batch mode, and English leaves the model alone", () => {
     const live = { language: "en", model_size: "nemotron-b", transcription_mode: "streaming", engine: "nemotron_streaming" } as Settings;
-    expect(withLanguage(live, "ar")).toMatchObject({ language: "ar", model_size: "qwen3-asr-1.7b", transcription_mode: "batch", engine: "auto" });
-    const arabic = withLanguage(live, "ar");
-    expect(withLanguage(arabic, "en")).toMatchObject({ language: "en", model_size: "qwen3-asr-1.7b", transcription_mode: "batch" });
+    const only = (...names: string[]) => names.map((name) => ({ name, installed: true }) as Model);
+    expect(withLanguage(live, "ar", only("qwen3-asr-1.7b"))).toMatchObject({ language: "ar", model_size: "qwen3-asr-1.7b", transcription_mode: "batch", engine: "auto" });
+    expect(withLanguage(live, "ar", only("qwen3-asr-1.7b", "jais-asr"))).toMatchObject({ model_size: "jais-asr" });
+    const onQwen = { ...live, model_size: "qwen3-asr-1.7b", transcription_mode: "batch", engine: "native_qwen3_asr" } as Settings;
+    expect(withLanguage(onQwen, "ar", only("qwen3-asr-1.7b", "jais-asr"))).toMatchObject({ model_size: "qwen3-asr-1.7b", engine: "native_qwen3_asr" });
+    expect(withLanguage(onQwen, "en", only("jais-asr"))).toMatchObject({ language: "en", model_size: "qwen3-asr-1.7b" });
   });
 
-  it("Arabic goes back to English only when the model changes to one that can't hear it", () => {
+  it("Jais-ASR means Arabic, and Arabic goes back to English only on a model that can't hear it", () => {
     const arabic = { language: "ar", model_size: "qwen3-asr-1.7b", transcription_mode: "batch", engine: "auto" } as Settings;
     expect(fitLanguageToModel(arabic)).toBe(arabic);
     expect(fitLanguageToModel({ ...arabic, model_size: "parakeet-ultra" })).toMatchObject({ language: "en", model_size: "parakeet-ultra" });
     expect(fitLanguageToModel({ ...arabic, language: "fr", model_size: "parakeet-ultra" }).language).toBe("fr");
+    expect(fitLanguageToModel({ ...arabic, language: "en", model_size: "jais-asr" }).language).toBe("ar");
   });
 });
 

@@ -1080,7 +1080,9 @@ def _build_meetings(
             turns=use_case.engine_turns,
             build_asr=functools.partial(
                 build_meeting_asr, paths, registry, hardware_detector, license_policy,
+                model=files.asr_model(settings.language),
             ),
+            asr_model=files.asr_model(settings.language),
             diarizer_snapshot=functools.partial(diarizer_snapshot, paths.models_dir),
             roman_urdu_snapshot=functools.partial(roman_urdu_snapshot, paths.models_dir),
             native_diarizer=functools.partial(native_diarizer_for, hardware_detector),

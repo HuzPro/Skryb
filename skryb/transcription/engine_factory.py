@@ -29,6 +29,7 @@ from skryb.transcription.model_info import (
     NEMOTRON_STREAMING_MODELS,
     PARAKEET_MODELS,
     PHONON2_MODELS,
+    JAIS_ASR_MODELS,
     QWEN3_ASR_MODELS,
     ModelInfo,
     get_model_info,
@@ -124,6 +125,28 @@ _OPENVINO_QWEN3_ASR_DESCRIPTOR = EngineDescriptor(
 )
 
 
+# Jais-ASR on the same DLL as Qwen3-ASR, from a pack with its decoder in 4 bits.
+_NATIVE_JAIS_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="native_jais_asr",
+    display_name="Jais-ASR (native GPU engine)",
+    supported_hardware=("amd_rocm", "nvidia_cuda"),
+    base_priority=95,
+    requires_torch=False,
+    supported_gfx=NATIVE_GPU_ARCHS,
+)
+
+
+# Jais-ASR on an Intel NPU through OpenVINO, int8 decoder, the same graphs as Qwen3-ASR's; on OpenVINO's CPU
+# device without one.
+_OPENVINO_JAIS_ASR_DESCRIPTOR = EngineDescriptor(
+    engine_id="openvino_jais_asr",
+    display_name="Jais-ASR on the NPU (OpenVINO)",
+    supported_hardware=("cpu",),
+    base_priority=90,
+    requires_torch=False,
+)
+
+
 _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "nano_parakeet": 1,
     "nemotron_streaming": 1,
@@ -133,6 +156,8 @@ _DEFAULT_BEAM_SIZE_BY_ENGINE: dict[EngineId, int] = {
     "native_parakeet": 1,
     "qwen3_asr": 1,
     "openvino_qwen3_asr": 1,
+    "native_jais_asr": 1,
+    "openvino_jais_asr": 1,
 }
 _FALLBACK_BEAM_SIZE = 1
 
@@ -155,6 +180,11 @@ def build_engine_registry() -> EngineRegistry:
                 _OPENVINO_QWEN3_ASR_DESCRIPTOR,
                 available=importlib.util.find_spec("openvino") is not None,
             ),
+            replace(_NATIVE_JAIS_ASR_DESCRIPTOR, available=_either_build(native_engine_dll)),
+            replace(
+                _OPENVINO_JAIS_ASR_DESCRIPTOR,
+                available=importlib.util.find_spec("openvino") is not None,
+            ),
         ],
         builders={
             "nano_parakeet": _build_nano_parakeet_engine,
@@ -165,6 +195,8 @@ def build_engine_registry() -> EngineRegistry:
             "native_parakeet": _build_native_parakeet_engine,
             "qwen3_asr": _build_qwen3_asr_engine,
             "openvino_qwen3_asr": _build_openvino_qwen3_asr_engine,
+            "native_jais_asr": _build_native_jais_asr_engine,
+            "openvino_jais_asr": _build_openvino_jais_asr_engine,
         },
     )
 
@@ -239,6 +271,19 @@ def _build_native_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
         question_threshold=QUESTION_THRESHOLD if spec.question_marks else None,
         cuda=_on_nvidia(spec),
     )
+
+
+def _build_native_jais_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.hf_model_manager import loadable_snapshot_dir
+    from skryb.transcription.native_jais_asr_adapter import NativeJaisAsrAdapter
+
+    return NativeJaisAsrAdapter(loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision), cuda=_on_nvidia(spec))
+
+
+def _build_openvino_jais_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
+    from skryb.transcription.openvino_jais_asr_adapter import OpenVinoJaisAsrAdapter
+
+    return OpenVinoJaisAsrAdapter(spec.model_dir, spec.repo_id, spec.revision)
 
 
 def _build_qwen3_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
@@ -611,6 +656,14 @@ def build_composite_model_manager(
     qwen3_asr_models = {
         name: info for name, info in QWEN3_ASR_MODELS.items() if info.repo_id
     }
+    jais_asr_manager = HuggingFaceModelManager(
+        models_dir=models_dir,
+        download_manager=download_manager,
+        resolver=resolver,
+        file_downloader=file_downloader,
+        models=dict(JAIS_ASR_MODELS),
+        license_policy=license_policy,
+    )
 
     nano_parakeet_manager = HuggingFaceModelManager(
         models_dir=models_dir,
@@ -655,6 +708,8 @@ def build_composite_model_manager(
             "native_qwen3_asr": qwen3_asr_manager,
             "qwen3_asr": qwen3_asr_manager,
             "openvino_qwen3_asr": qwen3_asr_manager,
+            "native_jais_asr": jais_asr_manager,
+            "openvino_jais_asr": jais_asr_manager,
         },
         active_engine_provider=active_engine_provider,
     )

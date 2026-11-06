@@ -56,6 +56,10 @@ MODELS = [
     {"name": "nemotron-speech-streaming-en-0.6b", "display_size": "2.5 GB", "size": 2_470_000_000,
      "description": "NVIDIA cache-aware streaming (English, low-latency, GPU)", "installed": False,
      "supports_batch": False, "supports_streaming": True, "license_id": None, "tier": None, "needs": None},
+    {"name": "jais-asr", "display_size": "11.5 GB", "size": 11_460_000_000,
+     "description": "Jais-ASR: Arabic in every dialect, Gulf best, English words kept in English", "installed": False,
+     "supports_batch": True, "supports_streaming": False, "license_id": None, "tier": None,
+     "needs": "A GPU with about 6 GB of VRAM free, or an Intel NPU; Arabic only"},
 ]
 
 BROKEN_MICROPHONE = "Microphone Array (Realtek(R) A"
@@ -74,6 +78,8 @@ MEETING_MODELS = [
     {"name": "whisper-hindi2hinglish-apex", "label": "Roman Urdu speech-to-text", "display_size": "1.6 GB",
      "size": 1_624_000_000, "description": "Writes spoken Urdu in Roman Urdu, English words in English. For Urdu and"
      " Auto meetings (Oriserve Whisper Hindi2Hinglish Apex)", "urdu_only": True},
+    {"name": "jais-asr", "label": "Jais-ASR Arabic speech-to-text", "display_size": "11.5 GB", "size": 11_460_000_000,
+     "description": "Jais-ASR: Arabic in every dialect, Gulf best, English words kept in English", "arabic_only": True},
 ]
 MEETING_LINES = [
     ("them:0", "All right, let's jump in. Bake Board first, then the seed swap."),
@@ -911,12 +917,15 @@ class Handler(BaseHTTPRequestHandler):
         core = self.core
         live = core.live_meeting
         if not rest and method == "GET":
-            urdu = core.settings["meetings"]["language"] in ("ur", "auto")
-            ready = all(model["installed"] for model in core.meeting_models if urdu or not model.get("urdu_only"))
+            language = core.settings["meetings"]["language"]
+            needed = [model for model in core.meeting_models
+                      if (language in ("ur", "auto") or not model.get("urdu_only"))
+                      and (language == "ar" or not model.get("arabic_only"))]
+            ready = all(model["installed"] for model in needed)
             ids = sorted(core.meetings, key=lambda meeting_id: core.meetings[meeting_id]["started"], reverse=True)
             self._send(200, {"recording": core.app["meeting_recording"], "folder": core.settings["meetings"]["folder"],
                              "models_ready": ready,
-                             "models": [{k: v for k, v in model.items() if k not in ("size", "urdu_only")}
+                             "models": [{k: v for k, v in model.items() if k not in ("size", "urdu_only", "arabic_only")}
                                         for model in core.meeting_models],
                              "meetings": [core.meeting_summary(meeting_id) for meeting_id in ids]})
         elif rest == ["live"]:

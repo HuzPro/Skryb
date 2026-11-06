@@ -443,7 +443,7 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
 
     assert status == 200
     by_name = {model["name"]: model for model in models}
-    assert set(by_name) == {PARAKEET, "phonon-2.5-english", NEMOTRON, QWEN}
+    assert set(by_name) == {PARAKEET, "phonon-2.5-english", NEMOTRON, QWEN, "jais-asr"}
     assert by_name[PARAKEET]["installed"] is True
     assert by_name[PARAKEET]["license_id"] is None
     assert [by_name[name]["tier"] for name in ("phonon-2.5-english", PARAKEET, QWEN, NEMOTRON)] == [

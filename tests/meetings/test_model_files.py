@@ -4,7 +4,8 @@ import pytest
 
 from skryb.meetings.model_files import MeetingModelFiles
 
-_ALL = ("nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex")
+_ALL = ("nemotron-3-diarization", "qwen3-asr-1.7b", "whisper-hindi2hinglish-apex", "jais-asr")
+_DICTATION_MODELS = ("qwen3-asr-1.7b", "jais-asr")
 
 
 class Rig:
@@ -22,11 +23,11 @@ class Rig:
         )
 
     def _meeting_only_installed(self, name: str) -> bool:
-        assert name != "qwen3-asr-1.7b", "Qwen3-ASR is one of dictation's models"
+        assert name not in _DICTATION_MODELS, f"{name} is one of dictation's models"
         return self.installed[name]
 
     def _dictation_installed(self, name: str) -> bool:
-        assert name == "qwen3-asr-1.7b", f"{name} is a meeting-only model"
+        assert name in _DICTATION_MODELS, f"{name} is a meeting-only model"
         return self.installed[name]
 
 
@@ -49,15 +50,15 @@ def test_a_language_passed_in_wins_over_the_meeting_setting() -> None:
     assert rig.files.missing("ur") == ["Roman Urdu speech-to-text"]
 
 
-def test_the_models_card_lists_all_three_models_whatever_the_language() -> None:
-    rig = Rig("en", missing=("whisper-hindi2hinglish-apex",))
+def test_the_models_card_lists_all_four_models_whatever_the_language() -> None:
+    rig = Rig("en", missing=("whisper-hindi2hinglish-apex", "jais-asr"))
 
     views = rig.files.views()
 
     assert [view["label"] for view in views] == [
-        "Speaker labels", "Qwen3-ASR speech-to-text", "Roman Urdu speech-to-text",
+        "Speaker labels", "Qwen3-ASR speech-to-text", "Roman Urdu speech-to-text", "Jais-ASR Arabic speech-to-text",
     ]
-    assert [view["installed"] for view in views] == [True, True, False]
+    assert [view["installed"] for view in views] == [True, True, False, False]
     assert views[2]["display_size"] == "1.6 GB"
 
 
@@ -94,3 +95,38 @@ def test_with_everything_installed_the_download_button_fetches_nothing() -> None
     rig.files.download_missing()
 
     assert rig.meeting_only_downloads == [] and rig.dictation_downloads == []
+
+
+def test_an_arabic_meeting_asks_for_jais_asr_when_neither_speech_model_is_downloaded() -> None:
+    rig = Rig("ar", missing=("qwen3-asr-1.7b", "jais-asr"))
+
+    assert rig.files.missing() == ["Jais-ASR Arabic speech-to-text"]
+    assert rig.files.asr_model("ar") == "jais-asr"
+    rig.files.download_missing()
+    assert rig.dictation_downloads == ["jais-asr"] and rig.meeting_only_downloads == []
+
+
+def test_an_arabic_meeting_runs_on_qwen3_asr_with_no_download_when_only_qwen3_asr_is_there() -> None:
+    rig = Rig("ar", missing=("jais-asr", "whisper-hindi2hinglish-apex"))
+
+    assert rig.files.missing() == []
+    assert rig.files.asr_model("ar") == "qwen3-asr-1.7b"
+
+
+def test_an_arabic_meeting_runs_on_jais_asr_once_it_is_downloaded() -> None:
+    rig = Rig("ar")
+
+    assert rig.files.missing() == [] and rig.files.asr_model("ar") == "jais-asr"
+
+
+@pytest.mark.parametrize("language", ["en", "ur", "auto"])
+def test_only_arabic_meetings_run_jais_asr(language: str) -> None:
+    assert Rig(language).files.asr_model(language) == "qwen3-asr-1.7b"
+
+
+def test_downloading_the_rest_never_fetches_eleven_gigabytes_of_arabic() -> None:
+    rig = Rig("en", missing=("whisper-hindi2hinglish-apex", "jais-asr"))
+
+    rig.files.download_missing()
+
+    assert rig.meeting_only_downloads == ["whisper-hindi2hinglish-apex"] and rig.dictation_downloads == []
