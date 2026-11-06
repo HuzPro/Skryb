@@ -234,7 +234,7 @@ describe("switching mode", () => {
 });
 
 function summary(id: string, started: string): MeetingSummary {
-  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true };
+  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true, has_thumbnail: false };
 }
 
 describe("past meetings under History", () => {

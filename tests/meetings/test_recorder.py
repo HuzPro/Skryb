@@ -8,7 +8,7 @@ import pytest
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import MeetingSettings
 from skryb.meetings.transcript import Event
-from tests.meetings.fakes import FakeCapture, FakeModels, silence, voice
+from tests.meetings.fakes import FakeCapture, FakeModels, no_thumbnail, silence, voice
 
 _WAIT_SECONDS = 10.0
 
@@ -173,6 +173,7 @@ class FileRig(Rig):
 
         self.recorder._check_file = check
         self.recorder._decode_file = decode
+        self.recorder._grab_thumbnail = no_thumbnail
 
     def wait_saved(self) -> None:
         deadline = threading.Event()

@@ -16,12 +16,15 @@ from skryb.meetings.capture import RATE
 from skryb.meetings.media_file import MediaFileError, decode_audio
 from skryb.meetings.segmenter import Segment, Segmenter
 from skryb.meetings.session import Models
+from skryb.meetings.thumbnail import Grab, grab_shell_thumbnail, save_thumbnail
 from skryb.meetings.transcript import Publish, Transcript, asr_context
 
 # The speaker labeller hears the file in pieces this long, as it would hear a live meeting.
 _PIECE_SECONDS = 10
 # Quitting keeps every line already saved without waiting for the rest.
 _QUIT_WAIT_SECONDS = 1.0
+# The thumbnail is made beside the transcription; "Saved" waits at most this long for one still coming.
+_THUMBNAIL_WAIT_SECONDS = 2.0
 # Progress is published in steps of a percent, not for every block read.
 _PROGRESS_STEP = 0.01
 _log = logging.getLogger(__name__)
@@ -43,6 +46,7 @@ class FileSession:
         publish: Publish,
         on_done: Callable[["FileSession"], None],
         decode: Decode = decode_audio,
+        grab_thumbnail: Grab = grab_shell_thumbnail,
     ) -> None:
         self.folder = folder
         self.source = source
@@ -59,6 +63,9 @@ class FileSession:
         self._decode = decode
         self._cancel = threading.Event()
         self._thread = threading.Thread(target=self._run, name="meeting-file", daemon=True)
+        self._thumbnail = threading.Thread(
+            target=save_thumbnail, args=(source, folder, grab_thumbnail), name="meeting-thumbnail", daemon=True,
+        )
 
     def start(self) -> None:
         """Create the meeting folder; nothing is read or published until ``begin``."""
@@ -67,6 +74,7 @@ class FileSession:
         self.status, self.progress = "Reading the file", 0.0
 
     def begin(self) -> None:
+        self._thumbnail.start()
         self._thread.start()
 
     def stop(self) -> None:
@@ -110,6 +118,7 @@ class FileSession:
             self.warning = f"Transcription stopped: {exc}"
         finally:
             self._models.release()
+            self._thumbnail.join(_THUMBNAIL_WAIT_SECONDS)
             if self._cancel.is_set() and not self.warning:
                 self.warning = "Cancelled: the lines so far are saved."
             self._set_status("Saved")

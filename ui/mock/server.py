@@ -16,9 +16,11 @@ import math
 import queue
 import random
 import re
+import struct
 import subprocess
 import threading
 import time
+import zlib
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -62,6 +64,7 @@ USB_MICROPHONE = {"name": "USB Microphone (Røde NT-USB Mi", "label": "USB Micro
 HOT_PLUG_AFTER_SECONDS = 45.0
 
 MEETINGS_FOLDER = "D:\\Meetings"
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".3gp", ".3g2", ".wmv", ".asf", ".avi")
 MEETING_LINE_SECONDS = 1.6
 MEETING_MODELS = [
     {"name": "nemotron-3-diarization", "label": "Speaker labels", "display_size": "397 MB", "size": 397_000_000,
@@ -186,17 +189,18 @@ def _usage(history):
 def _saved_meetings():
     """Folders like the ones in D:\\Meetings: named by hand or by the minute they started."""
     now = datetime.now().replace(second=0, microsecond=0)
+    # The last column is the colour of the thumbnail a meeting made from a video keeps; None for the rest.
     folders = [
-        ("{:%Y-%m-%d} 22-45 Marta garden planning", 1, 4357.7, {"them:0": "Priya Nair", "them:1": "Omar Haddad", "them:2": "Marta Lindgren", "them:3": "Theo Carver"}),
-        ("{:%Y-%m-%d %H-%M}", 2, 1830.0, {}),
-        ("{:%Y-%m-%d} Harbor sailing plans", 8, 3720.5, {"them:0": "Leo Brandt", "them:1": "نادیہ رحمان"}),
-        ("{:%Y-%m-%d} Ops Onboarding", 13, 3065.0, {"them:0": "Leo Brandt"}),
-        ("{:%Y-%m-%d} 22-53", 9, 2410.0, {}),
-        ("{:%Y-%m-%d} Cedar bake sale", 43, 2988.0, {"them:4": "Cedar"}),
+        ("{:%Y-%m-%d} 22-45 Marta garden planning", 1, 4357.7, {"them:0": "Priya Nair", "them:1": "Omar Haddad", "them:2": "Marta Lindgren", "them:3": "Theo Carver"}, None),
+        ("{:%Y-%m-%d %H-%M}", 2, 1830.0, {}, None),
+        ("{:%Y-%m-%d} Harbor sailing plans", 8, 3720.5, {"them:0": "Leo Brandt", "them:1": "نادیہ رحمان"}, (38, 104, 150)),
+        ("{:%Y-%m-%d} Ops Onboarding", 13, 3065.0, {"them:0": "Leo Brandt"}, (92, 70, 140)),
+        ("{:%Y-%m-%d} 22-53", 9, 2410.0, {}, None),
+        ("{:%Y-%m-%d} Cedar bake sale", 43, 2988.0, {"them:4": "Cedar"}, (176, 112, 64)),
     ]
     rng = random.Random(11)
     meetings = {}
-    for pattern, days_ago, seconds, names in folders:
+    for pattern, days_ago, seconds, names, thumbnail in folders:
         started = now - timedelta(days=days_ago, hours=rng.randint(0, 5))
         entries, at, index = [], 2.0, 0
         while at < seconds:
@@ -210,8 +214,18 @@ def _saved_meetings():
         keys = sorted({entry["key"] for entry in entries})
         shown = {key: names.get(key) or ("Me" if key.startswith("me:") else f"Speaker {int(key[5:]) + 1}") for key in keys}
         meetings[meeting_id] = {"folder": f"{MEETINGS_FOLDER}\\{meeting_id}", "started": started.isoformat(timespec="seconds"),
-                                "names": shown, "entries": entries}
+                                "names": shown, "entries": entries, "thumbnail": thumbnail}
     return meetings
+
+
+def _thumbnail_png(colour: tuple[int, int, int], width: int = 480, height: int = 270) -> bytes:
+    """A stand-in for a video's thumbnail: *colour* fading darker towards the bottom, as a PNG."""
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    rows = b"".join(b"\x00" + bytes(int(c * (1 - 0.5 * y / height)) for c in colour) * width for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
 
 class Core:
@@ -399,7 +413,8 @@ class Core:
         entries = meeting["entries"]
         return {"id": meeting_id, "started": meeting["started"], "seconds": max((e["end"] for e in entries), default=0.0),
                 "speakers": len({e["key"] for e in entries}), "lines": len(entries),
-                "words": sum(len(e["text"].split()) for e in entries), "has_audio": True}
+                "words": sum(len(e["text"].split()) for e in entries), "has_audio": True,
+                "has_thumbnail": meeting.get("thumbnail") is not None}
 
     def meeting_status(self, status: str, warning=None) -> None:
         live = self.live_meeting
@@ -498,6 +513,7 @@ class Core:
             self.emit("app", self.app)
             self.meeting_status("Saved")
             self.meetings[live["id"]] = {key: live[key] for key in ("folder", "started", "names", "entries")}
+            self.meetings[live["id"]]["thumbnail"] = (60, 128, 96) if live["source"].lower().endswith(VIDEO_EXTENSIONS) else None
             self.emit("meeting", {"type": "saved", "id": live["id"]})
 
     def stop_meeting(self) -> None:
@@ -543,12 +559,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Max-Age", "600")
 
-    def _send(self, status: int, body: object = None) -> None:
-        data = b"" if body is None else json.dumps(body).encode()
+    def _send(self, status: int, body: object = None, content_type: str = "application/json; charset=utf-8") -> None:
+        data = body if isinstance(body, bytes) else b"" if body is None else json.dumps(body).encode()
         self.send_response(status)
         self._cors()
         if body is not None:
-            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -887,6 +903,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(404, "That meeting is no longer in the meetings folder.")
                 return
             self._send(200, {key: meeting[key] for key in ("folder", "started", "names", "entries")})
+        elif len(rest) == 2 and rest[1] == "thumbnail" and method == "GET":
+            colour = (core.meetings.get(rest[0]) or {}).get("thumbnail")
+            if colour is None:
+                self._error(404, "This meeting has no thumbnail.")
+                return
+            self._send(200, _thumbnail_png(colour), "image/png")
         elif len(rest) == 2 and rest[1] == "rename":
             meeting = live if live and live["id"] == rest[0] else core.meetings.get(rest[0])
             body = self._body() or {}

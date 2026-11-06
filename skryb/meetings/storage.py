@@ -1,7 +1,8 @@
 """Where meetings are kept: one folder per meeting under the meetings folder.
 
 Each meeting folder holds ``them.flac`` (what the PC played), ``me.flac``
-(the microphone), ``transcript.json`` and ``transcript.md``.
+(the microphone), ``transcript.json`` and ``transcript.md``; a meeting made
+from a video also keeps the video's ``thumbnail.jpg``.
 """
 
 import json
@@ -13,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from skryb.core.config import ConfigurationStore
+from skryb.meetings.thumbnail import THUMBNAIL_JPG
 from skryb.meetings.transcript import TRANSCRIPT_JSON, Transcript
 
 _SECOND_DRIVE = Path("D:/")
@@ -90,11 +92,13 @@ class MeetingSummary:
     lines: int
     words: int
     has_audio: bool
+    has_thumbnail: bool
 
     def json(self) -> dict[str, object]:
         return {
             "id": self.id, "started": self.started, "seconds": self.seconds, "speakers": self.speakers,
             "lines": self.lines, "words": self.words, "has_audio": self.has_audio,
+            "has_thumbnail": self.has_thumbnail,
         }
 
 
@@ -131,4 +135,5 @@ def _summary(entry: os.DirEntry[str]) -> MeetingSummary | None:
         lines=len(entries),
         words=sum(len(e.text.split()) for e in entries),
         has_audio=(folder / "them.flac").is_file() or (folder / "me.flac").is_file(),
+        has_thumbnail=(folder / THUMBNAIL_JPG).is_file(),
     )
