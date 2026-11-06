@@ -64,6 +64,7 @@ USB_MICROPHONE = {"name": "USB Microphone (Røde NT-USB Mi", "label": "USB Micro
 HOT_PLUG_AFTER_SECONDS = 45.0
 
 MEETINGS_FOLDER = "D:\\Meetings"
+TRANSLATION_BYTES = 3_423_683_334
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".3gp", ".3g2", ".wmv", ".asf", ".avi")
 MEETING_LINE_SECONDS = 1.6
 MEETING_MODELS = [
@@ -88,6 +89,65 @@ MEETING_LINES = [
     ("them:0", "Not yet. Let's keep this season to the first two beds."),
     ("them:3", "خلنا نراجع الـ budget قبل الاجتماع، ترى الوقت ضيق."),
 ]
+# Show English: invented Gulf Arabic lines, each with its English and a gloss per written word.
+ENGLISH = {
+    "شلونك؟ أبي أرسل التقرير بكرة الصبح إن شاء الله.": (
+        "How are you? I want to send the report tomorrow morning, God willing.",
+        [("شلونك؟", "how are you?"), ("أبي", "I want"), ("أرسل", "to send"), ("التقرير", "the report"), ("بكرة", "tomorrow"),
+         ("الصبح", "the morning"), ("إن", "if"), ("شاء", "willed"), ("الله.", "God.")],
+    ),
+    "خلنا نراجع الـ budget قبل الاجتماع، ترى الوقت ضيق.": (
+        "Let's go over the budget before the meeting; time is tight.",
+        [("خلنا", "let us"), ("نراجع", "go over"), ("الـ", "the"), ("budget", "budget"), ("قبل", "before"),
+         ("الاجتماع،", "the meeting,"), ("ترى", "mind you"), ("الوقت", "the time"), ("ضيق.", "is tight.")],
+    ),
+    "وين حطيت مفاتيح المحل؟": (
+        "Where did you put the shop keys?",
+        [("وين", "where"), ("حطيت", "did you put"), ("مفاتيح", "the keys of"), ("المحل؟", "the shop?")],
+    ),
+    "المحل يفتح الساعة تسع الصبح، بس الجمعة بعد الصلاة.": (
+        "The shop opens at nine in the morning, but on Friday after the prayer.",
+        [("المحل", "the shop"), ("يفتح", "opens"), ("الساعة", "at"), ("تسع", "nine"), ("الصبح،", "in the morning,"),
+         ("بس", "but"), ("الجمعة", "Friday"), ("بعد", "after"), ("الصلاة.", "the prayer.")],
+    ),
+    "زين، بنطلب عشرين كرتون تمر من المزرعة.": (
+        "Good, we'll order twenty boxes of dates from the farm.",
+        [("زين،", "good,"), ("بنطلب", "we will order"), ("عشرين", "twenty"), ("كرتون", "boxes"), ("تمر", "of dates"),
+         ("من", "from"), ("المزرعة.", "the farm.")],
+    ),
+    "ترى العميل يبي الفاتورة قبل الخميس.": (
+        "Mind you, the client wants the invoice before Thursday.",
+        [("ترى", "mind you"), ("العميل", "the client"), ("يبي", "wants"), ("الفاتورة", "the invoice"), ("قبل", "before"),
+         ("الخميس.", "Thursday.")],
+    ),
+    "تمام، أنا بكلم فارس وأرد عليك.": (
+        "OK, I'll talk to Faris and get back to you.",
+        [("تمام،", "OK,"), ("أنا", "I"), ("بكلم", "will talk to"), ("فارس", "Faris"), ("وأرد", "and get back"), ("عليك.", "to you.")],
+    ),
+    "عندنا 12 طلب جديد اليوم.": (
+        "We have 12 new orders today.",
+        [("عندنا", "we have"), ("12", "12"), ("طلب", "orders"), ("جديد", "new"), ("اليوم.", "today.")],
+    ),
+}
+ARABIC_MEETING_LINES = [
+    ("them:0", "وين حطيت مفاتيح المحل؟"),
+    ("them:1", "المحل يفتح الساعة تسع الصبح، بس الجمعة بعد الصلاة."),
+    ("them:0", "زين، بنطلب عشرين كرتون تمر من المزرعة."),
+    ("me:0", "ترى العميل يبي الفاتورة قبل الخميس."),
+    ("them:1", "تمام، أنا بكلم فارس وأرد عليك."),
+    ("them:0", "عندنا 12 طلب جديد اليوم."),
+    ("me:0", "OK, I'll send the stall photos tonight."),
+    ("them:1", "خلنا نراجع الـ budget قبل الاجتماع، ترى الوقت ضيق."),
+]
+ARABIC_LETTER = re.compile("[\u0620-\u063f\u0641-\u064a\u066e-\u06d3\u06d5\u06ee\u06ef\u06fa-\u06fc\u06ff\u0750-\u077f\u08a0-\u08c9\ufb50-\ufdfb\ufe70-\ufefc]")
+
+
+def _english_of(text: str) -> dict | None:
+    """A line's English and gloss as the core sends them; an Arabic line not in ENGLISH gets a stand-in."""
+    if not ARABIC_LETTER.search(text):
+        return None
+    english, words = ENGLISH.get(text, ("(English for this line)", [(word, "gloss" if ARABIC_LETTER.search(word) else word) for word in text.split()]))
+    return {"english": english, "words": [list(pair) for pair in words]}
 
 ENGINES = {
     "phonon-2.5-english": [("phonon2_cpu", "Phonon-2 (Fermion CPU engine)", "Runs on the CPU; no GPU needed.")],
@@ -115,6 +175,7 @@ SAMPLE_TEXTS = [
     "Meeting notes for Monday:\n- ship the build\n- review the pill animation\n- write the release notes",
     "Можно ли так же диктовать по-русски? Да, конечно.",
     "شلونك؟ أبي أرسل التقرير بكرة الصبح إن شاء الله.",
+    "وين حطيت مفاتيح المحل؟\nترى العميل يبي الفاتورة قبل الخميس.\nPlease check the shared folder too.",
     "Fix the flaky test in test_history_management and push it before lunch.",
     "   ",
     "Refactor the tray menu so History opens the new window.",
@@ -140,6 +201,7 @@ def _default_settings():
         "paste_method_overrides": [["notepad.exe", "shift_insert"], ["windowsterminal.exe", "ctrl_shift_v"]],
         "check_for_updates": True,
         "meetings": {"folder": MEETINGS_FOLDER, "record_microphone": True, "language": "en"},
+        "show_english": True,
         "theme": "default",
         "colourways": {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"},
     }
@@ -269,6 +331,18 @@ def _saved_meetings():
         shown = {key: names.get(key) or ("Me" if key.startswith("me:") else f"Speaker {int(key[5:]) + 1}") for key in keys}
         meetings[meeting_id] = {"folder": f"{MEETINGS_FOLDER}\\{meeting_id}", "started": started.isoformat(timespec="seconds"),
                                 "names": shown, "entries": entries, "thumbnail": thumbnail}
+    # An Arabic meeting saved with Show English on; its last line has no English yet, so opening it asks for some.
+    started = now - timedelta(days=3, hours=2)
+    meeting_id = f"{started:%Y-%m-%d} Souq stall planning"
+    entries = []
+    for index, (key, text) in enumerate(ARABIC_MEETING_LINES):
+        entry = {"id": index, "track": key.split(":")[0], "speaker": int(key.split(":")[1]), "start": 3.0 + index * 6.5,
+                 "end": 8.5 + index * 6.5, "text": text, "key": key}
+        if index < len(ARABIC_MEETING_LINES) - 1:
+            entry.update(_english_of(text) or {})
+        entries.append(entry)
+    meetings[meeting_id] = {"folder": f"{MEETINGS_FOLDER}\\{meeting_id}", "started": started.isoformat(timespec="seconds"),
+                            "names": {"them:0": "Noura Khalfan", "them:1": "Speaker 2", "me:0": "Me"}, "entries": entries, "thumbnail": None}
     return meetings
 
 
@@ -331,6 +405,11 @@ class Core:
         self.history = _history()
         self.meeting_models = [dict(model, installed=not first_run, download=None) for model in MEETING_MODELS]
         self.meetings = _saved_meetings()
+        # Show English's model, as GET /api/translation reports it; downloaded already unless --first-run.
+        self.translation = {"name": "translation", "label": "Jais-3 3.7B", "description": "Inception's Arabic model, run on the graphics card",
+                            "display_size": "3.4 GB", "size": TRANSLATION_BYTES, "installed": not first_run,
+                            "device": None if first_run else "GPU", "device_name": None if first_run else "AMD Radeon RX 9060 XT",
+                            "error": None, "download": None}
         self.live_meeting = None
         self.meter_on = False
         self.capturing = False
@@ -383,7 +462,7 @@ class Core:
                 self._advance_downloads()
 
     def _advance_downloads(self) -> None:
-        for model in self.models + self.meeting_models:
+        for model in self.models + self.meeting_models + [self.translation]:
             download = model["download"]
             if not download or download["state"] != "downloading":
                 continue
@@ -495,6 +574,19 @@ class Core:
         with self.lock:
             action()
 
+    def english_later(self, meeting_id: str, entry: dict, seconds: float = 1.1) -> None:
+        """Show English: an Arabic line sent again under its id once its English is ready, as the core does."""
+        english = _english_of(entry["text"])
+        if english is None or not self.settings.get("show_english"):
+            return
+
+        def ready() -> None:
+            with self.lock:
+                entry.update(english)
+                self.emit("meeting", {"type": "entry", "id": meeting_id, "entry": entry})
+
+        self.later(seconds, ready)
+
     def _talk(self, meeting_id: str) -> None:
         rng = random.Random(3)
         index, at = 0, 1.5
@@ -512,6 +604,7 @@ class Core:
                 keys = sorted({e["key"] for e in live["entries"]} | set(live["names"]))
                 live["names"] = {k: live["names"].get(k) or ("Me" if k.startswith("me:") else f"Speaker {int(k[5:]) + 1}") for k in keys}
                 self.emit("meeting", {"type": "entry", "id": meeting_id, "entry": entry})
+                self.english_later(meeting_id, entry)
                 at += length + rng.random()
                 index += 1
 
@@ -526,7 +619,7 @@ class Core:
         self.app["meeting_recording"] = True
         self.emit("meeting", {"type": "started", **{k: v for k, v in self.live_meeting.items() if k != "recording"}})
         self.emit("app", self.app)
-        threading.Thread(target=self._read_and_transcribe, args=(meeting_id,), daemon=True).start()
+        threading.Thread(target=self._read_and_transcribe, args=(meeting_id, language), daemon=True).start()
 
     def _file_status(self, meeting_id: str, status: str, progress: float | None) -> bool:
         with self.lock:
@@ -538,7 +631,8 @@ class Core:
                                   "device": None, "warning": live["warning"], "source": live["source"], "progress": progress})
             return True
 
-    def _read_and_transcribe(self, meeting_id: str) -> None:
+    def _read_and_transcribe(self, meeting_id: str, language: str) -> None:
+        said = ARABIC_MEETING_LINES if language == "ar" else MEETING_LINES
         for step in range(1, 11):
             time.sleep(0.15)
             if not self._file_status(meeting_id, "Reading the file", step / 10):
@@ -554,13 +648,14 @@ class Core:
             time.sleep(0.5)
             with self.lock:
                 live = self.live_meeting
-                key, text = MEETING_LINES[index % len(MEETING_LINES)]
+                key, text = said[index % len(said)]
                 key = key if key.startswith("them:") else "them:3"
                 entry = {"id": index, "track": "them", "speaker": int(key[5:]), "start": index * 6.0 + 0.5,
                          "end": index * 6.0 + 5.0, "text": text, "key": key}
                 live["entries"].append(entry)
                 live["names"] = {k: live["names"].get(k) or f"Speaker {int(k[5:]) + 1}" for k in sorted({e["key"] for e in live["entries"]})}
                 self.emit("meeting", {"type": "entry", "id": meeting_id, "entry": entry})
+                self.english_later(meeting_id, entry, 0.4)
         self._file_status(meeting_id, "Transcribing", 1.0)
         with self.lock:
             live = self.live_meeting
@@ -733,6 +828,9 @@ class Handler(BaseHTTPRequestHandler):
             "history_retention_changed": before["history_retention_days"] != draft["history_retention_days"],
         }
         core.settings = draft
+        # Switching Show English on downloads its model, as the core does.
+        if draft.get("show_english") and not core.translation["installed"] and not core.translation["download"]:
+            core.translation["download"] = {"state": "downloading", "bytes_done": 0, "bytes_total": TRANSLATION_BYTES, "error": ""}
         self._send(200, {"changes": changes, "engine_reload_started": reload})
         core.emit("settings", draft)
         if reload:
@@ -994,8 +1092,35 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"id": renamed})
         elif len(rest) == 2 and rest[1] == "open":
             self._send(204)
+        elif len(rest) == 2 and rest[1] == "english":
+            meeting = live if live and live["id"] == rest[0] else core.meetings.get(rest[0])
+            if meeting is None:
+                self._error(404, "That meeting is no longer in the meetings folder.")
+                return
+            if not core.settings["show_english"] or not core.translation["installed"]:
+                self._error(409, "Show English is off, or its model hasn't finished downloading.")
+                return
+            waiting = [entry for entry in meeting["entries"] if not entry.get("english") and _english_of(entry["text"])]
+            for order, entry in enumerate(waiting):
+                core.english_later(rest[0], entry, 0.8 + 0.5 * order)
+            self._send(200, {"lines": len(waiting)})
         else:
             self._error(404, "Not found.")
+
+    def _translation(self, method, rest, query) -> None:
+        """Show English: the model's status, English for History's lines, and a retried download."""
+        core = self.core
+        if method == "GET":
+            self._send(200, core.translation)
+        elif rest == ["download"]:
+            core.translation["download"] = {"state": "downloading", "bytes_done": 0, "bytes_total": TRANSLATION_BYTES, "error": ""}
+            self._send(202)
+        elif not core.settings["show_english"]:
+            self._error(409, "Show English is off.")
+        elif not core.translation["installed"]:
+            self._error(409, "The translation model is still downloading.")
+        else:
+            self._send(200, {"lines": [_english_of(line) for line in str((self._body() or {}).get("text", "")).split("\n")]})
 
     def _updates(self, method, rest, query) -> None:
         """A check finds 9.9.9, downloads its 31 MB in five steps, and offers it; install only says so."""

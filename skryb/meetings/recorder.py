@@ -12,7 +12,7 @@ from skryb.meetings.media_file import MediaFileError, check, decode_audio
 from skryb.meetings.session import MeetingCapture, Models, Session
 from skryb.meetings.storage import MeetingSettings, new_meeting_folder
 from skryb.meetings.thumbnail import Grab, grab_shell_thumbnail
-from skryb.meetings.transcript import Event
+from skryb.meetings.transcript import English, Event
 
 _logger = logging.getLogger(__name__)
 _FILE_BUSY = "Skryb is transcribing a file. Cancel it on the Meetings page first."
@@ -24,6 +24,10 @@ class MeetingError(Exception):
 
 
 def _nothing(_recording: bool) -> None:
+    return None
+
+
+def _no_english() -> English | None:
     return None
 
 
@@ -42,7 +46,9 @@ class MeetingRecorder:
         check_file: Callable[[Path], None] = check,
         decode_file: Decode = decode_audio,
         grab_thumbnail: Grab = grab_shell_thumbnail,
+        english: Callable[[], English | None] = _no_english,
     ) -> None:
+        self._english = english
         self._settings = settings
         self._missing_models = missing_models
         self._make_models = make_models
@@ -107,6 +113,7 @@ class MeetingRecorder:
                 publish=self._publish,
                 record_microphone=settings.record_microphone,
             )
+            session.transcript.english = self._english()
             try:
                 session.start()
             except Exception as exc:
@@ -144,6 +151,7 @@ class MeetingRecorder:
                 decode=self._decode_file,
                 grab_thumbnail=self._grab_thumbnail,
             )
+            session.transcript.english = self._english()
             try:
                 session.start()
             except OSError as exc:

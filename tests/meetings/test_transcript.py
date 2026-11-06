@@ -1,5 +1,6 @@
 import json
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from skryb.meetings.segmenter import Segment
 from skryb.meetings.session import _Audio
 from skryb.meetings.transcript import Entry, Event, Transcript, asr_context, is_echo, is_speaker_key
 from skryb.people.terms import Term, update_people
+from skryb.translation.translator import Translation
 
 LONG = Segment(10.0, 14.0, 0)
 
@@ -221,3 +223,91 @@ def test_a_list_of_hundreds_of_entries_is_passed_whole(tmp_path: Path) -> None:
     hint = asr_context(people, {})
     assert hint is not None
     assert hint.count(", ") == 499 and hint.endswith("Term499.")
+
+
+class Sent:
+    """Lines handed over for English, answered later by ``answer``."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Callable[[Translation], None]]] = []
+
+    def __call__(self, line: str, done: Callable[[Translation], None]) -> None:
+        self.calls.append((line, done))
+
+    @property
+    def lines(self) -> list[str]:
+        return [line for line, _done in self.calls]
+
+    def answer(self) -> None:
+        for line, done in self.calls:
+            done(Translation(f"EN {len(line.split())} words", [(word, f"g:{word}") for word in line.split()]))
+
+
+GULF = "بكرة نروح السوق ونشتري Laptop جديد"
+
+
+def test_an_arabic_line_comes_back_under_its_own_id_with_english_saved_and_exported(tmp_path: Path) -> None:
+    events: list[Event] = []
+    t = make(tmp_path, events)
+    sent = Sent()
+    t.english = sent
+    t.add("them", Segment(1.0, 3.0, 0), GULF)
+    sent.answer()
+
+    first, again = [e["entry"] for e in events if e["type"] == "entry"]
+    assert isinstance(first, dict) and isinstance(again, dict)
+    assert first["id"] == again["id"] and first["english"] == "" and again["english"] == "EN 6 words"
+    assert again["words"][4] == ("Laptop", "g:Laptop")
+    saved = json.loads((tmp_path / "transcript.json").read_text(encoding="utf-8"))
+    assert saved["entries"][0]["english"] == "EN 6 words" and saved["entries"][0]["words"][0] == ["بكرة", "g:بكرة"]
+    markdown = (tmp_path / "transcript.md").read_text(encoding="utf-8")
+    assert f"{GULF}\n> EN 6 words\n> بكرة = g:بكرة · " in markdown
+
+
+def test_english_and_blank_lines_are_never_sent_but_a_repeated_arabic_line_is_sent_each_time(tmp_path: Path) -> None:
+    t = make(tmp_path)
+    sent = Sent()
+    t.english = sent
+    t.add("them", Segment(1.0, 2.0, 0), "Send me the invoice tonight.")
+    t.add("them", Segment(3.0, 4.0, 0), "   ")
+    t.add("them", Segment(5.0, 6.0, 0), "إن شاء الله")
+    t.add("them", Segment(30.0, 31.0, 1), "إن شاء الله")
+    assert sent.lines == ["إن شاء الله", "إن شاء الله"]
+
+
+def test_a_reopened_meeting_sends_only_the_arabic_lines_still_without_english(tmp_path: Path) -> None:
+    t = make(tmp_path)
+    sent = Sent()
+    t.english = sent
+    t.add("them", Segment(1.0, 2.0, 0), GULF)
+    sent.answer()
+    t.english = None
+    t.add("them", Segment(3.0, 4.0, 1), "وين المفاتيح؟")
+    t.add("me", Segment(5.0, 6.0, 0), "On the table.")
+
+    again = Transcript.load(tmp_path)
+    later = Sent()
+    assert again.entries[0].english == "EN 6 words" and again.entries[0].words[0] == ("بكرة", "g:بكرة")
+    assert again.request_english(later) == 1 and later.lines == ["وين المفاتيح؟"]
+
+
+def test_english_for_a_line_dropped_as_echo_since_is_ignored(tmp_path: Path) -> None:
+    t = make(tmp_path)
+    sent = Sent()
+    t.english = sent
+    t.add("me", Segment(10.1, 13.8, 0), "نروح السوق بكرة الصبح")
+    t.add("them", Segment(10.0, 14.0, 1), "قلت لك نروح السوق بكرة الصبح إن شاء الله")
+    sent.answer()
+    assert [(e.track, e.english) for e in t.entries] == [("them", "EN 9 words")]
+
+
+def test_saved_glosses_that_are_not_word_pairs_read_as_no_gloss(tmp_path: Path) -> None:
+    (tmp_path / "transcript.json").write_text(json.dumps({
+        "started": "2026-10-16T20:20:00",
+        "entries": [
+            {"id": 0, "track": "them", "speaker": 0, "start": 1.0, "end": 2.0, "text": "هلا", "english": "Hi", "words": [["هلا"]]},
+            {"id": 1, "track": "them", "speaker": 0, "start": 3.0, "end": 4.0, "text": "زين", "english": None, "words": "زين"},
+        ],
+    }), encoding="utf-8")
+    entries = Transcript.load(tmp_path).entries
+    assert [(e.english, e.words) for e in entries] == [("Hi", []), ("", [])]

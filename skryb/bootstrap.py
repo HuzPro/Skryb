@@ -126,6 +126,7 @@ from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.models import DIARIZER, ROMAN_URDU
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import meeting_settings_from
+from skryb.meetings.transcript import English
 from skryb.people.repick import Repick, suggest_heard_as
 from skryb.people.terms import import_vocabulary, load_terms
 from skryb.history.service import HistoryService
@@ -195,14 +196,25 @@ from skryb.transcription.streaming.streaming_engine import (
     StreamingTranscriptionEngine,
 )
 from skryb.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.translation.service import TranslationService
 from skryb.tray.app import SystemTrayApp
 from skryb.tray.win32_tray_adapter import build_win32_tray_adapter
 from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version, open_with_shell
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
 from skryb.ui.meeting_handlers import MeetingApi
+from skryb.ui.translation_handlers import TranslationApi
 
 _logger = logging.getLogger(__name__)
+
+
+def show_english(config: JsonConfigAdapter) -> bool:
+    return config.get("translation.show_english", False) is True
+
+
+def english_for_meetings(config: JsonConfigAdapter, translation: TranslationService) -> English | None:
+    """Where a meeting sends its Arabic lines for English: nowhere while Show English is off or still downloading."""
+    return translation.submit if show_english(config) and translation.installed() else None
 
 
 def migrate_output_mode(config: JsonConfigAdapter) -> None:
@@ -1058,6 +1070,7 @@ def _build_meetings(
     *,
     publish: Callable[[dict[str, object]], None],
     on_change: Callable[[bool], None],
+    english: Callable[[], English | None],
 ) -> tuple[MeetingRecorder, MeetingModelFiles]:
     """Meeting recording, sharing dictation's Qwen3-ASR when dictation has it loaded."""
     meeting_only = build_hf_model_manager(
@@ -1089,6 +1102,7 @@ def _build_meetings(
         publish=publish,
         people=paths.people_path,
         on_change=on_change,
+        english=english,
     )
     return recorder, files
 
@@ -1398,6 +1412,14 @@ def build_app(
         diagnostics=diagnostics,
     )
 
+    # Show English: nothing is downloaded until it is switched on, and nothing loads until a line needs it.
+    translation = TranslationService(
+        models_dir=paths.models_dir,
+        log_path=paths.session_dir / "translation-server.log",
+        hardware=hardware_detector.detect,
+        downloads=download_manager,
+    )
+
     def apply_saved_settings(changes: ChangeSet) -> None:
         apply_settings(
             changes, config, record_and_transcribe_use_case, app,
@@ -1411,6 +1433,8 @@ def build_app(
             people_path=paths.people_path,
             rule_counts=rule_counts,
         )
+        if show_english(config):
+            action_dispatcher.dispatch(translation.install)
 
     # Bound late: the app, the API and the notice all come after it.
     updater = _release_updater(
@@ -1441,6 +1465,7 @@ def build_app(
         settings_service, record_and_transcribe_use_case,
         publish=functools.partial(api_server.hub.publish, "meeting"),
         on_change=meeting_changed,
+        english=functools.partial(english_for_meetings, config, translation),
     )
 
     def explain_meeting_problem(message: str) -> None:
@@ -1480,7 +1505,9 @@ def build_app(
             folder=lambda: meeting_settings_from(config).folder,
             model_files=meeting_files,
             open_path=open_with_shell,
+            english=functools.partial(english_for_meetings, config, translation),
         ),
+        translation=TranslationApi(translation, api_server.hub, enabled=functools.partial(show_english, config)),
     )
     launcher = ShellLauncher(
         api_server,
@@ -1546,7 +1573,7 @@ def build_app(
         start_replacement=functools.partial(start_another_copy, "--restart"),
         download_manager=download_manager,
         owned_disposables=tuple(
-            item for item in (meetings, overlay, ducking, history_pruner, updater)
+            item for item in (meetings, overlay, ducking, history_pruner, updater, translation)
             if item is not None
         ),
     )

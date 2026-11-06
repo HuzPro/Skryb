@@ -2,16 +2,19 @@
 
 ``transcript.json`` and ``transcript.md`` are rewritten whole on every line,
 in the layout the standalone meeting transcriber wrote, so meetings it saved
-open here unchanged.
+open here unchanged. With Show English on, an Arabic line gets its English
+and a gloss under each word a moment later, and is published again under the
+same id.
 """
 
+import functools
 import json
 import logging
 import os
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -19,9 +22,12 @@ from pathlib import Path
 from skryb.meetings.segmenter import Segment
 from skryb.people.hints import hint_text
 from skryb.people.terms import load_terms
+from skryb.translation.translator import Translation, has_arabic
 
 Event = dict[str, object]
 Publish = Callable[[Event], None]
+# Hands an Arabic line to the translation thread, which calls back with its English.
+English = Callable[[str, Callable[[Translation], None]], None]
 
 TRANSCRIPT_JSON = "transcript.json"
 TRANSCRIPT_MD = "transcript.md"
@@ -44,6 +50,9 @@ class Entry:
     start: float
     end: float
     text: str
+    # Show English: the line in English, and each written word with its English gloss.
+    english: str = ""
+    words: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -87,6 +96,8 @@ class Transcript:
         self.started = started
         self.entries: list[Entry] = []
         self.names: dict[str, str] = {}
+        # Set while Show English is on: every Arabic line added is handed to it.
+        self.english: English | None = None
         self._publish = publish
         self._lock = threading.Lock()
         self._next_id = 0
@@ -135,6 +146,28 @@ class Transcript:
         for echo in echoes:
             self._publish({"type": "remove", "entry_id": echo.id})
         self._publish({"type": "entry", "entry": self.entry_view(entry)})
+        english = self.english
+        if english is not None and has_arabic(entry.text):
+            english(entry.text, functools.partial(self.annotate, entry.id))
+
+    def request_english(self, english: English) -> int:
+        """Hand every Arabic line still without English to *english*, and each new one from now on; how many went."""
+        self.english = english
+        with self._lock:
+            waiting = [entry for entry in self.entries if not entry.english and has_arabic(entry.text)]
+        for entry in waiting:
+            english(entry.text, functools.partial(self.annotate, entry.id))
+        return len(waiting)
+
+    def annotate(self, entry_id: int, translation: Translation) -> None:
+        """Keep a line's English and gloss, and publish the line again under its id; a line gone since is left alone."""
+        with self._lock:
+            entry = next((e for e in self.entries if e.id == entry_id), None)
+            if entry is None:
+                return
+            entry.english, entry.words = translation.english, list(translation.words)
+            self._save()
+        self._publish({"type": "entry", "entry": self.entry_view(entry)})
 
     def rename(self, key: str, name: str) -> None:
         with self._lock:
@@ -170,6 +203,10 @@ class Transcript:
                 lines += ["", f"**{self.label(e.key)}** [{_clock(e.start)}]"]
                 previous = e.key
             lines.append(e.text)
+            if e.english:
+                lines.append(f"> {e.english}")
+            if e.words:
+                lines.append("> " + " · ".join(f"{word} = {gloss}" for word, gloss in e.words))
         return "\n".join(lines).strip() + "\n"
 
     def save(self) -> None:
@@ -213,7 +250,15 @@ def _entry(raw: object) -> Entry | None:
         entry = Entry(
             int(raw["id"]), str(raw["track"]), int(raw["speaker"]),
             float(raw["start"]), float(raw["end"]), str(raw["text"]),
+            str(raw.get("english") or ""), _word_pairs(raw.get("words")),
         )
     except (KeyError, TypeError, ValueError):
         return None
     return entry if entry.track in _TRACKS else None
+
+
+def _word_pairs(raw: object) -> list[tuple[str, str]]:
+    """Saved ``[word, gloss]`` pairs; anything else reads as no gloss."""
+    if not isinstance(raw, list) or not all(isinstance(pair, list) and len(pair) == 2 for pair in raw):
+        return []
+    return [(str(word), str(gloss)) for word, gloss in raw]

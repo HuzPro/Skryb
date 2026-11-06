@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Search, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
+import { EnglishStatus, Interlinear, useTranslationStatus } from "../components/english";
 import { formatGigabytes } from "../components/models";
 import { Bars, Card, ContextMenu, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat, type Bar } from "../components/parts";
 import { Badge } from "../components/ui/badge";
@@ -10,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
+import { awaitingEnglish, englishOf, hasArabic, withEntry } from "../lib/english";
 import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, labelOf, MEDIA_EXTENSIONS, meetingName, meetingStats, percent, talkShares, turnsOf } from "../lib/meetings";
 import { chooseFolder, chooseMediaFile, onFileDrag } from "../lib/platform";
 import { queries } from "../lib/queries";
@@ -66,8 +68,11 @@ export function useMeetingEvents(): void {
     if (name !== "meeting") return;
     const event = data as MeetingEvent;
     const live = client.getQueryData<LiveMeeting | null>(["meeting-live"]);
+    // A saved meeting's line sent again with its English: that meeting's page shows it.
+    const saved = event.type === "entry" && client.getQueryData<MeetingTranscript>(["meeting", event.id]);
+    if (event.type === "entry" && saved) client.setQueryData<MeetingTranscript>(["meeting", event.id], withEntry(saved, event.entry));
     // A line or status from a meeting this window has not seen start yet: fetch it whole.
-    if ((event.type === "status" || event.type === "entry") && live?.id !== event.id) void client.invalidateQueries({ queryKey: ["meeting-live"] });
+    else if ((event.type === "status" || event.type === "entry") && live?.id !== event.id) void client.invalidateQueries({ queryKey: ["meeting-live"] });
     client.setQueryData<LiveMeeting | null>(["meeting-live"], (current) => applyMeetingEvent(current ?? null, event));
     if (event.type === "started" || event.type === "saved") void client.invalidateQueries({ queryKey: ["meetings"] });
     if (event.type === "names") client.setQueryData<MeetingTranscript>(["meeting", event.id], (saved) => (saved ? { ...saved, names: event.names } : saved));
@@ -345,9 +350,25 @@ function StatusBadge({ live }: { live: LiveMeeting }) {
   );
 }
 
+/** Show English: once per meeting, ask the core for the English its Arabic lines are missing; each arrives as an `entry` event. */
+function useEnglishFor(meetingId: string | undefined, entries: MeetingTranscript["entries"], on: boolean): void {
+  const waiting = on ? awaitingEnglish(entries) : 0;
+  const asked = useRef("");
+  useEffect(() => {
+    if (!meetingId || !waiting || asked.current === meetingId) return;
+    asked.current = meetingId;
+    // Refused while the model is still downloading; the Model page says so.
+    void api.post(`/api/meetings/${encodeURIComponent(meetingId)}/english`).catch(() => undefined);
+  }, [meetingId, waiting]);
+}
+
 /** The transcript, one heading per change of speaker, kept scrolled to the newest line unless the reader scrolled up. */
-function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: MeetingTranscript; live: boolean; onNameClick: (key: string) => void; empty: ReactNode }) {
+function TranscriptPane({ transcript, meetingId, live, onNameClick, empty }: { transcript: MeetingTranscript; meetingId?: string; live: boolean; onNameClick: (key: string) => void; empty: ReactNode }) {
   const turns = useMemo(() => turnsOf(transcript.entries), [transcript.entries]);
+  const showEnglish = useStore().settings?.saved.show_english ?? false;
+  const translation = useTranslationStatus();
+  const translating = showEnglish && Boolean(translation?.installed) && !translation?.error;
+  useEnglishFor(meetingId, transcript.entries, translating);
   const box = useRef<HTMLDivElement>(null);
   const [atEnd, setAtEnd] = useState(true);
   const stick = useRef(true);
@@ -389,7 +410,10 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
             <div
               key={`${turn.key}-${turn.lines[0]?.id ?? turn.start}`}
               style={{ ["--speaker" as string]: colourOf(turn.key) }}
-              className="grid grid-cols-1 gap-x-5 gap-y-0.5 border-b py-2.5 last:border-b-0 min-[1200px]:grid-cols-[180px_minmax(0,95ch)]"
+              className={cn(
+                "grid grid-cols-1 gap-x-5 gap-y-0.5 border-b py-2.5 last:border-b-0",
+                showEnglish ? "min-[1200px]:grid-cols-[180px_minmax(0,1fr)]" : "min-[1200px]:grid-cols-[180px_minmax(0,95ch)]",
+              )}
             >
               <div className="flex items-baseline gap-2 min-[1200px]:flex-col min-[1200px]:items-end min-[1200px]:gap-0">
                 <button onClick={() => onNameClick(turn.key)} className="max-w-full truncate text-[13px] font-semibold text-[var(--speaker)] hover:underline">
@@ -398,11 +422,20 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
                 <time className="text-[11.5px] text-muted-foreground tabular-nums">{formatDuration(turn.start)}</time>
               </div>
               <div className="selectable text-[13.5px] leading-relaxed">
-                {turn.lines.map((line) => (
-                  <p key={line.id} dir="auto" className="mb-1 last:mb-0">
-                    {line.text}
-                  </p>
-                ))}
+                {turn.lines.map((line) => {
+                  const english = showEnglish ? englishOf(line) : null;
+                  if (english) return <Interlinear key={line.id} line={english} className="mb-2.5 last:mb-0" />;
+                  return (
+                    <p key={line.id} dir="auto" className="mb-1 last:mb-0">
+                      {line.text}
+                      {translating && hasArabic(line.text) ? (
+                        <span dir="ltr" className="block text-[12px] text-muted-foreground">
+                          Translating…
+                        </span>
+                      ) : null}
+                    </p>
+                  );
+                })}
               </div>
             </div>
           ))
@@ -715,6 +748,7 @@ export function MeetingHomePage() {
           {live && !running ? <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} /> : null}
           <TranscriptPane
             transcript={transcript}
+            meetingId={live?.id}
             live={Boolean(live) && live?.status !== "Saved"}
             onNameClick={(key) => setFocusKey({ key, at: Date.now() })}
             empty={live ? (running ? (file ? "Lines appear here as the file is transcribed." : "Listening. Lines appear a second or two after someone stops talking.") : "Nothing was said in this meeting.") : idle}
@@ -829,7 +863,7 @@ export function SavedMeetingPage() {
   return (
     <MeetingLayout
       header={header}
-      transcript={<TranscriptPane transcript={transcript} live={false} onNameClick={(key) => setFocusKey({ key, at: Date.now() })} empty="Nothing was said in this meeting." />}
+      transcript={<TranscriptPane transcript={transcript} meetingId={id} live={false} onNameClick={(key) => setFocusKey({ key, at: Date.now() })} empty="Nothing was said in this meeting." />}
       aside={
         <>
           <SpeakersCard transcript={transcript} meetingId={id} focusKey={focusKey} />
@@ -913,6 +947,7 @@ export function MeetingOutputPage() {
 
 export function MeetingModelPage() {
   const { draft, edit } = useMeetingDraft();
+  const { settings, editSettings } = useStore();
   const overview = useMeetingOverview();
   return (
     <PageBody>
@@ -922,6 +957,15 @@ export function MeetingModelPage() {
           <Rows>
             <Row title="Language" description="Urdu is written in Roman Urdu.">
               <Select label="Meeting language" className="w-72" value={draft.language} options={LANGUAGES} onChange={(language) => edit({ language: language as MeetingLanguage })} />
+            </Row>
+          </Rows>
+        </Section>
+      ) : null}
+      {settings ? (
+        <Section title="English" note="Arabic lines, in meetings and in History, word by word with the English under each word, and the whole line in English below.">
+          <Rows>
+            <Row title="Show English" description={<EnglishStatus on={settings.saved.show_english} />}>
+              <Switch aria-label="Show English" checked={settings.draft.show_english} onCheckedChange={(on) => editSettings((current) => ({ ...current, show_english: on }))} />
             </Row>
           </Rows>
         </Section>
