@@ -112,3 +112,52 @@ def test_the_transformers_engine_refuses_to_transcribe_before_loading() -> None:
 
     with pytest.raises(TranscriptionError, match="not loaded"):
         Qwen3AsrAdapter(Path("."), "cpu", "en").transcribe(_CLIP)
+
+
+def test_arabic_is_asked_for_by_the_name_the_model_was_trained_on() -> None:
+    assert prompt_text(None, "ar")[1].endswith("assistant\nlanguage Arabic<asr_text>")
+
+
+class _PromptedQasrHearingQuestions(_PromptedQasr):
+    def __init__(self, transcript: str, question_probability: float) -> None:
+        super().__init__(transcript)
+        self._question_probability = question_probability
+
+    def qasr_question_probability(self, handle) -> float:  # noqa: ANN001
+        return self._question_probability
+
+
+def _dictate(tmp_path: Path, transcript: str, language: str, question_probability: float = -1.0) -> tuple[str, str]:
+    adapter = NativeQwen3AsrAdapter(tmp_path)
+    adapter._lib, adapter._handle = _PromptedQasrHearingQuestions(transcript, question_probability), 1  # type: ignore[assignment]
+    adapter._tokenizer = _characters
+    result = adapter.transcribe_prompted(_CLIP, None, language)
+    return result.text, result.language
+
+
+@pytest.mark.parametrize(("transcript", "probability", "expected"), [
+    ("شلونك اليوم.", 0.6, "شلونك اليوم؟"),
+    ("خلنا نراجع الـ budget قبل الاجتماع.", 0.31, "خلنا نراجع الـ budget قبل الاجتماع؟"),
+    ("زين. زين. زين.", 0.9, "زين. زين. زين؟"),
+    ("أرسل التقرير بكرة.", 0.1, "أرسل التقرير بكرة."),
+    ("متى نبدأ؟", 0.9, "متى نبدأ؟"),
+    ("", 0.9, ""),
+])
+def test_an_arabic_question_the_engine_nearly_heard_gets_the_arabic_question_mark(
+    tmp_path: Path, transcript: str, probability: float, expected: str,
+) -> None:
+    assert _dictate(tmp_path, transcript, "ar", probability) == (expected, "ar")
+
+
+def test_a_long_arabic_dictation_changes_only_its_last_full_stop(tmp_path: Path) -> None:
+    sentence = "نراجع الأرقام مع الفريق بعد الغداء. "
+    transcript = (sentence * 1500).rstrip()
+
+    text, _language = _dictate(tmp_path, transcript, "ar", 0.5)
+
+    assert text == transcript[:-1] + "؟"
+    assert text.count("؟") == 1 and text.count(".") == 1499
+
+
+def test_english_dictation_still_gets_the_latin_question_mark_and_says_it_was_english(tmp_path: Path) -> None:
+    assert _dictate(tmp_path, "Is the build green.", "en", 0.5) == ("Is the build green?", "en")

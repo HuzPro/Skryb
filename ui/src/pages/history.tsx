@@ -356,7 +356,7 @@ export function HistoryPage() {
                       active && "bg-selected shadow-[inset_3px_0_0_var(--primary)] hover:bg-selected",
                     )}
                   >
-                    <span className={cn("truncate text-[13px]", blank && "text-muted-foreground italic")}>{preview(entry)}</span>
+                    <span dir="auto" className={cn("truncate text-[13px]", blank && "text-muted-foreground italic")}>{preview(entry)}</span>
                     <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground tabular-nums">
                       {parts(entry.at).time} · {formatDuration(entry.audio_seconds)}
                       {blank ? null : ` · ${wordCount(finalText(entry)).toLocaleString()} words`}
@@ -409,7 +409,7 @@ export function HistoryPage() {
               </div>
               {statusNote ? <p className={cn("px-5 pt-3 text-[12.5px]", noteIsError ? "selectable text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-[14px] leading-relaxed">
-                <div className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
+                <div dir="auto" className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
               </div>
             </>
           ) : (

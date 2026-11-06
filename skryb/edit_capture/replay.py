@@ -1,3 +1,4 @@
+import unicodedata
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
@@ -18,6 +19,8 @@ class EditFlag(StrEnum):
     TAB = "tab"
     ESCAPE = "escape"
     IME = "ime"
+    # Left and Right move the other way through Arabic or Hebrew, and the replay can't tell which way.
+    RIGHT_TO_LEFT_ARROW = "right_to_left_arrow"
 
 
 # After any of these the replay can no longer say where the caret sits or what
@@ -35,6 +38,7 @@ UNRELIABLE_FLAGS = frozenset({
     EditFlag.TAB,
     EditFlag.ESCAPE,
     EditFlag.IME,
+    EditFlag.RIGHT_TO_LEFT_ARROW,
 })
 
 
@@ -229,6 +233,7 @@ class EditReplay:
         self._cursor = len(self._chars)
 
     def _move_by_character(self, stroke: KeyStroke) -> None:
+        self._flag_right_to_left_text()
         if self._collapses_a_selection(stroke):
             self._collapse_selection_toward(stroke)
             return
@@ -237,6 +242,7 @@ class EditReplay:
         self._move_caret(target, extend_selection=stroke.shift)
 
     def _move_by_word(self, stroke: KeyStroke) -> None:
+        self._flag_right_to_left_text()
         if self._collapses_a_selection(stroke):
             self._collapse_selection_toward(stroke)
             return
@@ -246,6 +252,10 @@ class EditReplay:
             else self._next_word_start_after_cursor()
         )
         self._move_caret(target, extend_selection=stroke.shift)
+
+    def _flag_right_to_left_text(self) -> None:
+        if any(unicodedata.bidirectional(char) in ("R", "AL") for char in self._chars):
+            self._flags.add(EditFlag.RIGHT_TO_LEFT_ARROW)
 
     def _collapses_a_selection(self, stroke: KeyStroke) -> bool:
         """An unshifted arrow over a selection only drops the highlight.

@@ -222,9 +222,9 @@ def migrate_output_mode(config: JsonConfigAdapter) -> None:
 
 
 def migrate_language(config: JsonConfigAdapter) -> None:
-    """Rewrite a legacy language of ``None`` or ``"auto"`` to ``"en"``."""
+    """Rewrite a language Qwen3-ASR isn't held to (``None``, ``"auto"``, or one the old list offered) to ``"en"``."""
     current = config.get("transcription.language")
-    if current not in (None, "auto"):
+    if current in LANGUAGE_NAMES:
         return
     _logger.info("Migrating transcription language %r -> 'en'.", current)
     config.set("transcription.language", "en")
@@ -591,7 +591,7 @@ def _best_model_left(config: JsonConfigAdapter, paths: AppPaths, hardware_detect
 
 
 def _dictation_language(config: JsonConfigAdapter) -> str:
-    """The language Qwen3-ASR is held to; it knows English and Hindi (asked for Urdu)."""
+    """The language Qwen3-ASR is held to: English, Hindi (asked for Urdu) or Arabic."""
     language = config.get("transcription.language", "en")
     return language if language in LANGUAGE_NAMES else "en"
 

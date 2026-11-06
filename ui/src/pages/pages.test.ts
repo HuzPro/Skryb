@@ -8,7 +8,7 @@ import { count, dictationPace, reliability, streakNote, timeSaved } from "./home
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
-import { byTier, withMode } from "./transcription";
+import { byTier, fitLanguageToModel, withLanguage, withMode } from "./transcription";
 import { describeUpdate } from "./updates";
 
 const entry = (at: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -212,6 +212,20 @@ describe("settings helpers", () => {
     expect(live).toMatchObject({ transcription_mode: "streaming", model_size: "nemotron-b", engine: "auto" });
     expect(withMode(live, "batch", models)).toMatchObject({ transcription_mode: "batch", model_size: "parakeet" });
     expect(withMode(settings, "batch", models)).toMatchObject({ model_size: "parakeet", engine: "nano_parakeet" });
+  });
+
+  it("picking Arabic picks Qwen3-ASR in batch mode, and English leaves the model alone", () => {
+    const live = { language: "en", model_size: "nemotron-b", transcription_mode: "streaming", engine: "nemotron_streaming" } as Settings;
+    expect(withLanguage(live, "ar")).toMatchObject({ language: "ar", model_size: "qwen3-asr-1.7b", transcription_mode: "batch", engine: "auto" });
+    const arabic = withLanguage(live, "ar");
+    expect(withLanguage(arabic, "en")).toMatchObject({ language: "en", model_size: "qwen3-asr-1.7b", transcription_mode: "batch" });
+  });
+
+  it("Arabic goes back to English only when the model changes to one that can't hear it", () => {
+    const arabic = { language: "ar", model_size: "qwen3-asr-1.7b", transcription_mode: "batch", engine: "auto" } as Settings;
+    expect(fitLanguageToModel(arabic)).toBe(arabic);
+    expect(fitLanguageToModel({ ...arabic, model_size: "parakeet-ultra" })).toMatchObject({ language: "en", model_size: "parakeet-ultra" });
+    expect(fitLanguageToModel({ ...arabic, language: "fr", model_size: "parakeet-ultra" }).language).toBe("fr");
   });
 });
 

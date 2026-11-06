@@ -135,6 +135,11 @@ def test_meeting_settings_default_to_the_default_folder_the_microphone_and_engli
     assert settings.language == "en"
 
 
+@pytest.mark.parametrize("language", ["en", "ur", "auto", "ar"])
+def test_each_meeting_language_is_read_back_as_saved(language: str) -> None:
+    assert meeting_settings_from(FakeConfig({"meetings.language": language})).language == language
+
+
 def test_saved_meeting_settings_are_read_and_an_unknown_language_falls_back_to_english() -> None:
     settings = meeting_settings_from(FakeConfig({
         "meetings.folder": "  E:\\Calls  ", "meetings.record_microphone": False, "meetings.language": "fr",

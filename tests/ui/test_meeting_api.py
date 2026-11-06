@@ -283,7 +283,7 @@ def test_a_file_in_a_language_skryb_doesnt_offer_is_refused(rig: MeetingRig, tmp
 
     status, error = rig.call("POST", "/api/meetings/files", {"path": str(video), "language": "fr"})
 
-    assert status == 400 and "Pick English or Urdu for the file." in json.dumps(error)
+    assert status == 400 and "Pick English, Urdu or Arabic for the file." in json.dumps(error)
 
 
 def _ids(rig: MeetingRig) -> list[str]:

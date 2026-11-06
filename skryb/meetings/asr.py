@@ -6,6 +6,7 @@ own, on the engine Skryb picks for this computer, with dictation's engine
 drafting its text when it can use a draft (the NPU one). Urdu and Auto
 meetings hear each line with Whisper Hindi2Hinglish Apex first, since
 Qwen3-ASR has no Urdu, and keep Qwen3-ASR for the lines that come out English.
+Arabic meetings ask Qwen3-ASR for Arabic.
 """
 
 import importlib.util
@@ -107,6 +108,7 @@ class MeetingModels:
         native_diarizer: Callable[[], Path | None] = lambda: None,
     ) -> None:
         self._urdu = language in URDU_LANGUAGES
+        self._asr_language = "ar" if language == "ar" else "en"
         self._dictation_engine = dictation_engine
         self._turns = turns
         self._build_asr = build_asr
@@ -163,9 +165,9 @@ class MeetingModels:
         with self._turns.meeting():
             engine = self._dictation_engine()
             if isinstance(engine, PromptedTranscriber):
-                return transcribe_with_hint(engine, clip, context, "en").text
+                return transcribe_with_hint(engine, clip, context, self._asr_language).text
         # ponytail: if dictation switches to Qwen3-ASR mid-meeting, the meeting keeps its own copy until it ends.
-        return transcribe_with_hint(self._own_engine(), clip, context, "en").text
+        return transcribe_with_hint(self._own_engine(), clip, context, self._asr_language).text
 
     def release(self) -> None:
         if isinstance(self._diarizer, (NativeDiarizer, OpenVinoDiarizer)):

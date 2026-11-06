@@ -8,6 +8,7 @@ export interface Option {
   label: string;
   /** Shown before the label, in the list and once chosen. */
   icon?: ReactNode;
+  disabled?: boolean;
 }
 
 /** A shadcn-style select over a plain list of options; Radix needs a non-empty value, so "" maps to a sentinel. */
@@ -53,7 +54,8 @@ export function Select({
               <SelectPrimitive.Item
                 key={option.value}
                 value={encode(option.value)}
-                className="relative flex h-7 items-center rounded-md pr-7 pl-2 text-[13px] outline-none select-none data-[highlighted]:bg-accent"
+                disabled={option.disabled}
+                className="relative flex h-7 items-center rounded-md pr-7 pl-2 text-[13px] outline-none select-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
               >
                 <SelectPrimitive.ItemText>
                   {option.icon ? (

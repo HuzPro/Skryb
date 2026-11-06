@@ -76,7 +76,7 @@ class _Command:
     capitalize_after: bool = False
 
 
-_SENTENCE_ENDINGS = (".", "?", "!")
+_SENTENCE_ENDINGS = (".", "?", "!", "؟")
 _SPOKEN_MARKS = ".,;:!?"
 _STRAY_MARKS = _SPOKEN_MARKS + " \t"
 _TOKEN_PATTERN = re.compile(r"\w+|\s+|[^\w\s]+", re.UNICODE)

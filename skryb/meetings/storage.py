@@ -18,8 +18,8 @@ from skryb.meetings.thumbnail import THUMBNAIL_JPG
 from skryb.meetings.transcript import TRANSCRIPT_JSON, Transcript
 
 _SECOND_DRIVE = Path("D:/")
-# English; Urdu, written in Roman Urdu; or each sentence in whichever of the two it is.
-LANGUAGES = ("en", "ur", "auto")
+# English; Urdu, written in Roman Urdu; each sentence in whichever of those two it is; or Arabic.
+LANGUAGES = ("en", "ur", "auto", "ar")
 
 
 _NAME_CHARS = 80

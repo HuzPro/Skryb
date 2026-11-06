@@ -11,7 +11,7 @@ from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.result import TranscriptionResult
 
 # Qwen3-ASR has no Urdu: spoken Urdu is asked for as Hindi, then romanized.
-LANGUAGE_NAMES = {"en": "English", "hi": "Hindi"}
+LANGUAGE_NAMES = {"en": "English", "hi": "Hindi", "ar": "Arabic"}
 _CONTROL_MARKS = ("<|", "|>")
 
 

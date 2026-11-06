@@ -149,8 +149,8 @@ def test_a_meetings_own_npu_engine_drafts_each_clip_with_dictations_engine_in_it
     assert own.drafts == ["dictated"]
 
 
-@pytest.mark.parametrize("setting", ["en", "ur", "auto", "klingon"])
-def test_qwen3_asr_is_always_asked_for_english_since_urdu_lines_come_from_the_roman_urdu_model(setting: str) -> None:
+@pytest.mark.parametrize("setting", ["en", "ur", "auto", "klingon", "", "AR"])
+def test_qwen3_asr_is_asked_for_english_in_every_meeting_but_an_arabic_one(setting: str) -> None:
     dictation = FakeQwen()
     models, _built = _models(dictation, language=setting)
     FakeApex.lines = ["Let's look at the quarterly numbers."]
@@ -445,3 +445,26 @@ def test_a_roman_urdu_model_that_fails_on_the_npu_runs_on_pytorch_instead(monkey
     models.speaker_labeller()
 
     assert len(FakeApex.built) == 1 and type(FakeApex.built[0]) is FakeApex
+
+
+def test_an_arabic_meeting_asks_qwen3_asr_for_arabic_and_never_loads_the_roman_urdu_model() -> None:
+    dictation = FakeQwen("خلنا نراجع الـ budget قبل الاجتماع.")
+    models, _built = _models(dictation, language="ar")
+    FakeApex.built.clear()
+
+    models.speaker_labeller()
+    texts = [models.transcribe(_CLIP, "Names and terms that may come up: Northwind.") for _ in range(3)]
+
+    assert texts == ["خلنا نراجع الـ budget قبل الاجتماع."] * 3
+    assert [call[2] for call in dictation.calls] == ["ar"] * 3
+    assert FakeApex.built == []
+
+
+def test_an_arabic_meeting_asks_its_own_qwen3_asr_for_arabic_when_dictation_uses_another_model() -> None:
+    own = FakeQwen("الوقت ضيق.")
+    models, built = _models(FakeParakeet(), own=own, language="ar")
+
+    models.speaker_labeller()
+    models.transcribe(_CLIP, None)
+
+    assert built == [own] and own.calls[0][2] == "ar"

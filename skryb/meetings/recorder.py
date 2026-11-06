@@ -16,7 +16,7 @@ from skryb.meetings.transcript import Event
 
 _logger = logging.getLogger(__name__)
 _FILE_BUSY = "Skryb is transcribing a file. Cancel it on the Meetings page first."
-_LANGUAGES = ("en", "ur")
+_LANGUAGES = ("en", "ur", "ar")
 
 
 class MeetingError(Exception):
@@ -118,9 +118,9 @@ class MeetingRecorder:
         self._on_change(True)
 
     def transcribe_file(self, path: Path, language: str) -> None:
-        """Transcribe a video or audio file as a meeting of its own, in English or (Roman) Urdu."""
+        """Transcribe a video or audio file as a meeting of its own, in English, (Roman) Urdu or Arabic."""
         if language not in _LANGUAGES:
-            raise MeetingError("Pick English or Urdu for the file.")
+            raise MeetingError("Pick English, Urdu or Arabic for the file.")
         with self._turn:
             if self._current is not None:
                 raise MeetingError(_FILE_BUSY if isinstance(self._current, FileSession) else

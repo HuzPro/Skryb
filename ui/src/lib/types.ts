@@ -27,8 +27,8 @@ export interface RecordingSettings {
   warn_before_cap_seconds: number;
 }
 
-/** English; Urdu, written in Roman Urdu; or each sentence in whichever of the two it is. */
-export type MeetingLanguage = "en" | "ur" | "auto";
+/** English; Urdu, written in Roman Urdu; each sentence in whichever of those two it is; or Arabic. */
+export type MeetingLanguage = "en" | "ur" | "auto" | "ar";
 
 export interface MeetingSettings {
   folder: string;
@@ -262,7 +262,7 @@ export interface MeetingTranscript {
 
 export type MeetingStatus = "Starting" | "Loading models" | "Recording" | "Reading the file" | "Transcribing" | "Finishing" | "Saved";
 /** The languages a dropped file can be transcribed in. */
-export type FileLanguage = "en" | "ur";
+export type FileLanguage = "en" | "ur" | "ar";
 
 export interface LiveMeeting extends MeetingTranscript {
   id: string;

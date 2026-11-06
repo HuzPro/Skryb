@@ -27,10 +27,12 @@ const LANGUAGES: { value: MeetingLanguage; label: string }[] = [
   { value: "en", label: "English" },
   { value: "ur", label: "Urdu, written in Roman Urdu" },
   { value: "auto", label: "English and Urdu, each sentence as spoken" },
+  { value: "ar", label: "Arabic" },
 ];
 const FILE_LANGUAGES: { value: FileLanguage; label: string }[] = [
   { value: "en", label: "English" },
   { value: "ur", label: "Urdu, written in Roman Urdu" },
+  { value: "ar", label: "Arabic" },
 ];
 
 export function useMeetingOverview(): MeetingOverview | undefined {
@@ -397,7 +399,7 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
               </div>
               <div className="selectable text-[13.5px] leading-relaxed">
                 {turn.lines.map((line) => (
-                  <p key={line.id} className="mb-1 last:mb-0">
+                  <p key={line.id} dir="auto" className="mb-1 last:mb-0">
                     {line.text}
                   </p>
                 ))}
@@ -594,7 +596,7 @@ export function MeetingModels({ overview, compact = false }: { overview: Meeting
 
 /** Drop a video or audio file on the window, or pick one: it is transcribed as a meeting of its own. */
 function FileDropCard({ ready, meetingLanguage, className }: { ready: boolean; meetingLanguage: MeetingLanguage | undefined; className?: string }) {
-  const [language, setLanguage] = useState<FileLanguage>(meetingLanguage === "ur" ? "ur" : "en");
+  const [language, setLanguage] = useState<FileLanguage>(meetingLanguage === "ur" || meetingLanguage === "ar" ? meetingLanguage : "en");
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");

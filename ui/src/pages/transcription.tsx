@@ -9,18 +9,25 @@ import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { Engines, Model, Settings, TranscriptionMode } from "../lib/types";
 
+// The languages the core holds Qwen3-ASR to (`LANGUAGE_NAMES`); any other dictates English.
 export const LANGUAGES = [
   { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "nl", label: "Dutch" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "zh", label: "Chinese" },
+  { value: "ar", label: "Arabic" },
 ];
+// Only Qwen3-ASR knows Arabic.
+const ARABIC_MODEL = "qwen3-asr-1.7b";
+
+/** Picking Arabic picks Qwen3-ASR, which only runs in batch mode. */
+export function withLanguage(settings: Settings, language: string): Settings {
+  return language === "ar"
+    ? { ...settings, language, transcription_mode: "batch", model_size: ARABIC_MODEL, engine: "auto" }
+    : { ...settings, language };
+}
+
+/** Arabic goes back to English when the model changes to one that can't hear it. */
+export function fitLanguageToModel(settings: Settings): Settings {
+  return settings.language === "ar" && settings.model_size !== ARABIC_MODEL ? { ...settings, language: "en" } : settings;
+}
 
 const TIERS = ["Small", "Medium", "Large"];
 
@@ -69,6 +76,8 @@ export function TranscriptionPage() {
       ? ""
       : "Needs a CUDA or ROCm GPU, and none was detected.";
   const shown = byTier(models.filter((model) => fitsMode(model, draft.transcription_mode)));
+  const arabicReady = models.some((model) => model.name === ARABIC_MODEL && model.installed);
+  const languages = LANGUAGES.map((language) => (language.value === "ar" && !arabicReady ? { ...language, disabled: true } : language));
   const candidates = engines?.candidates ?? [];
   const engineOptions = [
     { value: "auto", label: "Automatic" },
@@ -83,7 +92,7 @@ export function TranscriptionPage() {
         <ChoiceCards
           label="Mode"
           value={draft.transcription_mode}
-          onChange={(mode) => editSettings((current) => withMode(current, mode, models))}
+          onChange={(mode) => editSettings((current) => fitLanguageToModel(withMode(current, mode, models)))}
           choices={[
             { value: "batch", title: "Batch", description: "Transcribes when you stop. Works on any PC." },
             {
@@ -102,7 +111,7 @@ export function TranscriptionPage() {
               key={model.name}
               model={model}
               selected={model.name === draft.model_size}
-              onSelect={() => editSettings((current) => ({ ...current, model_size: model.name, engine: "auto" }))}
+              onSelect={() => editSettings((current) => fitLanguageToModel({ ...current, model_size: model.name, engine: "auto" }))}
             />
           ))}
           {models.length && !shown.length ? <p className="text-[12.5px] text-muted-foreground">No models for this mode.</p> : null}
@@ -110,13 +119,13 @@ export function TranscriptionPage() {
       </Section>
       <Section title="Speech">
         <Rows>
-          <Row title="Language" description="The language you speak in.">
+          <Row title="Language" description={arabicReady ? "The language you speak in. Arabic uses the Large model." : "The language you speak in. Arabic needs the Large model: download it above."}>
             <Select
               label="Language"
               className="w-56"
               value={draft.language}
-              options={LANGUAGES.some((language) => language.value === draft.language) ? LANGUAGES : [...LANGUAGES, { value: draft.language, label: draft.language }]}
-              onChange={(language) => editSettings((current) => ({ ...current, language }))}
+              options={languages.some((language) => language.value === draft.language) ? languages : [...languages, { value: draft.language, label: draft.language }]}
+              onChange={(language) => editSettings((current) => withLanguage(current, language))}
             />
           </Row>
           <Row

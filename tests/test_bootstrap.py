@@ -732,14 +732,25 @@ class TestMigrateLanguage:
         config.set.assert_not_called()
         config.save.assert_not_called()
 
-    def test_should_leave_other_language_unchanged(self):
+    @pytest.mark.parametrize("language", ["ar", "hi"])
+    def test_arabic_and_the_urdu_route_are_left_as_they_are(self, language: str) -> None:
         config = MagicMock()
-        config.get.return_value = "fr"
+        config.get.return_value = language
 
         migrate_language(config)
 
         config.set.assert_not_called()
         config.save.assert_not_called()
+
+    @pytest.mark.parametrize("language", ["fr", "zh", "", "AR"])
+    def test_a_language_that_always_dictated_english_is_saved_as_english(self, language: str) -> None:
+        config = MagicMock()
+        config.get.return_value = language
+
+        migrate_language(config)
+
+        config.set.assert_called_once_with("transcription.language", "en")
+        config.save.assert_called_once()
 
 
 class TestMigrateHotkeyBindings:

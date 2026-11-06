@@ -86,6 +86,7 @@ MEETING_LINES = [
     ("me:0", "Ek do ghante mein main bhi dekh leta hoon."),
     ("them:3", "Quick one from me: are late sign-ups allowed this season?"),
     ("them:0", "Not yet. Let's keep this season to the first two beds."),
+    ("them:3", "خلنا نراجع الـ budget قبل الاجتماع، ترى الوقت ضيق."),
 ]
 
 ENGINES = {
@@ -113,6 +114,7 @@ SAMPLE_TEXTS = [
     "Café au lait, naïve résumé, déjà vu — and an emoji 🎙️ for good measure.",
     "Meeting notes for Monday:\n- ship the build\n- review the pill animation\n- write the release notes",
     "Можно ли так же диктовать по-русски? Да, конечно.",
+    "شلونك؟ أبي أرسل التقرير بكرة الصبح إن شاء الله.",
     "Fix the flaky test in test_history_management and push it before lunch.",
     "   ",
     "Refactor the tray menu so History opens the new window.",
@@ -909,7 +911,7 @@ class Handler(BaseHTTPRequestHandler):
         core = self.core
         live = core.live_meeting
         if not rest and method == "GET":
-            urdu = core.settings["meetings"]["language"] != "en"
+            urdu = core.settings["meetings"]["language"] in ("ur", "auto")
             ready = all(model["installed"] for model in core.meeting_models if urdu or not model.get("urdu_only"))
             ids = sorted(core.meetings, key=lambda meeting_id: core.meetings[meeting_id]["started"], reverse=True)
             self._send(200, {"recording": core.app["meeting_recording"], "folder": core.settings["meetings"]["folder"],
@@ -929,8 +931,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(202)
         elif rest == ["files"]:
             body = self._body() or {}
-            if body.get("language") not in ("en", "ur"):
-                self._error(400, "Pick English or Urdu for the file.")
+            if body.get("language") not in ("en", "ur", "ar"):
+                self._error(400, "Pick English, Urdu or Arabic for the file.")
             elif not str(body.get("path") or "").strip():
                 self._error(400, "Say which file to transcribe and in which language.")
             elif str(body["path"]).lower().endswith((".ogg", ".opus")):
