@@ -106,7 +106,7 @@ export function MeetingHistoryPage() {
   const [problem, setProblem] = useState("");
   const closeMenu = useCallback(() => setMenu(null), []);
   const past = useMemo(() => pastMeetings(overview?.meetings ?? [], recording ? (live?.id ?? null) : null, search), [overview, recording, live?.id, search]);
-  const items = useMemo(() => groupByDay(past, new Date(), (meeting) => meeting.started), [past]);
+  const sections = useMemo(() => daySections(past), [past]);
 
   const rename = async (id: string, name: string | null) => {
     setRenaming(null);
@@ -126,7 +126,7 @@ export function MeetingHistoryPage() {
   const remove = async (id: string) => {
     const sure = await confirm(
       "Delete this meeting?",
-      `“${meetingName(id)}” goes to the Recycle Bin with its recording and transcript. You can restore it from there.`,
+      `“${meetingName(id)}” goes to the Recycle Bin with its recording.`,
       "Delete",
     );
     if (!sure) return;
@@ -153,7 +153,7 @@ export function MeetingHistoryPage() {
     event.preventDefault();
   };
 
-  const empty = !overview ? "Loading…" : search ? "No meetings match your search." : "Meetings you record or transcribe show up here.";
+  const empty = !overview ? "Loading…" : search ? "No meetings match." : "Meetings you record or transcribe land here.";
 
   return (
     <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-5")}>
@@ -163,46 +163,49 @@ export function MeetingHistoryPage() {
           <Input aria-label="Search meetings" placeholder="Search meetings" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} />
         </div>
       </PageTitle>
-      <Card className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        <nav aria-label="Past meetings" className="h-full overflow-y-auto px-1.5 pb-1.5">
-          {items.map((item) =>
-            item.kind === "day" ? (
-              <div key={`day-${item.label}`} className="flex h-[30px] items-end px-2.5 pb-1 text-[11.5px] font-semibold text-muted-foreground">
-                {item.label}
-              </div>
-            ) : renaming === item.entry.id ? (
-              <RenameField key={item.entry.id} meeting={item.entry} onDone={(name) => void rename(item.entry.id, name)} />
-            ) : (
-              <Link
-                key={item.entry.id}
-                to={`/meetings/${encodeURIComponent(item.entry.id)}`}
-                draggable={false}
-                onContextMenu={(event) => openMenu(item.entry.id, event)}
-                onKeyDown={(event) => keys(item.entry.id, event)}
-                className={cn(
-                  "flex h-[50px] items-center gap-3 rounded-lg px-2.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/40",
-                  menu?.id === item.entry.id && "bg-accent/60",
+      <div className="relative min-h-0 flex-1">
+        <nav aria-label="Past meetings" className="h-full overflow-y-auto pb-2">
+          {sections.map(({ label, meetings }) => (
+            <section key={label} className="mb-5">
+              <h2 className="mb-2 text-[12px] font-semibold text-muted-foreground">{label}</h2>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+                {meetings.map((meeting) =>
+                  renaming === meeting.id ? (
+                    <RenameField key={meeting.id} meeting={meeting} onDone={(name) => void rename(meeting.id, name)} />
+                  ) : (
+                    <Link
+                      key={meeting.id}
+                      to={`/meetings/${encodeURIComponent(meeting.id)}`}
+                      draggable={false}
+                      title={meeting.id}
+                      onContextMenu={(event) => openMenu(meeting.id, event)}
+                      onKeyDown={(event) => keys(meeting.id, event)}
+                      className={cn(
+                        "surface group flex flex-col overflow-hidden rounded-xl border border-edge bg-card shadow-card outline-none transition-[border-color,box-shadow] hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40",
+                        menu?.id === meeting.id && "border-primary/50",
+                      )}
+                    >
+                      <MeetingCover meeting={meeting} />
+                      <div className="px-3.5 py-2.5">
+                        <p className="truncate text-[13.5px] font-medium">{meetingName(meeting.id)}</p>
+                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground tabular-nums">
+                          {meeting.started.slice(11, 16)} · {meeting.speakers} {meeting.speakers === 1 ? "voice" : "voices"} · {meeting.words.toLocaleString()} words
+                        </p>
+                      </div>
+                    </Link>
+                  ),
                 )}
-              >
-                <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{item.entry.started.slice(11, 16)}</span>
-                <span className="min-w-0 flex-1 truncate text-[13px]" title={item.entry.id}>
-                  {meetingName(item.entry.id)}
-                </span>
-                <span className="shrink-0 text-[12px] text-muted-foreground">
-                  {item.entry.speakers} {item.entry.speakers === 1 ? "voice" : "voices"}
-                </span>
-                <span className="w-12 shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">{formatDuration(item.entry.seconds)}</span>
-              </Link>
-            ),
-          )}
+              </div>
+            </section>
+          ))}
         </nav>
         {!past.length ? <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12.5px] text-muted-foreground">{empty}</p> : null}
         {problem ? (
-          <p role="alert" className="absolute inset-x-0 bottom-0 border-t bg-card px-4 py-2 text-[12px] text-destructive">
+          <p role="alert" className="selectable absolute inset-x-0 bottom-0 rounded-lg border bg-card px-4 py-2 text-[12px] text-destructive">
             {problem}
           </p>
         ) : null}
-      </Card>
+      </div>
       {menu ? (
         <ContextMenu
           x={menu.x}
@@ -228,25 +231,76 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
     onDone(name);
   };
   return (
-    <div className="flex h-[50px] items-center gap-3 rounded-lg bg-selected px-2.5">
-      <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{meeting.started.slice(11, 16)}</span>
-      <input
-        autoFocus
-        defaultValue={meetingName(meeting.id)}
-        maxLength={80}
-        aria-label="Meeting name"
-        onFocus={(event) => event.currentTarget.select()}
-        onBlur={(event) => finish(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") finish(event.currentTarget.value);
-          else if (event.key === "Escape") finish(null);
-          else return;
-          event.preventDefault();
-        }}
-        className="min-w-0 flex-1 rounded-sm bg-transparent px-1 text-[13px] text-foreground outline-none ring-1 ring-primary"
-      />
+    <div className="flex flex-col overflow-hidden rounded-xl border border-primary bg-card shadow-card">
+      <MeetingCover meeting={meeting} />
+      <div className="px-3.5 py-2.5">
+        <input
+          autoFocus
+          defaultValue={meetingName(meeting.id)}
+          maxLength={80}
+          aria-label="Meeting name"
+          onFocus={(event) => event.currentTarget.select()}
+          onBlur={(event) => finish(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") finish(event.currentTarget.value);
+            else if (event.key === "Escape") finish(null);
+            else return;
+            event.preventDefault();
+          }}
+          className="w-full rounded-sm bg-transparent px-1 text-[13.5px] font-medium text-foreground outline-none ring-1 ring-primary"
+        />
+        <p className="mt-0.5 px-1 text-[12px] text-muted-foreground">Enter saves, Esc cancels</p>
+      </div>
     </div>
   );
+}
+
+/** Past meetings under one heading per day, newest first, as listed. */
+export function daySections(meetings: MeetingSummary[], today = new Date()): { label: string; meetings: MeetingSummary[] }[] {
+  const sections: { label: string; meetings: MeetingSummary[] }[] = [];
+  for (const item of groupByDay(meetings, today, (meeting) => meeting.started)) {
+    if (item.kind === "day") sections.push({ label: item.label, meetings: [] });
+    else sections.at(-1)?.meetings.push(item.entry);
+  }
+  return sections;
+}
+
+/** The top of a meeting's card: the video's own thumbnail when it had one, else bars drawn from its name in the voices' colours. */
+function MeetingCover({ meeting }: { meeting: MeetingSummary }) {
+  const thumbnail = useQuery({
+    queryKey: ["meeting-thumbnail", meeting.id],
+    queryFn: () => api.image(`/api/meetings/${encodeURIComponent(meeting.id)}/thumbnail`),
+    enabled: meeting.has_thumbnail,
+    staleTime: Infinity,
+    retry: false,
+  }).data;
+  const bars = useMemo(() => coverBars(meeting.id), [meeting.id]);
+  const voices = Math.max(1, Math.min(meeting.speakers, 8));
+  return (
+    <div className="relative aspect-[2/1] overflow-hidden bg-muted">
+      {thumbnail ? (
+        <img src={thumbnail} alt="" draggable={false} className="size-full object-cover" />
+      ) : (
+        <div aria-hidden className="flex size-full items-center justify-center gap-[3px] bg-gradient-to-br from-primary/15 to-primary/[0.03] px-8">
+          {bars.map((height, index) => (
+            <span key={index} className="w-[3px] rounded-full opacity-75" style={{ height: `${height}%`, background: colourOf(`them:${index % voices}`) }} />
+          ))}
+        </div>
+      )}
+      <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 text-[11.5px] font-medium text-white tabular-nums">{formatDuration(meeting.seconds)}</span>
+    </div>
+  );
+}
+
+/** Bar heights, as percentages, the same for a meeting every time: a picture of a conversation, not of its sound. */
+export function coverBars(id: string, count = 28): number[] {
+  let seed = 2166136261;
+  for (const char of id) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619) >>> 0;
+  return Array.from({ length: count }, () => {
+    seed = Math.imul(seed ^ (seed >>> 15), 2246822507) >>> 0;
+    seed = Math.imul(seed ^ (seed >>> 13), 3266489909) >>> 0;
+    return 18 + (((seed ^ (seed >>> 16)) >>> 0) % 55);
+  });
 }
 
 // -- shared pieces ---------------------------------------------------------------------
@@ -341,7 +395,7 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
   };
   return (
     <Card className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div ref={box} onScroll={onScroll} aria-live={live ? "polite" : undefined} className="selectable min-h-0 flex-1 overflow-y-auto px-5 py-3 motion-safe:scroll-smooth">
+      <div ref={box} onScroll={onScroll} aria-live={live ? "polite" : undefined} className="min-h-0 flex-1 overflow-y-auto px-5 py-3 motion-safe:scroll-smooth">
         {turns.length ? (
           turns.map((turn) => (
             <div
@@ -355,7 +409,7 @@ function TranscriptPane({ transcript, live, onNameClick, empty }: { transcript: 
                 </button>
                 <time className="text-[11.5px] text-muted-foreground tabular-nums">{formatDuration(turn.start)}</time>
               </div>
-              <div className="text-[13.5px] leading-relaxed">
+              <div className="selectable text-[13.5px] leading-relaxed">
                 {turn.lines.map((line) => (
                   <p key={line.id} className="mb-1 last:mb-0">
                     {line.text}
@@ -477,7 +531,7 @@ function MeetingLayout({ header, warning, transcript, aside }: { header: ReactNo
     <div className={cn(PAGE_EDGE, "flex h-full w-full flex-col gap-3 pb-5")}>
       {header}
       {warning ? (
-        <div role="alert" className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2 text-[12.5px] text-warning">
+        <div role="alert" className="selectable flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2 text-[12.5px] text-warning">
           <CircleAlert className="size-4 shrink-0" />
           {warning}
         </div>
@@ -588,7 +642,7 @@ function FileDropCard({ ready, meetingLanguage, className }: { ready: boolean; m
         <div className="min-w-0 flex-1">
           <p className="text-[14px] font-medium text-foreground">{over ? "Drop it to transcribe it" : "Transcribe a recording"}</p>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            Drop a video or audio file anywhere on this window, or choose one. It becomes a meeting of its own, with the voices told apart.
+            Drop a video or audio file on this window, or choose one.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Select value={language} options={FILE_LANGUAGES} onChange={(value) => setLanguage(value as FileLanguage)} label="Language of the file" className="w-[220px]" />
@@ -653,7 +707,7 @@ export function MeetingHomePage() {
     <div className="max-w-[460px] text-center">
       <p className="text-[15px] font-medium text-foreground">Ready when your meeting is</p>
       <p className="mt-1.5">
-        Start here, from the tray icon or your meeting shortcut. Skryb records what your PC plays{meetings?.record_microphone === false ? "" : " and your microphone"}, tells the voices apart and writes it all down as it goes, in {language}.
+        Start here, from the tray or with your shortcut. Skryb records what your PC plays{meetings?.record_microphone === false ? "" : " and your microphone"} and writes it down live, in {language}.
       </p>
       <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} className="mt-6 text-left" />
     </div>
@@ -800,7 +854,7 @@ export function MeetingMicrophonePage() {
     <PageBody>
       <PageTitle title="Microphone & sounds" />
       {draft ? (
-        <Section title="Meetings" note="Meetings record what your PC plays. Your own voice comes from the Windows default microphone.">
+        <Section title="Meetings" note="Records what your PC plays, and your voice from the default microphone.">
           <Rows>
             <Row title="Record my microphone too" description="Your voice is labelled Me. Off records only what your PC plays.">
               <Switch aria-label="Record my microphone too" checked={draft.record_microphone} onCheckedChange={(on) => edit({ record_microphone: on })} />
@@ -825,7 +879,7 @@ export function MeetingOutputPage() {
       {draft ? (
         <Section title="Meetings folder">
           <Rows>
-            <Row title="Saved to" description="Each meeting gets its own folder here, named by date and time, with its audio and transcript." stacked error={note}>
+            <Row title="Saved to" description="Each meeting gets a folder here with its audio and transcript." stacked error={note}>
               <Input aria-label="Meetings folder" value={draft.folder} onChange={(event) => edit({ folder: event.target.value })} className="flex-1" />
               <Button variant="outline" onClick={() => void changeFolder(draft.folder)}>
                 Change…
@@ -850,7 +904,7 @@ export function MeetingModelPage() {
       {draft ? (
         <Section title="Speech">
           <Rows>
-            <Row title="Language" description="Urdu is always written in Roman Urdu, never in Hindi script.">
+            <Row title="Language" description="Urdu is written in Roman Urdu.">
               <Select label="Meeting language" className="w-72" value={draft.language} options={LANGUAGES} onChange={(language) => edit({ language: language as MeetingLanguage })} />
             </Row>
           </Rows>

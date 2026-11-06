@@ -86,7 +86,7 @@ export function everyTheme(colourway: Colourway): Record<Theme, Colourway> {
 /** What the Updates section says about *update*; null means a git checkout, which updates through git. */
 export function describeUpdate(update: UpdateStatus | null, running: string): { title: string; description: string } {
   if (update === null) {
-    return { title: `Skryb ${running}`, description: "This copy runs from a source folder and updates through git, not from GitHub releases." };
+    return { title: `Skryb ${running}`, description: "Runs from source and updates through git." };
   }
   const percent = update.bytes_total > 0 ? Math.floor((update.bytes_done * 100) / update.bytes_total) : 0;
   switch (update.state) {
@@ -97,7 +97,7 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
     case "downloading":
       return { title: `Downloading Skryb ${update.version}`, description: `${percent}% downloaded. You choose when to install it.` };
     case "ready":
-      return { title: `Skryb ${update.version} is ready`, description: "Skryb closes, installs the update and opens again. It waits for a dictation to finish first." };
+      return { title: `Skryb ${update.version} is ready`, description: "Skryb restarts to install it, once any dictation finishes." };
     case "installing":
       return { title: `Installing Skryb ${update.version}`, description: "Skryb will close and open again in a minute." };
     case "updated":
@@ -105,9 +105,9 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
     case "failed":
       return { title: `Skryb ${running}`, description: "The last check didn't work." };
     case "off":
-      return { title: `Skryb ${running}`, description: "Automatic checks are off. Check by hand whenever you like." };
+      return { title: `Skryb ${running}`, description: "Automatic checks are off." };
     default:
-      return { title: `Skryb ${running}`, description: "Skryb checks for a newer version shortly after it starts." };
+      return { title: `Skryb ${running}`, description: "Skryb checks shortly after it starts." };
   }
 }
 
@@ -219,7 +219,7 @@ export function SettingsPage() {
           </Row>
           <Row
             title="Check for updates automatically"
-            description="Once an hour Skryb asks GitHub for a newer version and downloads it in the background. Nothing installs until you say so."
+            description="Checks hourly and downloads in the background. Nothing installs until you say so."
           >
             <Switch
               aria-label="Check for updates automatically"
@@ -246,7 +246,7 @@ export function SettingsPage() {
         <Rows>
           <Row
             title="Settings file"
-            description="Copy every setting to a file, or load one, to move Skryb to another PC."
+            description="Move your settings to another PC."
             error={fileNote.error ? fileNote.text : undefined}
           >
             {!fileNote.error && fileNote.text ? <span className="text-[12.5px] text-muted-foreground">{fileNote.text}</span> : null}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isNavActive, launchPath, modeOf, NAV, pageInMode } from "../app";
 import { groupByDay } from "../pages/history";
-import { pastMeetings } from "../pages/meetings";
+import { coverBars, daySections, pastMeetings } from "../pages/meetings";
 import { afterLeavingLivePage, applyMeetingEvent, CHART_DAYS, colourOf, meetingStats, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
 import type { LiveMeeting, MeetingEntry, MeetingSummary } from "./types";
 
@@ -320,5 +320,34 @@ describe("meeting stats on Home", () => {
     expect(meetingStats([], now)).toEqual({ count: 0, seconds: 0, words: 0, week: { count: 0, seconds: 0 }, days: new Array(CHART_DAYS).fill(0) });
     const many = Array.from({ length: 5000 }, (_, index) => meeting(`m${index}`, at(index % 60), 60));
     expect(meetingStats(many, now).count).toBe(5000);
+  });
+});
+
+describe("meeting History cards", () => {
+  it("puts each day's meetings under one heading, newest day first", () => {
+    const today = new Date(2026, 10, 4, 15, 0);
+    const summary = (id: string, started: string): MeetingSummary => ({ id, started, seconds: 60, speakers: 2, lines: 4, words: 50, has_audio: true, has_thumbnail: false });
+    const sections = daySections(
+      [summary("b", "2026-11-04T14:00:00"), summary("a", "2026-11-04T09:00:00"), summary("c", "2026-11-03T22:10:00"), summary("d", "2026-10-20T08:00:00")],
+      today,
+    );
+
+    expect(sections.map((section) => [section.label, section.meetings.map((meeting) => meeting.id)])).toEqual([
+      ["Today", ["b", "a"]],
+      ["Yesterday", ["c"]],
+      ["Tue 20 Oct 2026", ["d"]],
+    ]);
+    expect(daySections([], today)).toEqual([]);
+  });
+
+  it("draws the same cover bars for a meeting every time, and different ones for another", () => {
+    const first = coverBars("2026-11-04 Café planning ☕");
+
+    expect(first).toEqual(coverBars("2026-11-04 Café planning ☕"));
+    expect(first).not.toEqual(coverBars("2026-11-04 Café planning"));
+    expect(first).toHaveLength(28);
+    expect(Math.min(...first)).toBeGreaterThanOrEqual(18);
+    expect(Math.max(...first)).toBeLessThan(73);
+    expect(coverBars("")).toHaveLength(28);
   });
 });

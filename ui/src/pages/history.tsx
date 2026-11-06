@@ -21,7 +21,7 @@ const RETENTION_DAYS = [0, 7, 30, 90];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_HEIGHT = 30;
-const ROW_HEIGHT = 50;
+const ROW_HEIGHT = 58;
 // Each listed entry costs the core a disk check for its recording, so the
 // list asks for this many more whenever the last LOAD_AHEAD rows come into view.
 const PAGE_SIZE = HISTORY_PAGE;
@@ -57,6 +57,11 @@ export function formatDuration(seconds: number): string {
 /** Mirrors `HistoryEntry.shown_text`: what was typed when that was saved, else what the engine heard. */
 export function finalText(entry: HistoryEntry): string {
   return entry.typed || entry.text;
+}
+
+/** Words as the Home numbers count them: split on whitespace. */
+export function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
 }
 
 /** Mirrors `history.entries.preview`: one line, and a hint when there is no text. */
@@ -104,7 +109,7 @@ function HistorySettings() {
     if (event.event === "changed" && event.error) setNote(`Could not delete everything: ${event.error}`);
   });
   const draft = settings?.draft;
-  if (!draft) return <Card className="h-[46px]" />;
+  if (!draft) return <div className="h-8" />;
   const days = draft.history_retention_days;
   const choices = [...new Set([...RETENTION_DAYS, Math.max(days, 0)])].sort((a, b) => a - b);
   const changeFolder = async (current: string) => {
@@ -112,13 +117,13 @@ function HistorySettings() {
     if (!path) return;
     try {
       await api.put("/api/logs/directory", { path });
-      setNote(`From the next start, logs and history are kept in ${path}.`);
+      setNote(`Moves to ${path} on the next start.`);
     } catch (error) {
       setNote(errorText(error));
     }
   };
   const deleteAll = async () => {
-    if (!(await confirm("Delete all history", "Delete every saved dictation's text and recording? This cannot be undone.", "Delete all"))) return;
+    if (!(await confirm("Delete all history", "Every dictation's text and recording goes. This can't be undone.", "Delete all"))) return;
     try {
       await api.del("/api/history");
       setNote("Deleting...");
@@ -127,12 +132,12 @@ function HistorySettings() {
     }
   };
   return (
-    <Card className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5">
-      <label className="flex items-center gap-2.5 text-[13px] font-medium">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-[12.5px]">
+      <label className="flex items-center gap-2.5 font-medium">
         <Switch checked={draft.capture_content} onCheckedChange={(on) => editSettings((current) => ({ ...current, capture_content: on }))} />
         Save history
       </label>
-      <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+      <label className="flex items-center gap-2 text-muted-foreground">
         Keep for
         <Select
           label="Keep history for"
@@ -142,24 +147,23 @@ function HistorySettings() {
           onChange={(value) => editSettings((current) => ({ ...current, history_retention_days: Number(value) }))}
         />
       </label>
-      <span className="ml-auto text-[12.5px] text-muted-foreground">{note}</span>
-      <Button variant="destructive" size="sm" onClick={() => void deleteAll()}>
-        Delete all
-      </Button>
       {app?.diagnostics_directory ? (
-        <div className="flex w-full items-center gap-2 border-t pt-2 text-[12.5px] text-muted-foreground">
-          <span className="min-w-0 truncate">
-            Kept in <span className="selectable text-foreground">{app.diagnostics_directory}</span>, with the logs. Use a local folder that is not synced or shared.
-          </span>
-          <Button variant="link" className="ml-auto text-[12.5px]" onClick={() => void changeFolder(app.diagnostics_directory)}>
-            Change…
+        <span className="flex min-w-0 items-center gap-1 text-muted-foreground" title="Use a local folder that isn't synced or shared.">
+          Saved in <span className="selectable min-w-0 truncate text-foreground">{app.diagnostics_directory}</span>
+          <Button variant="link" className="text-[12.5px]" onClick={() => void changeFolder(app.diagnostics_directory)}>
+            Change
           </Button>
           <Button variant="link" className="text-[12.5px]" onClick={() => void api.post("/api/logs/open").catch((error: unknown) => setNote(errorText(error)))}>
             Open
           </Button>
-        </div>
+        </span>
       ) : null}
-    </Card>
+      <span className="ml-auto text-muted-foreground">{note}</span>
+      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => void deleteAll()}>
+        <Trash2 />
+        Delete all
+      </Button>
+    </div>
   );
 }
 
@@ -193,7 +197,8 @@ export function HistoryPage() {
     if (hasMore && lastRendered >= items.length - LOAD_AHEAD) setShown({ search, limit: limit + PAGE_SIZE });
   }, [hasMore, lastRendered, items.length, search, limit]);
 
-  const selected = entries.find((entry) => entry.id === selectedId) ?? null;
+  // The newest dictation shows until another is picked, and when the picked one is no longer listed.
+  const selected = entries.find((entry) => entry.id === selectedId) ?? entries[0] ?? null;
   const retry = selected ? retries[selected.id] : undefined;
 
   useServerEvent((name, data) => {
@@ -220,13 +225,13 @@ export function HistoryPage() {
   const statusNote =
     note.text ||
     (retry?.state === "done"
-      ? "New transcription (not saved to history)."
+      ? "New transcription, not saved."
       : retry?.state === "failed"
         ? `Transcription failed: ${retry.error}`
         : selected?.error
           ? `Failed: ${selected.error}`
           : selected && !selected.has_audio && (selected.status === "Cancelled" || !selected.text)
-            ? "No recording was saved for this entry."
+            ? "No recording was saved."
             : "");
   const noteIsError = note.text ? note.error : retry?.state === "failed" || Boolean(selected?.error && !retry);
 
@@ -302,7 +307,7 @@ export function HistoryPage() {
       : search
         ? "No dictations match your search."
         : settings && !settings.saved.capture_content
-          ? "History is off. Turn on Save history above to keep your dictations."
+          ? "History is off. Turn on Save history below."
           : "No dictations yet. Press your shortcut and speak.";
 
   return (
@@ -320,7 +325,6 @@ export function HistoryPage() {
           </div>
         </div>
       </PageTitle>
-      <HistorySettings />
       {/* Fixed proportions: what an entry holds must never move the split. */}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] grid-rows-[minmax(0,1fr)] gap-3">
         <Card className="relative min-w-0 overflow-hidden">
@@ -338,7 +342,7 @@ export function HistoryPage() {
                   );
                 }
                 const { entry } = item;
-                const active = entry.id === selectedId;
+                const active = entry.id === selected?.id;
                 const blank = !finalText(entry).trim();
                 return (
                   <div
@@ -348,14 +352,16 @@ export function HistoryPage() {
                     style={style}
                     onClick={() => select(entry.id)}
                     className={cn(
-                      "absolute inset-x-1.5 top-0 flex items-center gap-3 rounded-lg px-2.5 transition-colors hover:bg-accent/60",
-                      active && "bg-selected hover:bg-selected",
+                      "absolute inset-x-1.5 top-0 flex flex-col justify-center rounded-lg px-3 transition-colors hover:bg-accent/60",
+                      active && "bg-selected shadow-[inset_3px_0_0_var(--primary)] hover:bg-selected",
                     )}
                   >
-                    <span className="w-10 shrink-0 text-[12px] text-muted-foreground tabular-nums">{parts(entry.at).time}</span>
-                    <span className={cn("min-w-0 flex-1 truncate text-[13px]", blank && "text-muted-foreground italic")}>{preview(entry)}</span>
-                    {entry.status ? <Badge variant={statusVariant(entry.status)}>{entry.status}</Badge> : null}
-                    <span className="w-10 shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">{formatDuration(entry.audio_seconds)}</span>
+                    <span className={cn("truncate text-[13px]", blank && "text-muted-foreground italic")}>{preview(entry)}</span>
+                    <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground tabular-nums">
+                      {parts(entry.at).time} · {formatDuration(entry.audio_seconds)}
+                      {blank ? null : ` · ${wordCount(finalText(entry)).toLocaleString()} words`}
+                      {entry.status ? <Badge variant={statusVariant(entry.status)}>{entry.status}</Badge> : null}
+                    </span>
                   </div>
                 );
               })}
@@ -366,47 +372,52 @@ export function HistoryPage() {
         <Card className="flex min-w-0 flex-col">
           {selected && actions ? (
             <>
-              <div className="border-b px-4 py-3">
-                <div className="text-[13px] font-medium">
-                  {dayLabel(selected.at, new Date())}, {parts(selected.at).time}
+              <div className="border-b px-5 pt-4 pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[15px] font-semibold">
+                      {dayLabel(selected.at, new Date())}, {parts(selected.at).time}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[12px] text-muted-foreground tabular-nums">
+                      {formatDuration(selected.audio_seconds)}
+                      {shownText.trim() ? ` · ${wordCount(shownText).toLocaleString()} words` : null}
+                      {selected.status ? <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge> : null}
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="icon" aria-label="Delete" title="Delete" className="text-muted-foreground hover:text-destructive" onClick={() => void actions.remove()}>
+                    <Trash2 />
+                  </Button>
                 </div>
-                <div className="mt-0.5 flex items-center gap-2 text-[12px] text-muted-foreground">
-                  {formatDuration(selected.audio_seconds)}
-                  {selected.status ? <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge> : null}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <Button variant="outline" size="sm" disabled={!shownText.trim() || retry?.state === "running"} onClick={() => void actions.copy()}>
+                    <Copy />
+                    Copy
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={!selected.has_audio} onClick={() => void actions.play()}>
+                    {playing === selected.id ? <Square /> : <Play />}
+                    {playing === selected.id ? "Stop" : "Play"}
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={!selected.has_audio || retry?.state === "running"} onClick={() => void actions.retry()}>
+                    <RotateCcw />
+                    {selected.status === "Cancelled" ? "Transcribe" : "Retry"}
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={!selected.has_audio} onClick={() => void actions.save()}>
+                    <Download />
+                    Save audio
+                  </Button>
                 </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[13px]">
+              {statusNote ? <p className={cn("px-5 pt-3 text-[12.5px]", noteIsError ? "selectable text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-[14px] leading-relaxed">
                 <div className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
-              </div>
-              {statusNote ? <p className={cn("px-4 pb-2 text-[12.5px]", noteIsError ? "text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
-              <div className="flex flex-wrap gap-1.5 border-t px-3 py-2.5">
-                <Button variant="outline" size="sm" disabled={!shownText.trim() || retry?.state === "running"} onClick={() => void actions.copy()}>
-                  <Copy />
-                  Copy
-                </Button>
-                <Button variant="outline" size="sm" disabled={!selected.has_audio} onClick={() => void actions.play()}>
-                  {playing === selected.id ? <Square /> : <Play />}
-                  {playing === selected.id ? "Stop" : "Play"}
-                </Button>
-                <Button variant="outline" size="sm" disabled={!selected.has_audio || retry?.state === "running"} onClick={() => void actions.retry()}>
-                  <RotateCcw />
-                  {selected.status === "Cancelled" ? "Transcribe" : "Retry"}
-                </Button>
-                <Button variant="outline" size="sm" disabled={!selected.has_audio} onClick={() => void actions.save()}>
-                  <Download />
-                  Save audio
-                </Button>
-                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => void actions.remove()}>
-                  <Trash2 />
-                  Delete
-                </Button>
               </div>
             </>
           ) : (
-            <p className="m-auto px-6 text-center text-[12.5px] text-muted-foreground">Select a dictation to read it, copy it or play it back.</p>
+            <p className="m-auto px-6 text-center text-[12.5px] text-muted-foreground">Pick a dictation to read it.</p>
           )}
         </Card>
       </div>
+      <HistorySettings />
     </div>
   );
 }

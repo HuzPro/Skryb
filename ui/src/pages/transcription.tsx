@@ -85,7 +85,7 @@ export function TranscriptionPage() {
           value={draft.transcription_mode}
           onChange={(mode) => editSettings((current) => withMode(current, mode, models))}
           choices={[
-            { value: "batch", title: "Batch", description: "Records your dictation, then transcribes it when you stop. Works on any computer." },
+            { value: "batch", title: "Batch", description: "Transcribes when you stop. Works on any PC." },
             {
               value: "streaming",
               title: "Live",
@@ -121,7 +121,7 @@ export function TranscriptionPage() {
           </Row>
           <Row
             title="Hear questions"
-            description="When Qwen3-ASR nearly ended a sentence with a question mark, it uses one. Only Qwen3-ASR on the native engine can tell."
+            description="Adds a question mark when Qwen3-ASR almost chose one. Native Qwen3-ASR only."
           >
             <Switch aria-label="Hear questions" checked={draft.question_marks} onCheckedChange={(on) => editSettings((current) => ({ ...current, question_marks: on }))} />
           </Row>

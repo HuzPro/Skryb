@@ -48,8 +48,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   throw new ApiError(response.status, message, parsed.license ?? null, parsed.detail ?? "");
 }
 
+/** A picture the core serves, as a URL an <img> can show; the request carries the token an <img> can't. */
+async function image(path: string): Promise<string> {
+  const response = await fetch(base + path, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new ApiError(response.status, `Request failed (${response.status}).`, null, "");
+  return URL.createObjectURL(await response.blob());
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
+  image,
   put: <T = void>(path: string, body: unknown) => request<T>("PUT", path, body),
   post: <T = void>(path: string, body?: unknown) => request<T>("POST", path, body ?? {}),
   del: <T = void>(path: string) => request<T>("DELETE", path),

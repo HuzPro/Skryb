@@ -20,7 +20,7 @@ const MODE_CHOICES = [
 const OPTIONAL: { action: BindingAction; title: string; description: string }[] = [
   { action: "paste_last", title: "Paste last dictation", description: "Paste it again where the cursor is." },
   { action: "copy_last", title: "Copy last dictation", description: "Put it on the clipboard." },
-  { action: "toggle_meeting", title: "Start or stop a meeting", description: "Starts recording a meeting, or stops the one recording." },
+  { action: "toggle_meeting", title: "Start or stop a meeting", description: "Starts or stops recording a meeting." },
 ];
 
 export function setBindingKeys(bindings: Binding[], index: number, keys: string): Binding[] {
@@ -169,7 +169,7 @@ export function ShortcutsPage() {
           <Row
             stacked
             title="Dictate"
-            description="Start and stop dictation. Toggle: press to start, press again to stop. Hold: hold to talk, let go to stop."
+            description="Toggle: press to start, again to stop. Hold: talk while held."
             error={problem && problem.index === -1 ? problem.message : ""}
           >
             <div className="flex flex-col gap-2">
@@ -202,7 +202,7 @@ export function ShortcutsPage() {
               </Button>
             </div>
           </Row>
-          <Row title="Double-tap to lock" description="For a Hold shortcut. Two quick presses keep it recording; the next press stops it.">
+          <Row title="Double-tap to lock" description="Double-press a Hold shortcut to keep recording; press again to stop.">
             <Switch
               aria-label="Double-tap to lock"
               checked={draft.double_tap_locks_hold}
@@ -241,7 +241,7 @@ export function ShortcutsPage() {
           })}
         </Rows>
         <p className="mt-2.5 text-[12.5px] text-muted-foreground">
-          Click Record, then press the keys or mouse button you want. Mouse buttons 4 and 5 and the middle button work too. Clear a shortcut to turn it off.
+          Click Record, then press keys or a mouse button (middle, 4 and 5 work). Clear a shortcut to turn it off.
         </p>
       </Section>
     </PageBody>

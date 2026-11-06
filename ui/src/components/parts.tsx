@@ -70,7 +70,7 @@ export function Row({
 }
 
 export function InlineError({ children }: { children: ReactNode }) {
-  return <p className="mt-2 text-[12.5px] text-destructive">{children}</p>;
+  return <p className="selectable mt-2 text-[12.5px] text-destructive">{children}</p>;
 }
 
 export interface Choice<T extends string> {

@@ -262,7 +262,7 @@ export function MicrophonePage() {
         <Rows>
           <Row
             title="Boost quiet speech"
-            description="Helps when you are far from the microphone. Raises the volume up to 10x without distorting it. Saved recordings stay as heard."
+            description="For when you're far from the mic. Raises quiet speech up to 10x without distortion."
           >
             <Switch aria-label="Boost quiet speech" checked={draft.boost_quiet_speech} onCheckedChange={(on) => editSettings((current) => ({ ...current, boost_quiet_speech: on }))} />
           </Row>

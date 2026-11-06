@@ -12,7 +12,7 @@ import { useStore, useSyncedDraft, type DictionarySave } from "../lib/store";
 import type { Dictionary, DictionaryRule, LiteralRule, Suggestion, Term } from "../lib/types";
 
 const OPTIONS: { key: keyof Dictionary["options"]; title: string; description: string }[] = [
-  { key: "remove_fillers", title: "Remove fillers", description: "Drops um, uh, ah and erm, and short words said twice by accident, like “the the”." },
+  { key: "remove_fillers", title: "Remove fillers", description: "Drops um, uh, erm and accidental repeats like “the the”." },
   { key: "spoken_commands", title: "Spoken commands", description: "Say “new line” or “period” to type them." },
   { key: "numbers", title: "Format numbers", description: "Writes “twenty five” as 25." },
   { key: "punctuation_model", title: "Restore punctuation", description: "Adds punctuation with a small extra model." },
@@ -220,7 +220,7 @@ function SaveCue({ save, onRetry }: { save: DictionarySave; onRetry: () => void 
   }
   if (save.state === "failed") {
     return (
-      <span role="alert" className="flex min-w-0 items-center gap-2 text-[12.5px] text-destructive">
+      <span role="alert" className="selectable flex min-w-0 items-center gap-2 text-[12.5px] text-destructive">
         <span className="min-w-0">{save.error}</span>
         {save.retry ? (
           <Button size="sm" variant="outline" onClick={onRetry}>
@@ -324,7 +324,7 @@ export function DictionaryPage() {
 
       <Section
         title="People and terms"
-        note="Names and words dictation and meetings should spell right. Dictation and meetings tell the model about them, notes included, so it can tell your app from the ordinary word. Heard-as spellings are swapped for the entry. Dictating over a selected name again picks the other spelling, and suggests what it heard here."
+        note="Names and words to spell right in dictation and meetings. Heard-as spellings are swapped for the entry. Dictate over a selected name to switch spellings."
       >
         <Card className="divide-y">
           {draft.suggestions.map((suggestion) => (
@@ -387,7 +387,7 @@ export function DictionaryPage() {
 
       <Section
         title="Words and replacements"
-        note="Replace spoken words or phrases with typed text. Separate aliases with commas; regex rules use one pattern. A space typed at an alias's start or end stays part of that alias and glues it to the neighbouring text."
+        note="Swap spoken words for typed text. Separate aliases with commas. A space at an alias's edge stays part of it."
       >
         <Card className="divide-y">
           <form
