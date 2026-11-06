@@ -17,6 +17,8 @@ _logger = logging.getLogger(__name__)
 
 _PACK_FILENAME = "jais-asr.bin"
 _LEADING_TAGS = re.compile(r"^(?:\s*\[([^\]\n]{0,40})\])+")
+# Short vowels, tanween, shadda, sukun and the dagger alef: Skryb writes Arabic without vowel marks.
+_VOWEL_MARKS = re.compile("[ً-ْٰ]")
 
 
 def without_decision_tag(text: str) -> str:
@@ -28,6 +30,11 @@ def without_decision_tag(text: str) -> str:
     if any(tag.strip().upper().startswith("IF") for tag in tags):
         return ""
     return text[match.end():].strip()
+
+
+def transcript_text(raw: str) -> str:
+    """What Jais-ASR heard, without its decision tag or vowel marks."""
+    return _VOWEL_MARKS.sub("", without_decision_tag(raw))
 
 
 class NativeJaisAsrAdapter(NativeQwen3AsrAdapter):
@@ -58,4 +65,4 @@ class NativeJaisAsrAdapter(NativeQwen3AsrAdapter):
         return prompt_text(self._code_switch)
 
     def _finish(self, text: str, language: str | None) -> str:
-        return without_decision_tag(text)
+        return transcript_text(text)

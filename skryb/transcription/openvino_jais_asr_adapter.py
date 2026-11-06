@@ -8,7 +8,7 @@ decision tag Jais-ASR opens its transcripts with differ.
 from pathlib import Path
 
 from skryb.transcription.jais_asr_pack import prompt_text
-from skryb.transcription.native_jais_asr_adapter import without_decision_tag
+from skryb.transcription.native_jais_asr_adapter import transcript_text
 from skryb.transcription.openvino_qwen3_asr_adapter import OpenVinoQwen3AsrAdapter
 
 
@@ -25,4 +25,4 @@ class OpenVinoJaisAsrAdapter(OpenVinoQwen3AsrAdapter):
         return prompt_text(self._code_switch)
 
     def _finish(self, text: str) -> str:
-        return without_decision_tag(text)
+        return transcript_text(text)

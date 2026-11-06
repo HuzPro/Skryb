@@ -9,7 +9,7 @@ import pytest
 from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription import jais_asr_pack
 from skryb.transcription.jais_asr_pack import engine_config, prompt_text, quantize_q4
-from skryb.transcription.native_jais_asr_adapter import NativeJaisAsrAdapter, without_decision_tag
+from skryb.transcription.native_jais_asr_adapter import NativeJaisAsrAdapter, transcript_text, without_decision_tag
 from skryb.transcription.qwen3_asr_prompt import PromptedTranscriber
 
 
@@ -169,3 +169,13 @@ def test_the_native_jais_engine_types_the_transcript_without_its_tag_and_ignores
     assert lib.prefix == [ord(c) for c in prompt_text(code_switch=True)[0]]
     assert isinstance(adapter, PromptedTranscriber)
     assert adapter._packed_path() == tmp_path / ".qasr" / "jais-asr.bin"
+
+
+@pytest.mark.parametrize(("raw", "typed"), [
+    ("[SA] إيه اشرح لي وضّح لي", "إيه اشرح لي وضح لي"),
+    ("[msa] كَتَبَ الطَّالِبُ دَرْسًا", "كتب الطالب درسا"),
+    ("[AE] تمام bus الساعة ٣", "تمام bus الساعة ٣"),
+    ("[IFM-NoTranscript] وَ", ""),
+])
+def test_jais_asrs_vowel_marks_are_dropped_and_everything_else_is_kept(raw: str, typed: str) -> None:
+    assert transcript_text(raw) == typed

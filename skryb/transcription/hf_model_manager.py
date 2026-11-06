@@ -1,5 +1,6 @@
 import json
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -7,7 +8,7 @@ from skryb.core.exceptions import ConfigurationError
 from skryb.downloads.chunked_file_downloader import ChunkedFileDownloader
 from skryb.downloads.download_manager import DownloadHandle, DownloadManager
 from skryb.downloads.hf_repo_resolver import HfRepoResolver
-from skryb.downloads.model_download_job import ModelDownloadJob
+from skryb.downloads.model_download_job import ModelDownloadJob, PostInstallStep
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.transcription.model_info import ModelInfo
 from skryb.transcription.model_manager import ModelManager
@@ -123,6 +124,10 @@ class HuggingFaceModelManager(ModelManager):
     ``license_policy`` is required, never defaulted: acquiring weights is
     one of the paths the licence gate exists to cover, and a permissive
     default here would be a bypass.
+
+    ``post_install`` names, per model, a step that turns the finished
+    snapshot into what this computer's engine loads, so the first load
+    doesn't do it.
     """
 
     def __init__(
@@ -133,6 +138,7 @@ class HuggingFaceModelManager(ModelManager):
         file_downloader: ChunkedFileDownloader,
         models: dict[str, ModelInfo],
         license_policy: LicensePolicy,
+        post_install: Mapping[str, PostInstallStep] | None = None,
     ) -> None:
         self._models_dir = models_dir
         self._download_manager = download_manager
@@ -140,6 +146,7 @@ class HuggingFaceModelManager(ModelManager):
         self._file_downloader = file_downloader
         self._models = models
         self._license_policy = license_policy
+        self._post_install = dict(post_install or {})
 
     # ------------------------------------------------------------------
     # Listing / inspection
@@ -208,6 +215,8 @@ class HuggingFaceModelManager(ModelManager):
             models_dir=self._models_dir,
             file_downloader=self._file_downloader,
         )
+        if name in self._post_install:
+            job.post_install = self._post_install[name]
         return self._download_manager.enqueue(job)
 
     # ------------------------------------------------------------------

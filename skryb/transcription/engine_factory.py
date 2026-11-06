@@ -280,6 +280,23 @@ def _build_native_jais_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
     return NativeJaisAsrAdapter(loadable_snapshot_dir(spec.model_dir, spec.repo_id, spec.revision), cuda=_on_nvidia(spec))
 
 
+def prepare_jais_asr(snapshot: Path) -> None:
+    """Pack Jais-ASR for the native engine, or build its OpenVINO graphs, as its download finishes: about 3
+    minutes that would otherwise land on its first use."""
+    if _either_build(native_engine_dll):
+        from skryb.transcription.native_jais_asr_adapter import NativeJaisAsrAdapter
+
+        packed = NativeJaisAsrAdapter(snapshot)._packed_path()
+        if not packed.exists():
+            NativeJaisAsrAdapter(snapshot)._pack_snapshot(packed)
+    elif importlib.util.find_spec("openvino") is not None:
+        from skryb.transcription.openvino_parakeet_adapter import import_openvino
+        from skryb.transcription.openvino_qwen3_asr_adapter import EXPORT_DIRECTORY_NAME
+        from skryb.transcription.openvino_qwen3_asr_graph import build
+
+        build(import_openvino(), snapshot, snapshot / EXPORT_DIRECTORY_NAME)
+
+
 def _build_openvino_jais_asr_engine(spec: EngineSpec) -> TranscriptionEngine:
     from skryb.transcription.openvino_jais_asr_adapter import OpenVinoJaisAsrAdapter
 
@@ -663,6 +680,7 @@ def build_composite_model_manager(
         file_downloader=file_downloader,
         models=dict(JAIS_ASR_MODELS),
         license_policy=license_policy,
+        post_install={"jais-asr": prepare_jais_asr},
     )
 
     nano_parakeet_manager = HuggingFaceModelManager(
