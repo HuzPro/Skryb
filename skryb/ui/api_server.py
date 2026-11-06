@@ -50,6 +50,8 @@ class ApiRequest:
 class ApiResponse:
     status: int = 204
     body: object = None
+    # The type of a ``bytes`` body, which goes out as is; any other body goes out as JSON.
+    content_type: str = "application/octet-stream"
 
 
 class ApiError(Exception):
@@ -197,7 +199,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
             _logger.exception("UI API %s %s failed", method, url.path)
             self._send_json(500, {"error": "Something went wrong.", "detail": str(exc)})
             return
-        self._send_json(response.status, response.body)
+        if isinstance(response.body, bytes):
+            self._send(response.status, response.body, response.content_type)
+        else:
+            self._send_json(response.status, response.body)
 
     def _bearer_token(self) -> str:
         scheme, _space, token = self.headers.get("Authorization", "").partition(" ")
@@ -220,10 +225,13 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status: int, body: object) -> None:
         payload = b"" if body is None else json.dumps(body, ensure_ascii=False).encode()
+        self._send(status, payload, "application/json; charset=utf-8")
+
+    def _send(self, status: int, payload: bytes, content_type: str) -> None:
         self.send_response(status)
         self._send_cors()
         if payload:
-            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)

@@ -11,6 +11,7 @@ from skryb.meetings.file_session import Decode, FileSession
 from skryb.meetings.media_file import MediaFileError, check, decode_audio
 from skryb.meetings.session import MeetingCapture, Models, Session
 from skryb.meetings.storage import MeetingSettings, new_meeting_folder
+from skryb.meetings.thumbnail import Grab, grab_shell_thumbnail
 from skryb.meetings.transcript import Event
 
 _logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class MeetingRecorder:
         clock: Callable[[], datetime] = datetime.now,
         check_file: Callable[[Path], None] = check,
         decode_file: Decode = decode_audio,
+        grab_thumbnail: Grab = grab_shell_thumbnail,
     ) -> None:
         self._settings = settings
         self._missing_models = missing_models
@@ -53,6 +55,7 @@ class MeetingRecorder:
         self._handover = threading.Lock()  # a file that finishes by itself hands itself over under this
         self._check_file = check_file
         self._decode_file = decode_file
+        self._grab_thumbnail = grab_thumbnail
         self._current: Session | FileSession | None = None
         self._last: Session | FileSession | None = None
 
@@ -139,6 +142,7 @@ class MeetingRecorder:
                 publish=self._publish,
                 on_done=self._file_done,
                 decode=self._decode_file,
+                grab_thumbnail=self._grab_thumbnail,
             )
             try:
                 session.start()

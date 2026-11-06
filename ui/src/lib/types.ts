@@ -284,6 +284,7 @@ export interface MeetingSummary {
   lines: number;
   words: number;
   has_audio: boolean;
+  has_thumbnail: boolean;
 }
 
 export interface MeetingModel {

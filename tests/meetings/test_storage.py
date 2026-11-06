@@ -67,6 +67,22 @@ def test_saved_meetings_are_listed_newest_first_with_their_length_speakers_and_w
     assert onboarding.has_audio is False
 
 
+def test_only_meetings_that_kept_a_video_s_thumbnail_say_they_have_one(tmp_path: Path) -> None:
+    for n in range(300):
+        folder = _meeting(tmp_path, f"2026-10-21 {n:03} میٹنگ – Harbor ✓", datetime(2026, 10, 21, 9, 0), [("them", 0, 0.0, "Hi.")])
+        if n % 7 == 0:
+            (folder / "thumbnail.jpg").write_bytes(b"\xff\xd8\xff\xe0 jpeg")
+        elif n % 7 == 1:
+            (folder / "thumbnail.jpg.tmp").write_bytes(b"\xff\xd8 half written")
+        elif n % 7 == 2:
+            (folder / "thumbnail.jpg").mkdir()
+
+    meetings = list_meetings(tmp_path)
+
+    assert sorted(m.id[11:14] for m in meetings if m.has_thumbnail) == [f"{n:03}" for n in range(0, 300, 7)]
+    assert all(m.json()["has_thumbnail"] is m.has_thumbnail for m in meetings)
+
+
 def test_a_meeting_with_a_broken_transcript_is_left_out_of_the_list(tmp_path: Path) -> None:
     _meeting(tmp_path, "2026-10-20 22-53", datetime(2026, 10, 20, 22, 53), [("them", 0, 1.0, "Fine.")])
     broken = tmp_path / "Dana call"

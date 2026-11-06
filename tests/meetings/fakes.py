@@ -6,8 +6,10 @@ Audio is synthetic: a speaker's voice is a constant level that names them
 
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from skryb.meetings.capture import RATE
 from skryb.meetings.segmenter import SILENCE
@@ -23,6 +25,16 @@ def voice(speaker: int, seconds: float) -> np.ndarray:
 
 def silence(seconds: float) -> np.ndarray:
     return np.zeros(round(seconds * RATE), np.float32)
+
+
+def no_thumbnail(path: Path, _size: int) -> Image.Image:
+    """The Shell's answer for a file with only an icon, such as a plain audio file."""
+    raise OSError(f"{path.name} has no thumbnail")
+
+
+def video_frame(_path: Path, _size: int) -> Image.Image:
+    """A 1080p frame, the Shell's thumbnail for a video, before it is fitted."""
+    return Image.new("RGB", (1920, 1080), (38, 104, 150))
 
 
 class ScriptedTrack:

@@ -14,6 +14,7 @@ from skryb.core.recycle_bin import move_to_recycle_bin
 from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import list_meetings, meeting_folder, rename_meeting
+from skryb.meetings.thumbnail import THUMBNAIL_JPG
 from skryb.meetings.transcript import Transcript, is_speaker_key
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, Route
 from skryb.ui.event_hub import EventHub
@@ -57,6 +58,7 @@ class MeetingApi:
             ("POST", "/api/meetings/models/download", self._download_models),
             ("POST", "/api/meetings/folder/open", self._open_meetings_folder),
             ("GET", "/api/meetings/{id}", self._read),
+            ("GET", "/api/meetings/{id}/thumbnail", self._thumbnail),
             ("POST", "/api/meetings/{id}/rename", self._rename),
             ("POST", "/api/meetings/{id}/name", self._rename_meeting),
             ("DELETE", "/api/meetings/{id}", self._delete_meeting),
@@ -126,6 +128,15 @@ class MeetingApi:
         if live is not None:
             return ApiResponse(200, live.transcript.view())
         return ApiResponse(200, self._saved(request).view())
+
+    def _thumbnail(self, request: ApiRequest) -> ApiResponse:
+        """The JPEG kept from the video the meeting was made from."""
+        picture = self._meeting_folder(request) / THUMBNAIL_JPG
+        try:
+            jpeg = picture.read_bytes()
+        except OSError as exc:
+            raise ApiError(404, "This meeting has no thumbnail.") from exc
+        return ApiResponse(200, jpeg, "image/jpeg")
 
     def _rename(self, request: ApiRequest) -> ApiResponse:
         key, name = _rename_request(request.body)
