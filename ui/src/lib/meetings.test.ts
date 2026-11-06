@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isNavActive, launchPath, modeOf, NAV, pageInMode } from "../app";
 import { groupByDay } from "../pages/history";
-import { coverBars, daySections, pastMeetings } from "../pages/meetings";
+import { coverBars, pastMeetings } from "../pages/meetings";
 import { afterLeavingLivePage, applyMeetingEvent, CHART_WEEKS, colourOf, median, meetingStats, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
 import type { LiveMeeting, MeetingEntry, MeetingSummary } from "./types";
 
@@ -380,22 +380,6 @@ describe("meeting stats on Home", () => {
 });
 
 describe("meeting History cards", () => {
-  it("puts each day's meetings under one heading, newest day first", () => {
-    const today = new Date(2026, 10, 4, 15, 0);
-    const summary = (id: string, started: string): MeetingSummary => ({ id, started, seconds: 60, speakers: 2, lines: 4, words: 50, has_audio: true, has_thumbnail: false, me_seconds: 20, talk_seconds: 50 });
-    const sections = daySections(
-      [summary("b", "2026-11-04T14:00:00"), summary("a", "2026-11-04T09:00:00"), summary("c", "2026-11-03T22:10:00"), summary("d", "2026-10-20T08:00:00")],
-      today,
-    );
-
-    expect(sections.map((section) => [section.label, section.meetings.map((meeting) => meeting.id)])).toEqual([
-      ["Today", ["b", "a"]],
-      ["Yesterday", ["c"]],
-      ["Tue 20 Oct 2026", ["d"]],
-    ]);
-    expect(daySections([], today)).toEqual([]);
-  });
-
   it("draws the same cover bars for a meeting every time, and different ones for another", () => {
     const first = coverBars("2026-11-04 Café planning ☕");
 

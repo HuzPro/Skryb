@@ -17,7 +17,7 @@ import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
 import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingSettings, MeetingSummary, MeetingTranscript } from "../lib/types";
 import { cn, formatSaved, versusUsual } from "../lib/utils";
-import { dayLabel, formatDuration, groupByDay, useDebounced } from "./history";
+import { dayLabel, formatDuration, useDebounced } from "./history";
 
 
 const NEAR_BOTTOM_PX = 120;
@@ -107,7 +107,7 @@ export function MeetingHistoryPage() {
   const [problem, setProblem] = useState("");
   const closeMenu = useCallback(() => setMenu(null), []);
   const past = useMemo(() => pastMeetings(overview?.meetings ?? [], recording ? (live?.id ?? null) : null, search), [overview, recording, live?.id, search]);
-  const sections = useMemo(() => daySections(past), [past]);
+  const today = new Date();
 
   const rename = async (id: string, name: string | null) => {
     setRenaming(null);
@@ -166,39 +166,34 @@ export function MeetingHistoryPage() {
       </PageTitle>
       <div className="relative min-h-0 flex-1">
         <nav aria-label="Past meetings" className="h-full overflow-y-auto pb-2">
-          {sections.map(({ label, meetings }) => (
-            <section key={label} className="mb-5">
-              <h2 className="mb-2 text-[12px] font-semibold text-muted-foreground">{label}</h2>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
-                {meetings.map((meeting) =>
-                  renaming === meeting.id ? (
-                    <RenameField key={meeting.id} meeting={meeting} onDone={(name) => void rename(meeting.id, name)} />
-                  ) : (
-                    <Link
-                      key={meeting.id}
-                      to={`/meetings/${encodeURIComponent(meeting.id)}`}
-                      draggable={false}
-                      title={meeting.id}
-                      onContextMenu={(event) => openMenu(meeting.id, event)}
-                      onKeyDown={(event) => keys(meeting.id, event)}
-                      className={cn(
-                        "surface group flex flex-col overflow-hidden rounded-xl border border-edge bg-card shadow-card outline-none transition-[border-color,box-shadow] hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40",
-                        menu?.id === meeting.id && "border-primary/50",
-                      )}
-                    >
-                      <MeetingCover meeting={meeting} />
-                      <div className="px-3.5 py-2.5">
-                        <p className="truncate text-[13.5px] font-medium">{meetingName(meeting.id)}</p>
-                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground tabular-nums">
-                          {meeting.started.slice(11, 16)} · {meeting.speakers} {meeting.speakers === 1 ? "voice" : "voices"} · {meeting.words.toLocaleString()} words
-                        </p>
-                      </div>
-                    </Link>
-                  ),
-                )}
-              </div>
-            </section>
-          ))}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3">
+            {past.map((meeting) =>
+              renaming === meeting.id ? (
+                <RenameField key={meeting.id} meeting={meeting} onDone={(name) => void rename(meeting.id, name)} />
+              ) : (
+                <Link
+                  key={meeting.id}
+                  to={`/meetings/${encodeURIComponent(meeting.id)}`}
+                  draggable={false}
+                  title={meeting.id}
+                  onContextMenu={(event) => openMenu(meeting.id, event)}
+                  onKeyDown={(event) => keys(meeting.id, event)}
+                  className={cn(
+                    "surface group flex flex-col overflow-hidden rounded-xl border border-edge bg-card shadow-card outline-none transition-[border-color,box-shadow] hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40",
+                    menu?.id === meeting.id && "border-primary/50",
+                  )}
+                >
+                  <MeetingCover meeting={meeting} />
+                  <div className="px-3.5 py-2.5">
+                    <p className="truncate text-[13.5px] font-medium">{meetingName(meeting.id)}</p>
+                    <p className="mt-0.5 truncate text-[12px] text-muted-foreground tabular-nums">
+                      {dayLabel(meeting.started, today)}, {meeting.started.slice(11, 16)} · {meeting.speakers} {meeting.speakers === 1 ? "voice" : "voices"}
+                    </p>
+                  </div>
+                </Link>
+              ),
+            )}
+          </div>
         </nav>
         {!past.length ? <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12.5px] text-muted-foreground">{empty}</p> : null}
         {problem ? (
@@ -254,16 +249,6 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
       </div>
     </div>
   );
-}
-
-/** Past meetings under one heading per day, newest first, as listed. */
-export function daySections(meetings: MeetingSummary[], today = new Date()): { label: string; meetings: MeetingSummary[] }[] {
-  const sections: { label: string; meetings: MeetingSummary[] }[] = [];
-  for (const item of groupByDay(meetings, today, (meeting) => meeting.started)) {
-    if (item.kind === "day") sections.push({ label: item.label, meetings: [] });
-    else sections.at(-1)?.meetings.push(item.entry);
-  }
-  return sections;
 }
 
 /** The top of a meeting's card: the video's own thumbnail when it had one, else bars drawn from its name in the voices' colours. */

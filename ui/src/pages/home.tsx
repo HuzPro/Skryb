@@ -179,7 +179,7 @@ function UsageSection() {
 /** Dictation's Home: whether it is ready, how to start it, and how much it has saved you. */
 export function DictationHomePage() {
   return (
-    <div className={cn(PAGE_EDGE, "w-full max-w-[1400px] pb-10")}>
+    <div className={cn(PAGE_EDGE, "w-full max-w-[1880px] pb-10")}>
       <PageTitle title="Dictation" />
       <div className="mt-4 grid gap-3 min-[900px]:grid-cols-2">
         <EngineCard />

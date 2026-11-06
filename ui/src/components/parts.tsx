@@ -363,7 +363,7 @@ export function Bars({
           </p>
         ) : null}
       </div>
-      <div aria-hidden className="relative mt-3 flex h-28 items-end gap-[2px] border-b border-edge" onPointerLeave={() => setHovered(null)}>
+      <div aria-hidden className="relative mt-3 flex min-h-28 flex-1 items-end gap-[2px] border-b border-edge" onPointerLeave={() => setHovered(null)}>
         {bars.map((bar, index) => {
           const unfinished = partial && index === bars.length - 1;
           return (
