@@ -30,7 +30,7 @@ _SETTINGS_KEYS = {
     "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings", "theme",
-    "colourways",
+    "colourways", "show_english",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",
@@ -312,6 +312,17 @@ def test_a_chosen_theme_is_saved_and_comes_back_as_chosen(rig: Rig) -> None:
     assert _settings(rig)["theme"] == "paper"
 
 
+def test_show_english_starts_off_and_switched_on_is_saved_and_comes_back_on(rig: Rig) -> None:
+    settings = _settings(rig)
+    assert settings["show_english"] is False
+    settings["show_english"] = True
+
+    assert rig.call("PUT", "/api/settings", settings)[0] == 200
+
+    assert rig.config.get("translation.show_english") is True
+    assert _settings(rig)["show_english"] is True
+
+
 def test_a_theme_this_version_does_not_know_reads_back_as_the_default(rig: Rig) -> None:
     rig.config.set("ui.theme", "neon")
 
@@ -443,7 +454,7 @@ def test_models_list_the_whole_catalogue_with_what_each_can_do(make_rig, monkeyp
 
     assert status == 200
     by_name = {model["name"]: model for model in models}
-    assert set(by_name) == {PARAKEET, "phonon-2.5-english", NEMOTRON, QWEN}
+    assert set(by_name) == {PARAKEET, "phonon-2.5-english", NEMOTRON, QWEN, "jais-asr"}
     assert by_name[PARAKEET]["installed"] is True
     assert by_name[PARAKEET]["license_id"] is None
     assert [by_name[name]["tier"] for name in ("phonon-2.5-english", PARAKEET, QWEN, NEMOTRON)] == [

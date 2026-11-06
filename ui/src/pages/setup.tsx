@@ -51,7 +51,7 @@ export function SetupPage() {
         Three quick choices and you are ready to dictate. Everything runs on this computer; nothing is sent anywhere.
       </p>
 
-      <Section title="1. Speech model" note="Download one to start. You can add or change models later on the Model page.">
+      <Section title="1. Speech model" note="Download one to start. You can change it later.">
         <div role="radiogroup" aria-label="Speech model" className="flex flex-col gap-2">
           {models.map((model) => (
             <ModelCard

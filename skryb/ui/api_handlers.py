@@ -47,6 +47,7 @@ from skryb.transcription.model_info import ALL_MODELS
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, ApiServer, Route
 from skryb.ui.event_hub import EventHub, Json
 from skryb.ui.meeting_handlers import MeetingApi
+from skryb.ui.translation_handlers import TranslationApi
 from skryb.ui.shapes import (
     Fields,
     bindings_from_json,
@@ -57,7 +58,7 @@ from skryb.ui.shapes import (
     history_entry_json,
     settings_json,
     shown_combination,
-    usage_json,
+    usage_report_json,
 )
 
 _logger = logging.getLogger(__name__)
@@ -268,7 +269,9 @@ class CoreApi:
         preview_sound: Callable[[str, float], None] = _silent,
         meetings: MeetingApi | None = None,
         engine_device: Callable[[], tuple[str | None, str | None]] = _no_device,
+        translation: TranslationApi | None = None,
     ) -> None:
+        self._translation = translation
         self._service = service
         self._hub = hub
         self._microphones = microphones
@@ -338,11 +341,14 @@ class CoreApi:
             ("POST", "/api/updates/check", self._check_for_updates),
             ("POST", "/api/updates/install", self._install_update),
         ]
-        # Meetings keep their own order: stopping one waits for its last lines, which must not hold up settings.
+        # Meetings and translation keep their own order: stopping a meeting waits for its last lines, and a
+        # translation for the model, neither of which may hold up settings.
         return [
             (method, path, handler if method == "GET" else self._one_at_a_time(handler))
             for method, path, handler in table
-        ] + (self._meetings.routes() if self._meetings is not None else [])
+        ] + (self._meetings.routes() if self._meetings is not None else []) + (
+            self._translation.routes() if self._translation is not None else []
+        )
 
     def _one_at_a_time(
         self, handler: Callable[[ApiRequest], ApiResponse],
@@ -722,8 +728,7 @@ class CoreApi:
         return ApiResponse(200, [history_entry_json(entry) for entry in entries])
 
     def _history_usage(self, _request: ApiRequest) -> ApiResponse:
-        everything, this_week = self._require_history().usage()
-        return ApiResponse(200, {"all": usage_json(everything), "week": usage_json(this_week)})
+        return ApiResponse(200, usage_report_json(self._require_history().usage()))
 
     def _delete_history_entry(self, request: ApiRequest) -> ApiResponse:
         self._require_history().delete(self._find_entry(request))

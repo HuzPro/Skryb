@@ -605,3 +605,36 @@ class TestReturnModifiers:
         state = replay.apply_key(KeyStroke(vk=ord("A"), char="a"))
 
         assert state.text == "hi\na"
+
+
+class TestRightToLeftText:
+    @pytest.mark.parametrize("stroke", [
+        KeyStroke(VK_LEFT, ""), KeyStroke(VK_RIGHT, ""), KeyStroke(VK_LEFT, "", shift=True),
+        KeyStroke(VK_RIGHT, "", ctrl=True), KeyStroke(VK_LEFT, "", ctrl=True, shift=True),
+    ])
+    def test_an_arrow_key_in_arabic_text_makes_the_edit_unreliable(self, stroke: KeyStroke) -> None:
+        replay = _pasted("خلنا نراجع الـ budget قبل الاجتماع.")
+
+        state = replay.apply_key(stroke)
+
+        assert EditFlag.RIGHT_TO_LEFT_ARROW in state.flags
+        assert state.reliable is False
+
+    def test_hebrew_counts_as_right_to_left_too(self) -> None:
+        state = _pasted("שלום").apply_key(KeyStroke(VK_LEFT, ""))
+
+        assert state.reliable is False
+
+    def test_typing_and_deleting_in_arabic_without_arrows_stays_reliable(self) -> None:
+        replay = _pasted("شلونك اليوم")
+        replay.apply_key(KeyStroke(VK_BACK, ""))
+        state = _type(replay, "م؟")
+
+        assert state.reliable is True
+        assert state.text == "شلونك اليوم؟"
+
+    @pytest.mark.parametrize("text", ["Café au lait, naïve résumé", "日本語のテキスト", "Привет", "", "   "])
+    def test_arrows_in_left_to_right_text_stay_reliable(self, text: str) -> None:
+        state = _pasted(text).apply_key(KeyStroke(VK_LEFT, ""))
+
+        assert EditFlag.RIGHT_TO_LEFT_ARROW not in state.flags

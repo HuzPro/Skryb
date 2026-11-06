@@ -409,6 +409,28 @@
   }
 }
 
+/* The logo's tile, light to deep, in each colourway; skryb/core/brand_mark.py draws the app icon in the same pairs. */
+:root {
+  --mark-light: #34d399;
+  --mark-deep: #047857;
+}
+:root[data-colourway="terracotta"] {
+  --mark-light: #f0946c;
+  --mark-deep: #a53e18;
+}
+:root[data-colourway="ink"] {
+  --mark-light: #60a5fa;
+  --mark-deep: #1d4ed8;
+}
+:root[data-colourway="plum"] {
+  --mark-light: #e09ad2;
+  --mark-deep: #7e3070;
+}
+:root[data-colourway="graphite"] {
+  --mark-light: #a1a1aa;
+  --mark-deep: #3f3f46;
+}
+
 /*
  * Colourways: every theme in the same five, each tuned to it. A rule sets the accent and the text on it;
  * Default also its focus ring and selection, and Material the seed of its palette. A swatch carries

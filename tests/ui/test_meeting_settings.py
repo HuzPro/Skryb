@@ -36,7 +36,7 @@ def test_meeting_settings_save_without_reloading_the_dictation_model(rig: Rig) -
 
 @pytest.mark.parametrize("meetings, problem", [
     ({"folder": "   ", "record_microphone": True, "language": "en"}, "settings.meetings.folder cannot be blank."),
-    ({"folder": "D:\\Meetings", "record_microphone": True, "language": "fr"}, "settings.meetings.language must be one of en, ur, auto."),
+    ({"folder": "D:\\Meetings", "record_microphone": True, "language": "fr"}, "settings.meetings.language must be one of en, ur, auto, ar."),
     ({"folder": "D:\\Meetings", "record_microphone": "yes", "language": "en"}, "settings.meetings.record_microphone must be true or false."),
     ({"folder": "D:\\Meetings", "language": "en"}, "settings.meetings.record_microphone is missing."),
 ])

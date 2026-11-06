@@ -30,7 +30,7 @@ from skryb.recording.audio_segment import AudioSegment
 from skryb.transcription.engine import TranscriptionEngine
 from skryb.transcription.hf_model_manager import loadable_snapshot_dir
 from skryb.transcription.openvino_parakeet_adapter import import_openvino, split_at_pauses
-from skryb.transcription.openvino_graph import Safetensors, widen_bf16
+from skryb.transcription.openvino_graph import open_checkpoint, widen_bf16
 from skryb.transcription.openvino_qwen3_asr_graph import (
     DECODER_FILENAME, EMBEDDING, ENCODER_FILENAME, WINDOW_FRAMES, build, window_tokens,
 )
@@ -73,8 +73,12 @@ _ASR_TEXT_MARK = "<asr_text>"
 class OpenVinoQwen3AsrAdapter(TranscriptionEngine):
     """Batch and meeting Qwen3-ASR. One call at a time, like every adapter here.
 
+    *name* is the model's name in what the engine tells the user, such as which device it ended up on.
+
     *drafter*, when set, transcribes the same clip with another engine; its text drafts English decodes.
     """
+
+    name = "Qwen3-ASR"
 
     def __init__(self, model_dir: Path, repo_id: str, revision: str = "", language: str = "en") -> None:
         self._model_dir = model_dir
@@ -105,22 +109,22 @@ class OpenVinoQwen3AsrAdapter(TranscriptionEngine):
         snapshot = loadable_snapshot_dir(self._model_dir, self._repo_id, self._revision)
         files = snapshot / EXPORT_DIRECTORY_NAME
         if not (files / DECODER_FILENAME).is_file() or not (files / ENCODER_FILENAME).is_file():
-            _logger.info("Building Qwen3-ASR's OpenVINO graphs (once per download) in %s", files)
+            _logger.info("Building %s's OpenVINO graphs (once per download) in %s", self.name, files)
             build_started = time.monotonic()
             build(openvino, snapshot, files)
             _logger.info("Built in %.1fs", time.monotonic() - build_started)
         core = openvino.Core()
         cache = {"CACHE_DIR": str(files / CACHE_DIRECTORY_NAME)}
         with ThreadPoolExecutor(2) as pool:
-            encoder = pool.submit(_compile_encoder, core, files / ENCODER_FILENAME, cache)
-            decoder = pool.submit(_compile_decoder, core, files / DECODER_FILENAME, cache)
+            encoder = pool.submit(_compile_encoder, core, files / ENCODER_FILENAME, cache, self.name)
+            decoder = pool.submit(_compile_decoder, core, files / DECODER_FILENAME, cache, self.name)
             (self._encoder, encoder_device), (compiled, self._device, self._note) = encoder.result(), decoder.result()
         if encoder_device != self._device:
-            self._note = self._note or f"Qwen3-ASR's audio encoder runs on the {encoder_device}."
+            self._note = self._note or f"{self.name}'s audio encoder runs on the {encoder_device}."
         self._decoder = _Decoder(compiled, on_npu=self._device == "NPU")
-        self._embedding = Safetensors(snapshot / "model.safetensors").bf16_rows(EMBEDDING)
+        self._embedding = open_checkpoint(snapshot).bf16_rows(EMBEDDING)
         self._tokenizer, self._eos = _tokenizer(snapshot)
-        _logger.info("[load_model qwen3-asr openvino] on %s in %.2fs", self._device, time.monotonic() - started_at)
+        _logger.info("[load_model %s openvino] on %s in %.2fs", self.name, self._device, time.monotonic() - started_at)
 
     def is_model_loaded(self) -> bool:
         return self._decoder is not None
@@ -134,7 +138,7 @@ class OpenVinoQwen3AsrAdapter(TranscriptionEngine):
         if self._decoder is None:
             raise TranscriptionError("Model not loaded")
         if audio.sample_rate != _SAMPLE_RATE:
-            raise TranscriptionError(f"Qwen3-ASR needs {_SAMPLE_RATE} Hz audio, got {audio.sample_rate}")
+            raise TranscriptionError(f"{self.name} needs {_SAMPLE_RATE} Hz audio, got {audio.sample_rate}")
         started_at = time.monotonic()
         samples = np.ascontiguousarray(audio.data, dtype=np.float32)
         with self._lock:
@@ -149,12 +153,17 @@ class OpenVinoQwen3AsrAdapter(TranscriptionEngine):
         )
 
     def _transcribe_piece(self, samples: np.ndarray, context: str | None, language: str | None) -> str:
-        prefix, suffix = (self._ids(text) for text in prompt_text(context, language))
+        prefix, suffix = (self._ids(text) for text in self._prompt(context, language))
         prompt = np.concatenate([self._embeds(prefix), self._audio(samples), self._embeds(suffix)])
         draft = self._draft(samples, language)
         budget = min(new_token_budget(samples.size / _SAMPLE_RATE), MAX_RESPONSE_TOKENS - PASS_WIDTH)
         tokens = self._decoder.decode(prompt, draft, self._embeds, budget, self._eos)
-        text = self._tokenizer.decode(tokens, skip_special_tokens=False)
+        return self._finish(self._tokenizer.decode(tokens, skip_special_tokens=False))
+
+    def _prompt(self, context: str | None, language: str | None) -> tuple[str, str]:
+        return prompt_text(context, language)
+
+    def _finish(self, text: str) -> str:
         return text.split(_ASR_TEXT_MARK)[-1].strip()
 
     def _audio(self, samples: np.ndarray) -> np.ndarray:
@@ -250,20 +259,20 @@ class _Decoder:
                 state.state = type(state.state)(np.ascontiguousarray(cache[:, :, :length]))
 
 
-def _compile_encoder(core: object, path: Path, cache: dict) -> tuple[object, str]:
+def _compile_encoder(core: object, path: Path, cache: dict, name: str) -> tuple[object, str]:
     try:
         return core.compile_model(str(path), "NPU", cache), "NPU"
     except RuntimeError:
-        _logger.warning("The NPU refused Qwen3-ASR's audio encoder; it runs on the CPU", exc_info=True)
+        _logger.warning("The NPU refused %s's audio encoder; it runs on the CPU", name, exc_info=True)
         return core.compile_model(str(path), "CPU"), "CPU"
 
 
-def _compile_decoder(core: object, path: Path, cache: dict) -> tuple[object, str, str | None]:
+def _compile_decoder(core: object, path: Path, cache: dict, name: str) -> tuple[object, str, str | None]:
     try:
         return core.compile_model(str(path), "NPU", {**cache, **_NPU_DECODER_CONFIG}), "NPU", None
     except RuntimeError as error:
-        _logger.warning("The NPU refused Qwen3-ASR's decoder; it runs on the CPU", exc_info=True)
-        return core.compile_model(str(path), "CPU"), "CPU", f"Qwen3-ASR runs on the CPU: the NPU refused it ({error})."[:300]
+        _logger.warning("The NPU refused %s's decoder; it runs on the CPU", name, exc_info=True)
+        return core.compile_model(str(path), "CPU"), "CPU", f"{name} runs on the CPU: the NPU refused it ({error})."[:300]
 
 
 def _tokenizer(snapshot: Path) -> tuple[object, tuple[int, ...]]:

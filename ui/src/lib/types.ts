@@ -27,8 +27,8 @@ export interface RecordingSettings {
   warn_before_cap_seconds: number;
 }
 
-/** English; Urdu, written in Roman Urdu; or each sentence in whichever of the two it is. */
-export type MeetingLanguage = "en" | "ur" | "auto";
+/** English; Urdu, written in Roman Urdu; each sentence in whichever of those two it is; or Arabic. */
+export type MeetingLanguage = "en" | "ur" | "auto" | "ar";
 
 export interface MeetingSettings {
   folder: string;
@@ -54,6 +54,8 @@ export interface Settings {
   paste_method_overrides: [string, PasteMethod][];
   check_for_updates: boolean;
   meetings: MeetingSettings;
+  /** Arabic lines in meetings and History show their English and a gloss under each word; on downloads the model. */
+  show_english: boolean;
   theme: Theme;
   /** Each theme remembers its own colourway. */
   colourways: Record<Theme, Colourway>;
@@ -167,16 +169,35 @@ export interface HistoryEntry {
   typed: string;
 }
 
-/** Words kept in history and the seconds spent saying them. */
+/** Words kept in history, the seconds spent recording them, the dictations they came from, and seconds lost to recordings that typed nothing. */
 export interface Usage {
   words: number;
   seconds: number;
+  dictations: number;
+  lost_seconds: number;
 }
 
-/** Over all of history, and this week from Monday. */
+/** Dictation Home's numbers; each "usual" or "typical" is null until there is enough history to say. */
 export interface HistoryUsage {
   all: Usage;
+  /** Monday to now. */
   week: Usage;
+  today: Usage;
+  /** The last 30 days, today included. */
+  month: Usage;
+  streak: number;
+  longest_streak: number;
+  /** Words a day, the last 30 days, today last. */
+  days: number[];
+  /** Median words on the days dictated in the four weeks before today. */
+  usual_day: number | null;
+  /** Median words of earlier weeks from Monday to today's weekday. */
+  usual_week: number | null;
+  /** Medians over the last 30 days. */
+  typical_words: number | null;
+  typical_seconds: number | null;
+  /** Recordings over the last 30 days that typed something, came back empty or failed; cancelled ones left out. */
+  reliability: { typed: number; empty: number; failed: number };
 }
 
 export interface EngineInfo {
@@ -231,6 +252,31 @@ export interface MeetingEntry {
   end: number;
   text: string;
   key: string;
+  /** Show English: the line in English, sent again once it is ready. */
+  english?: string;
+  /** Each written word with its English gloss, in the order written. */
+  words?: [string, string][];
+}
+
+/** An Arabic line's English, and each written word with its gloss. */
+export interface EnglishLine {
+  english: string;
+  words: [string, string][];
+}
+
+/** The translation model this computer downloads for Show English, and where it runs once loaded. */
+export interface TranslationStatus {
+  name: string;
+  label: string;
+  description: string;
+  display_size: string;
+  installed: boolean;
+  /** "GPU", "NPU" or "CPU" once the model has started; null before. */
+  device: string | null;
+  device_name: string | null;
+  /** Why the model could not start. */
+  error: string | null;
+  download: null | { state: DownloadState; bytes_done: number; bytes_total: number; error: string };
 }
 
 export interface MeetingTranscript {
@@ -243,7 +289,7 @@ export interface MeetingTranscript {
 
 export type MeetingStatus = "Starting" | "Loading models" | "Recording" | "Reading the file" | "Transcribing" | "Finishing" | "Saved";
 /** The languages a dropped file can be transcribed in. */
-export type FileLanguage = "en" | "ur";
+export type FileLanguage = "en" | "ur" | "ar";
 
 export interface LiveMeeting extends MeetingTranscript {
   id: string;
@@ -265,6 +311,10 @@ export interface MeetingSummary {
   lines: number;
   words: number;
   has_audio: boolean;
+  has_thumbnail: boolean;
+  /** Seconds of speech from the microphone, and from everyone. */
+  me_seconds: number;
+  talk_seconds: number;
 }
 
 export interface MeetingModel {

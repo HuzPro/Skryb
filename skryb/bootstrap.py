@@ -11,6 +11,7 @@ from skryb.core.action_dispatcher import (
     ActionDispatcher,
     ThreadedActionDispatcher,
 )
+from skryb.core.app_icon import paint_app_icon_in_background
 from skryb.core.build_info import (
     RunningBuild,
     source_changed_since,
@@ -126,6 +127,7 @@ from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.models import DIARIZER, DIARIZER_CPU, ROMAN_URDU
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import meeting_settings_from
+from skryb.meetings.transcript import English
 from skryb.people.repick import Repick, suggest_heard_as
 from skryb.people.terms import import_vocabulary, load_terms
 from skryb.history.service import HistoryService
@@ -137,6 +139,7 @@ from skryb.recording.notice import Notice
 from skryb.recording.overlay import RecordingOverlay
 from skryb.recording.preferences import (
     RecordingPreferences,
+    active_colourway,
     fold_paper_colourway,
     load_pill_position,
     load_pill_skin,
@@ -194,14 +197,25 @@ from skryb.transcription.streaming.streaming_engine import (
     StreamingTranscriptionEngine,
 )
 from skryb.transcription_use_case import RecordAndTranscribeUseCase
+from skryb.translation.service import TranslationService
 from skryb.tray.app import SystemTrayApp
 from skryb.tray.win32_tray_adapter import build_win32_tray_adapter
 from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version, open_with_shell
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
 from skryb.ui.meeting_handlers import MeetingApi
+from skryb.ui.translation_handlers import TranslationApi
 
 _logger = logging.getLogger(__name__)
+
+
+def show_english(config: JsonConfigAdapter) -> bool:
+    return config.get("translation.show_english", False) is True
+
+
+def english_for_meetings(config: JsonConfigAdapter, translation: TranslationService) -> English | None:
+    """Where a meeting sends its Arabic lines for English: nowhere while Show English is off or still downloading."""
+    return translation.submit if show_english(config) and translation.installed() else None
 
 
 def migrate_output_mode(config: JsonConfigAdapter) -> None:
@@ -221,9 +235,9 @@ def migrate_output_mode(config: JsonConfigAdapter) -> None:
 
 
 def migrate_language(config: JsonConfigAdapter) -> None:
-    """Rewrite a legacy language of ``None`` or ``"auto"`` to ``"en"``."""
+    """Rewrite a language Qwen3-ASR isn't held to (``None``, ``"auto"``, or one the old list offered) to ``"en"``."""
     current = config.get("transcription.language")
-    if current not in (None, "auto"):
+    if current in LANGUAGE_NAMES:
         return
     _logger.info("Migrating transcription language %r -> 'en'.", current)
     config.set("transcription.language", "en")
@@ -255,6 +269,11 @@ def migrate_paper_colourway(config: JsonConfigAdapter) -> None:
         return
     _logger.info("Moved Paper's colourway into the colourways of every theme.")
     config.save()
+
+
+def _app_icon_painter(config: JsonConfigAdapter) -> Callable[[], None]:
+    """Repaint the installed app icon in the chosen colourway, off the calling thread."""
+    return functools.partial(paint_app_icon_in_background, functools.partial(active_colourway, config))
 
 
 def _ignore_delivery(text: str) -> None:
@@ -585,7 +604,7 @@ def _best_model_left(config: JsonConfigAdapter, paths: AppPaths, hardware_detect
 
 
 def _dictation_language(config: JsonConfigAdapter) -> str:
-    """The language Qwen3-ASR is held to; it knows English and Hindi (asked for Urdu)."""
+    """The language Qwen3-ASR is held to: English, Hindi (asked for Urdu) or Arabic."""
     language = config.get("transcription.language", "en")
     return language if language in LANGUAGE_NAMES else "en"
 
@@ -1052,6 +1071,7 @@ def _build_meetings(
     *,
     publish: Callable[[dict[str, object]], None],
     on_change: Callable[[bool], None],
+    english: Callable[[], English | None],
 ) -> tuple[MeetingRecorder, MeetingModelFiles]:
     """Meeting recording, sharing dictation's Qwen3-ASR when dictation has it loaded."""
     meeting_only = build_hf_model_manager(
@@ -1076,7 +1096,9 @@ def _build_meetings(
             turns=use_case.engine_turns,
             build_asr=functools.partial(
                 build_meeting_asr, paths, registry, hardware_detector, license_policy,
+                model=files.asr_model(settings.language),
             ),
+            asr_model=files.asr_model(settings.language),
             diarizer_snapshot=functools.partial(diarizer_snapshot, paths.models_dir),
             roman_urdu_snapshot=functools.partial(roman_urdu_snapshot, paths.models_dir),
             native_diarizer=functools.partial(native_diarizer_for, hardware_detector),
@@ -1086,6 +1108,7 @@ def _build_meetings(
         publish=publish,
         people=paths.people_path,
         on_change=on_change,
+        english=english,
     )
     return recorder, files
 
@@ -1163,6 +1186,7 @@ def _build_settings_service(
         license_policy=license_policy,
         registry=registry,
         hardware_detector=hardware_detector,
+        repaint_app_icon=_app_icon_painter(config),
     )
     # Populate the cache on a background thread so the first settings
     # open doesn't pay the filesystem-scan cost.
@@ -1394,6 +1418,14 @@ def build_app(
         diagnostics=diagnostics,
     )
 
+    # Show English: nothing is downloaded until it is switched on, and nothing loads until a line needs it.
+    translation = TranslationService(
+        models_dir=paths.models_dir,
+        log_path=paths.session_dir / "translation-server.log",
+        hardware=hardware_detector.detect,
+        downloads=download_manager,
+    )
+
     def apply_saved_settings(changes: ChangeSet) -> None:
         apply_settings(
             changes, config, record_and_transcribe_use_case, app,
@@ -1407,6 +1439,8 @@ def build_app(
             people_path=paths.people_path,
             rule_counts=rule_counts,
         )
+        if show_english(config):
+            action_dispatcher.dispatch(translation.install)
 
     # Bound late: the app, the API and the notice all come after it.
     updater = _release_updater(
@@ -1437,6 +1471,7 @@ def build_app(
         settings_service, record_and_transcribe_use_case,
         publish=functools.partial(api_server.hub.publish, "meeting"),
         on_change=meeting_changed,
+        english=functools.partial(english_for_meetings, config, translation),
     )
 
     def explain_meeting_problem(message: str) -> None:
@@ -1476,7 +1511,9 @@ def build_app(
             folder=lambda: meeting_settings_from(config).folder,
             model_files=meeting_files,
             open_path=open_with_shell,
+            english=functools.partial(english_for_meetings, config, translation),
         ),
+        translation=TranslationApi(translation, api_server.hub, enabled=functools.partial(show_english, config)),
     )
     launcher = ShellLauncher(
         api_server,
@@ -1542,7 +1579,7 @@ def build_app(
         start_replacement=functools.partial(start_another_copy, "--restart"),
         download_manager=download_manager,
         owned_disposables=tuple(
-            item for item in (meetings, overlay, ducking, history_pruner, updater)
+            item for item in (meetings, overlay, ducking, history_pruner, updater, translation)
             if item is not None
         ),
     )
@@ -1567,6 +1604,8 @@ def build_app(
     # Keys observed before this only queue up; the observer catches up.
     if edit_capture is not None:
         _start_once_idle(event_bus, edit_capture.start)
+    # Every start, as an update's Setup puts the emerald icon back.
+    _start_once_idle(event_bus, _app_icon_painter(config))
     _spawn_engine_load_thread(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,

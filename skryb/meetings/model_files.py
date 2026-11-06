@@ -1,20 +1,22 @@
 """The models a meeting needs on disk, and fetching the ones that are missing.
 
 Every meeting needs speaker labels and Qwen3-ASR; Urdu and Auto meetings
-need the Roman Urdu model too. Speaker labels are the checkpoint on a
-computer with a GPU or a tuned Intel NPU, and NVIDIA's CPU build of it on one
-with neither.
+need the Roman Urdu model too. Arabic meetings need Jais-ASR in Qwen3-ASR's
+place, unless Qwen3-ASR is downloaded and Jais-ASR isn't: then Qwen3-ASR
+hears the Arabic, and no download is asked for. Speaker labels are the
+checkpoint on a computer with a GPU or a tuned Intel NPU, and NVIDIA's CPU
+build of it on one with neither.
 """
 
 from collections.abc import Callable
 
-from skryb.meetings.asr import QWEN3_ASR, URDU_LANGUAGES
+from skryb.meetings.asr import JAIS_ASR, QWEN3_ASR, URDU_LANGUAGES
 from skryb.meetings.models import DIARIZER, DIARIZER_CPU, ROMAN_URDU
 from skryb.transcription.model_info import ModelInfo, get_model_info
 
 _DISPLAY_NAMES = {
     DIARIZER.name: "Speaker labels", DIARIZER_CPU.name: "Speaker labels", QWEN3_ASR: "Qwen3-ASR speech-to-text",
-    ROMAN_URDU.name: "Roman Urdu speech-to-text",
+    ROMAN_URDU.name: "Roman Urdu speech-to-text", JAIS_ASR: "Jais-ASR Arabic speech-to-text",
 }
 # Downloaded by the meetings' own model manager; Qwen3-ASR is one of dictation's models.
 _MEETING_ONLY = (DIARIZER.name, DIARIZER_CPU.name, ROMAN_URDU.name)
@@ -47,8 +49,12 @@ class MeetingModelFiles:
                 "name": info.name, "label": _DISPLAY_NAMES[info.name], "display_size": info.display_size,
                 "description": info.description, "installed": self.installed(info.name),
             }
-            for info in (self._diarizer(), get_model_info(QWEN3_ASR), ROMAN_URDU)
+            for info in (self._diarizer(), get_model_info(QWEN3_ASR), ROMAN_URDU, get_model_info(JAIS_ASR))
         ]
+
+    def asr_model(self, language: str) -> str:
+        """The speech-to-text model a meeting in *language* runs."""
+        return next(name for name in self._needed(language) if name in (QWEN3_ASR, JAIS_ASR))
 
     def missing(self, language: str | None = None) -> list[str]:
         """What a meeting in *language* (the meeting setting when not given) still needs to download."""
@@ -64,9 +70,13 @@ class MeetingModelFiles:
                 self._start_download(name)
 
     def _all(self) -> tuple[str, ...]:
-        """Every meeting model this computer uses."""
+        """Every meeting model this computer uses but Jais-ASR: 11 GB of Arabic, fetched for an Arabic meeting,
+        never as one of "the rest"."""
         return self._diarizer().name, QWEN3_ASR, ROMAN_URDU.name
 
     def _needed(self, language: str) -> tuple[str, ...]:
+        if language == "ar":
+            only_qwen = self.installed(QWEN3_ASR) and not self.installed(JAIS_ASR)
+            return (self._diarizer().name, QWEN3_ASR if only_qwen else JAIS_ASR)
         every = self._all()
         return every if language in URDU_LANGUAGES else every[:2]

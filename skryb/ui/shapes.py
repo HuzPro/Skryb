@@ -12,7 +12,7 @@ from dataclasses import asdict, replace
 from typing import TypeVar, cast
 
 from skryb.history.entries import HistoryEntry
-from skryb.history.usage import Usage
+from skryb.history.usage import Usage, UsageReport
 from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode, binding_for
 from skryb.output.dictionary_config import (
     DictionaryConfig,
@@ -65,7 +65,30 @@ def history_entry_json(entry: HistoryEntry) -> Json:
 
 
 def usage_json(usage: Usage) -> Json:
-    return {"words": usage.words, "seconds": round(usage.seconds, 1)}
+    return {
+        "words": usage.words,
+        "seconds": round(usage.seconds, 1),
+        "dictations": usage.dictations,
+        "lost_seconds": round(usage.lost_seconds, 1),
+    }
+
+
+def usage_report_json(report: UsageReport) -> Json:
+    reliability = report.reliability
+    return {
+        "all": usage_json(report.all),
+        "week": usage_json(report.week),
+        "today": usage_json(report.today),
+        "month": usage_json(report.month),
+        "streak": report.streak,
+        "longest_streak": report.longest_streak,
+        "days": list(report.days),
+        "usual_day": report.usual_day,
+        "usual_week": report.usual_week,
+        "typical_words": report.typical_words,
+        "typical_seconds": report.typical_seconds,
+        "reliability": {"typed": reliability.typed, "empty": reliability.empty, "failed": reliability.failed},
+    }
 
 
 def binding_json(binding: Binding) -> Json:
@@ -98,6 +121,7 @@ def settings_json(draft: SettingsDraft) -> Json:
             "record_microphone": draft.meetings_record_microphone,
             "language": draft.meetings_language,
         },
+        "show_english": draft.show_english,
         "theme": draft.theme,
         "colourways": dict(draft.colourways),
     }
@@ -154,6 +178,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         meetings_folder=meetings_folder,
         meetings_record_microphone=meetings.flag("record_microphone"),
         meetings_language=meetings.one_of("language", MEETING_LANGUAGES),
+        show_english=settings.flag("show_english"),
         theme=settings.one_of("theme", UI_THEMES),
         colourways={theme: colourways.one_of(theme, COLOURWAYS) for theme in UI_THEMES},
     )

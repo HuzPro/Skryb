@@ -33,8 +33,12 @@ export function Section({ title, note, children, action }: { title: string; note
   );
 }
 
-export function Card({ className, children }: { className?: string; children?: ReactNode }) {
-  return <div className={cn("surface rounded-xl border border-edge bg-card shadow-card", className)}>{children}</div>;
+export function Card({ className, children, title }: { className?: string; children?: ReactNode; title?: string }) {
+  return (
+    <div title={title} className={cn("surface rounded-xl border border-edge bg-card shadow-card", className)}>
+      {children}
+    </div>
+  );
 }
 
 /** Rows inside one card, separated by hairlines. */
@@ -70,7 +74,7 @@ export function Row({
 }
 
 export function InlineError({ children }: { children: ReactNode }) {
-  return <p className="mt-2 text-[12.5px] text-destructive">{children}</p>;
+  return <p className="selectable mt-2 text-[12.5px] text-destructive">{children}</p>;
 }
 
 export interface Choice<T extends string> {
@@ -305,4 +309,121 @@ export function ContextMenu({ x, y, label, items, onClose: closed }: { x: number
       ))}
     </div>
   );
+}
+
+/** One number on a card: what it counts, the number, and a line under it. */
+export function Stat({ label, value, detail, className, title }: { label: string; value: string; detail?: ReactNode; className?: string; title?: string }) {
+  return (
+    <Card className={cn("px-5 py-4", className)} title={title}>
+      <p className="text-[12.5px] text-muted-foreground">{label}</p>
+      <p className="mt-1 text-[24px] leading-tight font-semibold tabular-nums">{value}</p>
+      {detail ? <p className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</p> : null}
+    </Card>
+  );
+}
+
+/** One bar of a `Bars` chart: its value and what hovering it says it is. */
+export interface Bar {
+  value: number;
+  label: string;
+}
+
+/**
+ * Bars from a shared zero baseline, the last one drawn lighter while its period is still running. A dashed line marks
+ * the usual value when there is one. Each bar's whole column takes the hover, so a short bar is as easy to point at as
+ * a tall one; a table carries the numbers for screen readers.
+ */
+export function Bars({
+  title,
+  bars,
+  format,
+  axis,
+  usual,
+  partial = true,
+}: {
+  title: string;
+  bars: Bar[];
+  format: (value: number) => string;
+  axis: [string, string];
+  usual?: number | null;
+  partial?: boolean;
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const top = Math.max(...bars.map((bar) => bar.value), usual ?? 0, 0);
+  const shown = bars[hovered ?? bars.length - 1];
+  const usualAt = usual && top > 0 ? (usual / top) * 100 : null;
+  return (
+    <Card className="flex flex-col px-5 py-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-[12.5px] text-muted-foreground">{title}</h3>
+        {shown ? (
+          <p className="text-[12.5px] tabular-nums" aria-hidden>
+            <span className="text-muted-foreground">{shown.label} </span>
+            <span className="font-medium">{format(shown.value)}</span>
+          </p>
+        ) : null}
+      </div>
+      <div aria-hidden className="relative mt-3 flex min-h-28 flex-1 items-end gap-[2px] border-b border-edge" onPointerLeave={() => setHovered(null)}>
+        {bars.map((bar, index) => {
+          const unfinished = partial && index === bars.length - 1;
+          return (
+            <div key={index} className="flex h-full flex-1 items-end" onPointerEnter={() => setHovered(index)}>
+              <div
+                className={cn(
+                  "w-full rounded-t-[4px] transition-colors",
+                  bar.value <= 0 ? "bg-muted" : unfinished ? "bg-primary/45" : "bg-primary",
+                  hovered !== null && hovered !== index && bar.value > 0 && "opacity-50",
+                )}
+                style={{ height: bar.value > 0 && top > 0 ? `max(3px, ${(bar.value / top) * 100}%)` : "2px" }}
+              />
+            </div>
+          );
+        })}
+        {usualAt !== null ? (
+          <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-foreground/40" style={{ bottom: `${usualAt}%` }}>
+            <span className={cn("absolute right-0 bg-card pl-1 text-[11px] text-muted-foreground tabular-nums", usualAt > 80 ? "top-[2px]" : "-top-[17px]")}>
+              usual {format(usual ?? 0)}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      <div aria-hidden className="mt-1.5 flex justify-between text-[11.5px] text-muted-foreground">
+        <span>{axis[0]}</span>
+        <span>{axis[1]}</span>
+      </div>
+      <table className="sr-only">
+        <caption>{title}</caption>
+        <tbody>
+          {bars.map((bar, index) => (
+            <tr key={index}>
+              <th scope="row">{bar.label}</th>
+              <td>{format(bar.value)}</td>
+            </tr>
+          ))}
+          {usual ? (
+            <tr>
+              <th scope="row">Usual</th>
+              <td>{format(usual)}</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+const DAY_LABEL: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
+
+/** Bars for the last `values.length` days, today last and labelled "Today so far". */
+export function dayBars(values: number[], now: Date = new Date()): Bar[] {
+  return values.map((value, index) => {
+    const back = values.length - 1 - index;
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+    return { value, label: back ? day.toLocaleDateString(undefined, DAY_LABEL) : "Today so far" };
+  });
+}
+
+/** "4 Oct" for the first of `count` days ending today. */
+export function firstDayLabel(count: number, now: Date = new Date()): string {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - (count - 1)).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }

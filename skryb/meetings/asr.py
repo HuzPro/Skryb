@@ -6,6 +6,7 @@ own, on the engine Skryb picks for this computer, with dictation's engine
 drafting its text when it can use a draft (the NPU one). Urdu and Auto
 meetings hear each line with Whisper Hindi2Hinglish Apex first, since
 Qwen3-ASR has no Urdu, and keep Qwen3-ASR for the lines that come out English.
+Arabic meetings run Jais-ASR when it is downloaded, else ask Qwen3-ASR for Arabic.
 """
 
 import importlib.util
@@ -41,6 +42,7 @@ from skryb.transcription.qwen3_asr_prompt import PromptedTranscriber
 from skryb.transcription.roman_urdu import urdu_spelling
 
 QWEN3_ASR = "qwen3-asr-1.7b"
+JAIS_ASR = "jais-asr"
 # The meeting languages that hear each line with the Roman Urdu model first.
 URDU_LANGUAGES = ("ur", "auto")
 # Roman Urdu words English doesn't use; "to", "na" and "ho" are English words too, so they don't count.
@@ -58,9 +60,10 @@ _logger = logging.getLogger(__name__)
 
 def build_meeting_asr(
     paths: AppPaths, registry: EngineRegistry, hardware_detector: HardwareDetector, license_policy: LicensePolicy,
+    model: str = QWEN3_ASR,
 ) -> TranscriptionEngine:
-    """Qwen3-ASR on the best engine for this computer: the native one on an RX 9060 XT or an RTX 30-50 card."""
-    info = get_model_info(QWEN3_ASR)
+    """*model* on the best engine for this computer: the native one on an RX 9060 XT or an RTX 30-50 card."""
+    info = get_model_info(model)
     license_policy.assert_accepted(info)
     hardware = hardware_detector.detect()
     engine_id = rank_engines(info, hardware, registry.all_descriptors())[0].engine_id
@@ -127,8 +130,11 @@ class MeetingModels:
         roman_urdu_snapshot: Callable[[], Path],
         native_diarizer: Callable[[], Path | None] = lambda: None,
         cpu_diarizer_model: Callable[[], Path] = lambda: _not_downloaded(DIARIZER_CPU),
+        asr_model: str = QWEN3_ASR,
     ) -> None:
         self._urdu = language in URDU_LANGUAGES
+        self._asr_language = "ar" if language == "ar" else "en"
+        self._jais = asr_model == JAIS_ASR
         self._dictation_engine = dictation_engine
         self._turns = turns
         self._build_asr = build_asr
@@ -197,10 +203,10 @@ class MeetingModels:
         clip = AudioSegment(audio, RATE)
         with self._turns.meeting():
             engine = self._dictation_engine()
-            if isinstance(engine, PromptedTranscriber):
-                return transcribe_with_hint(engine, clip, context, "en").text
+            if self._can_borrow(engine):
+                return transcribe_with_hint(engine, clip, context, self._asr_language).text
         # ponytail: if dictation switches to Qwen3-ASR mid-meeting, the meeting keeps its own copy until it ends.
-        return transcribe_with_hint(self._own_engine(), clip, context, "en").text
+        return transcribe_with_hint(self._own_engine(), clip, context, self._asr_language).text
 
     def release(self) -> None:
         if isinstance(self._diarizer, (NativeDiarizer, OpenVinoDiarizer, CpuDiarizer)):
@@ -215,7 +221,11 @@ class MeetingModels:
         release_gpu()
 
     def _borrowed_engine_is_prompted(self) -> bool:
-        return isinstance(self._dictation_engine(), PromptedTranscriber)
+        return self._can_borrow(self._dictation_engine())
+
+    def _can_borrow(self, engine: TranscriptionEngine) -> bool:
+        """Whether dictation's engine is the model this meeting runs: Jais-ASR, or else Qwen3-ASR."""
+        return isinstance(engine, PromptedTranscriber) and _is_jais(engine) == self._jais
 
     def _own_engine(self) -> PromptedTranscriber:
         if self._own is None:
@@ -225,7 +235,7 @@ class MeetingModels:
             if hasattr(engine, "drafter"):
                 engine.drafter = self._dictation_draft
             self._own = engine
-            _logger.info("Loaded Qwen3-ASR for the meeting: dictation uses another model.")
+            _logger.info("Loaded %s for the meeting: dictation uses another model.", "Jais-ASR" if self._jais else "Qwen3-ASR")
         assert isinstance(self._own, PromptedTranscriber)
         return self._own
 
@@ -249,3 +259,10 @@ class MeetingModels:
         except Exception:
             _logger.warning("Whisper Hindi2Hinglish Apex didn't load on the NPU; it runs on PyTorch", exc_info=True)
             return RomanUrduAsr(snapshot)
+
+
+def _is_jais(engine: TranscriptionEngine) -> bool:
+    from skryb.transcription.native_jais_asr_adapter import NativeJaisAsrAdapter
+    from skryb.transcription.openvino_jais_asr_adapter import OpenVinoJaisAsrAdapter
+
+    return isinstance(engine, (NativeJaisAsrAdapter, OpenVinoJaisAsrAdapter))

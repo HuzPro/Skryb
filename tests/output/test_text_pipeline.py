@@ -763,3 +763,12 @@ class TestCaretContextStage:
         )
 
         assert pipeline.process("Question mark.") == expected
+
+
+@pytest.mark.parametrize(("dictated", "typed"), [
+    ("متى نبدأ؟", "متى نبدأ؟ "),
+    ("خلنا نراجع الـ budget قبل الاجتماع.", "خلنا نراجع الـ budget قبل الاجتماع. "),
+    ("زين، زين، زين.", "زين، زين، زين. "),
+])
+def test_an_arabic_dictation_ending_a_sentence_leaves_a_space_for_the_next_one(dictated: str, typed: str) -> None:
+    assert _batch(dictated) == typed

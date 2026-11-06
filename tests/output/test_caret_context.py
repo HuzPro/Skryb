@@ -435,3 +435,15 @@ class TestInsertingWithoutASelection:
         self, before: str, after: str, text: str, expected: str,
     ) -> None:
         assert fit_to_context(text, CaretContext(before, "", after)) == expected
+
+
+class TestArabicPunctuation:
+    @pytest.mark.parametrize("following", ["، وبعدين نشوف.", "؛ وبعدين نشوف.", "؟"])
+    def test_an_arabic_mark_that_follows_takes_the_place_of_the_full_stop(self, following: str) -> None:
+        assert fit_to_context("بكرة الصبح.", CaretContext("أرسل التقرير", "", following)) == " بكرة الصبح"
+
+    def test_a_sentence_after_an_arabic_question_mark_gets_its_space(self) -> None:
+        assert fit_to_context("زين.", CaretContext("شلونك؟", "", "")) == " زين."
+
+    def test_an_arabic_sentence_after_a_question_and_a_space_is_left_alone(self) -> None:
+        assert fit_to_context("بكرة الصبح.", CaretContext("متى نرسل التقرير؟ ", "", "")) == "بكرة الصبح."

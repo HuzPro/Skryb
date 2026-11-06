@@ -91,9 +91,14 @@ class ModelDownloadJob:
                 raise ModelDownloadError("Cancelled")
             if pause_event.is_set():
                 raise ModelDownloadError("Paused")
+            target = snapshot / resolved.filename
+            # A download picked up again after a stop keeps the files it already finished, whole 5 GB shards included.
+            if resolved.size and target.is_file() and target.stat().st_size == resolved.size:
+                self._on_file_progress(resolved.size, total, on_progress)
+                continue
             plan = FileDownloadPlan(
                 url=resolved.url,
-                target=snapshot / resolved.filename,
+                target=target,
                 expected_size=resolved.size,
             )
             try:

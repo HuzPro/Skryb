@@ -3,8 +3,9 @@ import { AudioLines, BookA, ClipboardPaste, History, House, Keyboard, Mic } from
 import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router";
 import { InstallBanner, InstallContext, useInstallWatch, useRestoredScroll } from "./components/install";
+import { markSvg } from "./components/mark";
 import { ConnectionBanner, LostContext, Prompts, SaveBar, Sidebar, TopBar, useAppInfo, type Mode, type NavItem } from "./components/shell";
-import { applyTheme, guardClose, onRelaunch, runBeforeClose, showWindow, windowControls, type LaunchArgs, type Page } from "./lib/platform";
+import { applyTheme, guardClose, onRelaunch, runBeforeClose, setWindowIcon, showWindow, windowControls, type LaunchArgs, type Page } from "./lib/platform";
 import { prefetchPages, queryClient } from "./lib/queries";
 import { useServerEvents } from "./lib/sse";
 import { StoreProvider, useStore, useStoreRef } from "./lib/store";
@@ -54,10 +55,10 @@ export function modeOf(pathname: string): Mode | null {
   return MEETING.test(pathname) || NAV.some((item) => item.meetings === pathname) ? "meetings" : "dictation";
 }
 
-/** The page behind the same sidebar item in `mode`; a shared page, or one outside the sidebar, stays put. */
+/** The page behind the same sidebar item in `mode`; from a page outside the sidebar, such as Settings, that mode's Home. */
 export function pageInMode(pathname: string, mode: Mode): string {
-  const item = NAV.find((candidate) => isNavActive(candidate, pathname));
-  return item ? item[mode] : pathname;
+  const item = NAV.find((candidate) => isNavActive(candidate, pathname)) ?? NAV[0]!;
+  return item[mode];
 }
 
 /** The window opens on Home; the tray's Meetings opens meeting mode's Home. */
@@ -104,18 +105,26 @@ function ThemeSync() {
   const draft = useStore().settings?.draft;
   const theme = draft?.theme;
   const colourway = theme ? draft?.colourways[theme] : undefined;
+  useEffect(paintWindowIcon, []);
   useEffect(() => {
     const root = document.documentElement;
     if (!theme || (root.dataset.theme === theme && root.dataset.colourway === colourway)) return;
     const swap = () => {
       root.setAttribute("data-theme-switch", "");
       applyTheme(theme, colourway);
+      paintWindowIcon();
     };
     const fade = document.startViewTransition?.(swap);
     if (!fade) swap();
     void (fade?.ready ?? Promise.resolve()).finally(() => root.removeAttribute("data-theme-switch"));
   }, [theme, colourway]);
   return null;
+}
+
+/** The taskbar shows the window's icon: the mark in the colourway now applied. */
+function paintWindowIcon(): void {
+  const style = getComputedStyle(document.documentElement);
+  setWindowIcon(markSvg(style.getPropertyValue("--mark-light").trim(), style.getPropertyValue("--mark-deep").trim())).catch(() => undefined);
 }
 
 function Shell() {

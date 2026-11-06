@@ -48,6 +48,32 @@ class Safetensors:
         return values.reshape(info["shape"])
 
 
+class ShardedSafetensors:
+    """A checkpoint split over several ``.safetensors`` shards, read like one."""
+
+    def __init__(self, paths: list[Path]) -> None:
+        parts = [Safetensors(path) for path in paths]
+        self._where = {name: part for part in parts for name in part.header}
+
+    def shape(self, name: str) -> list[int]:
+        return self._where[name].shape(name)
+
+    def bf16_rows(self, name: str) -> np.ndarray:
+        return self._where[name].bf16_rows(name)
+
+    def __getitem__(self, name: str) -> np.ndarray:
+        return self._where[name][name]
+
+
+def open_checkpoint(snapshot: Path) -> "Safetensors | ShardedSafetensors":
+    """The snapshot's one ``model.safetensors``, or the shards its index names."""
+    index = snapshot / "model.safetensors.index.json"
+    if not index.exists():
+        return Safetensors(snapshot / "model.safetensors")
+    shards = sorted(set(json.loads(index.read_text(encoding="utf-8"))["weight_map"].values()))
+    return ShardedSafetensors([snapshot / shard for shard in shards])
+
+
 def widen_bf16(rows: np.ndarray) -> np.ndarray:
     """bf16 bits (uint16) to float32, exactly."""
     return (np.asarray(rows, np.uint32) << 16).view(np.float32)
@@ -90,10 +116,15 @@ class Graph:
         y = self.ops.matmul(x, self.const(self.weights[name + ".weight"]), transpose_a=False, transpose_b=True)
         return self.ops.add(y, self.const(self.weights[name + ".bias"])) if bias else y
 
-    def rms(self, x: object, name: str, eps: float) -> object:
+    def rms(self, x: object, name: str, eps: float, groups: int = 1) -> object:
+        """RMSNorm over the last axis, or over each of its *groups* equal slices on its own."""
         ops = self.ops
-        variance = ops.reduce_mean(ops.multiply(x, x), self.const([-1]), keep_dims=True)
-        normed = ops.divide(x, ops.sqrt(ops.add(variance, self.const(np.float32(eps)))))
+        width = self.weights.shape(name)[0]
+        grouped = ops.reshape(x, self.const([0, 0, groups, width // groups]), True) if groups > 1 else x
+        variance = ops.reduce_mean(ops.multiply(grouped, grouped), self.const([-1]), keep_dims=True)
+        normed = ops.divide(grouped, ops.sqrt(ops.add(variance, self.const(np.float32(eps)))))
+        if groups > 1:
+            normed = ops.reshape(normed, self.const([0, 0, width]), True)
         return ops.multiply(normed, self.const(self.weights[name]))
 
     def rotate(self, t: object, cos: object, sin: object, head_dim: int) -> object:

@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { FileDown, FileUp, FolderOpen } from "lucide-react";
+import { ArrowLeft, FileDown, FileUp, FolderOpen } from "lucide-react";
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { installDescription, installTitle, useInstall } from "../components/install";
-import { PageBody, PageTitle, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
+import { PageBody, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Button } from "../components/ui/button";
-import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { chooseOpenPath, chooseSavePath } from "../lib/platform";
@@ -28,54 +28,65 @@ const COLOURWAYS: { value: Colourway; label: string }[] = [
   { value: "graphite", label: "Graphite" },
 ];
 
-/**
- * One card per theme with its own colour. The radio stretches over the card and the colour menu sits above
- * it, so neither takes the other's clicks or keys; opening a card's colour menu picks that card's theme.
- */
-function ThemeCards({ theme, colourways, onPick }: { theme: Theme; colourways: Record<Theme, Colourway>; onPick: (theme: Theme, colourway?: Colourway) => void }) {
+/** One card per theme; the colour is picked once, below, for every theme. */
+function ThemeCards({ theme, onPick }: { theme: Theme; onPick: (theme: Theme) => void }) {
   return (
     <div role="radiogroup" aria-label="Theme" className="grid grid-cols-4 gap-2.5">
       {THEMES.map(({ value, title }) => {
         const selected = value === theme;
         return (
-          <div
+          <button
             key={value}
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onPick(value)}
             className={cn(
-              "relative surface rounded-xl border border-edge bg-card px-3.5 py-3 shadow-card transition-colors hover:bg-accent/50 has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-ring/40",
+              "surface flex items-center gap-2 rounded-xl border border-edge bg-card px-3.5 py-3 text-[13.5px] font-medium shadow-card outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40",
               selected && "border-primary bg-selected hover:bg-selected",
             )}
           >
-            <button
-              role="radio"
-              aria-checked={selected}
-              onClick={() => onPick(value)}
-              className="flex items-center gap-2 text-[13.5px] font-medium outline-none after:absolute after:inset-0 after:rounded-xl"
-            >
-              <RadioDot selected={selected} />
-              {title}
-            </button>
-            <Select
-              label={`${title} colour`}
-              className="relative mt-2.5"
-              value={colourways[value]}
-              options={COLOURWAYS.map((colourway) => ({
-                ...colourway,
-                icon: <span data-theme={value} data-colourway={colourway.value} className="size-2.5 shrink-0 rounded-full bg-primary" />,
-              }))}
-              onOpenChange={(open) => open && onPick(value)}
-              onChange={(colourway) => onPick(value, colourway as Colourway)}
-            />
-          </div>
+            <RadioDot selected={selected} />
+            {title}
+          </button>
         );
       })}
     </div>
   );
 }
 
+/** One swatch per colourway, each drawn as the chosen theme draws it. */
+function ColourSwatches({ theme, colourway, onPick }: { theme: Theme; colourway: Colourway; onPick: (colourway: Colourway) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Colour" className="flex items-center gap-2">
+      {COLOURWAYS.map(({ value, label }) => (
+        <button
+          key={value}
+          role="radio"
+          aria-checked={value === colourway}
+          aria-label={label}
+          title={label}
+          onClick={() => onPick(value)}
+          className={cn(
+            "grid size-7 place-items-center rounded-full outline-none ring-offset-2 ring-offset-card transition-shadow focus-visible:ring-2 focus-visible:ring-ring/40",
+            value === colourway && "ring-2 ring-primary",
+          )}
+        >
+          <span data-theme={theme} data-colourway={value} className="size-5 rounded-full bg-primary" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The same colourway for every theme, as one colour picked once. */
+export function everyTheme(colourway: Colourway): Record<Theme, Colourway> {
+  return Object.fromEntries(THEMES.map(({ value }) => [value, colourway])) as Record<Theme, Colourway>;
+}
+
 /** What the Updates section says about *update*; null means a git checkout, which updates through git. */
 export function describeUpdate(update: UpdateStatus | null, running: string): { title: string; description: string } {
   if (update === null) {
-    return { title: `Skryb ${running}`, description: "This copy runs from a source folder and updates through git, not from GitHub releases." };
+    return { title: `Skryb ${running}`, description: "Runs from source and updates through git." };
   }
   const percent = update.bytes_total > 0 ? Math.floor((update.bytes_done * 100) / update.bytes_total) : 0;
   switch (update.state) {
@@ -86,7 +97,7 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
     case "downloading":
       return { title: `Downloading Skryb ${update.version}`, description: `${percent}% downloaded. You choose when to install it.` };
     case "ready":
-      return { title: `Skryb ${update.version} is ready`, description: "Skryb closes, installs the update and opens again. It waits for a dictation to finish first." };
+      return { title: `Skryb ${update.version} is ready`, description: "Skryb restarts to install it, once any dictation finishes." };
     case "installing":
       return { title: `Installing Skryb ${update.version}`, description: "Skryb will close and open again in a minute." };
     case "updated":
@@ -94,10 +105,24 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
     case "failed":
       return { title: `Skryb ${running}`, description: "The last check didn't work." };
     case "off":
-      return { title: `Skryb ${running}`, description: "Automatic checks are off. Check by hand whenever you like." };
+      return { title: `Skryb ${running}`, description: "Automatic checks are off." };
     default:
-      return { title: `Skryb ${running}`, description: "Skryb checks for a newer version shortly after it starts." };
+      return { title: `Skryb ${running}`, description: "Skryb checks shortly after it starts." };
   }
+}
+
+/** The page title with a way out: back to the page Settings was opened from, or Home when the window opened on it. */
+function SettingsTitle() {
+  const navigate = useNavigate();
+  const opened = useLocation().key === "default";
+  return (
+    <div className="mb-1 flex min-h-10 items-center gap-1.5">
+      <Button variant="ghost" size="icon" aria-label="Back" title="Back" className="-ml-2 text-muted-foreground hover:text-foreground" onClick={() => void (opened ? navigate("/home") : navigate(-1))}>
+        <ArrowLeft />
+      </Button>
+      <h1 className="page-title min-w-0 truncate">Settings</h1>
+    </div>
+  );
 }
 
 /** Skryb's own settings, the same in both modes: updates, the look, the settings file and the logs. */
@@ -113,7 +138,7 @@ export function SettingsPage() {
   if (install) {
     return (
       <PageBody>
-        <PageTitle title="Settings" />
+        <SettingsTitle />
         <Section title="Updates">
           <Rows>
             <Row title={installTitle(install)} description={<span className="selectable">{installDescription(install)}</span>} stacked>
@@ -124,9 +149,10 @@ export function SettingsPage() {
       </PageBody>
     );
   }
-  if (!app || !draft) return <PageBody><PageTitle title="Settings" /></PageBody>;
+  if (!app || !draft) return <PageBody><SettingsTitle /></PageBody>;
 
   const update = app.update;
+  const colourway = draft.colourways[draft.theme];
   const { title, description } = describeUpdate(update, app.version);
   const busy = update !== null && ["checking", "downloading", "installing"].includes(update.state);
   const send = async (path: string) => {
@@ -172,7 +198,7 @@ export function SettingsPage() {
 
   return (
     <PageBody>
-      <PageTitle title="Settings" />
+      <SettingsTitle />
       <Section title="Updates">
         <Rows>
           <Row
@@ -193,7 +219,7 @@ export function SettingsPage() {
           </Row>
           <Row
             title="Check for updates automatically"
-            description="Once an hour Skryb asks GitHub for a newer version and downloads it in the background. Nothing installs until you say so."
+            description="Checks hourly and downloads in the background. Nothing installs until you say so."
           >
             <Switch
               aria-label="Check for updates automatically"
@@ -204,21 +230,23 @@ export function SettingsPage() {
         </Rows>
       </Section>
 
-      <Section title="Theme" note="Each theme follows Windows' light or dark setting. You see it as you pick; Save keeps it.">
+      <Section title="Theme" note="Follows Windows' light or dark mode.">
         <ThemeCards
           theme={draft.theme}
-          colourways={draft.colourways}
-          onPick={(theme, colourway) =>
-            editSettings((current) => ({ ...current, theme, colourways: colourway ? { ...current.colourways, [theme]: colourway } : current.colourways }))
-          }
+          onPick={(theme) => editSettings((current) => ({ ...current, theme, colourways: everyTheme(current.colourways[current.theme]) }))}
         />
+        <Rows className="mt-2.5">
+          <Row title="Colour" description={COLOURWAYS.find(({ value }) => value === colourway)?.label}>
+            <ColourSwatches theme={draft.theme} colourway={colourway} onPick={(picked) => editSettings((current) => ({ ...current, colourways: everyTheme(picked) }))} />
+          </Row>
+        </Rows>
       </Section>
 
       <Section title="Settings and logs">
         <Rows>
           <Row
             title="Settings file"
-            description="Copy every setting to a file, or load one, to move Skryb to another PC."
+            description="Move your settings to another PC."
             error={fileNote.error ? fileNote.text : undefined}
           >
             {!fileNote.error && fileNote.text ? <span className="text-[12.5px] text-muted-foreground">{fileNote.text}</span> : null}

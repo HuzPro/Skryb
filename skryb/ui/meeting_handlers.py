@@ -14,7 +14,8 @@ from skryb.core.recycle_bin import move_to_recycle_bin
 from skryb.meetings.model_files import MeetingModelFiles
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import list_meetings, meeting_folder, rename_meeting
-from skryb.meetings.transcript import Transcript, is_speaker_key
+from skryb.meetings.thumbnail import THUMBNAIL_JPG
+from skryb.meetings.transcript import English, Transcript, is_speaker_key
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, Route
 from skryb.ui.event_hub import EventHub
 from skryb.ui.shapes import Fields
@@ -25,6 +26,10 @@ _NAME_CHARS = 60
 _NO_CONTENT = ApiResponse(204)
 _ACCEPTED = ApiResponse(202)
 _IN_BACKGROUND = ThreadedActionDispatcher()
+
+
+def _no_english() -> English | None:
+    return None
 
 
 class MeetingApi:
@@ -38,7 +43,9 @@ class MeetingApi:
         open_path: Callable[[Path], None],
         run_in_background: Callable[[Callable[[], None]], None] = _IN_BACKGROUND.dispatch,
         recycle: Callable[[Path], None] = move_to_recycle_bin,
+        english: Callable[[], English | None] = _no_english,
     ) -> None:
+        self._english = english
         self._recorder = recorder
         self._hub = hub
         self._folder = folder
@@ -57,6 +64,8 @@ class MeetingApi:
             ("POST", "/api/meetings/models/download", self._download_models),
             ("POST", "/api/meetings/folder/open", self._open_meetings_folder),
             ("GET", "/api/meetings/{id}", self._read),
+            ("GET", "/api/meetings/{id}/thumbnail", self._thumbnail),
+            ("POST", "/api/meetings/{id}/english", self._request_english),
             ("POST", "/api/meetings/{id}/rename", self._rename),
             ("POST", "/api/meetings/{id}/name", self._rename_meeting),
             ("DELETE", "/api/meetings/{id}", self._delete_meeting),
@@ -127,6 +136,15 @@ class MeetingApi:
             return ApiResponse(200, live.transcript.view())
         return ApiResponse(200, self._saved(request).view())
 
+    def _thumbnail(self, request: ApiRequest) -> ApiResponse:
+        """The JPEG kept from the video the meeting was made from."""
+        picture = self._meeting_folder(request) / THUMBNAIL_JPG
+        try:
+            jpeg = picture.read_bytes()
+        except OSError as exc:
+            raise ApiError(404, "This meeting has no thumbnail.") from exc
+        return ApiResponse(200, jpeg, "image/jpeg")
+
     def _rename(self, request: ApiRequest) -> ApiResponse:
         key, name = _rename_request(request.body)
         if not is_speaker_key(key):
@@ -138,6 +156,17 @@ class MeetingApi:
         except OSError as exc:
             raise ApiError(400, f"Could not save the new name: {exc}") from exc
         return _NO_CONTENT
+
+    def _request_english(self, request: ApiRequest) -> ApiResponse:
+        """English for the meeting's Arabic lines that have none yet; each line comes back as an ``entry`` event."""
+        english = self._english()
+        if english is None:
+            raise ApiError(409, "Show English is off, or its model hasn't finished downloading.")
+        live = self._recorder.live_session(request.params["id"])
+        # ponytail: a saved meeting gets its own Transcript here, so a rename saved while its lines are
+        # translated can be written over by the next line; share one instance per meeting if that bites.
+        transcript = live.transcript if live is not None else self._saved(request, publish=self.publish)
+        return ApiResponse(200, {"lines": transcript.request_english(english)})
 
     def _rename_meeting(self, request: ApiRequest) -> ApiResponse:
         name = _name_request(request.body)

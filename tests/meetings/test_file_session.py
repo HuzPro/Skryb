@@ -8,12 +8,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile
+from PIL import Image
 
+from skryb.meetings import file_session
 from skryb.meetings.capture import RATE
 from skryb.meetings.file_session import FileSession
 from skryb.meetings.media_file import MediaFileError
+from skryb.meetings.thumbnail import THUMBNAIL_JPG, Grab
 from skryb.meetings.transcript import Event, Transcript
-from tests.meetings.fakes import PHRASES, FakeModels, silence, voice
+from tests.meetings.fakes import PHRASES, FakeModels, no_thumbnail, silence, video_frame, voice
 
 _WAIT_SECONDS = 10.0
 
@@ -25,7 +28,7 @@ def _two_people(turns: int) -> np.ndarray:
 
 class Rig:
     def __init__(self, tmp_path: Path, audio: np.ndarray | Exception, models: FakeModels | None = None,
-                 decode_progress_calls: int = 3, gate: threading.Event | None = None) -> None:
+                 decode_progress_calls: int = 3, gate: threading.Event | None = None, grab: Grab = no_thumbnail) -> None:
         self.events: list[Event] = []
         self.done = threading.Event()
         self.models = models or FakeModels()
@@ -36,6 +39,7 @@ class Rig:
             tmp_path / "Meetings" / "2026-10-29 14-05 Q3 planning", datetime(2026, 10, 29, 14, 5),
             source=self.source, models=self.models, people=tmp_path / "people.json",
             publish=self.events.append, on_done=lambda _session: self.done.set(), decode=self._decode,
+            grab_thumbnail=grab,
         )
 
     def _decode(self, path: Path, progress: Callable[[float], None], cancelled: Callable[[], bool]) -> np.ndarray:
@@ -166,3 +170,54 @@ def test_the_state_names_the_file_and_its_progress(tmp_path: Path) -> None:
 
     assert state["source"] == "Q3 planning – ٹیم.mp4"
     assert state["status"] == "Saved" and state["id"] == "2026-10-29 14-05 Q3 planning"
+
+
+def test_a_video_s_thumbnail_is_beside_its_transcript_by_the_time_the_meeting_is_saved(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, _two_people(2), grab=video_frame)
+
+    rig.run()
+
+    assert sorted(p.name for p in rig.session.folder.iterdir()) == ["them.flac", THUMBNAIL_JPG, "transcript.json", "transcript.md"]
+
+
+def test_a_file_without_a_thumbnail_is_transcribed_as_usual(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, _two_people(2), grab=no_thumbnail)
+
+    rig.run()
+
+    assert not (rig.session.folder / THUMBNAIL_JPG).exists()
+    assert len(Transcript.load(rig.session.folder).entries) == 2
+    assert rig.session.status == "Saved" and rig.session.warning is None
+
+
+@pytest.mark.parametrize("failure", [OSError("0x8004B200"), RuntimeError("the Shell crashed"), MemoryError()])
+def test_a_thumbnail_that_fails_never_breaks_the_transcription(tmp_path: Path, failure: Exception) -> None:
+    def broken(_path: Path, _size: int) -> Image.Image:
+        raise failure
+
+    rig = Rig(tmp_path, _two_people(4), grab=broken)
+
+    rig.run()
+
+    assert [e.text for e in Transcript.load(rig.session.folder).entries] == [PHRASES[0], PHRASES[1]] * 2
+    assert rig.session.status == "Saved" and rig.session.warning is None
+    assert not (rig.session.folder / THUMBNAIL_JPG).exists()
+
+
+def test_a_thumbnail_that_hangs_holds_up_neither_the_lines_nor_the_saved_meeting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(file_session, "_THUMBNAIL_WAIT_SECONDS", 0.05)
+    release = threading.Event()
+
+    def hung(path: Path, size: int) -> Image.Image:
+        release.wait(_WAIT_SECONDS)
+        return video_frame(path, size)
+
+    rig = Rig(tmp_path, _two_people(4), grab=hung)
+
+    rig.run()
+    lines = len(Transcript.load(rig.session.folder).entries)
+    release.set()
+
+    assert lines == 4 and rig.session.status == "Saved"

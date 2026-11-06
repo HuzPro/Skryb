@@ -33,10 +33,7 @@
 namespace {
 
 constexpr uint64_t kHeader = 65536;
-constexpr int kEncLayers = 24, kDecLayers = 28;
 constexpr int kChunkBatch = 32;  // conv stem chunks per pass: bounds its scratch to ~130 MB
-constexpr int kEos1 = 151643, kEos2 = 151645;
-constexpr int kVocab = 151936;
 constexpr int kMaxRows = 8;       // decode / verify rows per step (the GEMV path)
 constexpr int kSplitKeys = 64;    // keys per split in decode attention
 constexpr int kMaxSplits = 512;   // 32768 positions
@@ -48,6 +45,23 @@ double ms_since(Clock::time_point t) { return std::chrono::duration<double, std:
 int cdiv(int a, int b) { return (a + b - 1) / b; }
 
 struct Entry { uint64_t off, bytes; uint32_t host; };
+
+// The model's shape, from the pack's "config" entry. A pack without one is Qwen3-ASR-1.7B, as every pack
+// was before Jais-ASR. Heads are 64 wide in the encoder and 128 in the decoder.
+struct Cfg {
+    int enc_layers = 24, enc_d = 1024, enc_heads = 16, enc_ffn = 4096, enc_out = 2048;
+    int dec_layers = 28, dec_d = 2048, q_heads = 16, kv_heads = 8, dec_ffn = 6144, vocab = 151936;
+    int eos1 = 151643, eos2 = 151645;
+    int qk_norm = 1;      // per-head RMSNorm on queries and keys before rope
+    int norm_groups = 1;  // the decoder's RMSNorms normalise this many slices of a row on their own
+    int adapter = 0;      // LayerNorm, Linear, GELU, Linear from enc_out to dec_d after the audio tower
+    int q4 = 0;           // decoder matrices, token embeddings and head packed in 4 bits; no draft
+    float rope_theta = 1000000.f;
+    int qkv_w() const { return (q_heads + 2 * kv_heads) * 128; }
+    int q_w() const { return q_heads * 128; }
+    int kv_w() const { return kv_heads * 128; }
+};
+constexpr int kCfgInts = 18;
 
 // Whisper / transformers mel_filter_bank(201 bins, 128 mels, 0-8000 Hz, slaney scale and norm), as [201][128].
 std::vector<float> mel_filters() {
@@ -182,6 +196,7 @@ std::u32string strip(const std::u32string& s) {
 }  // namespace
 
 struct QasrEngine {
+    Cfg cfg;
     hipStream_t s{};
     char* dev = nullptr;
     std::unordered_map<std::string, Entry> table;
@@ -225,7 +240,7 @@ struct QasrEngine {
     float question_probability = -1.f;  // -1 when the transcript does not end in "." or "?"
     struct Layer { bf16 *ln1, *qkv, *qn, *kn, *o, *ln2, *gu, *down; Q4 q_qkv, q_o, q_gu, q_down; };
     std::vector<Layer> layers;
-    Q4 q_head{};
+    Q4 q_head{}, q_embed{};
     void* q4_mem = nullptr;
 
     bf16* w(const std::string& name) {
@@ -254,6 +269,9 @@ struct QasrEngine {
 
    private:
     void read_host(HANDLE f, const Entry& e, void* dst);
+    void read_config(HANDLE f);
+    Q4 packed_q4(const std::string& name);
+    void embed_rows(const int* ids, const bf16* audio, int audio_start, bf16* out, int rows);
     void encoder(int T, const AttnTile* tiles, int n_tiles);
     void prepare_decoder();
     void decoder_layers(int M, int pos0, const AttnTile* tiles, int n_tiles, bool draft = false);
@@ -268,6 +286,28 @@ void QasrEngine::read_host(HANDLE f, const Entry& e, void* dst) {
     SetFilePointerEx(f, at, nullptr, FILE_BEGIN);
     DWORD got = 0;
     if (!ReadFile(f, dst, (DWORD)e.bytes, &got, nullptr) || got != e.bytes) throw std::runtime_error("short read");
+}
+
+void QasrEngine::read_config(HANDLE f) {
+    auto it = table.find("config");
+    if (it == table.end()) return;
+    if (it->second.bytes != kCfgInts * 4) throw std::runtime_error("config entry of the wrong size");
+    int32_t c[kCfgInts];
+    read_host(f, it->second, c);
+    cfg.enc_layers = c[0]; cfg.enc_d = c[1]; cfg.enc_heads = c[2]; cfg.enc_ffn = c[3]; cfg.enc_out = c[4];
+    cfg.dec_layers = c[5]; cfg.dec_d = c[6]; cfg.q_heads = c[7]; cfg.kv_heads = c[8]; cfg.dec_ffn = c[9];
+    cfg.vocab = c[10]; cfg.eos1 = c[11]; cfg.eos2 = c[12]; cfg.qk_norm = c[13]; cfg.norm_groups = c[14];
+    cfg.adapter = c[15]; cfg.q4 = c[16];
+    std::memcpy(&cfg.rope_theta, &c[17], 4);
+}
+
+Q4 QasrEngine::packed_q4(const std::string& name) {
+    return Q4{(const uint4*)w(name + ".q"), (const f16*)w(name + ".s")};
+}
+
+void QasrEngine::embed_rows(const int* ids, const bf16* audio, int audio_start, bf16* out, int rows) {
+    if (cfg.q4) embed_q4(s, ids, q_embed, audio, audio_start, out, rows, cfg.dec_d);
+    else embed(s, ids, w("dec.embed"), audio, audio_start, out, rows, cfg.dec_d);
 }
 
 void QasrEngine::load(const char* path) {
@@ -317,6 +357,9 @@ void QasrEngine::load(const char* path) {
         if (c == '.' && dot_id < 0) dot_id = id;
         if (c == '?' && question_id < 0) question_id = id;
     }
+    // The head's odds of "?" over "." need its bf16 rows.
+    read_config(f);
+    if (cfg.q4) dot_id = question_id = -1;
     prefix.resize(host_entry("prompt.prefix").bytes / 4);
     read_host(f, host_entry("prompt.prefix"), prefix.data());
     suffix.resize(host_entry("prompt.suffix").bytes / 4);
@@ -327,14 +370,15 @@ void QasrEngine::load(const char* path) {
     const auto tab = dft_tables();
     const auto fil = mel_filters();
     std::vector<float> inv(64);
-    for (int i = 0; i < 64; i++) inv[i] = 1.0f / std::pow(1000000.0f, (float)(2 * i) / 128.0f);
-    std::vector<uint16_t> pos(13 * 1024);
-    const float inc = (float)(std::log(10000.0) / 511.0);
+    for (int i = 0; i < 64; i++) inv[i] = 1.0f / std::pow(cfg.rope_theta, (float)(2 * i) / 128.0f);
+    const int ed = cfg.enc_d, half = ed / 2;
+    std::vector<uint16_t> pos(13 * ed);
+    const float inc = (float)(std::log(10000.0) / (half - 1));
     for (int t = 0; t < 13; t++)
-        for (int i = 0; i < 512; i++) {
+        for (int i = 0; i < half; i++) {
             const float a = (float)t * std::exp(-inc * (float)i);
-            pos[t * 1024 + i] = to_bf16_bits(std::sin(a));
-            pos[t * 1024 + 512 + i] = to_bf16_bits(std::cos(a));
+            pos[t * ed + i] = to_bf16_bits(std::sin(a));
+            pos[t * ed + half + i] = to_bf16_bits(std::cos(a));
         }
     // conv3 writes [chunk][t=ox][f=oy][c] so conv_out reads one contiguous row per (chunk, t).
     std::vector<int> map3(kChunkBatch * 208);
@@ -370,41 +414,72 @@ void QasrEngine::load(const char* path) {
 }
 
 void QasrEngine::encoder(int T, const AttnTile* tiles, int n_tiles) {
-    bf16* x = buf<bf16>("ex", (size_t)T * 1024);
-    bf16* h = buf<bf16>("eh", (size_t)T * 1024);
-    bf16* qkv = buf<bf16>("eqkv", (size_t)T * 3072);
-    bf16* at = buf<bf16>("eattn", (size_t)T * 1024);
-    bf16* ff = buf<bf16>("ef", (size_t)T * 4096);
-    for (int l = 0; l < kEncLayers; l++) {
+    const int D = cfg.enc_d, F = cfg.enc_ffn, AO = cfg.enc_out, DD = cfg.dec_d;
+    bf16* x = buf<bf16>("ex", (size_t)T * D);
+    bf16* h = buf<bf16>("eh", (size_t)T * D);
+    bf16* qkv = buf<bf16>("eqkv", (size_t)T * 3 * D);
+    bf16* at = buf<bf16>("eattn", (size_t)T * D);
+    bf16* ff = buf<bf16>("ef", (size_t)T * F);
+    for (int l = 0; l < cfg.enc_layers; l++) {
         const std::string p = "enc." + std::to_string(l) + ".";
-        layer_norm(s, x, w(p + "ln1.w"), w(p + "ln1.b"), h, T, 1024);
+        layer_norm(s, x, w(p + "ln1.w"), w(p + "ln1.b"), h, T, D);
         Epi e;
-        e.bias = w(p + "qkv.b"); e.out = qkv; e.ldo = 3072;
-        gemm(s, h, 1024, w(p + "qkv.w"), T, 3072, 1024, e);
-        AttnArgs a{qkv, 3072, 64, qkv + 1024, 3072, 64, qkv + 2048, 3072, 64, at, 1024, 64, 1, tiles, n_tiles, 16, 0, 0, 0.125f};
+        e.bias = w(p + "qkv.b"); e.out = qkv; e.ldo = 3 * D;
+        gemm(s, h, D, w(p + "qkv.w"), T, 3 * D, D, e);
+        AttnArgs a{qkv, 3 * D, 64, qkv + D, 3 * D, 64, qkv + 2 * D, 3 * D, 64, at, D, 64, 1, tiles, n_tiles, cfg.enc_heads, 0, 0,
+                   0.125f};
         attention(s, a, 64);
-        e = Epi{}; e.bias = w(p + "out.b"); e.res = x; e.res_ld = 1024; e.out = x; e.ldo = 1024;
-        gemm(s, at, 1024, w(p + "out.w"), T, 1024, 1024, e);
-        layer_norm(s, x, w(p + "ln2.w"), w(p + "ln2.b"), h, T, 1024);
-        e = Epi{}; e.bias = w(p + "fc1.b"); e.act = ACT_GELU; e.out = ff; e.ldo = 4096;
-        gemm(s, h, 1024, w(p + "fc1.w"), T, 4096, 1024, e);
-        e = Epi{}; e.bias = w(p + "fc2.b"); e.res = x; e.res_ld = 1024; e.out = x; e.ldo = 1024;
-        gemm(s, ff, 4096, w(p + "fc2.w"), T, 1024, 4096, e);
+        e = Epi{}; e.bias = w(p + "out.b"); e.res = x; e.res_ld = D; e.out = x; e.ldo = D;
+        gemm(s, at, D, w(p + "out.w"), T, D, D, e);
+        layer_norm(s, x, w(p + "ln2.w"), w(p + "ln2.b"), h, T, D);
+        e = Epi{}; e.bias = w(p + "fc1.b"); e.act = ACT_GELU; e.out = ff; e.ldo = F;
+        gemm(s, h, D, w(p + "fc1.w"), T, F, D, e);
+        e = Epi{}; e.bias = w(p + "fc2.b"); e.res = x; e.res_ld = D; e.out = x; e.ldo = D;
+        gemm(s, ff, F, w(p + "fc2.w"), T, D, F, e);
     }
-    layer_norm(s, x, w("enc.ln_post.w"), w("enc.ln_post.b"), h, T, 1024);
+    layer_norm(s, x, w("enc.ln_post.w"), w("enc.ln_post.b"), h, T, D);
     Epi e;
-    e.bias = w("proj.1.b"); e.act = ACT_GELU; e.out = at; e.ldo = 1024;
-    gemm(s, h, 1024, w("proj.1.w"), T, 1024, 1024, e);
-    e = Epi{}; e.bias = w("proj.2.b"); e.out = buf<bf16>("aemb", (size_t)T * 2048); e.ldo = 2048;
-    gemm(s, at, 1024, w("proj.2.w"), T, 2048, 1024, e);
+    e.bias = w("proj.1.b"); e.act = ACT_GELU; e.out = at; e.ldo = D;
+    gemm(s, h, D, w("proj.1.w"), T, D, D, e);
+    bf16* aemb = buf<bf16>("aemb", (size_t)T * DD);
+    if (!cfg.adapter) {
+        e = Epi{}; e.bias = w("proj.2.b"); e.out = aemb; e.ldo = AO;
+        gemm(s, at, D, w("proj.2.w"), T, AO, D, e);
+        return;
+    }
+    bf16* aout = buf<bf16>("aout", (size_t)T * AO);
+    bf16* ah = buf<bf16>("ah", (size_t)T * AO);
+    bf16* a1 = buf<bf16>("a1", (size_t)T * DD);
+    e = Epi{}; e.bias = w("proj.2.b"); e.out = aout; e.ldo = AO;
+    gemm(s, at, D, w("proj.2.w"), T, AO, D, e);
+    layer_norm(s, aout, w("adapter.norm.w"), w("adapter.norm.b"), ah, T, AO);
+    e = Epi{}; e.bias = w("adapter.1.b"); e.act = ACT_GELU; e.out = a1; e.ldo = DD;
+    gemm(s, ah, AO, w("adapter.1.w"), T, DD, AO, e);
+    e = Epi{}; e.bias = w("adapter.2.b"); e.out = aemb; e.ldo = DD;
+    gemm(s, a1, DD, w("adapter.2.w"), T, DD, DD, e);
 }
 
 // Per-layer pointers, the static decode tile table and the 4-bit draft copy of the decoder.
 void QasrEngine::prepare_decoder() {
-    layers.resize(kDecLayers);
-    for (int l = 0; l < kDecLayers; l++) {
+    layers.resize(cfg.dec_layers);
+    for (int l = 0; l < cfg.dec_layers; l++) {
         const std::string p = "dec." + std::to_string(l) + ".";
-        layers[l] = Layer{w(p + "ln1"), w(p + "qkv"), w(p + "qnorm"), w(p + "knorm"), w(p + "o"), w(p + "ln2"), w(p + "gateup"), w(p + "down")};
+        Layer& L = layers[l];
+        L = Layer{};
+        L.ln1 = w(p + "ln1");
+        L.ln2 = w(p + "ln2");
+        if (cfg.qk_norm) { L.qn = w(p + "qnorm"); L.kn = w(p + "knorm"); }
+        if (cfg.q4) {
+            L.q_qkv = packed_q4(p + "qkv"); L.q_o = packed_q4(p + "o");
+            L.q_gu = packed_q4(p + "gateup"); L.q_down = packed_q4(p + "down");
+        } else {
+            L.qkv = w(p + "qkv"); L.o = w(p + "o"); L.gu = w(p + "gateup"); L.down = w(p + "down");
+        }
+    }
+    if (cfg.q4) {
+        q_head = packed_q4("dec.head");
+        q_embed = packed_q4("dec.embed");
+        draft_len = 0;
     }
     std::vector<AttnTile> tiles((size_t)kMaxRows * kMaxSplits);
     for (int m = 1; m <= kMaxRows; m++)
@@ -412,23 +487,24 @@ void QasrEngine::prepare_decoder() {
             tiles[(size_t)(m - 1) * kMaxSplits + sp] = {0, m, sp * kSplitKeys, (sp + 1) * kSplitKeys};
     HIP_OK(hipMalloc(&dec_tiles, tiles.size() * sizeof(AttnTile)));
     HIP_OK(hipMemcpy(dec_tiles, tiles.data(), tiles.size() * sizeof(AttnTile), hipMemcpyHostToDevice));
-    HIP_OK(hipMalloc(&part_o, (size_t)kMaxSplits * 16 * 16 * 128 * 4));
-    HIP_OK(hipMalloc(&part_ml, (size_t)kMaxSplits * 16 * 16 * 2 * 4));
+    HIP_OK(hipMalloc(&part_o, (size_t)kMaxSplits * cfg.q_heads * 16 * 128 * 4));
+    HIP_OK(hipMalloc(&part_ml, (size_t)kMaxSplits * cfg.q_heads * 16 * 2 * 4));
     HIP_OK(hipMalloc(&ids_round, kMaxRows * 4));
     HIP_OK(hipMalloc(&ids_ver, kMaxRows * 4));
     HIP_OK(hipMalloc(&pair, kMaxRows * 2 * 4));
-    if (const char* v = std::getenv("QASR_DRAFT")) draft_len = std::max(0, std::min(kMaxRows - 1, std::atoi(v)));
+    if (const char* v = std::getenv("QASR_DRAFT"); v && !cfg.q4) draft_len = std::max(0, std::min(kMaxRows - 1, std::atoi(v)));
     if (!draft_len) return;
 
     struct Mat { Q4* dst; const bf16* src; int N, K; };
     std::vector<Mat> mats;
+    const int D = cfg.dec_d;
     for (auto& L : layers) {
-        mats.push_back({&L.q_qkv, L.qkv, 4096, 2048});
-        mats.push_back({&L.q_o, L.o, 2048, 2048});
-        mats.push_back({&L.q_gu, L.gu, 12288, 2048});
-        mats.push_back({&L.q_down, L.down, 2048, 6144});
+        mats.push_back({&L.q_qkv, L.qkv, cfg.qkv_w(), D});
+        mats.push_back({&L.q_o, L.o, D, cfg.q_w()});
+        mats.push_back({&L.q_gu, L.gu, 2 * cfg.dec_ffn, D});
+        mats.push_back({&L.q_down, L.down, D, cfg.dec_ffn});
     }
-    mats.push_back({&q_head, w("dec.embed"), kVocab, 2048});
+    mats.push_back({&q_head, w("dec.embed"), cfg.vocab, D});
     size_t bytes = 0;
     for (auto& m : mats) bytes += (size_t)m.N * m.K / 2 + ((size_t)m.N * (m.K / 32) * 2 + 255) / 256 * 256;
     HIP_OK(hipMalloc(&q4_mem, bytes));
@@ -444,35 +520,42 @@ void QasrEngine::prepare_decoder() {
 }
 
 void QasrEngine::decoder_layers(int M, int pos0, const AttnTile* tiles, int n_tiles, bool draft) {
-    bf16* x = buf<bf16>("dx", (size_t)M * 2048);
-    bf16* h = buf<bf16>("dh", (size_t)M * 2048);
-    bf16* qkv = buf<bf16>("dqkv", (size_t)M * 4096);
-    bf16* at = buf<bf16>("dattn", (size_t)M * 2048);
-    bf16* gu = buf<bf16>("dgu", (size_t)M * 12288);
-    bf16* act = buf<bf16>("dact", (size_t)M * 6144);
+    const int D = cfg.dec_d, QKV = cfg.qkv_w(), QW = cfg.q_w(), KVW = cfg.kv_w(), FF = cfg.dec_ffn;
+    bf16* x = buf<bf16>("dx", (size_t)M * D);
+    bf16* h = buf<bf16>("dh", (size_t)M * D);
+    bf16* qkv = buf<bf16>("dqkv", (size_t)M * QKV);
+    bf16* at = buf<bf16>("dattn", (size_t)M * QW);
+    bf16* gu = buf<bf16>("dgu", (size_t)M * 2 * FF);
+    bf16* act = buf<bf16>("dact", (size_t)M * FF);
     bf16* kv = (bf16*)scratch.at("kv").first;
-    const size_t layer_kv = kv_pos * 1024;  // elements per K (or V) plane
+    const size_t layer_kv = kv_pos * KVW;  // elements per K (or V) plane
     const bool split = M <= kMaxRows;
     const int splits = cdiv(pos0 + M, kSplitKeys);
+    // One row multiplies the 4-bit weights directly; more rows multiply them unpacked to bf16, a matrix at a time.
     auto mm = [&](const bf16* a, int lda, const bf16* wt, const Q4& wq, int N, int K, const Epi& e) {
-        if (draft) gemv_q4(s, a, wq, N, K, e);
-        else gemm(s, a, lda, wt, M, N, K, e);
+        if (draft || (cfg.q4 && M == 1)) gemv_q4(s, a, wq, N, K, e);
+        else if (cfg.q4) {
+            bf16* unpacked = buf<bf16>("wdq", (size_t)N * K);
+            dequant_q4(s, wq, N, K, unpacked);
+            gemm(s, a, lda, unpacked, M, N, K, e);
+        } else gemm(s, a, lda, wt, M, N, K, e);
     };
-    for (int l = 0; l < kDecLayers; l++) {
+    for (int l = 0; l < cfg.dec_layers; l++) {
         const Layer& Ly = layers[l];
         bf16* kc = kv + (size_t)l * 2 * layer_kv;
         bf16* vc = kc + layer_kv;
         const bool pf = M > kMaxRows;
         if (pf) tick("p.other");
-        rms_norm(s, x, 2048, Ly.ln1, h, M, 2048);
+        rms_norm(s, x, D, Ly.ln1, h, M, D, cfg.norm_groups);
         if (pf) tick("p.norm");
         Epi e;
-        e.out = qkv; e.ldo = 4096;
-        mm(h, 2048, Ly.qkv, Ly.q_qkv, 4096, 2048, e);
+        e.out = qkv; e.ldo = QKV;
+        mm(h, D, Ly.qkv, Ly.q_qkv, QKV, D, e);
         if (pf) tick("p.qkv");
-        qk_norm_rope(s, qkv, Ly.qn, Ly.kn, kc, vc, M, pos0, inv_freq);
+        qk_norm_rope(s, qkv, Ly.qn, Ly.kn, kc, vc, M, pos0, inv_freq, cfg.q_heads, cfg.kv_heads);
         if (pf) tick("p.rope");
-        AttnArgs a{qkv, 4096, 128, kc, 1024, 128, vc, 1024, 128, at, 2048, 128, 2, tiles, n_tiles, 16, 1, pos0, 0.08838834764831845f};
+        AttnArgs a{qkv, QKV, 128, kc, KVW, 128, vc, KVW, 128, at, QW, 128, cfg.q_heads / cfg.kv_heads, tiles, n_tiles,
+                   cfg.q_heads, 1, pos0, 0.08838834764831845f};
         if (split) {
             a.tiles = dec_tiles + (size_t)(M - 1) * kMaxSplits;
             a.n_tiles = splits;
@@ -484,33 +567,35 @@ void QasrEngine::decoder_layers(int M, int pos0, const AttnTile* tiles, int n_ti
             attention(s, a, 128);
         }
         if (pf) tick("p.attn");
-        e = Epi{}; e.res = x; e.res_ld = 2048; e.out = x; e.ldo = 2048;
-        mm(at, 2048, Ly.o, Ly.q_o, 2048, 2048, e);
+        e = Epi{}; e.res = x; e.res_ld = D; e.out = x; e.ldo = D;
+        mm(at, QW, Ly.o, Ly.q_o, D, QW, e);
         if (pf) tick("p.o");
-        rms_norm(s, x, 2048, Ly.ln2, h, M, 2048);
+        rms_norm(s, x, D, Ly.ln2, h, M, D, cfg.norm_groups);
         if (pf) tick("p.norm");
-        e = Epi{}; e.out = gu; e.ldo = 12288;
-        mm(h, 2048, Ly.gu, Ly.q_gu, 12288, 2048, e);
+        e = Epi{}; e.out = gu; e.ldo = 2 * FF;
+        mm(h, D, Ly.gu, Ly.q_gu, 2 * FF, D, e);
         if (pf) tick("p.gateup");
-        silu_mul(s, gu, act, M, 6144);
+        silu_mul(s, gu, act, M, FF);
         if (pf) tick("p.silu");
-        e = Epi{}; e.res = x; e.res_ld = 2048; e.out = x; e.ldo = 2048;
-        mm(act, 6144, Ly.down, Ly.q_down, 2048, 6144, e);
+        e = Epi{}; e.res = x; e.res_ld = D; e.out = x; e.ldo = D;
+        mm(act, FF, Ly.down, Ly.q_down, D, FF, e);
         if (pf) tick("p.down");
     }
 }
 
 // Final norm and lm_head over M rows of x; the argmax ids land in ids (device).
+// A 4-bit head takes one row at a time, which is all a model without a draft asks of it.
 void QasrEngine::logits_argmax(const bf16* x, int M, int* ids, bool draft) {
-    bf16* dh = buf<bf16>("dh", (size_t)M * 2048);
-    rms_norm(s, x, 2048, w("dec.norm"), dh, M, 2048);
+    const int D = cfg.dec_d;
+    bf16* dh = buf<bf16>("dh", (size_t)M * D);
+    rms_norm(s, x, D, w("dec.norm"), dh, M, D, cfg.norm_groups);
     HIP_OK(hipMemsetAsync(argkeys, 0, (size_t)M * 8, s));
     Epi e;
     e.argmax = argkeys;
-    if (draft) gemv_q4(s, dh, q_head, kVocab, 2048, e);
-    else gemm(s, dh, 2048, w("dec.embed"), M, kVocab, 2048, e);
+    if (draft || cfg.q4) gemv_q4(s, dh, q_head, cfg.vocab, D, e);
+    else gemm(s, dh, D, w("dec.embed"), M, cfg.vocab, D, e);
     argmax_ids(s, argkeys, ids, M);
-    if (!draft && dot_id >= 0 && question_id >= 0) pair_logits(s, dh, M, w("dec.embed"), dot_id, question_id, pair);
+    if (!draft && dot_id >= 0 && question_id >= 0) pair_logits(s, dh, M, w("dec.embed"), dot_id, question_id, pair, D);
 }
 
 // Greedy decoding after the prefill. With a draft, each round guesses draft_len tokens with the
@@ -518,7 +603,7 @@ void QasrEngine::logits_argmax(const bf16* x, int M, int* ids, bool draft) {
 // exactly like single steps (same GEMV order, masked keys add nothing), so the output is the
 // bf16 model's own greedy output either way; the draft only changes how fast it arrives.
 std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) {
-    bf16* dx = buf<bf16>("dx", (size_t)kMaxRows * 2048);
+    bf16* dx = buf<bf16>("dx", (size_t)kMaxRows * cfg.dec_d);
     std::vector<int> out;
     rounds = accepted = 0;
     question_probability = -1.f;
@@ -529,7 +614,7 @@ std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) 
     HIP_OK(hipMemcpyAsync(host, ids_round, 4, hipMemcpyDeviceToHost, s));
     HIP_OK(hipMemcpyAsync(pairs, pair, 2 * 4, hipMemcpyDeviceToHost, s));
     HIP_OK(hipStreamSynchronize(s));
-    auto finished = [&](int t) { return t == kEos1 || t == kEos2 || (int)out.size() >= max_new; };
+    auto finished = [&](int t) { return t == cfg.eos1 || t == cfg.eos2 || (int)out.size() >= max_new; };
     // Each kept token sets the odds when it is punctuation and clears them otherwise, so after the
     // loop they belong to the last token.
     auto keep = [&](int t, const float* logits) {
@@ -542,11 +627,11 @@ std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) 
     while ((int)out.size() < max_new) {
         const int k = std::min(draft_len, max_new - (int)out.size());
         for (int i = 0; i < k; i++) {
-            embed(s, ids_round + i, w("dec.embed"), nullptr, 0, dx, 1, 2048);
+            embed_rows(ids_round + i, nullptr, 0, dx, 1);
             decoder_layers(1, pos + i, nullptr, 0, true);
             logits_argmax(dx, 1, ids_round + i + 1, true);
         }
-        embed(s, ids_round, w("dec.embed"), nullptr, 0, dx, k + 1, 2048);
+        embed_rows(ids_round, nullptr, 0, dx, k + 1);
         decoder_layers(k + 1, pos, nullptr, 0);
         logits_argmax(dx, k + 1, ids_ver);
         HIP_OK(hipMemcpyAsync(host, ids_round, (k + 1) * 4, hipMemcpyDeviceToHost, s));
@@ -572,7 +657,7 @@ std::vector<int> QasrEngine::generate(const bf16* last_row, int L, int max_new) 
 std::string QasrEngine::detokenize(const std::vector<int>& ids) {
     std::string bytes;
     for (int id : ids)
-        if (id >= 0 && id < kVocab) bytes.append((const char*)vocab.data() + vocab_off[id], vocab_off[id + 1] - vocab_off[id]);
+        if (id >= 0 && id < cfg.vocab) bytes.append((const char*)vocab.data() + vocab_off[id], vocab_off[id + 1] - vocab_off[id]);
     std::u32string text = strip(utf8_decode(bytes));
     if (text.empty()) return "";
     text = fix_pattern_repeats(fix_char_repeats(text, 20), 20);
@@ -625,23 +710,31 @@ std::string QasrEngine::transcribe(const float* pcm, int n, const std::vector<in
     int* map_d = buf<int>("outmap", out_map.size());
     AttnTile* tiles_d = buf<AttnTile>("tiles", tiles.size());
     int* ids_d = buf<int>("ids", ids.size());
-    buf<bf16>("ex", (size_t)T * 1024);
-    buf<bf16>("aemb", (size_t)T * 2048);
+    const int ED = cfg.enc_d, DD = cfg.dec_d, KVW = cfg.kv_w();
+    buf<bf16>("ex", (size_t)T * ED);
+    buf<bf16>("aemb", (size_t)T * DD);
+    if (cfg.adapter) {
+        buf<bf16>("aout", (size_t)T * cfg.enc_out);
+        buf<bf16>("ah", (size_t)T * cfg.enc_out);
+        buf<bf16>("a1", (size_t)T * DD);
+    }
     const size_t rows = std::max(std::min(L, kPrefillRows), kMaxRows);
-    buf<bf16>("dx", rows * 2048);
+    buf<bf16>("dx", rows * DD);
     if ((size_t)L + max_new + kMaxRows + 1 > (size_t)kMaxSplits * kSplitKeys) throw std::runtime_error("audio too long");
     // Sized once for the whole call: growing it mid-decode needs old and new copies at once, and when
     // VRAM is short Windows places the new one in system memory, which halves decode speed.
-    buf<bf16>("kv", ((size_t)L + max_new + kMaxRows + 1) * 1024 * 2 * kDecLayers);
-    kv_pos = scratch.at("kv").second / (2 * kDecLayers * 1024 * sizeof(bf16));
-    for (const char* name : {"eh", "eattn"}) buf<bf16>(name, (size_t)T * 1024);
-    buf<bf16>("eqkv", (size_t)T * 3072);
-    buf<bf16>("ef", (size_t)T * 4096);
-    buf<bf16>("dh", rows * 2048);
-    buf<bf16>("dqkv", rows * 4096);
-    buf<bf16>("dattn", rows * 2048);
-    buf<bf16>("dgu", rows * 12288);
-    buf<bf16>("dact", rows * 6144);
+    buf<bf16>("kv", ((size_t)L + max_new + kMaxRows + 1) * KVW * 2 * cfg.dec_layers);
+    kv_pos = scratch.at("kv").second / (2 * (size_t)cfg.dec_layers * KVW * sizeof(bf16));
+    for (const char* name : {"eh", "eattn"}) buf<bf16>(name, (size_t)T * ED);
+    buf<bf16>("eqkv", (size_t)T * 3 * ED);
+    buf<bf16>("ef", (size_t)T * cfg.enc_ffn);
+    buf<bf16>("dh", rows * DD);
+    buf<bf16>("dqkv", rows * cfg.qkv_w());
+    buf<bf16>("dattn", rows * cfg.q_w());
+    buf<bf16>("dgu", rows * 2 * cfg.dec_ffn);
+    buf<bf16>("dact", rows * cfg.dec_ffn);
+    if (cfg.q4)
+        buf<bf16>("wdq", std::max({(size_t)cfg.qkv_w() * DD, (size_t)DD * cfg.q_w(), (size_t)2 * cfg.dec_ffn * DD}));
 
     std::vector<float> padded(pcm, pcm + n);
     padded.resize(n_eff, 0.f);
@@ -655,7 +748,7 @@ std::string QasrEngine::transcribe(const float* pcm, int n, const std::vector<in
     auto phase = [&](int i) { HIP_OK(hipStreamSynchronize(s)); mark[i] = Clock::now(); };
     phase(0);
     log_mel(s, pcm_d, n_eff, frames, fpad, tables, filters, mel_scratch, gmax, melT);
-    bf16* x = buf<bf16>("ex", (size_t)T * 1024);
+    bf16* x = buf<bf16>("ex", (size_t)T * ED);
     for (int c0 = 0; c0 < chunks; c0 += kChunkBatch) {
         const int nb = std::min(kChunkBatch, chunks - c0);
         conv1(s, melT, fpad, c0, nb, w("enc.conv1.w"), w("enc.conv1.b"), c1);
@@ -664,23 +757,23 @@ std::string QasrEngine::transcribe(const float* pcm, int n, const std::vector<in
         conv3x3_480(s, c1, nb, 64, 50, w("enc.conv2.w"), 480, e);
         e = Epi{}; e.bias = w("enc.conv3.b"); e.act = ACT_GELU; e.row_map = conv3_map; e.out = c3; e.ldo = 480;
         conv3x3_480(s, c2, nb, 32, 25, w("enc.conv3.w"), 480, e);
-        e = Epi{}; e.res = pos13; e.res_ld = 1024; e.res_mod = 13; e.row_map = map_d + c0 * 13; e.out = x; e.ldo = 1024;
-        gemm(s, c3, 7680, w("enc.conv_out.w"), nb * 13, 1024, 7680, e);
+        e = Epi{}; e.res = pos13; e.res_ld = ED; e.res_mod = 13; e.row_map = map_d + c0 * 13; e.out = x; e.ldo = ED;
+        gemm(s, c3, 7680, w("enc.conv_out.w"), nb * 13, ED, 7680, e);
     }
     phase(1);
     encoder(T, tiles_d, n_enc_tiles);
     phase(2);
 
-    bf16* dx = buf<bf16>("dx", rows * 2048);
+    bf16* dx = buf<bf16>("dx", rows * DD);
     int last_rows = 0;
     for (int c = 0, r0 = 0; r0 < L; c++, r0 += kPrefillRows) {
         last_rows = std::min(kPrefillRows, L - r0);
-        embed(s, ids_d + r0, w("dec.embed"), buf<bf16>("aemb", 1), (int)pre.size() - r0, dx, last_rows, 2048);
+        embed_rows(ids_d + r0, buf<bf16>("aemb", 1), (int)pre.size() - r0, dx, last_rows);
         if (last_rows <= kMaxRows) decoder_layers(last_rows, r0, nullptr, 0);
         else decoder_layers(last_rows, r0, tiles_d + chunk_tiles[c], cdiv(last_rows, 16));
     }
     phase(3);
-    const std::vector<int> out = generate(dx + (size_t)(last_rows - 1) * 2048, L, max_new);
+    const std::vector<int> out = generate(dx + (size_t)(last_rows - 1) * DD, L, max_new);
     phase(4);
     double part[4];
     for (int i = 0; i < 4; i++) part[i] = std::chrono::duration<double, std::milli>(mark[i + 1] - mark[i]).count();

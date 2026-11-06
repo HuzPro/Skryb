@@ -9,18 +9,28 @@ import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { Engines, Model, Settings, TranscriptionMode } from "../lib/types";
 
+// The languages the core holds Qwen3-ASR to (`LANGUAGE_NAMES`); any other dictates English.
 export const LANGUAGES = [
   { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "nl", label: "Dutch" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "zh", label: "Chinese" },
+  { value: "ar", label: "Arabic" },
 ];
+// The models that hear Arabic, best first (the core's `ARABIC_MODELS`); Jais-ASR hears nothing else as well.
+const ARABIC_MODELS = ["jais-asr", "qwen3-asr-1.7b"];
+const ARABIC_ONLY = "jais-asr";
+
+/** Picking Arabic keeps a downloaded model that hears it, else picks the best one downloaded; both run in batch mode. */
+export function withLanguage(settings: Settings, language: string, models: Model[]): Settings {
+  if (language !== "ar") return { ...settings, language };
+  const installed = ARABIC_MODELS.filter((name) => models.some((model) => model.name === name && model.installed));
+  if (installed.includes(settings.model_size)) return { ...settings, language, transcription_mode: "batch" };
+  return { ...settings, language, transcription_mode: "batch", model_size: installed[0] ?? settings.model_size, engine: "auto" };
+}
+
+/** Jais-ASR means Arabic; any other model that can't hear Arabic means English. */
+export function fitLanguageToModel(settings: Settings): Settings {
+  if (settings.model_size === ARABIC_ONLY) return settings.language === "ar" ? settings : { ...settings, language: "ar" };
+  return settings.language === "ar" && !ARABIC_MODELS.includes(settings.model_size) ? { ...settings, language: "en" } : settings;
+}
 
 const TIERS = ["Small", "Medium", "Large"];
 
@@ -69,6 +79,8 @@ export function TranscriptionPage() {
       ? ""
       : "Needs a CUDA or ROCm GPU, and none was detected.";
   const shown = byTier(models.filter((model) => fitsMode(model, draft.transcription_mode)));
+  const arabicReady = models.some((model) => ARABIC_MODELS.includes(model.name) && model.installed);
+  const languages = LANGUAGES.map((language) => (language.value === "ar" && !arabicReady ? { ...language, disabled: true } : language));
   const candidates = engines?.candidates ?? [];
   const engineOptions = [
     { value: "auto", label: "Automatic" },
@@ -83,9 +95,9 @@ export function TranscriptionPage() {
         <ChoiceCards
           label="Mode"
           value={draft.transcription_mode}
-          onChange={(mode) => editSettings((current) => withMode(current, mode, models))}
+          onChange={(mode) => editSettings((current) => fitLanguageToModel(withMode(current, mode, models)))}
           choices={[
-            { value: "batch", title: "Batch", description: "Records your dictation, then transcribes it when you stop. Works on any computer." },
+            { value: "batch", title: "Batch", description: "Transcribes when you stop. Works on any PC." },
             {
               value: "streaming",
               title: "Live",
@@ -102,7 +114,7 @@ export function TranscriptionPage() {
               key={model.name}
               model={model}
               selected={model.name === draft.model_size}
-              onSelect={() => editSettings((current) => ({ ...current, model_size: model.name, engine: "auto" }))}
+              onSelect={() => editSettings((current) => fitLanguageToModel({ ...current, model_size: model.name, engine: "auto" }))}
             />
           ))}
           {models.length && !shown.length ? <p className="text-[12.5px] text-muted-foreground">No models for this mode.</p> : null}
@@ -110,18 +122,23 @@ export function TranscriptionPage() {
       </Section>
       <Section title="Speech">
         <Rows>
-          <Row title="Language" description="The language you speak in.">
+          <Row
+            title="Language"
+            description={arabicReady
+              ? "The language you speak in. Arabic runs on Jais-ASR when it is downloaded, else on the Large model."
+              : "The language you speak in. Arabic needs Jais-ASR or the Large model: download one above."}
+          >
             <Select
               label="Language"
               className="w-56"
               value={draft.language}
-              options={LANGUAGES.some((language) => language.value === draft.language) ? LANGUAGES : [...LANGUAGES, { value: draft.language, label: draft.language }]}
-              onChange={(language) => editSettings((current) => ({ ...current, language }))}
+              options={languages.some((language) => language.value === draft.language) ? languages : [...languages, { value: draft.language, label: draft.language }]}
+              onChange={(language) => editSettings((current) => withLanguage(current, language, models))}
             />
           </Row>
           <Row
             title="Hear questions"
-            description="When Qwen3-ASR nearly ended a sentence with a question mark, it uses one. Only Qwen3-ASR on the native engine can tell."
+            description="Adds a question mark when Qwen3-ASR almost chose one. Native Qwen3-ASR only."
           >
             <Switch aria-label="Hear questions" checked={draft.question_marks} onCheckedChange={(on) => editSettings((current) => ({ ...current, question_marks: on }))} />
           </Row>

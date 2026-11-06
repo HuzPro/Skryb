@@ -68,7 +68,7 @@ class TestServiceModeFiltering:
         names = {view.name for view in service.list_models()}
 
         assert names == {
-            _PARAKEET, "phonon-2.5-english", "qwen3-asr-1.7b",
+            _PARAKEET, "phonon-2.5-english", "qwen3-asr-1.7b", "jais-asr",
         }
 
     def test_should_list_only_streaming_models_in_streaming_mode(self):

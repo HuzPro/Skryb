@@ -459,6 +459,27 @@ class TestHuggingFaceModelManagerOperations:
 
         resolver.resolve.assert_called_once_with("example/pinned", _PINNED_SHA, ("Model Zoë.q8_0.gguf",))
 
+    def test_a_model_with_a_preparation_step_runs_it_as_its_download_finishes_and_others_run_none(
+        self, tmp_path: Path,
+    ) -> None:
+        resolver = MagicMock()
+        resolver.resolve.return_value = ResolvedRepo(requested_revision="", canonical_commit="sha", files=[])
+        download_manager = MagicMock()
+        prepared: list[Path] = []
+        manager = HuggingFaceModelManager(
+            models_dir=tmp_path, download_manager=download_manager, resolver=resolver, file_downloader=MagicMock(),
+            models={_NEMO_MODEL.name: _NEMO_MODEL, _PINNED_MODEL.name: _PINNED_MODEL},
+            license_policy=AllowAllLicensePolicy(), post_install={_PINNED_MODEL.name: prepared.append},
+        )
+
+        manager.download(_PINNED_MODEL.name)
+        manager.download(_NEMO_MODEL.name)
+        pinned_job, nemo_job = (call.args[0] for call in download_manager.enqueue.call_args_list)
+        pinned_job.post_install(tmp_path / "snapshot")
+        nemo_job.post_install(tmp_path / "other")
+
+        assert prepared == [tmp_path / "snapshot"]
+
     def test_delete_should_remove_model_directory(self, tmp_path: Path) -> None:
         model_dir = _write_nemo_snapshot(tmp_path)
         manager = _make_manager(tmp_path)

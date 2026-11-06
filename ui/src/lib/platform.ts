@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Image } from "@tauri-apps/api/image";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -80,6 +81,20 @@ export function applyTheme(theme: string | undefined, colourway: string | undefi
   root.dataset.theme = theme ?? "default";
   if (colourway) root.dataset.colourway = colourway;
   else delete root.dataset.colourway;
+}
+
+/** Draws *svg* as the window's icon, which the taskbar shows; outside the app there is no window to draw it on. */
+export async function setWindowIcon(svg: string, size = 64): Promise<void> {
+  if (!appWindow) return;
+  const picture = new window.Image(size, size);
+  picture.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await picture.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.drawImage(picture, 0, 0, size, size);
+  await appWindow.setIcon(await Image.new(context.getImageData(0, 0, size, size).data.buffer, size, size));
 }
 
 /** Alt+F4 and the taskbar close ask first; `ask` returns true when the window may close. */

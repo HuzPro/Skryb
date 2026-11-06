@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { isNavActive, launchPath, modeOf, NAV, pageInMode } from "../app";
 import { groupByDay } from "../pages/history";
-import { pastMeetings } from "../pages/meetings";
-import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
+import { coverBars, pastMeetings } from "../pages/meetings";
+import { afterLeavingLivePage, applyMeetingEvent, CHART_WEEKS, colourOf, median, meetingStats, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
 import type { LiveMeeting, MeetingEntry, MeetingSummary } from "./types";
 
 const line = (id: number, key: string, start: number, end: number, text: string): MeetingEntry => {
@@ -213,10 +213,15 @@ describe("switching mode", () => {
   });
 
   it("stays on a page both modes share", () => {
-    for (const page of ["/dictionary", "/shortcuts", "/updates"]) {
+    for (const page of ["/dictionary", "/shortcuts"]) {
       expect(pageInMode(page, "meetings")).toBe(page);
       expect(pageInMode(page, "dictation")).toBe(page);
     }
+  });
+
+  it("leaves Settings for the chosen mode's Home", () => {
+    expect(pageInMode("/updates", "meetings")).toBe("/meeting-home");
+    expect(pageInMode("/updates", "dictation")).toBe("/home");
   });
 
   it("lights Home up for the live meeting and History for every saved one", () => {
@@ -229,7 +234,7 @@ describe("switching mode", () => {
 });
 
 function summary(id: string, started: string): MeetingSummary {
-  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true };
+  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true, has_thumbnail: false, me_seconds: 400, talk_seconds: 1700 };
 }
 
 describe("past meetings under History", () => {
@@ -268,3 +273,121 @@ describe("past meetings under History", () => {
   });
 });
 
+
+describe("meeting stats on Home", () => {
+  // A Wednesday afternoon, local time.
+  const now = new Date(2026, 10, 4, 15, 0);
+  const at = (daysAgo: number, hour = 10) => new Date(2026, 10, 4 - daysAgo, hour, 30).toISOString();
+  const meeting = (id: string, started: string, seconds: number, lines = 10, speakers = 2): MeetingSummary => ({
+    id, started, seconds, speakers, lines, words: 100, has_audio: true, has_thumbnail: false, me_seconds: 0, talk_seconds: seconds,
+  });
+
+  it("adds up every meeting, and only Monday to now for this week so far", () => {
+    const meetings = [
+      meeting("2026-11-04 Café planning ☕", at(0), 1800),
+      meeting("2026-11-02 Weekly sync", at(2), 3600),
+      meeting("2026-11-01 Sunday call", at(3), 600),
+      meeting("2026-11-01 Sunday call", at(3), 600),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.count).toBe(4);
+    expect(stats.seconds).toBe(6600);
+    expect(stats.week).toEqual({ count: 2, seconds: 5400 });
+  });
+
+  it("compares this week so far with the same days of earlier weeks, once there are two", () => {
+    const meetings = [
+      meeting("this week", at(1), 1200),
+      meeting("last week, Tuesday", at(8), 600),
+      meeting("last week, Friday, after this weekday", at(5), 9000),
+      meeting("two weeks ago, Monday", at(16), 1800),
+    ];
+
+    expect(meetingStats(meetings, now).usualWeek).toBe(1200);
+    expect(meetingStats([meeting("only this week", at(0), 60), meeting("last week", at(7), 60)], now).usualWeek).toBeNull();
+  });
+
+  it("calls a typical meeting the median of those where someone spoke, not the mean", () => {
+    const meetings = [
+      meeting("short", at(1), 600, 12, 2),
+      meeting("medium", at(2), 1800, 40, 3),
+      meeting("marathon", at(3), 4.5 * 3600, 900, 6),
+      meeting("silent", at(4), 0, 0, 1),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.typicalSeconds).toBe(1800);
+    expect(stats.typicalSpeakers).toBe(3);
+    expect(meetingStats([meeting("silent", at(0), 0, 0)], now).typicalSeconds).toBeNull();
+  });
+
+  it("charts twelve weeks of meeting time, this week last, with a usual line from complete weeks only", () => {
+    const meetings = [
+      meeting("this week", at(0), 600),
+      meeting("last week", at(7), 3600),
+      meeting("two weeks ago", at(14), 1800),
+      meeting("eleven weeks ago", at(77), 1200),
+      meeting("too old for the chart", at(84), 9000),
+      meeting("no date", "", 900),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.weeks).toHaveLength(CHART_WEEKS);
+    expect(stats.weeks.at(-1)).toBe(600);
+    expect(stats.weeks.at(-2)).toBe(3600);
+    expect(stats.weeks[0]).toBe(1200);
+    expect(stats.usualFullWeek).toBe(0);
+    expect(stats.count).toBe(5);
+  });
+
+  it("is empty with no meetings, and handles thousands", () => {
+    const stats = meetingStats([], now);
+    expect(stats).toMatchObject({ count: 0, seconds: 0, week: { count: 0, seconds: 0 }, usualWeek: null, typicalSeconds: null, usualFullWeek: null });
+    expect(stats.weeks).toEqual(new Array(CHART_WEEKS).fill(0));
+    const many = Array.from({ length: 5000 }, (_, index) => meeting(`m${index}`, at(index % 90), 60));
+    expect(meetingStats(many, now).count).toBe(5000);
+  });
+
+  it("gives your share of talk over the last 30 days' meetings with you and others in them, beside an even split", () => {
+    const talk = (id: string, daysAgo: number, me: number, total: number, speakers: number): MeetingSummary => ({
+      ...meeting(id, at(daysAgo), total, 20, speakers), me_seconds: me, talk_seconds: total,
+    });
+    const meetings = [
+      talk("one to one", 1, 600, 1200, 2),
+      talk("team of four", 3, 300, 2400, 4),
+      talk("only me", 2, 500, 500, 1),
+      talk("only them", 4, 0, 900, 3),
+      talk("too old", 31, 900, 1000, 2),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.talk?.meetings).toBe(2);
+    expect(stats.talk?.share).toBeCloseTo(900 / 3600);
+    expect(stats.talk?.even).toBeCloseTo((600 + 600) / 3600);
+    expect(meetingStats([talk("only them", 1, 0, 900, 3)], now).talk).toBeNull();
+  });
+
+  it("takes the median of an odd or even count, and nothing of none", () => {
+    expect(median([5, 1, 3])).toBe(3);
+    expect(median([4, 1, 3, 2])).toBe(2.5);
+    expect(median([])).toBeNull();
+  });
+});
+
+describe("meeting History cards", () => {
+  it("draws the same cover bars for a meeting every time, and different ones for another", () => {
+    const first = coverBars("2026-11-04 Café planning ☕");
+
+    expect(first).toEqual(coverBars("2026-11-04 Café planning ☕"));
+    expect(first).not.toEqual(coverBars("2026-11-04 Café planning"));
+    expect(first).toHaveLength(28);
+    expect(Math.min(...first)).toBeGreaterThanOrEqual(18);
+    expect(Math.max(...first)).toBeLessThan(73);
+    expect(coverBars("")).toHaveLength(28);
+  });
+});

@@ -93,6 +93,28 @@ class TestModelDownloadJobHappyPath:
         assert progress_events[-1] == (300, 300)
         assert all(total == 300 for _, total in progress_events)
 
+    def test_a_resumed_download_keeps_files_already_finished_and_fetches_only_the_rest(self, tmp_path):
+        resolved = [
+            ResolvedFile(filename="model-00001-of-00002.safetensors", size=6, url="u/1"),
+            ResolvedFile(filename="model-00002-of-00002.safetensors", size=6, url="u/2"),
+            ResolvedFile(filename="config.json", size=3, url="u/c"),
+        ]
+        snapshot = tmp_path / "models--IFM--Example" / "snapshots" / "sha"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model-00001-of-00002.safetensors").write_bytes(b"SHARD1")
+        (snapshot / "config.json").write_bytes(b"{")  # cut short: fetched again
+        downloader = _FakeDownloader(payloads={"model-00002-of-00002.safetensors": b"SHARD2", "config.json": b"{}!"})
+        job = ModelDownloadJob(job_id="example", repo_id="IFM/Example", commit_sha="sha", files=resolved,
+                               models_dir=tmp_path, file_downloader=downloader)
+        progress: list[tuple[int, int]] = []
+
+        job.run(on_progress=lambda done, total: progress.append((done, total)),
+                cancel_event=threading.Event(), pause_event=threading.Event())
+
+        assert downloader.calls == ["u/2", "u/c"]
+        assert (snapshot / "model-00001-of-00002.safetensors").read_bytes() == b"SHARD1"
+        assert progress[0] == (6, 15) and progress[-1] == (15, 15)
+
     def test_total_bytes_equals_sum_of_file_sizes(self, tmp_path):
         resolved = [
             ResolvedFile(filename="a", size=100, url="u/a"),

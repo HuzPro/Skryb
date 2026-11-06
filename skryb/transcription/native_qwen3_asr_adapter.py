@@ -37,6 +37,7 @@ _ERROR_BUFFER_BYTES = 1024
 # Huz's dictations, 0.3 turned 6 full stops into question marks: 2 clearly right, none clearly
 # wrong, 4 that read fine either way. Lower bars caught more but got about 3 in 10 wrong.
 QUESTION_THRESHOLD = 0.3
+QUESTION_MARKS = {"ar": "؟"}
 
 
 def packed_model_path(snapshot: Path) -> Path:
@@ -65,7 +66,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
 
     def load_model(self) -> None:
         started_at = time.perf_counter()
-        packed = packed_model_path(self._snapshot)
+        packed = self._packed_path()
         if not packed.exists():
             self._pack_snapshot(packed)
         if self._cuda:
@@ -89,7 +90,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         return self._decoded(lambda: lib.qasr_transcribe(
             handle, samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), samples.size,
             self._text, _TEXT_BUFFER_BYTES,
-        ))
+        ), "en")
 
     def transcribe_prompted(
         self, audio: AudioSegment, context: str | None, language: str | None,
@@ -99,13 +100,13 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         if not hasattr(lib, "qasr_transcribe_prompted"):
             self._warn_unprompted_once()
             return self.transcribe(audio)
-        prefix, suffix = (np.array(self._token_ids(text), np.int32) for text in prompt_text(context, language))
+        prefix, suffix = (np.array(self._token_ids(text), np.int32) for text in self._prompt(context, language))
         ints = ctypes.POINTER(ctypes.c_int)
         return self._decoded(lambda: lib.qasr_transcribe_prompted(
             handle, samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), samples.size,
             prefix.ctypes.data_as(ints), prefix.size, suffix.ctypes.data_as(ints), suffix.size,
             self._text, _TEXT_BUFFER_BYTES,
-        ))
+        ), language)
 
     def _ready(self, audio: AudioSegment) -> tuple[ctypes.CDLL, int, np.ndarray]:
         if self._handle is None or self._lib is None:
@@ -114,7 +115,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
             raise TranscriptionError(f"Native Qwen3-ASR needs {_SAMPLE_RATE} Hz audio, got {audio.sample_rate}")
         return self._lib, self._handle, np.ascontiguousarray(audio.data, dtype=np.float32)
 
-    def _decoded(self, run: Callable[[], int]) -> TranscriptionResult:
+    def _decoded(self, run: Callable[[], int], language: str | None) -> TranscriptionResult:
         started_at = time.perf_counter()
         length = run()
         if length < 0:
@@ -122,14 +123,23 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         _logger.debug("native qwen3-asr %s", self._stats())
         text = self._text.raw[:length].decode("utf-8", errors="replace")
         return TranscriptionResult(
-            # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
-            text=romanize(self._with_heard_question(text)),
-            language="en",
+            text=self._finish(text, language),
+            language=language or "",
             language_probability=0.0,
             transcription_seconds=time.perf_counter() - started_at,
         )
 
-    def _with_heard_question(self, text: str) -> str:
+    def _packed_path(self) -> Path:
+        return packed_model_path(self._snapshot)
+
+    def _prompt(self, context: str | None, language: str | None) -> tuple[str, str]:
+        return prompt_text(context, language)
+
+    def _finish(self, text: str, language: str | None) -> str:
+        # Qwen3-ASR has no Urdu: it writes spoken Urdu in Hindi script.
+        return romanize(self._with_heard_question(text, language))
+
+    def _with_heard_question(self, text: str, language: str | None) -> str:
         """The final full stop as a question mark when the engine nearly chose one."""
         # A qasr.dll built before the readout existed can't hear questions; it still transcribes.
         if self._question_threshold is None or not hasattr(self._lib, "qasr_question_probability"):
@@ -141,7 +151,7 @@ class NativeQwen3AsrAdapter(TranscriptionEngine):
         if probability < self._question_threshold:
             return text
         _logger.info("Final full stop heard as a question (p=%.2f).", probability)
-        return core[:-1] + "?" + text[len(core):]
+        return core[:-1] + QUESTION_MARKS.get(language or "", "?") + text[len(core):]
 
     def _token_ids(self, text: str) -> list[int]:
         if self._tokenizer is None:

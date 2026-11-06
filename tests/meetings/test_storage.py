@@ -65,6 +65,24 @@ def test_saved_meetings_are_listed_newest_first_with_their_length_speakers_and_w
     assert (onboarding.seconds, onboarding.speakers, onboarding.lines, onboarding.words) == (3066.5, 3, 3, 9)
     assert onboarding.started == "2026-10-16T20:20:00"
     assert onboarding.has_audio is False
+    assert (onboarding.me_seconds, onboarding.talk_seconds) == (1.5, 4.5)
+    assert meetings[0].me_seconds == 0.0
+
+
+def test_only_meetings_that_kept_a_video_s_thumbnail_say_they_have_one(tmp_path: Path) -> None:
+    for n in range(300):
+        folder = _meeting(tmp_path, f"2026-10-21 {n:03} میٹنگ – Harbor ✓", datetime(2026, 10, 21, 9, 0), [("them", 0, 0.0, "Hi.")])
+        if n % 7 == 0:
+            (folder / "thumbnail.jpg").write_bytes(b"\xff\xd8\xff\xe0 jpeg")
+        elif n % 7 == 1:
+            (folder / "thumbnail.jpg.tmp").write_bytes(b"\xff\xd8 half written")
+        elif n % 7 == 2:
+            (folder / "thumbnail.jpg").mkdir()
+
+    meetings = list_meetings(tmp_path)
+
+    assert sorted(m.id[11:14] for m in meetings if m.has_thumbnail) == [f"{n:03}" for n in range(0, 300, 7)]
+    assert all(m.json()["has_thumbnail"] is m.has_thumbnail for m in meetings)
 
 
 def test_a_meeting_with_a_broken_transcript_is_left_out_of_the_list(tmp_path: Path) -> None:
@@ -115,6 +133,11 @@ def test_meeting_settings_default_to_the_default_folder_the_microphone_and_engli
     assert settings.folder == default_meetings_folder()
     assert settings.record_microphone is True
     assert settings.language == "en"
+
+
+@pytest.mark.parametrize("language", ["en", "ur", "auto", "ar"])
+def test_each_meeting_language_is_read_back_as_saved(language: str) -> None:
+    assert meeting_settings_from(FakeConfig({"meetings.language": language})).language == language
 
 
 def test_saved_meeting_settings_are_read_and_an_unknown_language_falls_back_to_english() -> None:

@@ -11,11 +11,12 @@ from skryb.meetings.file_session import Decode, FileSession
 from skryb.meetings.media_file import MediaFileError, check, decode_audio
 from skryb.meetings.session import MeetingCapture, Models, Session
 from skryb.meetings.storage import MeetingSettings, new_meeting_folder
-from skryb.meetings.transcript import Event
+from skryb.meetings.thumbnail import Grab, grab_shell_thumbnail
+from skryb.meetings.transcript import English, Event
 
 _logger = logging.getLogger(__name__)
 _FILE_BUSY = "Skryb is transcribing a file. Cancel it on the Meetings page first."
-_LANGUAGES = ("en", "ur")
+_LANGUAGES = ("en", "ur", "ar")
 
 
 class MeetingError(Exception):
@@ -23,6 +24,10 @@ class MeetingError(Exception):
 
 
 def _nothing(_recording: bool) -> None:
+    return None
+
+
+def _no_english() -> English | None:
     return None
 
 
@@ -40,7 +45,10 @@ class MeetingRecorder:
         clock: Callable[[], datetime] = datetime.now,
         check_file: Callable[[Path], None] = check,
         decode_file: Decode = decode_audio,
+        grab_thumbnail: Grab = grab_shell_thumbnail,
+        english: Callable[[], English | None] = _no_english,
     ) -> None:
+        self._english = english
         self._settings = settings
         self._missing_models = missing_models
         self._make_models = make_models
@@ -53,6 +61,7 @@ class MeetingRecorder:
         self._handover = threading.Lock()  # a file that finishes by itself hands itself over under this
         self._check_file = check_file
         self._decode_file = decode_file
+        self._grab_thumbnail = grab_thumbnail
         self._current: Session | FileSession | None = None
         self._last: Session | FileSession | None = None
 
@@ -104,6 +113,7 @@ class MeetingRecorder:
                 publish=self._publish,
                 record_microphone=settings.record_microphone,
             )
+            session.transcript.english = self._english()
             try:
                 session.start()
             except Exception as exc:
@@ -115,9 +125,9 @@ class MeetingRecorder:
         self._on_change(True)
 
     def transcribe_file(self, path: Path, language: str) -> None:
-        """Transcribe a video or audio file as a meeting of its own, in English or (Roman) Urdu."""
+        """Transcribe a video or audio file as a meeting of its own, in English, (Roman) Urdu or Arabic."""
         if language not in _LANGUAGES:
-            raise MeetingError("Pick English or Urdu for the file.")
+            raise MeetingError("Pick English, Urdu or Arabic for the file.")
         with self._turn:
             if self._current is not None:
                 raise MeetingError(_FILE_BUSY if isinstance(self._current, FileSession) else
@@ -139,7 +149,9 @@ class MeetingRecorder:
                 publish=self._publish,
                 on_done=self._file_done,
                 decode=self._decode_file,
+                grab_thumbnail=self._grab_thumbnail,
             )
+            session.transcript.english = self._english()
             try:
                 session.start()
             except OSError as exc:

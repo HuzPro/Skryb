@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { restoredPath } from "../app";
 import { installDescription, installTitle } from "../components/install";
 import type { UpdateStatus } from "../lib/types";
-import { describeUpdate } from "./updates";
+import { describeUpdate, everyTheme } from "./updates";
 
 const status = (overrides: Partial<UpdateStatus>): UpdateStatus => ({ state: "idle", version: "", bytes_done: 0, bytes_total: 0, error: "", ...overrides });
 
@@ -45,5 +45,11 @@ describe("reopening the window the last version handed over", () => {
     for (const route of ["/models-old", "", "/", "updates", "/updates/../history", null, undefined]) {
       expect(restoredPath(route)).toBeNull();
     }
+  });
+});
+
+describe("the colour picker", () => {
+  it("gives every theme the one colour picked", () => {
+    expect(everyTheme("plum")).toEqual({ default: "plum", glass: "plum", material: "plum", paper: "plum" });
   });
 });

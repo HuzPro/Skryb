@@ -6,12 +6,15 @@ from enum import Enum
 from text_to_num import alpha2digit
 
 _NEWLINES = "\n\r"
-_SENTENCE_ENDINGS = ".!?" + _NEWLINES
-_MID_SENTENCE_PUNCTUATION = ",;:)]}"
-_TERMINAL_PUNCTUATION = ".!?,;:"
-_PUNCTUATION_THAT_FOLLOWS = ".,;:!?)]}\"'"
+# Arabic's own question mark, and its comma and semicolon.
+_ARABIC_QUESTION_MARK = "\u061f"
+_ARABIC_MID_SENTENCE = "\u060c\u061b"
+_SENTENCE_ENDINGS = ".!?" + _ARABIC_QUESTION_MARK + _NEWLINES
+_MID_SENTENCE_PUNCTUATION = ",;:)]}" + _ARABIC_MID_SENTENCE
+_TERMINAL_PUNCTUATION = ".!?,;:" + _ARABIC_QUESTION_MARK + _ARABIC_MID_SENTENCE
+_PUNCTUATION_THAT_FOLLOWS = ".,;:!?)]}\"'" + _ARABIC_QUESTION_MARK + _ARABIC_MID_SENTENCE
 _CLOSING_MARKS = ")]}\"'\u201d\u2019"
-_SPACED_PUNCTUATION = ".!?,;:\u2026"
+_SPACED_PUNCTUATION = ".!?,;:\u2026" + _ARABIC_QUESTION_MARK + _ARABIC_MID_SENTENCE
 _INVISIBLE_CHARACTERS = "\ufeff\u200b\u200c\u200d\u2060\ufffc"
 _WITHOUT_INVISIBLE_CHARACTERS = str.maketrans("", "", _INVISIBLE_CHARACTERS)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
@@ -282,7 +285,7 @@ def _replaces_words_without_an_ending(selected: str) -> bool:
 
 def _holds_a_sentence_ending(core: str) -> bool:
     """Whether the dictation is prose of its own: a sentence ends before its last word."""
-    return any(mark in core.rstrip(_TERMINAL_PUNCTUATION + " ") for mark in ".!?")
+    return any(mark in core.rstrip(_TERMINAL_PUNCTUATION + " ") for mark in ".!?" + _ARABIC_QUESTION_MARK)
 
 
 def _inserted_mid_sentence(context: CaretContext, following: str) -> bool:

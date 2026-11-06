@@ -279,7 +279,7 @@ class TestBuildEngineRegistry:
 
         assert {d.engine_id for d in registry.all_descriptors()} == {
             "nano_parakeet", "nemotron_streaming", "phonon2_cpu", "native_qwen3_asr", "openvino_parakeet",
-            "native_parakeet", "qwen3_asr", "openvino_qwen3_asr",
+            "native_parakeet", "qwen3_asr", "openvino_qwen3_asr", "native_jais_asr", "openvino_jais_asr",
         }
 
 

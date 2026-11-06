@@ -76,6 +76,7 @@ def _build_service(
     config_store: ConfigurationStore | None = None,
     dictionary_path: Path | None = None,
     license_policy=None,
+    repaint_app_icon=lambda: None,
 ):
     config_data = {
         "transcription.model_size": _PARAKEET,
@@ -112,6 +113,7 @@ def _build_service(
         hardware_detector=(
             None if hardware is None else FakeHardwareDetector(hardware)
         ),
+        repaint_app_icon=repaint_app_icon,
     )
     return service, config, manager, bus, hot_swap
 
@@ -176,7 +178,7 @@ class TestListModels:
 
         names = {v.name for v in views}
         assert names == {
-            _PARAKEET, "phonon-2.5-english", _NEMOTRON, "qwen3-asr-1.7b",
+            _PARAKEET, "phonon-2.5-english", _NEMOTRON, "qwen3-asr-1.7b", "jais-asr",
         }
 
     def test_should_mark_installed_status_on_view(self):
@@ -521,6 +523,48 @@ class TestSettingsTransfer:
             service.import_settings(path)
 
         assert config.save_count == 0
+
+
+class TestRepaintingTheAppIcon:
+    def _service(self, theme: str):
+        repaints: list[None] = []
+        service, config, *_ = _build_service(
+            config_overrides={"ui.theme": theme}, repaint_app_icon=lambda: repaints.append(None),
+        )
+        return service, config, repaints
+
+    def test_saving_a_new_colour_for_the_theme_in_use_repaints_the_icon_once(self):
+        service, _, repaints = self._service("paper")
+        draft = service.current_draft()
+
+        service.apply_draft(replace(draft, colourways={**draft.colourways, "paper": "plum"}))
+
+        assert repaints == [None]
+
+    def test_switching_to_a_theme_in_another_colour_repaints_the_icon(self):
+        service, _, repaints = self._service("default")
+
+        service.apply_draft(replace(service.current_draft(), theme="paper"))
+
+        assert repaints == [None]
+
+    def test_saving_other_settings_or_another_themes_colour_leaves_the_icon_alone(self):
+        service, _, repaints = self._service("paper")
+        draft = service.current_draft()
+
+        service.apply_draft(replace(draft, language="fr", colourways={**draft.colourways, "glass": "terracotta"}))
+        service.apply_draft(replace(service.current_draft(), theme="material", colourways={**draft.colourways, "material": "green"}))
+
+        assert repaints == []
+
+    def test_importing_settings_in_another_colour_repaints_the_icon(self, tmp_path: Path):
+        service, _, repaints = self._service("default")
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"ui": {"theme": "glass", "colourways": {"glass": "graphite"}}}), encoding="utf-8")
+
+        service.import_settings(path)
+
+        assert repaints == [None]
 
 
 class TestTriggerEngineSwap:

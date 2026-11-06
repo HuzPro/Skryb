@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Card, KeyCaps, PAGE_EDGE, PageTitle, Section, StatusDot } from "../components/parts";
+import { Bars, Card, dayBars, firstDayLabel, KeyCaps, PAGE_EDGE, PageTitle, Section, Stat, StatusDot } from "../components/parts";
 import { useEngineStatus } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
-import type { BindingMode, Usage } from "../lib/types";
-import { cn } from "../lib/utils";
+import type { BindingMode, HistoryUsage, Usage } from "../lib/types";
+import { cn, formatSaved, versusUsual } from "../lib/utils";
 import { Detail } from "./meetings";
 import { LevelMeter, useMicrophones } from "./microphone";
 
@@ -20,18 +20,9 @@ const HOW_IT_FIRES: Record<BindingMode, string> = {
   press: "Press once",
 };
 
-/** How long typing the words at 40 words a minute takes, less the time spent saying them; never below nothing. */
-export function timeSaved(usage: Usage): number {
-  return Math.max(0, (usage.words / TYPING_WPM) * 60 - usage.seconds);
-}
-
-/** "0 min", "Under a minute", "12 min", "3 h 5 min". */
-export function formatSaved(seconds: number): string {
-  if (seconds <= 0) return "0 min";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 1) return "Under a minute";
-  const hours = Math.floor(minutes / 60);
-  return hours ? `${hours.toLocaleString()} h ${minutes % 60} min` : `${minutes} min`;
+/** An estimate: typing the words at 40 words a minute, less all the time spent recording, lost recordings included; never below nothing. */
+export function timeSaved(usage: Pick<Usage, "words" | "seconds"> & { lost_seconds?: number }): number {
+  return Math.max(0, (usage.words / TYPING_WPM) * 60 - usage.seconds - (usage.lost_seconds ?? 0));
 }
 
 function MoreLink({ to, children }: { to: string; children: ReactNode }) {
@@ -107,37 +98,79 @@ function DictateCard() {
   );
 }
 
-function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <Card className="px-5 py-4">
-      <p className="text-[12.5px] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-[24px] leading-tight font-semibold tabular-nums">{value}</p>
-      {detail ? <p className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</p> : null}
-    </Card>
-  );
+/** "1 word", "1,912 words", and from ten thousand on "169K words". */
+export function count(value: number, one: string, many: string): string {
+  const number = value >= 10_000 ? new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value) : value.toLocaleString();
+  return `${number} ${value === 1 ? one : many}`;
+}
+
+/** Words a minute of recording, pauses and all; null until there is a second of recording to measure. */
+export function dictationPace(usage: Pick<Usage, "words" | "seconds">): number | null {
+  return usage.seconds >= 1 ? Math.round(usage.words / (usage.seconds / 60)) : null;
+}
+
+/** The line under the streak: the longest run, or how one starts. */
+export function streakNote(streak: number, longest: number): string {
+  if (!longest) return "Starts with your next dictation";
+  return longest > streak ? `Longest ${count(longest, "day", "days")}` : "Your longest yet";
+}
+
+/** Recordings that typed something, as a whole percentage; null below ten recordings. */
+export function reliability({ typed, empty, failed }: HistoryUsage["reliability"]): number | null {
+  const recorded = typed + empty + failed;
+  return recorded >= 10 ? Math.floor((typed / recorded) * 100) : null;
 }
 
 function UsageSection() {
   const usage = useQuery(queries.usage).data;
   const { settings } = useStore();
-  const all = usage?.all ?? { words: 0, seconds: 0 };
-  const week = usage?.week ?? { words: 0, seconds: 0 };
-  const words = (count: number) => (usage ? `${count.toLocaleString()} ${count === 1 ? "word" : "words"}` : "…");
-  const historyOff = settings?.saved.capture_content === false;
+  const saved = settings?.saved;
+  if (!usage) {
+    return (
+      <Section title="Your dictation">
+        <p className="text-[12.5px] text-muted-foreground">Loading…</p>
+      </Section>
+    );
+  }
+  const { all, week, today, month } = usage;
+  const pace = dictationPace(month);
+  const reliable = reliability(usage.reliability);
+  const { empty, failed } = usage.reliability;
+  const retention = saved?.history_retention_days ?? 0;
+  const words = (value: number) => count(value, "word", "words");
+  const losses = [empty ? `${empty} empty` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(", ");
   return (
     <Section title="Your dictation">
-      <div className="grid gap-3 min-[900px]:grid-cols-3">
-        <Stat label="Words dictated" value={usage ? all.words.toLocaleString() : "…"} />
-        <Stat label="Time saved" value={usage ? formatSaved(timeSaved(all)) : "…"} />
-        <Stat label="This week" value={words(week.words)} detail={usage ? `${formatSaved(timeSaved(week))} saved since Monday` : undefined} />
+      <div className="grid grid-cols-2 gap-3 min-[1100px]:grid-cols-4">
+        <Stat
+          label="Today so far"
+          value={words(today.words)}
+          detail={[count(today.dictations, "dictation", "dictations"), usage.usual_day ? `usual day ${count(usage.usual_day, "word", "words")}` : ""].filter(Boolean).join(" · ")}
+        />
+        <Stat label="This week so far" value={words(week.words)} detail={versusUsual(week.words, usage.usual_week) ?? count(week.dictations, "dictation", "dictations")} />
+        <Stat label={retention ? `Last ${retention} days` : "All time"} value={words(all.words)} detail={`≈${formatSaved(timeSaved(all))} saved vs typing`} />
+        <Stat label="Streak" value={count(usage.streak, "day", "days")} detail={streakNote(usage.streak, usage.longest_streak)} />
       </div>
-      <p className="mt-2.5 max-w-[760px] text-[12.5px] text-muted-foreground">
-        {usage && !all.words ? "Your numbers start with your first dictation. " : ""}
-        Time saved is how long typing these words takes at {TYPING_WPM} words a minute, minus the time you spent saying them. Counted from the dictations kept in{" "}
+      <div className="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
+        <Bars title="Words a day, last 30 days" bars={dayBars(usage.days)} format={words} axis={[firstDayLabel(usage.days.length), "Today"]} usual={usage.usual_day} />
+        <div className="grid gap-3 max-[1099px]:grid-cols-3">
+          <Stat label="Dictation pace" value={pace === null ? "–" : `${pace} wpm`} detail={`Pauses included · typing ≈${TYPING_WPM}`} />
+          <Stat
+            label="Typical dictation"
+            value={usage.typical_words === null ? "–" : words(usage.typical_words)}
+            detail={usage.typical_seconds === null ? undefined : `about ${Math.round(usage.typical_seconds)} s recorded`}
+          />
+          {reliable === null ? null : (
+            <Stat label="Recordings that typed" value={`${reliable}%`} detail={losses ? `Last 30 days · ${losses}` : "None empty or failed"} />
+          )}
+        </div>
+      </div>
+      <p className="mt-2.5 text-[12.5px] text-muted-foreground">
+        Time saved is an estimate: the same words typed at {TYPING_WPM} a minute, less all time spent recording. From{" "}
         <Link to="/history" draggable={false} className="font-medium text-primary hover:underline">
           History
         </Link>
-        {historyOff ? ", which is not saving new ones." : "."}
+        {saved?.capture_content === false ? ", which isn't saving new dictations." : "."}
       </p>
     </Section>
   );
@@ -146,7 +179,7 @@ function UsageSection() {
 /** Dictation's Home: whether it is ready, how to start it, and how much it has saved you. */
 export function DictationHomePage() {
   return (
-    <div className={cn(PAGE_EDGE, "w-full max-w-[1400px] pb-10")}>
+    <div className={cn(PAGE_EDGE, "w-full max-w-[1880px] pb-10")}>
       <PageTitle title="Dictation" />
       <div className="mt-4 grid gap-3 min-[900px]:grid-cols-2">
         <EngineCard />

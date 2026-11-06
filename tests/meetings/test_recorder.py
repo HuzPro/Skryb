@@ -8,7 +8,7 @@ import pytest
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import MeetingSettings
 from skryb.meetings.transcript import Event
-from tests.meetings.fakes import FakeCapture, FakeModels, silence, voice
+from tests.meetings.fakes import FakeCapture, FakeModels, no_thumbnail, silence, voice
 
 _WAIT_SECONDS = 10.0
 
@@ -173,6 +173,7 @@ class FileRig(Rig):
 
         self.recorder._check_file = check
         self.recorder._decode_file = decode
+        self.recorder._grab_thumbnail = no_thumbnail
 
     def wait_saved(self) -> None:
         deadline = threading.Event()
@@ -183,15 +184,16 @@ class FileRig(Rig):
         raise AssertionError("the file never finished")
 
 
-def test_a_file_becomes_a_meeting_named_after_it_in_the_language_asked_for(tmp_path: Path) -> None:
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_file_becomes_a_meeting_named_after_it_in_the_language_asked_for(tmp_path: Path, language: str) -> None:
     rig = FileRig(tmp_path)
 
-    rig.recorder.transcribe_file(rig.video_ok, "en")
+    rig.recorder.transcribe_file(rig.video_ok, language)
     rig.wait_saved()
 
     folder = rig.root / "2026-10-29 14-05 Sprint review"
     assert (folder / "them.flac").exists() and (folder / "transcript.json").exists()
-    assert rig.asked_for[0].language == "en"
+    assert rig.asked_for[0].language == language
     assert rig.events[0]["type"] == "started" and rig.events[0]["source"] == "Sprint review.mp4"
     assert rig.events[-1] == {"type": "saved", "id": "2026-10-29 14-05 Sprint review"}
     assert not rig.recorder.is_recording() and rig.recorder.live() is None
@@ -236,7 +238,8 @@ def test_cancelling_a_file_saves_it_without_touching_the_tray(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize(("language", "unreadable", "missing", "message"), [
-    ("fr", None, None, "Pick English or Urdu for the file."),
+    ("fr", None, None, "Pick English, Urdu or Arabic for the file."),
+    ("auto", None, None, "Pick English, Urdu or Arabic for the file."),
     ("en", "Skryb can't read .ogg files yet.", None, "Skryb can't read .ogg files yet."),
     ("en", None, ["Speaker labels"], "Download the meeting models first: Speaker labels."),
 ])
