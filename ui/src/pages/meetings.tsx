@@ -526,9 +526,10 @@ function BackToHistory() {
   );
 }
 
-function MeetingLayout({ header, warning, transcript, aside }: { header: ReactNode; warning?: string | null; transcript: ReactNode; aside: ReactNode }) {
+/** Header, transcript and side cards; `fill` pins it to the window so the transcript scrolls, else the page scrolls as a whole. */
+function MeetingLayout({ header, warning, transcript, aside, fill = true }: { header: ReactNode; warning?: string | null; transcript: ReactNode; aside: ReactNode; fill?: boolean }) {
   return (
-    <div className={cn(PAGE_EDGE, "flex h-full w-full flex-col gap-3 pb-5")}>
+    <div className={cn(PAGE_EDGE, "flex w-full flex-col gap-3 pb-5", fill ? "h-full" : "min-h-full")}>
       {header}
       {warning ? (
         <div role="alert" className="selectable flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2 text-[12.5px] text-warning">
@@ -718,6 +719,7 @@ export function MeetingHomePage() {
     <MeetingLayout
       header={header}
       warning={live?.warning}
+      fill={Boolean(live)}
       transcript={
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {overview && !overview.models_ready ? <MeetingModels overview={overview} compact /> : null}
