@@ -125,15 +125,22 @@ def test_usage_adds_up_the_words_and_speaking_time_of_every_dictation_that_kept_
         "words": sum(len(entry["text"].split()) for entry in kept),
         "seconds": round(2.4 * len(kept), 1),
         "dictations": len(kept),
+        "lost_seconds": round(sum(entry["audio_seconds"] for entry in _history(seeded) if entry["status"] in ("Cancelled", "Empty", "Failed")), 1),
     }
     assert usage["all"]["words"] > 10_000
-    assert usage["week"] == {"words": 0, "seconds": 0.0, "dictations": 0}
+    assert usage["week"] == {"words": 0, "seconds": 0.0, "dictations": 0, "lost_seconds": 0.0}
 
 
 def test_usage_of_an_empty_history_is_all_zeros(make_rig: Callable[..., Rig]) -> None:
-    nothing = {"words": 0, "seconds": 0.0, "dictations": 0}
+    nothing = {"words": 0, "seconds": 0.0, "dictations": 0, "lost_seconds": 0.0}
     assert make_rig().call("GET", "/api/history/usage") == (
-        200, {"all": nothing, "week": nothing, "today": nothing, "streak": 0, "days": [0] * 30},
+        200,
+        {
+            "all": nothing, "week": nothing, "today": nothing, "month": nothing,
+            "streak": 0, "longest_streak": 0, "days": [0] * 30,
+            "usual_day": None, "usual_week": None, "typical_words": None, "typical_seconds": None,
+            "reliability": {"typed": 0, "empty": 0, "failed": 0},
+        },
     )
 
 

@@ -106,42 +106,69 @@ export function applyMeetingEvent(live: LiveMeeting | null, event: MeetingEvent)
   }
 }
 
-/** Home's chart covers this many days, today last. */
-export const CHART_DAYS = 30;
+/** Meeting Home's chart covers this many weeks, this one last. */
+export const CHART_WEEKS = 12;
+// A usual week is the median of up to eight earlier weeks, once there are two.
+const USUAL_WEEKS = 8;
+const USUAL_WEEK_MINIMUM = 2;
+const DAY_MS = 86_400_000;
 
 export interface MeetingStats {
+  /** Every saved meeting. */
   count: number;
   seconds: number;
-  words: number;
+  /** Monday to now. */
   week: { count: number; seconds: number };
-  /** Minutes recorded each day, the last 30 days, today last. */
-  days: number[];
+  /** Median seconds of earlier weeks from Monday to today's weekday; null with fewer than two such weeks. */
+  usualWeek: number | null;
+  /** Medians over meetings in which something was said; null with none. */
+  typicalSeconds: number | null;
+  typicalSpeakers: number | null;
+  /** Seconds recorded each week, the last 12 weeks, this one last. */
+  weeks: number[];
+  /** Median seconds of the complete weeks on the chart since the first meeting; null with fewer than two. */
+  usualFullWeek: number | null;
 }
 
 /** The local calendar day of *date*, as a number of days that is the same all day. */
 function dayNumber(date: Date): number {
-  return Math.round(new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() / 86_400_000);
+  return Math.round(new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() / DAY_MS);
 }
 
-/** Totals over every saved meeting, this week from Monday, and minutes a day for the chart, in local time. */
+export function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+/** Meeting Home's numbers, in local time; "usual" counts only weeks since the first meeting, so an empty past doesn't drag it down. */
 export function meetingStats(meetings: MeetingSummary[], now: Date = new Date()): MeetingStats {
   const today = dayNumber(now);
-  const monday = today - ((now.getDay() + 6) % 7);
-  const days = new Array<number>(CHART_DAYS).fill(0);
-  const stats: MeetingStats = { count: 0, seconds: 0, words: 0, week: { count: 0, seconds: 0 }, days };
-  for (const meeting of meetings) {
-    const started = new Date(meeting.started);
-    if (Number.isNaN(started.getTime())) continue;
-    const day = dayNumber(started);
-    stats.count += 1;
-    stats.seconds += meeting.seconds;
-    stats.words += meeting.words;
-    if (day >= monday && day <= today) {
-      stats.week.count += 1;
-      stats.week.seconds += meeting.seconds;
-    }
-    const slot = CHART_DAYS - 1 - (today - day);
-    if (slot >= 0 && slot < CHART_DAYS) days[slot]! += meeting.seconds / 60;
-  }
-  return stats;
+  const weekday = (now.getDay() + 6) % 7;
+  const monday = today - weekday;
+  const dated = meetings.map((meeting) => ({ meeting, day: dayNumber(new Date(meeting.started)) })).filter(({ day }) => !Number.isNaN(day));
+  // A day number counts calendar days, so its weekday is read in UTC whatever the time zone.
+  const firstDay = dated.length ? Math.min(...dated.map(({ day }) => day)) : today;
+  const firstWeek = firstDay - ((new Date(firstDay * DAY_MS).getUTCDay() + 6) % 7);
+  const seconds = (from: number, to: number) => dated.filter(({ day }) => day >= from && day <= to).reduce((sum, { meeting }) => sum + meeting.seconds, 0);
+  const thisWeek = dated.filter(({ day }) => day >= monday && day <= today);
+  const soFar: number[] = [];
+  for (let back = 1; back <= USUAL_WEEKS && monday - 7 * back >= firstWeek; back += 1) soFar.push(seconds(monday - 7 * back, monday - 7 * back + weekday));
+  const weeks = Array.from({ length: CHART_WEEKS }, (_, index) => {
+    const start = monday - 7 * (CHART_WEEKS - 1 - index);
+    return seconds(start, start + 6);
+  });
+  const full = weeks.slice(0, -1).filter((_, index) => monday - 7 * (CHART_WEEKS - 1 - index) >= firstWeek);
+  const spoken = dated.filter(({ meeting }) => meeting.lines > 0).map(({ meeting }) => meeting);
+  return {
+    count: dated.length,
+    seconds: dated.reduce((sum, { meeting }) => sum + meeting.seconds, 0),
+    week: { count: thisWeek.length, seconds: thisWeek.reduce((sum, { meeting }) => sum + meeting.seconds, 0) },
+    usualWeek: soFar.length >= USUAL_WEEK_MINIMUM ? median(soFar) : null,
+    typicalSeconds: median(spoken.map((meeting) => meeting.seconds)),
+    typicalSpeakers: median(spoken.map((meeting) => meeting.speakers)),
+    weeks,
+    usualFullWeek: full.length >= USUAL_WEEK_MINIMUM ? median(full) : null,
+  };
 }

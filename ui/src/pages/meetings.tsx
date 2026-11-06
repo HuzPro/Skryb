@@ -3,7 +3,7 @@ import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderO
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { formatGigabytes } from "../components/models";
-import { Card, ContextMenu, DailyBars, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat } from "../components/parts";
+import { Bars, Card, ContextMenu, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat, type Bar } from "../components/parts";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -16,8 +16,9 @@ import { queries } from "../lib/queries";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
 import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingSettings, MeetingSummary, MeetingTranscript } from "../lib/types";
-import { cn, formatSaved } from "../lib/utils";
+import { cn, formatSaved, versusUsual } from "../lib/utils";
 import { dayLabel, formatDuration, groupByDay, useDebounced } from "./history";
+
 
 const NEAR_BOTTOM_PX = 120;
 // Progress updates the cached list in place; a finished, failed or cancelled download fetches it again.
@@ -768,21 +769,38 @@ export function MeetingHomePage() {
   );
 }
 
-/** Home's numbers between meetings: how many, how long, and minutes a day for the last 30 days. */
+/** Home's numbers between meetings: this week against a usual week, every meeting saved, a typical one, and 12 weeks of meeting time. */
 function MeetingNumbers({ meetings }: { meetings: MeetingSummary[] }) {
   const stats = useMemo(() => meetingStats(meetings), [meetings]);
   const plural = (value: number, one: string, many: string) => `${value.toLocaleString()} ${value === 1 ? one : many}`;
+  const compare = versusUsual(stats.week.seconds, stats.usualWeek);
+  const typicalVoices = stats.typicalSpeakers === null ? "" : `usually ${plural(Math.round(stats.typicalSpeakers), "voice", "voices")}`;
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-3 min-[1500px]:grid-cols-4">
-        <Stat label="Meetings" value={stats.count.toLocaleString()} detail={`${stats.week.count.toLocaleString()} this week`} />
-        <Stat label="Recorded" value={formatSaved(stats.seconds)} detail={`${formatSaved(stats.week.seconds)} this week`} />
-        <Stat label="Average length" value={formatSaved(stats.count ? stats.seconds / stats.count : 0)} />
-        <Stat label="Words transcribed" value={stats.words.toLocaleString()} />
+      <div className="grid grid-cols-1 gap-3 min-[700px]:grid-cols-3">
+        <Stat label="This week so far" value={formatSaved(stats.week.seconds)} detail={[plural(stats.week.count, "meeting", "meetings"), compare ?? ""].filter(Boolean).join(" · ")} />
+        <Stat label="Typical meeting" value={stats.typicalSeconds === null ? "–" : formatSaved(stats.typicalSeconds)} detail={typicalVoices || undefined} />
+        <Stat label="All saved" value={plural(stats.count, "meeting", "meetings")} detail={`${formatSaved(stats.seconds)} recorded`} />
       </div>
-      <DailyBars title="Meeting time a day, last 30 days" values={stats.days} format={(minutes) => plural(Math.round(minutes), "min", "min")} />
+      <Bars
+        title="Meeting time a week, last 12 weeks"
+        bars={weekBars(stats.weeks)}
+        format={(seconds) => formatSaved(seconds)}
+        axis={[weekBars(stats.weeks)[0]?.label ?? "", "This week"]}
+        usual={stats.usualFullWeek}
+      />
     </div>
   );
+}
+
+/** Bars for the last weeks, labelled by their Monday, this one "This week so far". */
+function weekBars(weeks: number[], now: Date = new Date()): Bar[] {
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+  return weeks.map((value, index) => {
+    const back = weeks.length - 1 - index;
+    const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7 * back);
+    return { value, label: back ? `Week of ${start.toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : "This week so far" };
+  });
 }
 
 // -- a saved meeting --------------------------------------------------------------------

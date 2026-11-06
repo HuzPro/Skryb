@@ -318,51 +318,106 @@ export function Stat({ label, value, detail, className }: { label: string; value
   );
 }
 
-const DAY_LABEL: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
+/** One bar of a `Bars` chart: its value and what hovering it says it is. */
+export interface Bar {
+  value: number;
+  label: string;
+}
 
 /**
- * One bar a day, today last, rising from a shared baseline. Each day's whole column takes the hover,
- * so a short bar is as easy to point at as a tall one; a table carries the numbers for screen readers.
+ * Bars from a shared zero baseline, the last one drawn lighter while its period is still running. A dashed line marks
+ * the usual value when there is one. Each bar's whole column takes the hover, so a short bar is as easy to point at as
+ * a tall one; a table carries the numbers for screen readers.
  */
-export function DailyBars({ title, values, format, now = new Date() }: { title: string; values: number[]; format: (value: number) => string; now?: Date }) {
+export function Bars({
+  title,
+  bars,
+  format,
+  axis,
+  usual,
+  partial = true,
+}: {
+  title: string;
+  bars: Bar[];
+  format: (value: number) => string;
+  axis: [string, string];
+  usual?: number | null;
+  partial?: boolean;
+}) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const top = Math.max(...values, 0);
-  const dayOf = (index: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - (values.length - 1 - index));
-  const shown = hovered ?? values.length - 1;
+  const top = Math.max(...bars.map((bar) => bar.value), usual ?? 0, 0);
+  const shown = bars[hovered ?? bars.length - 1];
+  const usualAt = usual && top > 0 ? (usual / top) * 100 : null;
   return (
     <Card className="flex flex-col px-5 py-4">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-[12.5px] text-muted-foreground">{title}</h3>
-        <p className="text-[12.5px] tabular-nums" aria-hidden>
-          <span className="text-muted-foreground">{hovered === null ? "Today" : dayOf(shown).toLocaleDateString(undefined, DAY_LABEL)} </span>
-          <span className="font-medium">{format(values[shown] ?? 0)}</span>
-        </p>
+        {shown ? (
+          <p className="text-[12.5px] tabular-nums" aria-hidden>
+            <span className="text-muted-foreground">{shown.label} </span>
+            <span className="font-medium">{format(shown.value)}</span>
+          </p>
+        ) : null}
       </div>
-      <div aria-hidden className="mt-3 flex h-28 items-end gap-[2px] border-b border-edge" onPointerLeave={() => setHovered(null)}>
-        {values.map((value, index) => (
-          <div key={index} className="flex h-full flex-1 items-end" onPointerEnter={() => setHovered(index)}>
-            <div
-              className={cn("w-full rounded-t-[4px] transition-colors", value > 0 ? "bg-primary" : "bg-muted", hovered !== null && hovered !== index && value > 0 && "bg-primary/45")}
-              style={{ height: value > 0 && top > 0 ? `${Math.max(4, (value / top) * 100)}%` : "2px" }}
-            />
+      <div aria-hidden className="relative mt-3 flex h-28 items-end gap-[2px] border-b border-edge" onPointerLeave={() => setHovered(null)}>
+        {bars.map((bar, index) => {
+          const unfinished = partial && index === bars.length - 1;
+          return (
+            <div key={index} className="flex h-full flex-1 items-end" onPointerEnter={() => setHovered(index)}>
+              <div
+                className={cn(
+                  "w-full rounded-t-[4px] transition-colors",
+                  bar.value <= 0 ? "bg-muted" : unfinished ? "bg-primary/45" : "bg-primary",
+                  hovered !== null && hovered !== index && bar.value > 0 && "opacity-50",
+                )}
+                style={{ height: bar.value > 0 && top > 0 ? `max(3px, ${(bar.value / top) * 100}%)` : "2px" }}
+              />
+            </div>
+          );
+        })}
+        {usualAt !== null ? (
+          <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-foreground/40" style={{ bottom: `${usualAt}%` }}>
+            <span className="absolute -top-[17px] right-0 bg-card pl-1 text-[11px] text-muted-foreground tabular-nums">usual {format(usual ?? 0)}</span>
           </div>
-        ))}
+        ) : null}
       </div>
       <div aria-hidden className="mt-1.5 flex justify-between text-[11.5px] text-muted-foreground">
-        <span>{dayOf(0).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
-        <span>Today</span>
+        <span>{axis[0]}</span>
+        <span>{axis[1]}</span>
       </div>
       <table className="sr-only">
         <caption>{title}</caption>
         <tbody>
-          {values.map((value, index) => (
+          {bars.map((bar, index) => (
             <tr key={index}>
-              <th scope="row">{dayOf(index).toLocaleDateString(undefined, DAY_LABEL)}</th>
-              <td>{format(value)}</td>
+              <th scope="row">{bar.label}</th>
+              <td>{format(bar.value)}</td>
             </tr>
           ))}
+          {usual ? (
+            <tr>
+              <th scope="row">Usual</th>
+              <td>{format(usual)}</td>
+            </tr>
+          ) : null}
         </tbody>
       </table>
     </Card>
   );
+}
+
+const DAY_LABEL: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
+
+/** Bars for the last `values.length` days, today last and labelled "Today so far". */
+export function dayBars(values: number[], now: Date = new Date()): Bar[] {
+  return values.map((value, index) => {
+    const back = values.length - 1 - index;
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+    return { value, label: back ? day.toLocaleDateString(undefined, DAY_LABEL) : "Today so far" };
+  });
+}
+
+/** "4 Oct" for the first of `count` days ending today. */
+export function firstDayLabel(count: number, now: Date = new Date()): string {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - (count - 1)).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }

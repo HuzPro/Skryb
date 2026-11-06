@@ -65,16 +65,29 @@ def history_entry_json(entry: HistoryEntry) -> Json:
 
 
 def usage_json(usage: Usage) -> Json:
-    return {"words": usage.words, "seconds": round(usage.seconds, 1), "dictations": usage.dictations}
+    return {
+        "words": usage.words,
+        "seconds": round(usage.seconds, 1),
+        "dictations": usage.dictations,
+        "lost_seconds": round(usage.lost_seconds, 1),
+    }
 
 
 def usage_report_json(report: UsageReport) -> Json:
+    reliability = report.reliability
     return {
         "all": usage_json(report.all),
         "week": usage_json(report.week),
         "today": usage_json(report.today),
+        "month": usage_json(report.month),
         "streak": report.streak,
+        "longest_streak": report.longest_streak,
         "days": list(report.days),
+        "usual_day": report.usual_day,
+        "usual_week": report.usual_week,
+        "typical_words": report.typical_words,
+        "typical_seconds": report.typical_seconds,
+        "reliability": {"typed": reliability.typed, "empty": reliability.empty, "failed": reliability.failed},
     }
 
 

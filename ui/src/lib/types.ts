@@ -167,20 +167,35 @@ export interface HistoryEntry {
   typed: string;
 }
 
-/** Words kept in history, the seconds spent saying them and the dictations they came from. */
+/** Words kept in history, the seconds spent recording them, the dictations they came from, and seconds lost to recordings that typed nothing. */
 export interface Usage {
   words: number;
   seconds: number;
   dictations: number;
+  lost_seconds: number;
 }
 
-/** Over all of history, this week from Monday and today; days in a row dictated; words a day, the last 30 days ending today. */
+/** Dictation Home's numbers; each "usual" or "typical" is null until there is enough history to say. */
 export interface HistoryUsage {
   all: Usage;
+  /** Monday to now. */
   week: Usage;
   today: Usage;
+  /** The last 30 days, today included. */
+  month: Usage;
   streak: number;
+  longest_streak: number;
+  /** Words a day, the last 30 days, today last. */
   days: number[];
+  /** Median words on the days dictated in the four weeks before today. */
+  usual_day: number | null;
+  /** Median words of earlier weeks from Monday to today's weekday. */
+  usual_week: number | null;
+  /** Medians over the last 30 days. */
+  typical_words: number | null;
+  typical_seconds: number | null;
+  /** Recordings over the last 30 days that typed something, came back empty or failed; cancelled ones left out. */
+  reliability: { typed: number; empty: number; failed: number };
 }
 
 export interface EngineInfo {

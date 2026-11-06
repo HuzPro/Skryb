@@ -171,30 +171,67 @@ def _history():
 
 
 def _usage(history):
-    """Home's numbers over the dictations that kept their text: all, since Monday, today, the streak and 30 days of words."""
+    """Dictation Home's numbers, worked out as the core's skryb/history/usage.py does."""
+    from statistics import median
+
     today = datetime.now().date()
-    kept = [(datetime.fromisoformat(entry["at"]).astimezone().date(), entry) for entry in history if not entry["status"]]
+    dated = [(datetime.fromisoformat(entry["at"]).astimezone().date(), entry) for entry in history]
+    lost = ("Cancelled", "Empty", "Failed")
 
     def words(entry):
         return len((entry["typed"] or entry["text"]).split())
 
     def total(entries):
-        return {"words": sum(words(entry) for entry in entries),
-                "seconds": round(sum(entry["audio_seconds"] for entry in entries), 1), "dictations": len(entries)}
+        kept = [entry for entry in entries if not entry["status"]]
+        return {"words": sum(words(entry) for entry in kept),
+                "seconds": round(sum(entry["audio_seconds"] for entry in kept), 1), "dictations": len(kept),
+                "lost_seconds": round(sum(entry["audio_seconds"] for entry in entries if entry["status"] in lost), 1)}
 
     monday = today - timedelta(days=today.weekday())
-    dictated = {day for day, _ in kept}
+    first = today - timedelta(days=29)
+    by_day = {}
+    for day, entry in dated:
+        if not entry["status"]:
+            by_day[day] = by_day.get(day, 0) + words(entry)
+    dictated = {day for day, entry in dated if entry["status"] in ("", "Not saved")}
     day = today if today in dictated else today - timedelta(days=1)
     streak = 0
     while day in dictated:
         streak, day = streak + 1, day - timedelta(days=1)
-    chart = [today - timedelta(days=29 - offset) for offset in range(30)]
+    longest = 0
+    for start_day in dictated:
+        if start_day - timedelta(days=1) not in dictated:
+            length = 1
+            while start_day + timedelta(days=length) in dictated:
+                length += 1
+            longest = max(longest, length)
+    earlier = [count for day, count in by_day.items() if today - timedelta(days=28) <= day < today and count]
+    weeks = []
+    began = min(by_day) - timedelta(days=min(by_day).weekday()) if by_day else today
+    for back in range(1, 9):
+        start_day = monday - timedelta(weeks=back)
+        if start_day < began:
+            break
+        weeks.append(sum(by_day.get(start_day + timedelta(days=offset), 0) for offset in range(today.weekday() + 1)))
+    recent = [entry for day, entry in dated if first <= day <= today]
+    recent_kept = [entry for entry in recent if not entry["status"]]
     return {
-        "all": total([entry for _, entry in kept]),
-        "week": total([entry for day, entry in kept if day >= monday]),
-        "today": total([entry for day, entry in kept if day == today]),
+        "all": total([entry for _, entry in dated]),
+        "week": total([entry for day, entry in dated if monday <= day <= today]),
+        "today": total([entry for day, entry in dated if day == today]),
+        "month": total(recent),
         "streak": streak,
-        "days": [sum(words(entry) for day, entry in kept if day == chart_day) for chart_day in chart],
+        "longest_streak": longest,
+        "days": [by_day.get(first + timedelta(days=offset), 0) for offset in range(30)],
+        "usual_day": round(median(earlier)) if len(earlier) >= 5 else None,
+        "usual_week": round(median(weeks)) if len(weeks) >= 2 else None,
+        "typical_words": round(median(words(entry) for entry in recent_kept)) if recent_kept else None,
+        "typical_seconds": round(median(entry["audio_seconds"] for entry in recent_kept), 1) if recent_kept else None,
+        "reliability": {
+            "typed": sum(1 for entry in recent if entry["status"] in ("", "Not saved")),
+            "empty": sum(1 for entry in recent if entry["status"] == "Empty"),
+            "failed": sum(1 for entry in recent if entry["status"] == "Failed"),
+        },
     }
 
 

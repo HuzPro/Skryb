@@ -3,8 +3,8 @@ import { launchPath, restoredPath } from "../app";
 import type { HistoryEntry, Model, Settings, UpdateStatus } from "../lib/types";
 import { duplicateAlias, joinAliases, newestFirst, splitAliases, termFrom, termProblem } from "./dictionary";
 import { finalText, formatDuration, groupByDay, preview } from "./history";
-import { formatSaved } from "../lib/utils";
-import { speakingSpeed, streakNote, timeSaved } from "./home";
+import { formatSaved, versusUsual } from "../lib/utils";
+import { count, dictationPace, reliability, streakNote, timeSaved } from "./home";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
@@ -236,16 +236,45 @@ describe("time saved on Home", () => {
 });
 
 describe("the numbers on dictation Home", () => {
-  it("measures speaking speed in words a minute of speech, with nothing to measure before the first second", () => {
-    expect(speakingSpeed({ words: 28_525, seconds: 16_372.1 })).toBe(105);
-    expect(speakingSpeed({ words: 3, seconds: 0.4 })).toBeNull();
-    expect(speakingSpeed({ words: 0, seconds: 0 })).toBeNull();
+  it("measures pace in words a minute of recording, with nothing to measure before the first second", () => {
+    expect(dictationPace({ words: 28_525, seconds: 16_372.1 })).toBe(105);
+    expect(dictationPace({ words: 3, seconds: 0.4 })).toBeNull();
+    expect(dictationPace({ words: 0, seconds: 0 })).toBeNull();
   });
 
-  it("says a streak is kept today, still alive until tonight, or not started", () => {
-    expect(streakNote(65, 13)).toBe("Dictated today");
-    expect(streakNote(4, 0)).toBe("Dictate today to keep it");
+  it("takes lost recordings off the time saved, an estimate that never goes below nothing", () => {
+    expect(timeSaved({ words: 400, seconds: 120, lost_seconds: 60 })).toBe(420);
+    expect(timeSaved({ words: 10, seconds: 5, lost_seconds: 900 })).toBe(0);
+  });
+
+  it("compares a week so far with a usual one, calling five percent either way about usual", () => {
+    const wednesday = new Date(2026, 10, 4);
+    const weekday = wednesday.toLocaleDateString(undefined, { weekday: "long" });
+    expect(versusUsual(1180, 1000, wednesday)).toBe(`18% more than usual by ${weekday}`);
+    expect(versusUsual(600, 1000, wednesday)).toBe(`40% less than usual by ${weekday}`);
+    expect(versusUsual(1040, 1000, wednesday)).toBe(`About usual by ${weekday}`);
+    expect(versusUsual(500, null, wednesday)).toBeNull();
+    expect(versusUsual(500, 0, wednesday)).toBeNull();
+  });
+
+  it("names the longest streak without nagging, or says how one starts", () => {
+    expect(streakNote(4, 65)).toBe("Longest 65 days");
+    expect(streakNote(65, 65)).toBe("Your longest yet");
     expect(streakNote(0, 0)).toBe("Starts with your next dictation");
+  });
+
+  it("gives reliability as recordings that typed, only from ten recordings on", () => {
+    expect(reliability({ typed: 97, empty: 2, failed: 1 })).toBe(97);
+    expect(reliability({ typed: 199, empty: 1, failed: 0 })).toBe(99);
+    expect(reliability({ typed: 8, empty: 1, failed: 0 })).toBeNull();
+    expect(reliability({ typed: 0, empty: 0, failed: 0 })).toBeNull();
+  });
+
+  it("shortens counts from ten thousand on and keeps one and many apart", () => {
+    expect(count(1, "word", "words")).toBe("1 word");
+    expect(count(9_999, "word", "words")).toBe(`${(9_999).toLocaleString()} words`);
+    expect(count(169_483, "word", "words")).toMatch(/^169.*words$/);
+    expect(count(169_483, "word", "words").length).toBeLessThan("169,483 words".length);
   });
 });
 
