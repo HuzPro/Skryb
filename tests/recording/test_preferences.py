@@ -9,6 +9,7 @@ from skryb.core.json_config_adapter import JsonConfigAdapter
 from skryb.recording.pill import DEFAULT_PILL_POSITION, DEFAULT_SKIN, pill_skin, without_glass
 from skryb.recording.preferences import (
     RecordingPreferences,
+    active_colourway,
     fold_paper_colourway,
     load_colourways,
     load_pill_position,
@@ -178,6 +179,16 @@ class TestColourways:
         assert load_colourways(FakeConfig({"ui.colourways": saved})) == {
             "default": "ink", "glass": "plum", "material": "ink", "paper": "graphite",
         }
+
+    def test_the_active_colourway_is_the_one_saved_for_the_theme_in_use(self):
+        saved = {"default": "plum", "glass": "terracotta", "material": "graphite", "paper": "ink"}
+        for theme, colourway in saved.items():
+            assert active_colourway(FakeConfig({"ui.theme": theme, "ui.colourways": saved})) == colourway
+
+    def test_a_fresh_or_hand_edited_theme_takes_the_default_themes_colourway(self):
+        for values in ({}, {"ui.theme": 42}, {"ui.theme": "Glass ✨"}, {"ui.theme": ["glass"]}, {"ui.theme": ""}):
+            assert active_colourway(FakeConfig(values)) == "ink"
+            assert active_colourway(FakeConfig({**values, "ui.colourways": {"default": "plum"}})) == "plum"
 
     def test_an_old_paper_colourway_moves_into_the_colourways_and_the_old_key_goes(self, tmp_path):
         path = tmp_path / "config.json"

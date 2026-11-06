@@ -110,6 +110,13 @@ def load_colourways(config: ConfigurationStore) -> dict[str, str]:
     }
 
 
+def active_colourway(config: ConfigurationStore) -> str:
+    """The colourway of the theme in use; an unknown theme counts as the default one."""
+    colourways = load_colourways(config)
+    theme = config.get("ui.theme", "default")
+    return colourways[theme if isinstance(theme, str) and theme in colourways else "default"]
+
+
 def fold_paper_colourway(config: ConfigurationStore) -> bool:
     """Move a saved ``ui.paper_colourway`` into ``ui.colourways`` and drop it. True when config changed."""
     document = config.get_all()
