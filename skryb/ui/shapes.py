@@ -12,7 +12,7 @@ from dataclasses import asdict, replace
 from typing import TypeVar, cast
 
 from skryb.history.entries import HistoryEntry
-from skryb.history.usage import Usage
+from skryb.history.usage import Usage, UsageReport
 from skryb.hotkeys.bindings import Binding, BindingAction, BindingMode, binding_for
 from skryb.output.dictionary_config import (
     DictionaryConfig,
@@ -65,7 +65,17 @@ def history_entry_json(entry: HistoryEntry) -> Json:
 
 
 def usage_json(usage: Usage) -> Json:
-    return {"words": usage.words, "seconds": round(usage.seconds, 1)}
+    return {"words": usage.words, "seconds": round(usage.seconds, 1), "dictations": usage.dictations}
+
+
+def usage_report_json(report: UsageReport) -> Json:
+    return {
+        "all": usage_json(report.all),
+        "week": usage_json(report.week),
+        "today": usage_json(report.today),
+        "streak": report.streak,
+        "days": list(report.days),
+    }
 
 
 def binding_json(binding: Binding) -> Json:

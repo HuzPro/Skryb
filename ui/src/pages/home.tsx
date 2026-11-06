@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Card, KeyCaps, PAGE_EDGE, PageTitle, Section, StatusDot } from "../components/parts";
+import { Card, DailyBars, KeyCaps, PAGE_EDGE, PageTitle, Section, Stat, StatusDot } from "../components/parts";
 import { useEngineStatus } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { BindingMode, Usage } from "../lib/types";
-import { cn } from "../lib/utils";
+import { cn, formatSaved } from "../lib/utils";
 import { Detail } from "./meetings";
 import { LevelMeter, useMicrophones } from "./microphone";
 
@@ -21,17 +21,8 @@ const HOW_IT_FIRES: Record<BindingMode, string> = {
 };
 
 /** How long typing the words at 40 words a minute takes, less the time spent saying them; never below nothing. */
-export function timeSaved(usage: Usage): number {
+export function timeSaved(usage: Pick<Usage, "words" | "seconds">): number {
   return Math.max(0, (usage.words / TYPING_WPM) * 60 - usage.seconds);
-}
-
-/** "0 min", "Under a minute", "12 min", "3 h 5 min". */
-export function formatSaved(seconds: number): string {
-  if (seconds <= 0) return "0 min";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 1) return "Under a minute";
-  const hours = Math.floor(minutes / 60);
-  return hours ? `${hours.toLocaleString()} h ${minutes % 60} min` : `${minutes} min`;
 }
 
 function MoreLink({ to, children }: { to: string; children: ReactNode }) {
@@ -107,37 +98,60 @@ function DictateCard() {
   );
 }
 
-function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <Card className="px-5 py-4">
-      <p className="text-[12.5px] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-[24px] leading-tight font-semibold tabular-nums">{value}</p>
-      {detail ? <p className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</p> : null}
-    </Card>
-  );
+/** "1 word", "1,912 words". */
+function count(value: number, one: string, many: string): string {
+  return `${value.toLocaleString()} ${value === 1 ? one : many}`;
+}
+
+/** Words a minute while speaking; null until there is speech to measure. */
+export function speakingSpeed(usage: Pick<Usage, "words" | "seconds">): number | null {
+  return usage.seconds >= 1 ? Math.round(usage.words / (usage.seconds / 60)) : null;
+}
+
+/** What the streak tile says under the number. */
+export function streakNote(streak: number, today: number): string {
+  if (!streak) return "Starts with your next dictation";
+  return today ? "Dictated today" : "Dictate today to keep it";
 }
 
 function UsageSection() {
   const usage = useQuery(queries.usage).data;
   const { settings } = useStore();
-  const all = usage?.all ?? { words: 0, seconds: 0 };
-  const week = usage?.week ?? { words: 0, seconds: 0 };
-  const words = (count: number) => (usage ? `${count.toLocaleString()} ${count === 1 ? "word" : "words"}` : "…");
   const historyOff = settings?.saved.capture_content === false;
+  if (!usage) {
+    return (
+      <Section title="Your dictation">
+        <p className="text-[12.5px] text-muted-foreground">Loading…</p>
+      </Section>
+    );
+  }
+  const { all, week, today, streak, days } = usage;
+  const speed = speakingSpeed(all);
   return (
     <Section title="Your dictation">
-      <div className="grid gap-3 min-[900px]:grid-cols-3">
-        <Stat label="Words dictated" value={usage ? all.words.toLocaleString() : "…"} />
-        <Stat label="Time saved" value={usage ? formatSaved(timeSaved(all)) : "…"} />
-        <Stat label="This week" value={words(week.words)} detail={usage ? `${formatSaved(timeSaved(week))} saved since Monday` : undefined} />
+      <div className="grid grid-cols-2 gap-3 min-[1100px]:grid-cols-4">
+        <Stat label="Today" value={count(today.words, "word", "words")} detail={count(today.dictations, "dictation", "dictations")} />
+        <Stat label="Streak" value={count(streak, "day", "days")} detail={streakNote(streak, today.dictations)} />
+        <Stat label="This week" value={count(week.words, "word", "words")} detail={`${formatSaved(timeSaved(week))} saved`} />
+        <Stat label="All time" value={count(all.words, "word", "words")} detail={`${formatSaved(timeSaved(all))} saved`} />
       </div>
-      <p className="mt-2.5 max-w-[760px] text-[12.5px] text-muted-foreground">
-        {usage && !all.words ? "Your numbers start with your first dictation. " : ""}
-        Time saved is how long typing these words takes at {TYPING_WPM} words a minute, minus the time you spent saying them. Counted from the dictations kept in{" "}
+      <div className="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
+        <DailyBars title="Words a day, last 30 days" values={days} format={(value) => count(value, "word", "words")} />
+        <div className="grid gap-3 max-[1099px]:grid-cols-2">
+          <Stat label="Speaking speed" value={speed === null ? "–" : `${speed} wpm`} detail={`Typing is about ${TYPING_WPM}`} />
+          <Stat
+            label="Average dictation"
+            value={all.dictations ? count(Math.round(all.words / all.dictations), "word", "words") : "–"}
+            detail={all.dictations ? `${(all.seconds / all.dictations).toFixed(1)} s of speech` : undefined}
+          />
+        </div>
+      </div>
+      <p className="mt-2.5 text-[12.5px] text-muted-foreground">
+        Time saved is typing at {TYPING_WPM} words a minute, less speaking time. From{" "}
         <Link to="/history" draggable={false} className="font-medium text-primary hover:underline">
           History
         </Link>
-        {historyOff ? ", which is not saving new ones." : "."}
+        {historyOff ? ", which isn't saving new dictations." : "."}
       </p>
     </Section>
   );

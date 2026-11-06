@@ -1,4 +1,4 @@
-import type { LiveMeeting, MeetingEntry, MeetingEvent } from "./types";
+import type { LiveMeeting, MeetingEntry, MeetingEvent, MeetingSummary } from "./types";
 
 const COLOURS = 8;
 // Once stopping starts no more audio is recorded, though the last lines are still being written.
@@ -104,4 +104,44 @@ export function applyMeetingEvent(live: LiveMeeting | null, event: MeetingEvent)
     case "saved":
       return { ...live, recording: false, status: "Saved" };
   }
+}
+
+/** Home's chart covers this many days, today last. */
+export const CHART_DAYS = 30;
+
+export interface MeetingStats {
+  count: number;
+  seconds: number;
+  words: number;
+  week: { count: number; seconds: number };
+  /** Minutes recorded each day, the last 30 days, today last. */
+  days: number[];
+}
+
+/** The local calendar day of *date*, as a number of days that is the same all day. */
+function dayNumber(date: Date): number {
+  return Math.round(new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() / 86_400_000);
+}
+
+/** Totals over every saved meeting, this week from Monday, and minutes a day for the chart, in local time. */
+export function meetingStats(meetings: MeetingSummary[], now: Date = new Date()): MeetingStats {
+  const today = dayNumber(now);
+  const monday = today - ((now.getDay() + 6) % 7);
+  const days = new Array<number>(CHART_DAYS).fill(0);
+  const stats: MeetingStats = { count: 0, seconds: 0, words: 0, week: { count: 0, seconds: 0 }, days };
+  for (const meeting of meetings) {
+    const started = new Date(meeting.started);
+    if (Number.isNaN(started.getTime())) continue;
+    const day = dayNumber(started);
+    stats.count += 1;
+    stats.seconds += meeting.seconds;
+    stats.words += meeting.words;
+    if (day >= monday && day <= today) {
+      stats.week.count += 1;
+      stats.week.seconds += meeting.seconds;
+    }
+    const slot = CHART_DAYS - 1 - (today - day);
+    if (slot >= 0 && slot < CHART_DAYS) days[slot]! += meeting.seconds / 60;
+  }
+  return stats;
 }

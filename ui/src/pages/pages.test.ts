@@ -3,7 +3,8 @@ import { launchPath, restoredPath } from "../app";
 import type { HistoryEntry, Model, Settings, UpdateStatus } from "../lib/types";
 import { duplicateAlias, joinAliases, newestFirst, splitAliases, termFrom, termProblem } from "./dictionary";
 import { finalText, formatDuration, groupByDay, preview } from "./history";
-import { formatSaved, timeSaved } from "./home";
+import { formatSaved } from "../lib/utils";
+import { speakingSpeed, streakNote, timeSaved } from "./home";
 import { nextCue } from "./microphone";
 import { normalizedProcessName, withOverride } from "./output";
 import { setOptionalKeys } from "./shortcuts";
@@ -231,6 +232,20 @@ describe("time saved on Home", () => {
     expect(formatSaved(3 * 3600 + 5 * 60)).toBe("3 h 5 min");
     const year = timeSaved({ words: 1_250_000, seconds: 180_000 });
     expect(formatSaved(year)).toBe(`${(470).toLocaleString()} h 50 min`);
+  });
+});
+
+describe("the numbers on dictation Home", () => {
+  it("measures speaking speed in words a minute of speech, with nothing to measure before the first second", () => {
+    expect(speakingSpeed({ words: 28_525, seconds: 16_372.1 })).toBe(105);
+    expect(speakingSpeed({ words: 3, seconds: 0.4 })).toBeNull();
+    expect(speakingSpeed({ words: 0, seconds: 0 })).toBeNull();
+  });
+
+  it("says a streak is kept today, still alive until tonight, or not started", () => {
+    expect(streakNote(65, 13)).toBe("Dictated today");
+    expect(streakNote(4, 0)).toBe("Dictate today to keep it");
+    expect(streakNote(0, 0)).toBe("Starts with your next dictation");
   });
 });
 

@@ -124,14 +124,16 @@ def test_usage_adds_up_the_words_and_speaking_time_of_every_dictation_that_kept_
     assert usage["all"] == {
         "words": sum(len(entry["text"].split()) for entry in kept),
         "seconds": round(2.4 * len(kept), 1),
+        "dictations": len(kept),
     }
     assert usage["all"]["words"] > 10_000
-    assert usage["week"] == {"words": 0, "seconds": 0.0}
+    assert usage["week"] == {"words": 0, "seconds": 0.0, "dictations": 0}
 
 
 def test_usage_of_an_empty_history_is_all_zeros(make_rig: Callable[..., Rig]) -> None:
+    nothing = {"words": 0, "seconds": 0.0, "dictations": 0}
     assert make_rig().call("GET", "/api/history/usage") == (
-        200, {"all": {"words": 0, "seconds": 0.0}, "week": {"words": 0, "seconds": 0.0}},
+        200, {"all": nothing, "week": nothing, "today": nothing, "streak": 0, "days": [0] * 30},
     )
 
 

@@ -306,3 +306,63 @@ export function ContextMenu({ x, y, label, items, onClose: closed }: { x: number
     </div>
   );
 }
+
+/** One number on a card: what it counts, the number, and a line under it. */
+export function Stat({ label, value, detail, className }: { label: string; value: string; detail?: ReactNode; className?: string }) {
+  return (
+    <Card className={cn("px-5 py-4", className)}>
+      <p className="text-[12.5px] text-muted-foreground">{label}</p>
+      <p className="mt-1 text-[24px] leading-tight font-semibold tabular-nums">{value}</p>
+      {detail ? <p className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</p> : null}
+    </Card>
+  );
+}
+
+const DAY_LABEL: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
+
+/**
+ * One bar a day, today last, rising from a shared baseline. Each day's whole column takes the hover,
+ * so a short bar is as easy to point at as a tall one; a table carries the numbers for screen readers.
+ */
+export function DailyBars({ title, values, format, now = new Date() }: { title: string; values: number[]; format: (value: number) => string; now?: Date }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const top = Math.max(...values, 0);
+  const dayOf = (index: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - (values.length - 1 - index));
+  const shown = hovered ?? values.length - 1;
+  return (
+    <Card className="flex flex-col px-5 py-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-[12.5px] text-muted-foreground">{title}</h3>
+        <p className="text-[12.5px] tabular-nums" aria-hidden>
+          <span className="text-muted-foreground">{hovered === null ? "Today" : dayOf(shown).toLocaleDateString(undefined, DAY_LABEL)} </span>
+          <span className="font-medium">{format(values[shown] ?? 0)}</span>
+        </p>
+      </div>
+      <div aria-hidden className="mt-3 flex h-28 items-end gap-[2px] border-b border-edge" onPointerLeave={() => setHovered(null)}>
+        {values.map((value, index) => (
+          <div key={index} className="flex h-full flex-1 items-end" onPointerEnter={() => setHovered(index)}>
+            <div
+              className={cn("w-full rounded-t-[4px] transition-colors", value > 0 ? "bg-primary" : "bg-muted", hovered !== null && hovered !== index && value > 0 && "bg-primary/45")}
+              style={{ height: value > 0 && top > 0 ? `${Math.max(4, (value / top) * 100)}%` : "2px" }}
+            />
+          </div>
+        ))}
+      </div>
+      <div aria-hidden className="mt-1.5 flex justify-between text-[11.5px] text-muted-foreground">
+        <span>{dayOf(0).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+        <span>Today</span>
+      </div>
+      <table className="sr-only">
+        <caption>{title}</caption>
+        <tbody>
+          {values.map((value, index) => (
+            <tr key={index}>
+              <th scope="row">{dayOf(index).toLocaleDateString(undefined, DAY_LABEL)}</th>
+              <td>{format(value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}

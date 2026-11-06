@@ -167,16 +167,20 @@ export interface HistoryEntry {
   typed: string;
 }
 
-/** Words kept in history and the seconds spent saying them. */
+/** Words kept in history, the seconds spent saying them and the dictations they came from. */
 export interface Usage {
   words: number;
   seconds: number;
+  dictations: number;
 }
 
-/** Over all of history, and this week from Monday. */
+/** Over all of history, this week from Monday and today; days in a row dictated; words a day, the last 30 days ending today. */
 export interface HistoryUsage {
   all: Usage;
   week: Usage;
+  today: Usage;
+  streak: number;
+  days: number[];
 }
 
 export interface EngineInfo {

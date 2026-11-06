@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isNavActive, launchPath, modeOf, NAV, pageInMode } from "../app";
 import { groupByDay } from "../pages/history";
 import { pastMeetings } from "../pages/meetings";
-import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
+import { afterLeavingLivePage, applyMeetingEvent, CHART_DAYS, colourOf, meetingStats, droppedMedia, percent, defaultLabel, labelOf, meetingName, speakerOrder, talkShares, turnsOf } from "./meetings";
 import type { LiveMeeting, MeetingEntry, MeetingSummary } from "./types";
 
 const line = (id: number, key: string, start: number, end: number, text: string): MeetingEntry => {
@@ -273,3 +273,52 @@ describe("past meetings under History", () => {
   });
 });
 
+
+describe("meeting stats on Home", () => {
+  // A Wednesday afternoon, local time.
+  const now = new Date(2026, 10, 4, 15, 0);
+  const at = (daysAgo: number, hour = 10) => new Date(2026, 10, 4 - daysAgo, hour, 30).toISOString();
+  const meeting = (id: string, started: string, seconds: number, words = 100): MeetingSummary => ({
+    id, started, seconds, speakers: 2, lines: 10, words, has_audio: true,
+  });
+
+  it("adds up every meeting, and only Monday on for this week", () => {
+    const meetings = [
+      meeting("2026-11-04 Café planning ☕", at(0), 1800, 4200),
+      meeting("2026-11-02 Weekly sync", at(2), 3600, 9000),
+      meeting("2026-11-01 Sunday call", at(3), 600, 1500),
+      meeting("2026-11-01 Sunday call", at(3), 600, 1500),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.count).toBe(4);
+    expect(stats.seconds).toBe(6600);
+    expect(stats.words).toBe(16_200);
+    expect(stats.week).toEqual({ count: 2, seconds: 5400 });
+  });
+
+  it("charts minutes a day for thirty days, today last, leaving older meetings and bad dates out", () => {
+    const meetings = [
+      meeting("today", at(0), 1200),
+      meeting("today again", at(0, 13), 600),
+      meeting("oldest on the chart", at(CHART_DAYS - 1), 300),
+      meeting("too old", at(CHART_DAYS), 900),
+      meeting("no date", "", 900),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.days).toHaveLength(CHART_DAYS);
+    expect(stats.days.at(-1)).toBe(30);
+    expect(stats.days[0]).toBe(5);
+    expect(stats.days.reduce((sum, minutes) => sum + minutes, 0)).toBe(35);
+    expect(stats.count).toBe(4);
+  });
+
+  it("is all zeros with no meetings, and handles thousands", () => {
+    expect(meetingStats([], now)).toEqual({ count: 0, seconds: 0, words: 0, week: { count: 0, seconds: 0 }, days: new Array(CHART_DAYS).fill(0) });
+    const many = Array.from({ length: 5000 }, (_, index) => meeting(`m${index}`, at(index % 60), 60));
+    expect(meetingStats(many, now).count).toBe(5000);
+  });
+});

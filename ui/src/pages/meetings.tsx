@@ -3,20 +3,20 @@ import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderO
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { formatGigabytes } from "../components/models";
-import { Card, ContextMenu, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section } from "../components/parts";
+import { Card, ContextMenu, DailyBars, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat } from "../components/parts";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
-import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, labelOf, MEDIA_EXTENSIONS, meetingName, percent, talkShares, turnsOf } from "../lib/meetings";
+import { afterLeavingLivePage, applyMeetingEvent, colourOf, droppedMedia, labelOf, MEDIA_EXTENSIONS, meetingName, meetingStats, percent, talkShares, turnsOf } from "../lib/meetings";
 import { chooseFolder, chooseMediaFile, onFileDrag } from "../lib/platform";
 import { queries } from "../lib/queries";
 import { useServerEvent } from "../lib/sse";
 import { useStore } from "../lib/store";
 import type { DownloadState, FileLanguage, LiveMeeting, MeetingEvent, MeetingLanguage, MeetingModel, MeetingOverview, MeetingSettings, MeetingSummary, MeetingTranscript } from "../lib/types";
-import { cn } from "../lib/utils";
+import { cn, formatSaved } from "../lib/utils";
 import { dayLabel, formatDuration, groupByDay, useDebounced } from "./history";
 
 const NEAR_BOTTOM_PX = 120;
@@ -667,6 +667,7 @@ export function MeetingHomePage() {
       transcript={
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {overview && !overview.models_ready ? <MeetingModels overview={overview} compact /> : null}
+          {!live && overview?.meetings.length ? <MeetingNumbers meetings={overview.meetings} /> : null}
           {live && !running ? <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} /> : null}
           <TranscriptPane
             transcript={transcript}
@@ -708,6 +709,23 @@ export function MeetingHomePage() {
         </>
       }
     />
+  );
+}
+
+/** Home's numbers between meetings: how many, how long, and minutes a day for the last 30 days. */
+function MeetingNumbers({ meetings }: { meetings: MeetingSummary[] }) {
+  const stats = useMemo(() => meetingStats(meetings), [meetings]);
+  const plural = (value: number, one: string, many: string) => `${value.toLocaleString()} ${value === 1 ? one : many}`;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3 min-[1500px]:grid-cols-4">
+        <Stat label="Meetings" value={stats.count.toLocaleString()} detail={`${stats.week.count.toLocaleString()} this week`} />
+        <Stat label="Recorded" value={formatSaved(stats.seconds)} detail={`${formatSaved(stats.week.seconds)} this week`} />
+        <Stat label="Average length" value={formatSaved(stats.count ? stats.seconds / stats.count : 0)} />
+        <Stat label="Words transcribed" value={stats.words.toLocaleString()} />
+      </div>
+      <DailyBars title="Meeting time a day, last 30 days" values={stats.days} format={(minutes) => plural(Math.round(minutes), "min", "min")} />
+    </div>
   );
 }
 

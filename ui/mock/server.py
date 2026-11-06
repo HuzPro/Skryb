@@ -171,16 +171,31 @@ def _history():
 
 
 def _usage(history):
-    """Words and speaking time of the dictations that kept their text, all of them and since Monday."""
+    """Home's numbers over the dictations that kept their text: all, since Monday, today, the streak and 30 days of words."""
     today = datetime.now().date()
-    monday = (today - timedelta(days=today.weekday())).isoformat()
-    kept = [entry for entry in history if not entry["status"]]
+    kept = [(datetime.fromisoformat(entry["at"]).astimezone().date(), entry) for entry in history if not entry["status"]]
+
+    def words(entry):
+        return len((entry["typed"] or entry["text"]).split())
 
     def total(entries):
-        return {"words": sum(len((entry["typed"] or entry["text"]).split()) for entry in entries),
-                "seconds": round(sum(entry["audio_seconds"] for entry in entries), 1)}
+        return {"words": sum(words(entry) for entry in entries),
+                "seconds": round(sum(entry["audio_seconds"] for entry in entries), 1), "dictations": len(entries)}
 
-    return {"all": total(kept), "week": total([entry for entry in kept if entry["at"][:10] >= monday])}
+    monday = today - timedelta(days=today.weekday())
+    dictated = {day for day, _ in kept}
+    day = today if today in dictated else today - timedelta(days=1)
+    streak = 0
+    while day in dictated:
+        streak, day = streak + 1, day - timedelta(days=1)
+    chart = [today - timedelta(days=29 - offset) for offset in range(30)]
+    return {
+        "all": total([entry for _, entry in kept]),
+        "week": total([entry for day, entry in kept if day >= monday]),
+        "today": total([entry for day, entry in kept if day == today]),
+        "streak": streak,
+        "days": [sum(words(entry) for day, entry in kept if day == chart_day) for chart_day in chart],
+    }
 
 
 def _saved_meetings():
