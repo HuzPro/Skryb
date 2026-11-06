@@ -213,10 +213,15 @@ describe("switching mode", () => {
   });
 
   it("stays on a page both modes share", () => {
-    for (const page of ["/dictionary", "/shortcuts", "/updates"]) {
+    for (const page of ["/dictionary", "/shortcuts"]) {
       expect(pageInMode(page, "meetings")).toBe(page);
       expect(pageInMode(page, "dictation")).toBe(page);
     }
+  });
+
+  it("leaves Settings for the chosen mode's Home", () => {
+    expect(pageInMode("/updates", "meetings")).toBe("/meeting-home");
+    expect(pageInMode("/updates", "dictation")).toBe("/home");
   });
 
   it("lights Home up for the live meeting and History for every saved one", () => {

@@ -54,10 +54,10 @@ export function modeOf(pathname: string): Mode | null {
   return MEETING.test(pathname) || NAV.some((item) => item.meetings === pathname) ? "meetings" : "dictation";
 }
 
-/** The page behind the same sidebar item in `mode`; a shared page, or one outside the sidebar, stays put. */
+/** The page behind the same sidebar item in `mode`; from a page outside the sidebar, such as Settings, that mode's Home. */
 export function pageInMode(pathname: string, mode: Mode): string {
-  const item = NAV.find((candidate) => isNavActive(candidate, pathname));
-  return item ? item[mode] : pathname;
+  const item = NAV.find((candidate) => isNavActive(candidate, pathname)) ?? NAV[0]!;
+  return item[mode];
 }
 
 /** The window opens on Home; the tray's Meetings opens meeting mode's Home. */

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, Download, LoaderCircle, Mic, Minus, RefreshCw, Settings, Square, Users, X, type LucideIcon } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { isDirty } from "../lib/draft";
@@ -103,14 +103,18 @@ export function TopBar({ nativeTitlebar, onClose, showStatus, children }: { nati
   );
 }
 
-const MODES: { value: Mode; label: string; icon: LucideIcon }[] = [
-  { value: "dictation", label: "Dictation", icon: Mic },
-  { value: "meetings", label: "Meetings", icon: Users },
+const MODES: { value: Mode; label: string; icon: LucideIcon; tip: string }[] = [
+  { value: "dictation", label: "Dictation", icon: Mic, tip: "Type with your voice" },
+  { value: "meetings", label: "Meetings", icon: Users, tip: "Transcribe your meetings" },
 ];
 
-/** A segmented switch: the thumb glides to the chosen mode without overshooting its track; arrow keys move it too. */
+/**
+ * A segmented switch: the thumb glides to the chosen mode without overshooting its track; arrow keys move it too.
+ * Hovering a side shows what it is for, kept inside the sidebar by hanging from that side's outer edge.
+ */
 export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange: (mode: Mode) => void; recording: boolean }) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const tipId = useId();
   const at = Math.max(0, MODES.findIndex((choice) => choice.value === mode));
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
@@ -127,9 +131,10 @@ export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange
         className="absolute inset-y-[3px] left-[3px] w-[calc(50%-3px)] transition-transform duration-[var(--page-dur)] rounded-[calc(var(--r-button)-3px)] border border-edge bg-card shadow-xs"
         style={{ transform: `translateX(${at * 100}%)` }}
       />
-      {MODES.map(({ value, label, icon: Icon }, index) => {
+      {MODES.map(({ value, label, icon: Icon, tip }, index) => {
         const selected = value === mode;
-        const hint = value === "meetings" && recording ? `${label} (recording now)` : label;
+        const live = value === "meetings" && recording;
+        const hint = live ? `${label} (recording now)` : label;
         return (
           <button
             key={value}
@@ -139,17 +144,27 @@ export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange
             role="radio"
             aria-checked={selected}
             aria-label={hint}
-            title={hint}
+            aria-describedby={`${tipId}-${value}`}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(value)}
             className={cn(
-              "relative flex items-center justify-center gap-1.5 rounded-[calc(var(--r-button)-3px)] text-[12.5px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-3.5",
+              "group relative flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--r-button)-3px)] text-[12.5px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-3.5",
               selected && "text-foreground",
             )}
           >
             <Icon />
             {label}
-            {value === "meetings" && recording ? <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" /> : null}
+            {live ? <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" /> : null}
+            <span
+              id={`${tipId}-${value}`}
+              role="tooltip"
+              className={cn(
+                "surface pointer-events-none absolute top-full z-30 mt-2 w-max rounded-md border border-edge bg-popover px-2 py-1 text-[12px] font-normal text-foreground opacity-0 shadow-lg transition-opacity delay-0 group-hover:opacity-100 group-hover:delay-300 group-focus-visible:opacity-100",
+                index === 0 ? "-left-[3px]" : "-right-[3px]",
+              )}
+            >
+              {live ? "Recording a meeting" : tip}
+            </span>
           </button>
         );
       })}
@@ -359,7 +374,7 @@ export function Sidebar({
           aria-current={settingsOpen ? "page" : undefined}
           className={cn(
             "surface grid size-8 shrink-0 place-items-center rounded-lg border border-edge bg-card text-muted-foreground shadow-card transition-[color,background-color,scale] hover:bg-accent hover:text-foreground active:scale-[0.97]",
-            settingsOpen && "text-foreground ring-2 ring-ring/40",
+            settingsOpen && "text-foreground",
           )}
         >
           <Settings className="size-4" />

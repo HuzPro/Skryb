@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { FileDown, FileUp, FolderOpen } from "lucide-react";
+import { ArrowLeft, FileDown, FileUp, FolderOpen } from "lucide-react";
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { installDescription, installTitle, useInstall } from "../components/install";
-import { PageBody, PageTitle, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
+import { PageBody, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/select";
@@ -100,6 +101,20 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
   }
 }
 
+/** The page title with a way out: back to the page Settings was opened from, or Home when the window opened on it. */
+function SettingsTitle() {
+  const navigate = useNavigate();
+  const opened = useLocation().key === "default";
+  return (
+    <div className="mb-1 flex min-h-10 items-center gap-1.5">
+      <Button variant="ghost" size="icon" aria-label="Back" title="Back" className="-ml-2 text-muted-foreground hover:text-foreground" onClick={() => void (opened ? navigate("/home") : navigate(-1))}>
+        <ArrowLeft />
+      </Button>
+      <h1 className="page-title min-w-0 truncate">Settings</h1>
+    </div>
+  );
+}
+
 /** Skryb's own settings, the same in both modes: updates, the look, the settings file and the logs. */
 export function SettingsPage() {
   const app = useAppInfo();
@@ -113,7 +128,7 @@ export function SettingsPage() {
   if (install) {
     return (
       <PageBody>
-        <PageTitle title="Settings" />
+        <SettingsTitle />
         <Section title="Updates">
           <Rows>
             <Row title={installTitle(install)} description={<span className="selectable">{installDescription(install)}</span>} stacked>
@@ -124,7 +139,7 @@ export function SettingsPage() {
       </PageBody>
     );
   }
-  if (!app || !draft) return <PageBody><PageTitle title="Settings" /></PageBody>;
+  if (!app || !draft) return <PageBody><SettingsTitle /></PageBody>;
 
   const update = app.update;
   const { title, description } = describeUpdate(update, app.version);
@@ -172,7 +187,7 @@ export function SettingsPage() {
 
   return (
     <PageBody>
-      <PageTitle title="Settings" />
+      <SettingsTitle />
       <Section title="Updates">
         <Rows>
           <Row
