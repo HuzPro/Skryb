@@ -724,7 +724,7 @@ export function MeetingHomePage() {
       transcript={
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {overview && !overview.models_ready ? <MeetingModels overview={overview} compact /> : null}
-          {!live && overview?.meetings.length ? <MeetingNumbers meetings={overview.meetings} /> : null}
+          {!live && overview?.meetings.length ? <MeetingNumbers meetings={overview.meetings} recordsMicrophone={meetings?.record_microphone !== false} /> : null}
           {live && !running ? <FileDropCard ready={overview?.models_ready !== false} meetingLanguage={meetings?.language} /> : null}
           <TranscriptPane
             transcript={transcript}
@@ -770,16 +770,24 @@ export function MeetingHomePage() {
 }
 
 /** Home's numbers between meetings: this week against a usual week, every meeting saved, a typical one, and 12 weeks of meeting time. */
-function MeetingNumbers({ meetings }: { meetings: MeetingSummary[] }) {
+function MeetingNumbers({ meetings, recordsMicrophone }: { meetings: MeetingSummary[]; recordsMicrophone: boolean }) {
   const stats = useMemo(() => meetingStats(meetings), [meetings]);
   const plural = (value: number, one: string, many: string) => `${value.toLocaleString()} ${value === 1 ? one : many}`;
   const compare = versusUsual(stats.week.seconds, stats.usualWeek);
   const typicalVoices = stats.typicalSpeakers === null ? "" : `usually ${plural(Math.round(stats.typicalSpeakers), "voice", "voices")}`;
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-1 gap-3 min-[700px]:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 min-[1500px]:grid-cols-4">
         <Stat label="This week so far" value={formatSaved(stats.week.seconds)} detail={[plural(stats.week.count, "meeting", "meetings"), compare ?? ""].filter(Boolean).join(" · ")} />
         <Stat label="Typical meeting" value={stats.typicalSeconds === null ? "–" : formatSaved(stats.typicalSeconds)} detail={typicalVoices || undefined} />
+        {stats.talk && recordsMicrophone ? (
+          <Stat
+            label="Your share of talk"
+            value={`${Math.round(stats.talk.share * 100)}%`}
+            detail={`An even split is ${Math.round(stats.talk.even * 100)}% · ${plural(stats.talk.meetings, "meeting", "meetings")}, last 30 days`}
+            title="Voices in the room your microphone picks up count as you."
+          />
+        ) : null}
         <Stat label="All saved" value={plural(stats.count, "meeting", "meetings")} detail={`${formatSaved(stats.seconds)} recorded`} />
       </div>
       <Bars

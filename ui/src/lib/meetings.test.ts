@@ -234,7 +234,7 @@ describe("switching mode", () => {
 });
 
 function summary(id: string, started: string): MeetingSummary {
-  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true, has_thumbnail: false };
+  return { id, started, seconds: 1800, speakers: 3, lines: 120, words: 2400, has_audio: true, has_thumbnail: false, me_seconds: 400, talk_seconds: 1700 };
 }
 
 describe("past meetings under History", () => {
@@ -279,7 +279,7 @@ describe("meeting stats on Home", () => {
   const now = new Date(2026, 10, 4, 15, 0);
   const at = (daysAgo: number, hour = 10) => new Date(2026, 10, 4 - daysAgo, hour, 30).toISOString();
   const meeting = (id: string, started: string, seconds: number, lines = 10, speakers = 2): MeetingSummary => ({
-    id, started, seconds, speakers, lines, words: 100, has_audio: true, has_thumbnail: false,
+    id, started, seconds, speakers, lines, words: 100, has_audio: true, has_thumbnail: false, me_seconds: 0, talk_seconds: seconds,
   });
 
   it("adds up every meeting, and only Monday to now for this week so far", () => {
@@ -352,6 +352,26 @@ describe("meeting stats on Home", () => {
     expect(meetingStats(many, now).count).toBe(5000);
   });
 
+  it("gives your share of talk over the last 30 days' meetings with you and others in them, beside an even split", () => {
+    const talk = (id: string, daysAgo: number, me: number, total: number, speakers: number): MeetingSummary => ({
+      ...meeting(id, at(daysAgo), total, 20, speakers), me_seconds: me, talk_seconds: total,
+    });
+    const meetings = [
+      talk("one to one", 1, 600, 1200, 2),
+      talk("team of four", 3, 300, 2400, 4),
+      talk("only me", 2, 500, 500, 1),
+      talk("only them", 4, 0, 900, 3),
+      talk("too old", 31, 900, 1000, 2),
+    ];
+
+    const stats = meetingStats(meetings, now);
+
+    expect(stats.talk?.meetings).toBe(2);
+    expect(stats.talk?.share).toBeCloseTo(900 / 3600);
+    expect(stats.talk?.even).toBeCloseTo((600 + 600) / 3600);
+    expect(meetingStats([talk("only them", 1, 0, 900, 3)], now).talk).toBeNull();
+  });
+
   it("takes the median of an odd or even count, and nothing of none", () => {
     expect(median([5, 1, 3])).toBe(3);
     expect(median([4, 1, 3, 2])).toBe(2.5);
@@ -362,7 +382,7 @@ describe("meeting stats on Home", () => {
 describe("meeting History cards", () => {
   it("puts each day's meetings under one heading, newest day first", () => {
     const today = new Date(2026, 10, 4, 15, 0);
-    const summary = (id: string, started: string): MeetingSummary => ({ id, started, seconds: 60, speakers: 2, lines: 4, words: 50, has_audio: true, has_thumbnail: false });
+    const summary = (id: string, started: string): MeetingSummary => ({ id, started, seconds: 60, speakers: 2, lines: 4, words: 50, has_audio: true, has_thumbnail: false, me_seconds: 20, talk_seconds: 50 });
     const sections = daySections(
       [summary("b", "2026-11-04T14:00:00"), summary("a", "2026-11-04T09:00:00"), summary("c", "2026-11-03T22:10:00"), summary("d", "2026-10-20T08:00:00")],
       today,

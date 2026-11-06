@@ -33,8 +33,12 @@ export function Section({ title, note, children, action }: { title: string; note
   );
 }
 
-export function Card({ className, children }: { className?: string; children?: ReactNode }) {
-  return <div className={cn("surface rounded-xl border border-edge bg-card shadow-card", className)}>{children}</div>;
+export function Card({ className, children, title }: { className?: string; children?: ReactNode; title?: string }) {
+  return (
+    <div title={title} className={cn("surface rounded-xl border border-edge bg-card shadow-card", className)}>
+      {children}
+    </div>
+  );
 }
 
 /** Rows inside one card, separated by hairlines. */
@@ -308,9 +312,9 @@ export function ContextMenu({ x, y, label, items, onClose: closed }: { x: number
 }
 
 /** One number on a card: what it counts, the number, and a line under it. */
-export function Stat({ label, value, detail, className }: { label: string; value: string; detail?: ReactNode; className?: string }) {
+export function Stat({ label, value, detail, className, title }: { label: string; value: string; detail?: ReactNode; className?: string; title?: string }) {
   return (
-    <Card className={cn("px-5 py-4", className)}>
+    <Card className={cn("px-5 py-4", className)} title={title}>
       <p className="text-[12.5px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-[24px] leading-tight font-semibold tabular-nums">{value}</p>
       {detail ? <p className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</p> : null}

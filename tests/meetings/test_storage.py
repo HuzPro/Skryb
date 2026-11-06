@@ -65,6 +65,8 @@ def test_saved_meetings_are_listed_newest_first_with_their_length_speakers_and_w
     assert (onboarding.seconds, onboarding.speakers, onboarding.lines, onboarding.words) == (3066.5, 3, 3, 9)
     assert onboarding.started == "2026-10-16T20:20:00"
     assert onboarding.has_audio is False
+    assert (onboarding.me_seconds, onboarding.talk_seconds) == (1.5, 4.5)
+    assert meetings[0].me_seconds == 0.0
 
 
 def test_only_meetings_that_kept_a_video_s_thumbnail_say_they_have_one(tmp_path: Path) -> None:

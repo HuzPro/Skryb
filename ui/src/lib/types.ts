@@ -285,6 +285,9 @@ export interface MeetingSummary {
   words: number;
   has_audio: boolean;
   has_thumbnail: boolean;
+  /** Seconds of speech from the microphone, and from everyone. */
+  me_seconds: number;
+  talk_seconds: number;
 }
 
 export interface MeetingModel {

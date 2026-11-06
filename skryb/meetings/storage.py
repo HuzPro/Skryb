@@ -93,12 +93,16 @@ class MeetingSummary:
     words: int
     has_audio: bool
     has_thumbnail: bool
+    # Seconds of speech: the microphone's lines, and every line; Home's talk share is one over the other.
+    me_seconds: float = 0.0
+    talk_seconds: float = 0.0
 
     def json(self) -> dict[str, object]:
         return {
             "id": self.id, "started": self.started, "seconds": self.seconds, "speakers": self.speakers,
             "lines": self.lines, "words": self.words, "has_audio": self.has_audio,
             "has_thumbnail": self.has_thumbnail,
+            "me_seconds": round(self.me_seconds, 1), "talk_seconds": round(self.talk_seconds, 1),
         }
 
 
@@ -136,4 +140,6 @@ def _summary(entry: os.DirEntry[str]) -> MeetingSummary | None:
         words=sum(len(e.text.split()) for e in entries),
         has_audio=(folder / "them.flac").is_file() or (folder / "me.flac").is_file(),
         has_thumbnail=(folder / THUMBNAIL_JPG).is_file(),
+        me_seconds=sum(max(0.0, e.end - e.start) for e in entries if e.track == "me"),
+        talk_seconds=sum(max(0.0, e.end - e.start) for e in entries),
     )

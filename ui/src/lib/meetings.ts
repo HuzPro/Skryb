@@ -128,7 +128,12 @@ export interface MeetingStats {
   weeks: number[];
   /** Median seconds of the complete weeks on the chart since the first meeting; null with fewer than two. */
   usualFullWeek: number | null;
+  /** Over the last 30 days' meetings with both you and others in them: your share of the talking, what an even split would be, and how many. */
+  talk: { share: number; even: number; meetings: number } | null;
 }
+
+/** Talk share counts the last this-many days. */
+const TALK_DAYS = 30;
 
 /** The local calendar day of *date*, as a number of days that is the same all day. */
 function dayNumber(date: Date): number {
@@ -161,6 +166,8 @@ export function meetingStats(meetings: MeetingSummary[], now: Date = new Date())
   });
   const full = weeks.slice(0, -1).filter((_, index) => monday - 7 * (CHART_WEEKS - 1 - index) >= firstWeek);
   const spoken = dated.filter(({ meeting }) => meeting.lines > 0).map(({ meeting }) => meeting);
+  const shared = dated.filter(({ day, meeting }) => day > today - TALK_DAYS && day <= today && meeting.me_seconds > 0 && meeting.talk_seconds > meeting.me_seconds).map(({ meeting }) => meeting);
+  const talked = shared.reduce((sum, meeting) => sum + meeting.talk_seconds, 0);
   return {
     count: dated.length,
     seconds: dated.reduce((sum, { meeting }) => sum + meeting.seconds, 0),
@@ -170,5 +177,12 @@ export function meetingStats(meetings: MeetingSummary[], now: Date = new Date())
     typicalSpeakers: median(spoken.map((meeting) => meeting.speakers)),
     weeks,
     usualFullWeek: full.length >= USUAL_WEEK_MINIMUM ? median(full) : null,
+    talk: talked > 0
+      ? {
+          share: shared.reduce((sum, meeting) => sum + meeting.me_seconds, 0) / talked,
+          even: shared.reduce((sum, meeting) => sum + meeting.talk_seconds / Math.max(meeting.speakers, 2), 0) / talked,
+          meetings: shared.length,
+        }
+      : null,
   };
 }

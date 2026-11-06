@@ -466,7 +466,9 @@ class Core:
         return {"id": meeting_id, "started": meeting["started"], "seconds": max((e["end"] for e in entries), default=0.0),
                 "speakers": len({e["key"] for e in entries}), "lines": len(entries),
                 "words": sum(len(e["text"].split()) for e in entries), "has_audio": True,
-                "has_thumbnail": meeting.get("thumbnail") is not None}
+                "has_thumbnail": meeting.get("thumbnail") is not None,
+                "me_seconds": round(sum(max(0.0, e["end"] - e["start"]) for e in entries if e["key"].startswith("me")), 1),
+                "talk_seconds": round(sum(max(0.0, e["end"] - e["start"]) for e in entries), 1)}
 
     def meeting_status(self, status: str, warning=None) -> None:
         live = self.live_meeting
