@@ -619,6 +619,15 @@
   box-shadow: var(--chip-ring);
 }
 
+/*
+ * A label beside an icon: a line of text is taller above its capitals than below its baseline, so centring
+ * the line leaves the words low. This centres the capitals instead. Not for text that truncates: the
+ * trimmed box would clip its descenders.
+ */
+@utility label-centred {
+  text-box: trim-both cap alphabetic;
+}
+
 @utility page-title {
   font-family: var(--font-head);
   font-size: var(--title-size);

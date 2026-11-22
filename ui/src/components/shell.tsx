@@ -142,18 +142,19 @@ export function ModeToggle({ mode, onChange, recording }: { mode: Mode; onChange
               buttons.current[index] = element;
             }}
             role="radio"
+            data-track={`mode-${value}`}
             aria-checked={selected}
             aria-label={hint}
             aria-describedby={`${tipId}-${value}`}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(value)}
             className={cn(
-              "group relative flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--r-button)-3px)] text-[12.5px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-3.5",
+              "group relative flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--r-button)-3px)] text-[12.5px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:-ml-0.5 [&_svg]:size-3.5",
               selected && "text-foreground",
             )}
           >
             <Icon />
-            {label}
+            <span className="label-centred">{label}</span>
             {live ? <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" /> : null}
             <span
               id={`${tipId}-${value}`}
@@ -192,22 +193,31 @@ export function fitSidebar(width: number, windowWidth: number): number {
   return Math.round(Math.max(SIDEBAR.least, Math.min(width, SIDEBAR.most, windowWidth - PAGE_ROOM)));
 }
 
-/** The width the sidebar was last dragged to; the standard width the first time or when storage is blocked. */
-export function savedSidebarWidth(memory: WidthMemory | null = browserStorage()): number {
+/** The width saved under *key*; *standard* the first time, when what is saved isn't a width, or when storage is blocked. */
+export function savedWidth(key: string, standard: number, memory: WidthMemory | null = browserStorage()): number {
   try {
-    const width = Number(memory?.getItem(SIDEBAR_WIDTH));
-    return Number.isFinite(width) && width > 0 ? width : SIDEBAR.standard;
+    const width = Number(memory?.getItem(key));
+    return Number.isFinite(width) && width > 0 ? width : standard;
   } catch {
-    return SIDEBAR.standard;
+    return standard;
   }
 }
 
-export function saveSidebarWidth(width: number, memory: WidthMemory | null = browserStorage()): void {
+export function saveWidth(key: string, width: number, memory: WidthMemory | null = browserStorage()): void {
   try {
-    memory?.setItem(SIDEBAR_WIDTH, String(Math.round(width)));
+    memory?.setItem(key, String(Math.round(width)));
   } catch {
-    // Storage blocked: the sidebar opens at the standard width next time.
+    // Storage blocked: it opens at the standard width next time.
   }
+}
+
+/** The width the sidebar was last dragged to; the standard width the first time or when storage is blocked. */
+export function savedSidebarWidth(memory: WidthMemory | null = browserStorage()): number {
+  return savedWidth(SIDEBAR_WIDTH, SIDEBAR.standard, memory);
+}
+
+export function saveSidebarWidth(width: number, memory: WidthMemory | null = browserStorage()): void {
+  saveWidth(SIDEBAR_WIDTH, width, memory);
 }
 
 function useSidebarWidth(): [number, (width: number) => void] {
@@ -221,11 +231,35 @@ function useSidebarWidth(): [number, (width: number) => void] {
   return [fitSidebar(wanted, windowWidth), setWanted];
 }
 
-/** The sidebar's right edge: drag it, or use the arrow keys, to widen it; double-click puts it back. Saved once it settles. */
-function SidebarEdge({ width, onResize }: { width: number; onResize: (width: number) => void }) {
+/**
+ * The right edge of something *width* wide: drag it, or use the arrow keys, to widen it; double-click puts
+ * it back to *standard*. *fit* keeps a wanted width within what there is room for; *onSettle* gets the
+ * width once a drag, a nudge or a reset is over, to remember it.
+ */
+export function ResizeEdge({
+  label,
+  width,
+  standard,
+  least,
+  most,
+  fit,
+  onResize,
+  onSettle,
+  className,
+}: {
+  label: string;
+  width: number;
+  standard: number;
+  least: number;
+  most: number;
+  fit: (width: number) => number;
+  onResize: (width: number) => void;
+  onSettle: (width: number) => void;
+  className?: string;
+}) {
   const resize = (next: number) => {
     onResize(next);
-    saveSidebarWidth(next);
+    onSettle(next);
   };
   const drag = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -234,14 +268,14 @@ function SidebarEdge({ width, onResize }: { width: number; onResize: (width: num
     const from = event.clientX;
     let last = width;
     const move = (moved: globalThis.PointerEvent) => {
-      last = fitSidebar(width + moved.clientX - from, window.innerWidth);
+      last = fit(width + moved.clientX - from);
       onResize(last);
     };
     const stop = () => {
       edge.removeEventListener("pointermove", move);
       edge.removeEventListener("pointerup", stop);
       edge.removeEventListener("pointercancel", stop);
-      saveSidebarWidth(last);
+      onSettle(last);
     };
     edge.setPointerCapture(event.pointerId);
     edge.addEventListener("pointermove", move);
@@ -252,22 +286,25 @@ function SidebarEdge({ width, onResize }: { width: number; onResize: (width: num
     const step = event.key === "ArrowRight" ? 16 : event.key === "ArrowLeft" ? -16 : 0;
     if (!step) return;
     event.preventDefault();
-    resize(fitSidebar(width + step, window.innerWidth));
+    resize(fit(width + step));
   };
   return (
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Sidebar width"
-      aria-valuemin={SIDEBAR.least}
-      aria-valuemax={SIDEBAR.most}
+      aria-label={label}
+      aria-valuemin={least}
+      aria-valuemax={most}
       aria-valuenow={width}
       tabIndex={0}
       title="Drag to resize. Double-click to reset."
       onPointerDown={drag}
-      onDoubleClick={() => resize(SIDEBAR.standard)}
+      onDoubleClick={() => resize(fit(standard))}
       onKeyDown={nudge}
-      className="absolute inset-y-0 -right-[3px] z-10 w-[6px] cursor-col-resize outline-none transition-colors hover:bg-primary/40 focus-visible:bg-primary/60 active:bg-primary/60"
+      className={cn(
+        "absolute inset-y-0 -right-[3px] z-10 w-[6px] cursor-col-resize outline-none transition-colors hover:bg-primary/40 focus-visible:bg-primary/60 active:bg-primary/60",
+        className,
+      )}
     />
   );
 }
@@ -277,14 +314,15 @@ function UpdateButton() {
   const app = useAppInfo();
   const [failed, setFailed] = useState(false);
   const line = "flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground";
+  // Cut short sideways only: `truncate` hides overflow both ways, and would clip the descenders that centring on the capitals leaves outside the box.
   if (!app) return <span />;
   const update = app.update;
-  if (update === null) return <span className={line}>Skryb {app.version}</span>;
+  if (update === null) return <span className={line}><span className="label-centred">Skryb {app.version}</span></span>;
   if (update.state === "ready") {
     return (
       <Link to="/updates" draggable={false} title={`Install Skryb ${update.version}`} className={cn(line, "font-medium text-primary transition-colors hover:bg-accent")}>
         <Download className="size-3.5 shrink-0" />
-        <span className="truncate">Update to {update.version}</span>
+        <span className="label-centred overflow-x-clip text-ellipsis whitespace-nowrap">Update to {update.version}</span>
       </Link>
     );
   }
@@ -310,7 +348,7 @@ function UpdateButton() {
       className={cn(line, "transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none")}
     >
       {busy ? <LoaderCircle className="size-3.5 shrink-0 motion-safe:animate-spin" /> : <RefreshCw className="size-3.5 shrink-0" />}
-      <span className="truncate">{label}</span>
+      <span className="label-centred overflow-x-clip text-ellipsis whitespace-nowrap">{label}</span>
     </button>
   );
 }
@@ -333,7 +371,16 @@ export function Sidebar({
   const settingsOpen = pathname === "/updates";
   return (
     <aside style={{ width }} className="surface relative flex shrink-0 flex-col border-r border-[var(--sidebar-edge)] bg-sidebar">
-      <SidebarEdge width={width} onResize={setWidth} />
+      <ResizeEdge
+        label="Sidebar width"
+        width={width}
+        standard={SIDEBAR.standard}
+        least={SIDEBAR.least}
+        most={SIDEBAR.most}
+        fit={(wanted) => fitSidebar(wanted, window.innerWidth)}
+        onResize={setWidth}
+        onSettle={saveSidebarWidth}
+      />
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="pointer-events-none flex">
           <Mark />
@@ -351,6 +398,7 @@ export function Sidebar({
             <Link
               key={item.label}
               to={item[mode]}
+              data-track={`nav-${item[mode].slice(1)}`}
               draggable={false}
               aria-current={active ? "page" : undefined}
               className={cn(
@@ -359,7 +407,7 @@ export function Sidebar({
               )}
             >
               <Icon className="size-4" />
-              {item.label}
+              <span className="label-centred">{item.label}</span>
             </Link>
           );
         })}
@@ -368,6 +416,7 @@ export function Sidebar({
         <UpdateButton />
         <Link
           to="/updates"
+          data-track="nav-updates"
           draggable={false}
           aria-label="Settings"
           title="Settings"

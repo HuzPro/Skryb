@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppInfo } from "../lib/types";
-import { engineStatus, fitSidebar, saveSidebarWidth, savedSidebarWidth, SIDEBAR } from "./shell";
+import { fitList, LIST } from "../pages/history";
+import { engineStatus, fitSidebar, saveSidebarWidth, savedSidebarWidth, saveWidth, savedWidth, SIDEBAR } from "./shell";
 
 function ready(device?: string | null, device_note?: string | null): AppInfo {
   return { state: "idle", engine: { ready: true, loading: false, error: null, model: "phonon-2.5-english", device, device_note } } as AppInfo;
@@ -62,5 +63,33 @@ describe("the sidebar's width", () => {
     expect(() => saveSidebarWidth(300, blocked)).not.toThrow();
     expect(savedSidebarWidth(blocked)).toBe(SIDEBAR.standard);
     expect(savedSidebarWidth(null)).toBe(SIDEBAR.standard);
+  });
+});
+
+describe("History's list width", () => {
+  it("stays as dragged, between its least and its most", () => {
+    expect(fitList(40, 2560)).toBe(LIST.least);
+    expect(fitList(-300, 2560)).toBe(LIST.least);
+    expect(fitList(412.6, 2560)).toBe(413);
+    expect(fitList(LIST.least, 2560)).toBe(LIST.least);
+    expect(fitList(LIST.most, 2560)).toBe(LIST.most);
+    expect(fitList(5000, 2560)).toBe(LIST.most);
+  });
+
+  it("leaves the reader beside it at least 320 px, and keeps its own least when there is no room for both", () => {
+    expect(fitList(700, 864)).toBe(538);
+    expect(fitList(538, 864)).toBe(538);
+    expect(fitList(539, 864)).toBe(538);
+    expect(fitList(700, 500)).toBe(LIST.least);
+    expect(fitList(700, 0)).toBe(LIST.least);
+  });
+
+  it("is remembered on its own, apart from the sidebar's", () => {
+    const store = memory({ "sidebar-width": "300" });
+    expect(savedWidth("history-list-width", LIST.standard, store)).toBe(LIST.standard);
+    saveWidth("history-list-width", 451.5, store);
+    expect(savedWidth("history-list-width", LIST.standard, store)).toBe(452);
+    expect(savedSidebarWidth(store)).toBe(300);
+    for (const junk of ["", "wide", "-50", "0", "NaN", "Infinity"]) expect(savedWidth("history-list-width", LIST.standard, memory({ "history-list-width": junk }))).toBe(LIST.standard);
   });
 });

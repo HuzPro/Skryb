@@ -71,9 +71,17 @@ first thing to include in a bug report.
 
 ## Privacy
 
-Audio and transcripts aren't saved by default. The **Save history** switch on
-the History page lets you opt in, and saved sessions go to the logs folder.
-Ordinary logs hold timing and status information, never transcript text.
+Audio and transcripts aren't saved by default. The **Save history** switch in
+History settings, behind the sliders button on the History page, lets you opt
+in, and saved sessions go to the logs folder. Ordinary logs hold timing and
+status information, never transcript text.
+
+Usage data is off by default too. **Keep usage data** in Settings records which
+pages, buttons and settings you use, and nothing you say or type: no dictated
+text, audio, names or folders. It stays in `telemetry.jsonl` in the logs folder
+and is never sent anywhere. Skryb uses it to put the History action you use
+most first. Settings can export it as one file, to read yourself or send to
+the developers if you choose, and can delete it.
 
 The default folder is `%APPDATA%\Skryb\diagnostics`. Use a local folder
 that isn't synced or shared. Turning history off keeps the files already
