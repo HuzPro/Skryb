@@ -72,6 +72,10 @@ def _english() -> str:
     return "en"
 
 
+def _as_heard(text: str) -> str:
+    return text
+
+
 class RecordAndTranscribeUseCase:
 
     def __init__(
@@ -94,6 +98,7 @@ class RecordAndTranscribeUseCase:
         engine_turns: EngineTurns | None = None,
         terms: Callable[[], Sequence[Term]] = _no_terms,
         language: Callable[[], str] = _english,
+        clean_up: Callable[[str], str] = _as_heard,
     ) -> None:
         self._recorder = recorder
         self._engine = engine
@@ -151,6 +156,10 @@ class RecordAndTranscribeUseCase:
         # The people and terms list, read at each decode so an edit applies to the next dictation.
         self._terms = terms
         self._language = language
+        # The cleanup rules switched on now. A dictation meets them in the
+        # output chain on its way to the text box; a history retry is shown,
+        # never typed, so it takes them from here.
+        self._clean_up = clean_up
         event_bus.subscribe(StateChangedEvent, self._on_state_changed)
 
     def on_hotkey_activated(self) -> None:
@@ -266,13 +275,16 @@ class RecordAndTranscribeUseCase:
 
         def run() -> None:
             try:
-                result = self._transcribe(load_wav(wav_path))
+                text = self._cleaned_transcript_of(wav_path)
             except Exception as exc:  # noqa: BLE001 - reported to the window
                 on_done(exc)
                 return
-            on_done(result.text)
+            on_done(text)
 
         self._dispatcher.dispatch(run)
+
+    def _cleaned_transcript_of(self, wav_path: Path) -> str:
+        return self._clean_up(self._transcribe(load_wav(wav_path)).text)
 
     def _handle_pause_toggle(self) -> None:
         with self._action_lock:

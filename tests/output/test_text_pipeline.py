@@ -599,11 +599,66 @@ class TestSpokenVersionNumbers:
         assert _batch(spoken, options=DictionaryOptions(numbers=True)) == typed
 
     @pytest.mark.parametrize(("spoken", "typed"), [
+        ("zero point seventeen point one", "0.17.1"),
+        ("Zero point seventeen point one.", "0.17.1. "),
+        ("version one point two point three", "version 1.2.3"),
+        ("The release is zero point seventeen", "The release is 0.17"),
+        ("It needs Python three point twelve", "It needs Python 3.12"),
+        ("Bump it to two point twenty five", "Bump it to 2.25"),
+        ("Ship 0.17 point one today", "Ship 0.17.1 today"),
+        ("Rated 4 point five, then two point 5", "Rated 4.5, then 2.5"),
+        ("We're at one point two point three now", "We're at 1.2.3 now"),
+        ("zero point seventeen point one and zero point seventeen point one", "0.17.1 and 0.17.1"),
+    ])
+    def test_versions_said_with_point_are_typed_as_numbers(self, spoken: str, typed: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == typed
+
+    @pytest.mark.parametrize(("spoken", "typed"), [
         ("two point five", "2.5"),
+        ("three point one four", "3.14"),
+        ("ten point zero", "10.0"),
+        ("zero point zero five", "0.05"),
         ("Pi is three point one four one five", "Pi is 3.1415"),
     ])
     def test_a_single_point_is_still_a_decimal(self, spoken: str, typed: str) -> None:
         assert _batch(spoken, options=DictionaryOptions(numbers=True)) == typed
+
+    @pytest.mark.parametrize("spoken", [
+        "that is a good point one of them made",
+        "the point is",
+        "at one point two people left",
+        "At one point, two people left",
+        "point taken",
+        "At one point",
+    ])
+    def test_point_in_ordinary_prose_keeps_its_words(self, spoken: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == spoken
+
+    @pytest.mark.parametrize("spoken", [
+        "zero point seventeen point one",
+        "It needs Python three point twelve",
+        "two point five",
+        "at one point two people left",
+    ])
+    def test_points_stay_words_when_number_formatting_is_off(self, spoken: str) -> None:
+        assert _batch(spoken) == spoken
+
+    def test_unicode_around_a_version_is_left_as_it_was(self) -> None:
+        spoken = "Café zero point seventeen point one — naïve point taken"
+
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == "Café 0.17.1 — naïve point taken"
+
+    def test_a_long_dictation_mixing_versions_and_moments_reads_each_one_right(self) -> None:
+        sentence = "At one point two people left, so zero point seventeen point one shipped at two point five times."
+        spoken = " ".join([sentence] * 1000)
+
+        typed = _batch(spoken, options=DictionaryOptions(numbers=True))
+
+        assert typed.count("At one point two people left, so 0.17.1 shipped at 2.5 times.") == 1000
+        assert " point seventeen" not in typed
+
+    def test_a_blank_dictation_stays_blank(self) -> None:
+        assert _batch("", options=DictionaryOptions(numbers=True)) == ""
 
     @pytest.mark.parametrize("spoken", [
         "Go to one dot com",
@@ -708,6 +763,51 @@ class TestStreamingPipeline:
         result = TextPipeline.for_streaming(config).process("get hub twenty percent")
 
         assert result == "get hub twenty percent"
+
+
+_NUMBERS_ON = DictionaryOptions(numbers=True)
+
+
+def _over(selected: str, spoken: str, options: DictionaryOptions = _NUMBERS_ON) -> str:
+    return TextPipeline.for_batch(
+        DictionaryConfig(options=options),
+        caret_context=lambda: CaretContext("Row ", selected, " is free"),
+    ).process(spoken)
+
+
+class TestANumberSaidOverASelectedNumber:
+    @pytest.mark.parametrize(("selected", "spoken", "typed"), [
+        ("3", "Two.", "2"),
+        ("3 ", "two", "2 "),
+        ("1,000", "Zero.", "0"),
+        ("0.17.1", "one", "1"),
+        ("42", "twenty five", "25"),
+        ("7", "two point five", "2.5"),
+        ("12", "one hundred and two", "102"),
+    ])
+    def test_a_number_said_over_a_selected_number_is_typed_as_digits(
+        self, selected: str, spoken: str, typed: str,
+    ) -> None:
+        assert _over(selected, spoken) == typed
+
+    @pytest.mark.parametrize(("selected", "spoken", "typed"), [
+        ("3", "two cats", "two cats"),
+        ("3", "First.", "first"),
+        ("three", "Two.", "two"),
+        ("", "Two.", "two"),
+        ("B2", "one", "one"),
+    ])
+    def test_a_small_number_stays_a_word_unless_it_is_all_that_replaces_a_number(
+        self, selected: str, spoken: str, typed: str,
+    ) -> None:
+        assert _over(selected, spoken) == typed
+
+    def test_a_number_over_a_number_stays_a_word_when_number_formatting_is_off(self) -> None:
+        assert _over("3", "Two.", DictionaryOptions()) == "two"
+
+    @pytest.mark.parametrize("spoken", ["", "   "])
+    def test_a_blank_dictation_over_a_number_types_nothing(self, spoken: str) -> None:
+        assert _over("3", spoken) == ""
 
 
 class TestCaretContextStage:

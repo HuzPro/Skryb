@@ -453,6 +453,19 @@ def _build_output(
     )
 
 
+def _clean_up_with_current_rules(paths: AppPaths, text: str) -> str:
+    """*text* as the cleanup rules switched on now would type it, with no text box to fit it to.
+
+    Read from the saved files each time, as each rebuilt output chain reads
+    them, since nothing records the rules a past dictation was typed with.
+    """
+    pipeline = build_pipeline(
+        load_dictionary(paths.dictionary_path), PipelineMode.BATCH,
+        models_dir=paths.models_dir, terms=load_terms(paths.people_path),
+    )
+    return pipeline.process(text)
+
+
 def _ignore_repick(_picked: Repick) -> None:
     return None
 
@@ -1362,6 +1375,7 @@ def build_app(
         ),
         terms=functools.partial(load_terms, paths.people_path),
         language=functools.partial(_dictation_language, config),
+        clean_up=functools.partial(_clean_up_with_current_rules, paths),
     )
 
     def toggle_meeting_from_shortcut() -> None:

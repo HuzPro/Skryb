@@ -1163,6 +1163,70 @@ class TestRetranscribe:
         output.output.assert_not_called()
         assert engine.transcribe.call_args.args[0].duration_seconds == pytest.approx(1.0)
 
+    def _dictating_through(self, pipeline):
+        from skryb.output.text_filter_decorator import TextFilterDecorator
+        from tests.fakes.output import FakeTextOutputHandler
+
+        event_bus = SimpleEventBus()
+        typed = FakeTextOutputHandler()
+        engine = _plain_engine()
+        recorder = MagicMock()
+        recorder.stop_recording.return_value = _make_audio()
+        use_case = RecordAndTranscribeUseCase(
+            recorder=recorder,
+            engine=engine,
+            output=TextFilterDecorator(typed, pipeline),
+            state_machine=AppStateMachine(event_bus, initial_state=AppState.IDLE),
+            event_bus=event_bus,
+            action_dispatcher=InlineActionDispatcher(),
+            diagnostics=MagicMock(spec=SessionDiagnostics),
+            clean_up=pipeline.process,
+        )
+        return use_case, engine, typed
+
+    def test_retry_formats_numbers_the_way_dictation_does(self, tmp_path):
+        from skryb.output.dictionary_config import DictionaryConfig, DictionaryOptions
+        from skryb.output.text_pipeline import TextPipeline
+
+        options = DictionaryOptions(remove_fillers=True, spoken_commands=True, numbers=True)
+        use_case, engine, typed = self._dictating_through(TextPipeline.for_batch(DictionaryConfig(options=options)))
+        engine.transcribe.return_value = _make_result(
+            "Um, order twenty five boxes comma then zero point seventeen point one, café ✓ period",
+        )
+        retried = []
+
+        use_case.on_hotkey_activated()
+        use_case.on_hotkey_activated()
+        use_case.retranscribe(self._wav(tmp_path), retried.append)
+
+        assert typed.outputs == ["Order 25 boxes, then 0.17.1, café ✓. "]
+        assert retried == typed.outputs
+
+    def test_an_empty_retry_stays_empty_with_every_rule_on(self, tmp_path):
+        from skryb.output.dictionary_config import DictionaryConfig, DictionaryOptions
+        from skryb.output.text_pipeline import TextPipeline
+
+        options = DictionaryOptions(remove_fillers=True, spoken_commands=True, numbers=True)
+        use_case, engine, _typed = self._dictating_through(TextPipeline.for_batch(DictionaryConfig(options=options)))
+        engine.transcribe.return_value = _make_result("")
+        retried = []
+
+        use_case.retranscribe(self._wav(tmp_path), retried.append)
+
+        assert retried == [""]
+
+    def test_hands_back_the_error_when_the_cleanup_fails(self, tmp_path):
+        failing = MagicMock()
+        failing.process.side_effect = ValueError("dictionary unreadable")
+        use_case, engine, typed = self._dictating_through(failing)
+        engine.transcribe.return_value = _make_result("twenty five")
+        results = []
+
+        use_case.retranscribe(self._wav(tmp_path), results.append)
+
+        assert str(results[0]) == "dictionary unreadable"
+        assert typed.outputs == []
+
     def test_hands_back_the_error_when_the_file_is_gone(self, tmp_path):
         use_case, _, engine, _, _, _ = _build_use_case()
         results = []

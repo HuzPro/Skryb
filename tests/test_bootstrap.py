@@ -992,6 +992,38 @@ class TestBuildOutput:
         )
 
 
+class TestHistoryRetryCleanup:
+    def test_retried_text_goes_through_the_rules_switched_on_now(self, tmp_path: Path) -> None:
+        from skryb.output.dictionary_config import (
+            DictionaryConfig,
+            DictionaryOptions,
+            save_dictionary,
+        )
+        from skryb.people.terms import Term, update_people, with_terms
+
+        paths = AppPaths(tmp_path)
+        heard = "Send twenty five copies to kestrel win"
+        before = bootstrap._clean_up_with_current_rules(paths, heard)
+        save_dictionary(paths.dictionary_path, DictionaryConfig(options=DictionaryOptions(numbers=True)))
+        update_people(paths.people_path, lambda people: with_terms(people, (Term("Kestrelwyn", heard_as=("kestrel win",)),)))
+
+        after = bootstrap._clean_up_with_current_rules(paths, heard)
+
+        assert before == heard
+        assert after == "Send 25 copies to Kestrelwyn"
+
+    def test_a_retry_never_reads_the_focused_window_it_is_shown_in(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def focused_window_read() -> object:
+            raise AssertionError("a retry is shown, not typed into the focused window")
+
+        monkeypatch.setattr(bootstrap, "read_caret_context", focused_window_read)
+        monkeypatch.setattr(bootstrap, "_foreground_process", focused_window_read)
+
+        assert bootstrap._clean_up_with_current_rules(AppPaths(tmp_path), "Open the data.") == "Open the data. "
+
+
 class TestApplySettings:
     """Characterize the hot-reload dispatch: apply_settings routes each
     ChangeSet flag to the correct adapter swap so runtime changes take

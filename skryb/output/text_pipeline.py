@@ -144,10 +144,21 @@ _PART = (
 _SEPARATOR_PATTERN = re.compile(r"\s+(point|dot)\s+", re.IGNORECASE)
 # Spoken version numbers: "zero point three point one", "Python three dot
 # twelve". alpha2digit reads a lone "point" as a decimal, with the digits
-# after it one by one ("three point one four" is 3.14), so that is left to it.
+# after it one by one ("three point one four" is 3.14), so a word and a
+# single digit around one "point" are left to it.
 _DOTTED_NUMBER_PATTERN = re.compile(
     rf"(?<![\w.]){_PART}(?:\s+(?:point|dot)\s+{_PART})+(?!\w|\.\d)", re.IGNORECASE,
 )
+_DIGIT_WORDS = frozenset({"zero", *_UNIT_WORDS.split("|")})
+# "At one point" is a moment, not a decimal: "at one point two people left"
+# keeps its words, unless a version follows ("at one point two point three").
+# A decimal said right after "at" ("peaked at one point five") is read as the
+# idiom too; the word after it could tell the two apart if that ever matters.
+_AT_ONE_POINT = re.compile(
+    rf"((?<![\w'’-])at\s+one\s+point(?!\w)(?!\s+{_PART}\s+(?:point|dot)\s+{_PART}))", re.IGNORECASE,
+)
+# A number as it is written: "3", "1,000", "0.17.1".
+_WRITTEN_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 # Words a sentence never ends on. A full stop or question mark after one is
 # the transcriber hearing a pause to think, as in "Make a plan and. Do
 # adversarial reviews", so the sentence carries on through it.
@@ -228,12 +239,17 @@ def _caret_stage(
     swap: Callable[[str], str],
     terms: Sequence[Term] = (),
     on_repick: Callable[[Repick], None] = _ignore_repick,
+    numbers: bool = False,
 ) -> Callable[[str], str]:
     def fit(text: str) -> str:
         context = caret_context()
         picked = repick(text, context.selected, terms) if terms and context.selected.strip() else None
         if picked is None:
-            return swap(fit_to_context(text, context))
+            fitted = swap(fit_to_context(text, context))
+            # Only here is the selection known, so the numbers stage after this can't tell.
+            if numbers and _WRITTEN_NUMBER.fullmatch(context.selected.strip()):
+                return _number_over_a_number(fitted)
+            return fitted
         # No swaps after a re-pick: "scribe" is a heard-as spelling of "Skryb", so they would undo it.
         on_repick(picked)
         fitted = fit_to_context(picked.text, context)
@@ -279,6 +295,7 @@ class TextPipeline:
         stages.append(add_trailing_sentence_space)
         stages.append(_caret_stage(
             caret_context, _RuleStage(config.rules + people_rules(terms), on_fired).apply, terms, on_repick,
+            config.options.numbers,
         ))
         if config.options.numbers:
             stages.append(format_numbers)
@@ -431,8 +448,12 @@ def add_trailing_sentence_space(text: str) -> str:
 
 
 def format_numbers(text: str) -> str:
-    converted = _DOTTED_NUMBER_PATTERN.sub(_format_dotted_number, text)
-    converted = alpha2digit(converted, "en")
+    # The stretches between "at one point"s are read apart, so no decimal is read across one.
+    pieces = _AT_ONE_POINT.split(text)
+    converted = "".join(
+        piece if index % 2 else alpha2digit(_DOTTED_NUMBER_PATTERN.sub(_format_dotted_number, piece), "en")
+        for index, piece in enumerate(pieces)
+    )
     converted = _PERCENT_PATTERN.sub(r"\1%", converted)
     converted = _DOLLARS_AND_CENTS_PATTERN.sub(_format_dollars_and_cents, converted)
     return _DOLLARS_PATTERN.sub(r"$\1", converted)
@@ -441,9 +462,21 @@ def format_numbers(text: str) -> str:
 def _format_dotted_number(match: re.Match[str]) -> str:
     pieces = _SEPARATOR_PATTERN.split(match.group(0))
     parts, separators = pieces[::2], [piece.casefold() for piece in pieces[1::2]]
-    if separators == ["point"] and not any("." in part for part in parts):
+    # alpha2digit gets "zero point seventeen" and "two point 5" wrong ("0 point 17"), so only
+    # a word and a single digit around one "point" are its to read.
+    if separators == ["point"] and not parts[0][0].isdigit() and parts[1].casefold() in _DIGIT_WORDS:
         return match.group(0)
     return ".".join(_digits_of(part) for part in parts)
+
+
+def _number_over_a_number(text: str) -> str:
+    """A number said over a selected number, as digits however small: "two" over "3" types 2.
+
+    Anywhere else zero, one and two said on their own stay words, as
+    alpha2digit leaves them, so "one of them" and "one dot com" read as prose.
+    """
+    digits = alpha2digit(text, "en", threshold=0)
+    return digits if _WRITTEN_NUMBER.fullmatch(digits.strip(_STRAY_MARKS + "\r\n")) else text
 
 
 def _digits_of(part: str) -> str:
