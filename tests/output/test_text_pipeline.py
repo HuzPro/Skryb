@@ -630,9 +630,26 @@ class TestSpokenVersionNumbers:
         "At one point, two people left",
         "point taken",
         "At one point",
+        "Oh yeah, he has a point.",
+        "He has a point, two of them actually.",
+        "At this point 3 people left.",
+        "The 3 point shot went in.",
+        "Point one, the cost. Point two, the time.",
+        "From point A to point B.",
+        "There's no point.",
+        "Good point, 2 more to go.",
+        "The point is 0.5 is too low.",
     ])
     def test_point_in_ordinary_prose_keeps_its_words(self, spoken: str) -> None:
-        assert _batch(spoken, options=DictionaryOptions(numbers=True)) == spoken
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)).rstrip() == spoken
+
+    @pytest.mark.parametrize(("spoken", "typed"), [
+        ("My point is we need three of them.", "My point is we need 3 of them."),
+        ("I see your point one hundred percent.", "I see your point 100%."),
+        ("He scored a three point play.", "He scored a 3 point play."),
+    ])
+    def test_a_number_beside_the_word_point_is_formatted_and_point_stays_a_word(self, spoken: str, typed: str) -> None:
+        assert _batch(spoken, options=DictionaryOptions(numbers=True)).rstrip() == typed
 
     @pytest.mark.parametrize("spoken", [
         "zero point seventeen point one",
