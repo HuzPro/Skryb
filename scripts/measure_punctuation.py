@@ -1,8 +1,8 @@
 """Measure where the speech model puts its full stops and commas, from saved dictations.
 
     python -m scripts.measure_punctuation checks --logs D:/VoiceToText_logs --out D:/Skryb-punctuation-eval
-    "%LOCALAPPDATA%/Programs/Skryb/python/python.exe" scripts/measure_punctuation.py replay \
-        --logs D:/VoiceToText_logs --out D:/Skryb-punctuation-eval --limit 20
+    "%LOCALAPPDATA%/Programs/Skryb/python/python.exe" -B scripts/measure_punctuation.py replay \
+        --logs D:/VoiceToText_logs --out D:/Skryb-punctuation-eval --min-seconds 15 --control
 
 ``checks`` decodes nothing. It counts, over every logged dictation of one
 model, the signs of a misplaced mark that need no labels: sentences ending on
@@ -17,7 +17,10 @@ with every long pause inside it shortened to that cap, and compares the marks.
 Shortening pauses cut mid-sentence splits for Parakeet; whether Qwen3-ASR
 splits at pauses at all is what this measures. The words must not change: a
 trim that changes them has damaged recognition, whatever it did to the marks.
-Every spot where the two disagree on a mark is written out for a later blind
+The engine also moves on its own: taking 40 ms off one clip changed a word.
+So ``--control`` decodes each clip twice more with its pauses untouched, once
+exactly as it is and once without its first 20 ms, and a cap only means
+something where it moves the output more than those do. Every spot where the two disagree on a mark is written out for a later blind
 listening pass, which is the only fair judge: the user's own edits were made
 from the raw output and so favour it.
 
@@ -37,6 +40,7 @@ import json
 import math
 import random
 import re
+import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -48,7 +52,7 @@ import numpy as np
 
 from skryb.output.dictation_trace import TYPED_FIELD
 from skryb.output.text_pipeline import _NEVER_FINAL_WORDS
-from skryb.recording.audio_segment import load_wav
+from skryb.recording.audio_segment import AudioSegment, load_wav
 
 DEFAULT_MODEL = "qwen3-asr-1.7b"
 DEFAULT_CAPS_MS = (300, 500, 800)
@@ -116,6 +120,9 @@ class _Options:
     examples: int
     caps: tuple[int, ...]
     limit: int | None
+    min_seconds: float | None
+    max_seconds: float | None
+    control: bool
 
 
 def main(argv: Sequence[str] | None = None, build_decoder: DecoderFactory | None = None) -> None:
@@ -144,10 +151,21 @@ def _parse_options(argv: Sequence[str] | None) -> _Options:
     )
     replay.add_argument("--cap", type=int, action="append", help="longest pause kept, in ms (repeatable)")
     replay.add_argument("--limit", type=int, help="replay at most N clips, picked at random with --seed")
+    replay.add_argument("--min-seconds", type=float, help="keep only clips logged at least this long")
+    replay.add_argument("--max-seconds", type=float, help="keep only clips logged shorter than this")
+    replay.add_argument(
+        "--control", action="store_true",
+        help="also decode each clip a second time as it is (repeat) and without its first 20 ms (shift)",
+    )
     arguments = parser.parse_args(argv)
     caps = tuple(getattr(arguments, "cap", None) or DEFAULT_CAPS_MS)
     if any(cap <= 0 for cap in caps):
         parser.error("--cap must be a positive number of milliseconds")
+    shortest, longest = getattr(arguments, "min_seconds", None), getattr(arguments, "max_seconds", None)
+    if any(bound is not None and bound < 0 for bound in (shortest, longest)):
+        parser.error("--min-seconds and --max-seconds can't be negative")
+    if shortest is not None and longest is not None and longest <= shortest:
+        parser.error("--max-seconds must be more than --min-seconds")
     return _Options(
         command=arguments.command,
         logs=arguments.logs,
@@ -157,6 +175,9 @@ def _parse_options(argv: Sequence[str] | None) -> _Options:
         examples=getattr(arguments, "examples", 0),
         caps=tuple(dict.fromkeys(caps)),
         limit=getattr(arguments, "limit", None),
+        min_seconds=shortest,
+        max_seconds=longest,
+        control=getattr(arguments, "control", False),
     )
 
 
@@ -528,40 +549,87 @@ def _joined(samples: np.ndarray, cuts: list[tuple[int, int]], fade: int) -> np.n
 
 # --- replay -------------------------------------------------------------------
 
-_COUNT_KEYS = ("full_stops", "question_marks", "commas", "starts")
 _COUNT_LABELS = {
     "full_stops": "full stops",
     "question_marks": "question marks",
     "commas": "commas",
     "starts": "sentences starting And/But/So/Or",
+    "inner_starts": "  the same, after the dictation's first sentence",
+    "stop_before": "full stops before And/But/So/Or",
+    "comma_before": "commas before and/but/so/or",
 }
+_COUNT_KEYS = tuple(_COUNT_LABELS)
 _CONTEXT_WORDS = 5
+# A pause result means nothing without knowing how far the output moves when
+# the pauses are left alone. "repeat" decodes the very same samples again: the
+# engine's own run-to-run wobble. "shift" drops the first 20 ms, before the
+# first word: about as small a change as the smallest trim, at no pause.
+_REPEAT = "repeat"
+_SHIFT = "shift"
+_SHIFT_SECONDS = 0.02
+_PROGRESS_EVERY = 25
 
 
 def _replay_command(options: _Options, out: Path, build_decoder: DecoderFactory) -> None:
-    of_model = [dictation for dictation in read_dictations(options.logs) if dictation.model == options.model]
+    started = time.monotonic()
+    of_model = [
+        dictation
+        for dictation in read_dictations(options.logs)
+        if dictation.model == options.model and _in_length_range(dictation.audio_seconds, options)
+    ]
     saved = [dictation for dictation in of_model if dictation.audio is not None]
     on_disk = [dictation for dictation in saved if dictation.audio is not None and dictation.audio.is_file()]
     if not on_disk:
-        raise SystemExit(f"No saved audio for {options.model} under {options.logs}.")
+        raise SystemExit(f"No saved audio for {options.model} in that length range under {options.logs}.")
     # One adapter for the whole run: the one most of this model's dictations went through.
     engine = Counter(dictation.engine for dictation in on_disk).most_common(1)[0][0]
     chosen = sample_clips([d for d in on_disk if d.engine == engine], options.limit, options.seed)
+    keys = _variant_keys(options)
     slug = _slug(options.model)
     results_path = out / f"replay-{slug}.jsonl"
-    already = finished_records(results_path, options.caps)
-    pending = [dictation for dictation in chosen if dictation.id not in already]
+    earlier = replayed_records(results_path)
+    pending = [dictation for dictation in chosen if _missing_variants(earlier.get(dictation.id), keys)]
     # The engine is only loaded when there is something left to decode.
-    failures = _replay_with_engine(pending, build_decoder, options, engine, results_path) if pending else []
-    finished = finished_records(results_path, options.caps)
-    records = [finished[dictation.id] for dictation in chosen if dictation.id in finished]
-    entries = [_per_dictation(record, options.caps) for record in records]
-    summary = _replay_summary(entries, options, engine, len(failures), len(saved) - len(on_disk))
+    failures = _replay_with_engine(pending, build_decoder, options, engine, results_path, earlier) if pending else []
+    replayed = replayed_records(results_path)
+    records = [
+        replayed[dictation.id]
+        for dictation in chosen
+        if dictation.id in replayed and not _missing_variants(replayed[dictation.id], keys)
+    ]
+    entries = [_per_dictation(record, keys) for record in records]
+    summary = _replay_summary(entries, options, keys, engine, len(failures), len(saved) - len(on_disk))
     _write_jsonl(out / f"replay-{slug}-per-dictation.jsonl", entries)
-    _write_jsonl(out / f"replay-{slug}-differences.jsonl", _differences(records, options.caps))
+    _write_jsonl(out / f"replay-{slug}-differences.jsonl", _differences(records, keys))
     _write_json(out / f"replay-{slug}-summary.json", summary)
-    _print_replay(summary, options.caps, failures)
+    _print_replay(summary, keys, failures)
     print(f"\nWritten to {out}")
+    print(_wall_time(time.monotonic() - started, len(pending)))
+
+
+def _in_length_range(seconds: float | None, options: _Options) -> bool:
+    if options.min_seconds is None and options.max_seconds is None:
+        return True
+    if seconds is None:
+        return False
+    return (options.min_seconds is None or seconds >= options.min_seconds) and (
+        options.max_seconds is None or seconds < options.max_seconds
+    )
+
+
+def _variant_keys(options: _Options) -> tuple[str, ...]:
+    """The variants of each clip besides raw, as their keys in the results file."""
+    controls = (_REPEAT, _SHIFT) if options.control else ()
+    return (*(str(cap) for cap in options.caps), *controls)
+
+
+def _variant_name(key: str) -> str:
+    return f"{key} ms" if key.isdigit() else key
+
+
+def _wall_time(seconds: float, clips: int) -> str:
+    each = f", {seconds / clips:.1f} s a clip with the engine load" if clips else ""
+    return f"Took {seconds:.0f} s for {clips} clips decoded this run{each}"
 
 
 def sample_clips(dictations: Sequence[_Dictation], limit: int | None, seed: int) -> list[_Dictation]:
@@ -576,55 +644,80 @@ def sample_clips(dictations: Sequence[_Dictation], limit: int | None, seed: int)
 
 
 def _replay_with_engine(
-    pending: list[_Dictation], build_decoder: DecoderFactory, options: _Options, engine: str, results_path: Path,
+    pending: list[_Dictation],
+    build_decoder: DecoderFactory,
+    options: _Options,
+    engine: str,
+    results_path: Path,
+    earlier: dict[str, _Event],
 ) -> list[str]:
     decode, close = build_decoder(options.model, engine)
     try:
-        return replay(pending, decode, options.caps, results_path)
+        return replay(pending, decode, _variant_keys(options), results_path, earlier)
     finally:
         close()
 
 
-def replay(dictations: Sequence[_Dictation], decode: Decode, caps: Sequence[int], results_path: Path) -> list[str]:
-    """Decode each clip raw and once per cap, appending one record per clip; returns what failed.
+def replay(
+    dictations: Sequence[_Dictation],
+    decode: Decode,
+    keys: Sequence[str],
+    results_path: Path,
+    earlier: dict[str, _Event],
+) -> list[str]:
+    """Decode each clip's missing variants, appending one record per clip; returns what failed.
 
     Each record is flushed as soon as it is made, so a run that is stopped
     loses at most the clip it was on.
     """
     failures: list[str] = []
+    started = time.monotonic()
     with _appending(results_path) as stream:
         for done, dictation in enumerate(dictations, start=1):
             try:
-                record = _replay_clip(dictation, decode, caps)
+                record = _replay_clip(dictation, decode, keys, earlier.get(dictation.id))
             except Exception as error:  # noqa: BLE001 - one bad clip must not end a long run
                 failures.append(_failure(dictation, error))
             else:
                 _append_record(stream, record)
-            print(f"replayed {done} of {len(dictations)}", end="\r", flush=True)
-    print()
+            if done % _PROGRESS_EVERY == 0:
+                print(f"replayed {done} of {len(dictations)} clips, {time.monotonic() - started:.0f} s", flush=True)
     return failures
 
 
-def _replay_clip(dictation: _Dictation, decode: Decode, caps: Sequence[int]) -> _Event:
+def _replay_clip(dictation: _Dictation, decode: Decode, keys: Sequence[str], earlier: _Event | None) -> _Event:
     assert dictation.audio is not None
     audio = load_wav(dictation.audio)
-    raw = decode(audio.data, audio.sample_rate)
-    trimmed: dict[str, _Event] = {}
-    for cap in caps:
-        shortened = shorten_pauses(audio.data, audio.sample_rate, cap)
-        removed = audio.data.size - shortened.size
-        # Nothing cut is the same audio, and decoding it again could only add
-        # the engine's own run-to-run noise to the comparison.
-        text = decode(shortened, audio.sample_rate) if removed else raw
-        trimmed[str(cap)] = {"text": text, "removed_seconds": round(removed / audio.sample_rate, 3)}
+    # A clip replayed before keeps its raw text and every variant it has, so
+    # asking for more decodes only what is new.
+    raw = str(earlier["raw"]) if earlier else decode(audio.data, audio.sample_rate)
+    variants = dict(earlier["trimmed"]) if earlier else {}
+    for key in _missing_variants(earlier, keys):
+        variants[key] = _variant(key, audio, raw, decode)
     return {
         "id": dictation.id,
         "audio_path": str(dictation.audio),
         "audio_seconds": dictation.audio_seconds,
         "logged_text": dictation.text,
         "raw": raw,
-        "trimmed": trimmed,
+        # Named when caps were the only variants; the controls sit beside them.
+        "trimmed": variants,
     }
+
+
+def _variant(key: str, audio: AudioSegment, raw: str, decode: Decode) -> _Event:
+    rate = audio.sample_rate
+    if key == _REPEAT:
+        return {"text": decode(audio.data, rate), "removed_seconds": 0.0}
+    if key == _SHIFT:
+        changed = audio.data[round(rate * _SHIFT_SECONDS):]
+    else:
+        changed = shorten_pauses(audio.data, rate, int(key))
+    removed = audio.data.size - changed.size
+    # Nothing cut is the same audio, and decoding it again would only add the
+    # engine's run-to-run wobble, which "repeat" measures on its own.
+    text = decode(changed, rate) if removed else raw
+    return {"text": text, "removed_seconds": round(removed / rate, 3)}
 
 
 def _failure(dictation: _Dictation, error: Exception) -> str:
@@ -651,29 +744,36 @@ def _ends_with_newline(path: Path) -> bool:
         return stream.read(1) == b"\n"
 
 
-def finished_records(results_path: Path, caps: Sequence[int]) -> dict[str, _Event]:
-    """The clips already replayed with every cap asked for, by id; a later record wins."""
-    finished: dict[str, _Event] = {}
+def replayed_records(results_path: Path) -> dict[str, _Event]:
+    """Every clip replayed so far, by id, whatever variants it has; a later record wins."""
+    replayed: dict[str, _Event] = {}
     for record in _events(results_path):
-        if _is_complete(record, caps):
-            finished[str(record["id"])] = record
-    return finished
+        if (
+            isinstance(record.get("id"), str)
+            and isinstance(record.get("raw"), str)
+            and isinstance(record.get("trimmed"), dict)
+        ):
+            replayed[str(record["id"])] = record
+    return replayed
 
 
-def _is_complete(record: _Event, caps: Sequence[int]) -> bool:
-    trimmed = record.get("trimmed")
-    if not (isinstance(record.get("id"), str) and isinstance(record.get("raw"), str) and isinstance(trimmed, dict)):
-        return False
-    variants = [trimmed.get(str(cap)) for cap in caps]
-    return all(
+def _missing_variants(record: _Event | None, keys: Sequence[str]) -> list[str]:
+    if record is None:
+        return list(keys)
+    variants = record["trimmed"]
+    assert isinstance(variants, dict)
+    return [key for key in keys if not _is_variant(variants.get(key))]
+
+
+def _is_variant(variant: object) -> bool:
+    return (
         isinstance(variant, dict)
         and isinstance(variant.get("text"), str)
         and isinstance(variant.get("removed_seconds"), (int, float))
-        for variant in variants
     )
 
 
-def _per_dictation(record: _Event, caps: Sequence[int]) -> _Event:
+def _per_dictation(record: _Event, keys: Sequence[str]) -> _Event:
     raw, logged = str(record["raw"]), _text(record, "logged_text")
     trimmed = record["trimmed"]
     assert isinstance(trimmed, dict)
@@ -685,12 +785,14 @@ def _per_dictation(record: _Event, caps: Sequence[int]) -> _Event:
         "same_words_as_logged": _lexical(raw) == _lexical(logged),
         "raw": text_counts(raw),
     }
-    for cap in caps:
-        variant = trimmed[str(cap)]
+    for key in keys:
+        variant = trimmed[key]
         text = str(variant["text"])
-        entry[f"{cap} ms"] = {
+        entry[_variant_name(key)] = {
             **text_counts(text),
             "removed_seconds": variant["removed_seconds"],
+            # A cap that cut nothing reused the raw text; only the rest were decoded again.
+            "decoded": key == _REPEAT or variant["removed_seconds"] > 0,
             "words_changed": _lexical(raw) != _lexical(text),
             "spots": len(punctuation_spots(raw, text)),
         }
@@ -705,6 +807,9 @@ def text_counts(text: str) -> dict[str, int]:
         "question_marks": kinds["question"],
         "commas": len(_COMMA.findall(text)),
         "starts": sum(1 for sentence in found if _opens_with_conjunction(sentence)),
+        "inner_starts": sum(1 for sentence in found[1:] if _opens_with_conjunction(sentence)),
+        "stop_before": len(_STOP_BEFORE_CONJUNCTION.findall(text)),
+        "comma_before": len(_COMMA_BEFORE_CONJUNCTION.findall(text)),
     }
 
 
@@ -748,18 +853,19 @@ def _around(tokens: list[tuple[str, str]], at: int) -> str:
     return " ".join(word + mark for word, mark in window)
 
 
-def _differences(records: list[_Event], caps: Sequence[int]) -> list[_Event]:
+def _differences(records: list[_Event], keys: Sequence[str]) -> list[_Event]:
     differences: list[_Event] = []
     for record in records:
         trimmed = record["trimmed"]
         assert isinstance(trimmed, dict)
-        for cap in caps:
-            text = str(trimmed[str(cap)]["text"])
+        for key in keys:
+            text = str(trimmed[key]["text"])
             differences += [
                 {
                     "id": record["id"],
                     "audio_path": record.get("audio_path"),
-                    "cap_ms": cap,
+                    "variant": _variant_name(key),
+                    "cap_ms": int(key) if key.isdigit() else None,
                     "raw_text": record["raw"],
                     "trimmed_text": text,
                     "spot": spot,
@@ -770,26 +876,28 @@ def _differences(records: list[_Event], caps: Sequence[int]) -> list[_Event]:
 
 
 def _replay_summary(
-    entries: list[_Event], options: _Options, engine: str, failed: int, audio_gone: int,
+    entries: list[_Event], options: _Options, keys: Sequence[str], engine: str, failed: int, audio_gone: int,
 ) -> _Event:
     logged = [entry for entry in entries if entry["logged"]]
+    raw = [entry["raw"] for entry in entries]
     variants: dict[str, _Event] = {"raw": _totals(entries, "raw")}
-    for cap in options.caps:
-        name = f"{cap} ms"
-        cut = [entry[name] for entry in entries]
-        raw = [entry["raw"] for entry in entries]
+    for key in keys:
+        name = _variant_name(key)
+        changed = [entry[name] for entry in entries]
         variants[name] = {
             **_totals(entries, name),
-            "clips_shortened": sum(1 for variant in cut if variant["removed_seconds"] > 0),
-            "seconds_removed": round(sum(variant["removed_seconds"] for variant in cut), 1),
-            "clips_fewer_full_stops": sum(1 for v, r in zip(cut, raw) if v["full_stops"] < r["full_stops"]),
-            "clips_more_full_stops": sum(1 for v, r in zip(cut, raw) if v["full_stops"] > r["full_stops"]),
-            "clips_words_changed": sum(1 for variant in cut if variant["words_changed"]),
-            "spots": sum(variant["spots"] for variant in cut),
+            "clips_decoded": sum(1 for variant in changed if variant["decoded"]),
+            "seconds_removed": round(sum(variant["removed_seconds"] for variant in changed), 1),
+            "clips_fewer_full_stops": sum(1 for v, r in zip(changed, raw) if v["full_stops"] < r["full_stops"]),
+            "clips_more_full_stops": sum(1 for v, r in zip(changed, raw) if v["full_stops"] > r["full_stops"]),
+            "clips_words_changed": sum(1 for variant in changed if variant["words_changed"]),
+            "spots": sum(variant["spots"] for variant in changed),
         }
     return {
         "model": options.model,
         "engine": engine,
+        "min_seconds": options.min_seconds,
+        "max_seconds": options.max_seconds,
         "clips": len(entries),
         "failed": failed,
         "audio_gone": audio_gone,
@@ -804,7 +912,7 @@ def _totals(entries: list[_Event], variant: str) -> _Event:
     return {key: sum(entry[variant][key] for entry in entries) for key in _COUNT_KEYS}
 
 
-def _print_replay(summary: _Event, caps: Sequence[int], failures: list[str]) -> None:
+def _print_replay(summary: _Event, keys: Sequence[str], failures: list[str]) -> None:
     print(
         f"Replay of {summary['model']} on {summary['engine']}: {summary['clips']} clips, "
         f"{summary['failed']} failed this run, {summary['audio_gone']} with their audio gone"
@@ -819,15 +927,15 @@ def _print_replay(summary: _Event, caps: Sequence[int], failures: list[str]) -> 
     assert isinstance(variants, dict)
     names = list(variants)
     rows = [(label, [f"{variants[name][key]:,}" for name in names]) for key, label in _COUNT_LABELS.items()]
-    for key, label in (
-        ("clips_shortened", "clips with a pause shortened"),
-        ("seconds_removed", "seconds of pause removed"),
+    for field, label in (
+        ("clips_decoded", "clips decoded again"),
+        ("seconds_removed", "seconds of audio removed"),
         ("clips_fewer_full_stops", "clips with fewer full stops than raw"),
         ("clips_more_full_stops", "clips with more full stops than raw"),
         ("clips_words_changed", "clips whose words changed"),
         ("spots", "places a mark differs from raw"),
     ):
-        rows.append((label, ["-", *(f"{variants[f'{cap} ms'][key]:,}" for cap in caps)]))
+        rows.append((label, ["-", *(f"{variants[_variant_name(key)][field]:,}" for key in keys)]))
     print()
     _print_table(names, rows)
 
@@ -848,7 +956,6 @@ def _app_decoder(model: str, engine_id: str) -> tuple[Decode, Callable[[], None]
     from skryb.core.paths import AppPaths
     from skryb.people.hints import transcribe_with_terms
     from skryb.people.terms import load_terms
-    from skryb.recording.audio_segment import AudioSegment
     from skryb.recording.speech_level import boost_quiet_speech
     from skryb.transcription.engine_factory import build_engine_registry
     from skryb.transcription.engine_registry import EngineSpec

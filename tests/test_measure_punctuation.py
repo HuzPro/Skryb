@@ -8,6 +8,7 @@ which is the habit being measured.
 """
 
 import json
+import re
 import wave
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from scripts.measure_punctuation import (
     sentences,
     shorten_pauses,
 )
+from skryb.recording.audio_segment import load_wav
 
 pytestmark = pytest.mark.integration
 
@@ -548,8 +550,8 @@ class TestWhereChecksWrite:
 # --- replay ------------------------------------------------------------------------
 
 
-_SPLIT = "Light the lantern and. Then walk to the orchard."
-_JOINED = "Light the lantern and then walk to the orchard."
+_SPLIT = "Light the lantern. And walk to the orchard."
+_JOINED = "Light the lantern, and walk to the orchard."
 
 
 def _longest_inner_pause(samples: np.ndarray, sample_rate: int) -> float:
@@ -567,6 +569,7 @@ class _PauseHearingEngine:
 
     def __init__(self, drops_a_word_when_joined: bool = False) -> None:
         self.heard: list[tuple[np.dtype, int, int]] = []
+        self.clips: list[np.ndarray] = []
         self.built_for: list[tuple[str, str]] = []
         self.closed = 0
         self._drops_a_word = drops_a_word_when_joined
@@ -577,6 +580,7 @@ class _PauseHearingEngine:
 
     def decode(self, samples: np.ndarray, sample_rate: int) -> str:
         self.heard.append((samples.dtype, sample_rate, samples.size))
+        self.clips.append(samples.copy())
         if _longest_inner_pause(samples, sample_rate) > 0.5:
             return _SPLIT
         return _JOINED.replace("the orchard", "orchard") if self._drops_a_word else _JOINED
@@ -585,13 +589,32 @@ class _PauseHearingEngine:
         self.closed += 1
 
 
+class _WobblingEngine(_PauseHearingEngine):
+    """Writes a comma it did not write before whenever it hears the very same audio a second time."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._seen: set[bytes] = set()
+
+    def decode(self, samples: np.ndarray, sample_rate: int) -> str:
+        text = super().decode(samples, sample_rate)
+        fingerprint = samples.tobytes()
+        if fingerprint in self._seen:
+            return text.replace("Light the", "Light, the")
+        self._seen.add(fingerprint)
+        return text
+
+
+_SESSION = "20261120T100000Z-0a1b2c3d"
+
+
 def _replay_logs(tmp_path: Path) -> Path:
     """Two clips to replay, plus one of each kind the replay must step over."""
     rng = np.random.default_rng(20)
     logs = tmp_path / "logs"
     session = _write_session(logs, "20261120T100000Z-0a1b2c3d", [
         _transcription(1, _SPLIT, seconds=3.5),
-        _transcription(2, "Light the lantern and then walk to the orchards.", seconds=2.2),
+        _transcription(2, "Light the lantern, and walk to the orchards.", seconds=2.2),
         _transcription(3, "The kettle is on.", seconds=2.0),
         _transcription(4, "The kettle is off.", seconds=2.0),
         _transcription(5, "The kettle is cold.", model=_OTHER_MODEL, engine="nano_parakeet"),
@@ -607,9 +630,11 @@ def _replay_logs(tmp_path: Path) -> Path:
     return logs
 
 
-def _run_replay(tmp_path: Path, engine: _PauseHearingEngine, *caps: int, limit: int | None = None) -> dict:
+def _run_replay(
+    tmp_path: Path, engine: _PauseHearingEngine, *caps: int, limit: int | None = None, extra: tuple[str, ...] = (),
+) -> dict:
     out = tmp_path / "eval"
-    arguments = ["replay", "--logs", str(tmp_path / "logs"), "--out", str(out)]
+    arguments = ["replay", "--logs", str(tmp_path / "logs"), "--out", str(out), *extra]
     for cap in caps or (300, 800):
         arguments += ["--cap", str(cap)]
     if limit is not None:
@@ -632,7 +657,7 @@ class TestReplay:
         raw, short, long = (summary["variants"][name] for name in ("raw", "300 ms", "800 ms"))
         assert (raw["full_stops"], short["full_stops"], long["full_stops"]) == (3, 2, 3)
         assert (short["clips_fewer_full_stops"], short["clips_more_full_stops"]) == (1, 0)
-        assert (long["clips_fewer_full_stops"], long["clips_shortened"]) == (0, 1)
+        assert (long["clips_fewer_full_stops"], long["clips_decoded"]) == (0, 1)
         assert short["seconds_removed"] == pytest.approx(1.2, abs=0.05)
         assert short["clips_words_changed"] == 0
 
@@ -673,10 +698,10 @@ class TestReplay:
         assert len(differences) == 1
         difference = differences[0]
         assert difference["id"] == "20261120T100000Z-0a1b2c3d/0001"
-        assert difference["cap_ms"] == 300
+        assert (difference["variant"], difference["cap_ms"]) == ("300 ms", 300)
         assert Path(difference["audio_path"]) == logs / "20261120T100000Z-0a1b2c3d" / "audio" / "0001.wav"
         assert (difference["raw_text"], difference["trimmed_text"]) == (_SPLIT, _JOINED)
-        assert (difference["spot"]["raw_mark"], difference["spot"]["trimmed_mark"]) == (".", "")
+        assert (difference["spot"]["raw_mark"], difference["spot"]["trimmed_mark"]) == (".", ",")
 
     def test_the_raw_replay_is_checked_against_the_logged_text(self, tmp_path: Path) -> None:
         _replay_logs(tmp_path)
@@ -727,14 +752,15 @@ class TestReplay:
             "20261120T100000Z-0a1b2c3d/0001", "20261120T100000Z-0a1b2c3d/0002",
         }
 
-    def test_asking_for_a_new_cap_redoes_the_clips_that_lack_it(self, tmp_path: Path) -> None:
+    def test_asking_for_a_new_cap_decodes_only_that_cap(self, tmp_path: Path) -> None:
         _replay_logs(tmp_path)
         _run_replay(tmp_path, _PauseHearingEngine(), 300)
         again = _PauseHearingEngine()
 
         summary = _run_replay(tmp_path, again, 300, 500)
 
-        assert len(again.heard) == 1 + 3
+        # Only the long-pause clip has anything for 500 ms to cut; its raw text is kept from the first run.
+        assert len(again.heard) == 1
         assert set(summary["variants"]) == {"raw", "300 ms", "500 ms"}
 
     def test_limit_takes_a_seeded_sample_of_the_clips(self, tmp_path: Path) -> None:
@@ -765,6 +791,176 @@ class TestReplay:
 
         with pytest.raises(SystemExit):
             _run_replay(tmp_path, _PauseHearingEngine(), 0)
+
+
+class TestReplayControls:
+    def test_with_the_control_each_clip_is_decoded_again_as_it_is_and_without_its_first_20_ms(
+        self, tmp_path: Path,
+    ) -> None:
+        logs = _replay_logs(tmp_path)
+        engine = _PauseHearingEngine()
+
+        _run_replay(tmp_path, engine, extra=("--control",))
+
+        # Long-pause clip: raw, 300 ms, 800 ms, repeat, shift. The other: raw, repeat, shift.
+        assert len(engine.heard) == 8
+        recorded = load_wav(logs / _SESSION / "audio" / "0001.wav").data
+        assert sum(np.array_equal(clip, recorded) for clip in engine.clips) == 2
+        assert sum(np.array_equal(clip, recorded[320:]) for clip in engine.clips) == 1
+
+    def test_the_controls_are_counted_and_compared_with_raw_like_the_caps(self, tmp_path: Path) -> None:
+        _replay_logs(tmp_path)
+
+        summary = _run_replay(tmp_path, _PauseHearingEngine(), extra=("--control",))
+
+        repeat, shift = summary["variants"]["repeat"], summary["variants"]["shift"]
+        assert set(repeat) == set(shift) == set(summary["variants"]["300 ms"])
+        assert (repeat["clips_decoded"], shift["clips_decoded"]) == (2, 2)
+        assert (repeat["seconds_removed"], shift["seconds_removed"]) == (0.0, 0.0)
+        assert (repeat["spots"], shift["spots"], repeat["clips_words_changed"]) == (0, 0, 0)
+        entries = _jsonl(tmp_path / "eval" / f"replay-{DEFAULT_MODEL}-per-dictation.jsonl")
+        assert all({"raw", "300 ms", "800 ms", "repeat", "shift"} <= set(entry) for entry in entries)
+        assert {entry["shift"]["removed_seconds"] for entry in entries} == {0.02}
+
+    def test_an_engine_that_wobbles_run_to_run_shows_up_in_the_repeat_control(self, tmp_path: Path) -> None:
+        _replay_logs(tmp_path)
+
+        summary = _run_replay(tmp_path, _WobblingEngine(), extra=("--control",))
+
+        assert summary["variants"]["repeat"]["spots"] == 2
+        assert summary["variants"]["shift"]["spots"] == 0
+        differences = _jsonl(tmp_path / "eval" / f"replay-{DEFAULT_MODEL}-differences.jsonl")
+        repeats = [difference for difference in differences if difference["variant"] == "repeat"]
+        assert len(repeats) == 2
+        assert {difference["cap_ms"] for difference in repeats} == {None}
+        assert {(d["spot"]["raw_mark"], d["spot"]["trimmed_mark"]) for d in repeats} == {("", ",")}
+
+    def test_a_clip_replayed_without_the_control_gets_only_the_controls_decoded_when_asked_again(
+        self, tmp_path: Path,
+    ) -> None:
+        _replay_logs(tmp_path)
+        _run_replay(tmp_path, _PauseHearingEngine())
+        again = _PauseHearingEngine()
+
+        summary = _run_replay(tmp_path, again, extra=("--control",))
+
+        assert len(again.heard) == 2 * 2
+        assert summary["clips"] == 2
+        assert summary["variants"]["raw"]["full_stops"] == 3
+
+    def test_a_result_file_written_before_the_controls_existed_is_still_read(self, tmp_path: Path) -> None:
+        logs = _replay_logs(tmp_path)
+        out = tmp_path / "eval"
+        out.mkdir()
+
+        def record(index: int, raw: str, trimmed: dict[str, tuple[str, float]]) -> dict[str, object]:
+            return {
+                "id": f"{_SESSION}/{index:04d}",
+                "audio_path": str(logs / _SESSION / "audio" / f"{index:04d}.wav"),
+                "audio_seconds": 3.5,
+                "logged_text": raw,
+                "raw": raw,
+                "trimmed": {cap: {"text": text, "removed_seconds": cut} for cap, (text, cut) in trimmed.items()},
+            }
+
+        (out / f"replay-{DEFAULT_MODEL}.jsonl").write_text(
+            json.dumps(record(1, _SPLIT, {"300": (_JOINED, 1.2), "500": (_JOINED, 1.0), "800": (_SPLIT, 0.7)}))
+            + "\n"
+            + json.dumps(record(2, _JOINED, {"300": (_JOINED, 0.0), "500": (_JOINED, 0.0), "800": (_JOINED, 0.0)}))
+            + "\n",
+            encoding="utf-8",
+        )
+        again = _PauseHearingEngine()
+
+        summary = _run_replay(tmp_path, again, 300, 500, 800, extra=("--control",))
+
+        assert len(again.heard) == 2 * 2
+        assert list(summary["variants"]) == ["raw", "300 ms", "500 ms", "800 ms", "repeat", "shift"]
+        assert summary["variants"]["500 ms"]["clips_fewer_full_stops"] == 1
+
+    def test_the_summary_counts_and_but_so_or_after_the_first_sentence_and_the_marks_before_them(
+        self, tmp_path: Path,
+    ) -> None:
+        _replay_logs(tmp_path)
+
+        summary = _run_replay(tmp_path, _PauseHearingEngine(), extra=("--control",))
+
+        picked = ("inner_starts", "stop_before", "comma_before")
+        variants = summary["variants"]
+        assert [variants["raw"][key] for key in picked] == [1, 1, 1]
+        assert [variants["300 ms"][key] for key in picked] == [0, 0, 2]
+        assert [variants["800 ms"][key] for key in picked] == [1, 1, 1]
+        assert [variants["shift"][key] for key in picked] == [1, 1, 1]
+
+
+_LENGTHS: tuple[float | None, ...] = (0.5, 14.99, 15.0, 29.99, 30.0, 45.0, None)
+
+
+def _clips_logged_at(tmp_path: Path, lengths: tuple[float | None, ...]) -> None:
+    """One short clip per entry, each logged as lasting that long; the replay goes by the log."""
+    rng = np.random.default_rng(30)
+    session = _write_session(tmp_path / "logs", _SESSION, [
+        _transcription(index, "The kettle hums.", seconds=seconds) for index, seconds in enumerate(lengths, start=1)
+    ])
+    for index in range(1, len(lengths) + 1):
+        _write_wav(session / "audio" / f"{index:04d}.wav", _speech(0.3, rng))
+
+
+def _replayed_lengths(tmp_path: Path) -> set[float | None]:
+    entries = _jsonl(tmp_path / "eval" / f"replay-{DEFAULT_MODEL}-per-dictation.jsonl")
+    return {_LENGTHS[int(entry["id"].rsplit("/", 1)[1]) - 1] for entry in entries}
+
+
+class TestReplayLengthRange:
+    @pytest.mark.parametrize(
+        ("bounds", "kept"),
+        [
+            (("--min-seconds", "15", "--max-seconds", "30"), {15.0, 29.99}),
+            (("--min-seconds", "15"), {15.0, 29.99, 30.0, 45.0}),
+            (("--max-seconds", "15"), {0.5, 14.99}),
+            ((), set(_LENGTHS)),
+        ],
+    )
+    def test_only_clips_logged_within_the_length_range_are_replayed(
+        self, tmp_path: Path, bounds: tuple[str, ...], kept: set[float | None],
+    ) -> None:
+        _clips_logged_at(tmp_path, _LENGTHS)
+
+        _run_replay(tmp_path, _PauseHearingEngine(), extra=bounds)
+
+        assert _replayed_lengths(tmp_path) == kept
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_the_length_range_is_applied_before_the_limit(self, tmp_path: Path, seed: int) -> None:
+        _clips_logged_at(tmp_path, _LENGTHS)
+
+        _run_replay(tmp_path, _PauseHearingEngine(), limit=1, extra=("--min-seconds", "30", "--seed", str(seed)))
+
+        assert len(_replayed_lengths(tmp_path)) == 1
+        assert _replayed_lengths(tmp_path) <= {30.0, 45.0}
+
+    @pytest.mark.parametrize(
+        "bounds",
+        [("--min-seconds", "30", "--max-seconds", "15"), ("--min-seconds", "15", "--max-seconds", "15"), ("--min-seconds", "-1")],
+    )
+    def test_a_length_range_that_is_empty_or_negative_is_refused(self, tmp_path: Path, bounds: tuple[str, ...]) -> None:
+        _clips_logged_at(tmp_path, _LENGTHS)
+
+        with pytest.raises(SystemExit):
+            _run_replay(tmp_path, _PauseHearingEngine(), extra=bounds)
+
+    def test_progress_is_printed_every_25_clips_with_the_wall_time_at_the_end_and_no_dictated_text(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _clips_logged_at(tmp_path, (20.0,) * 60)
+
+        _run_replay(tmp_path, _PauseHearingEngine())
+
+        shown = capsys.readouterr().out
+        progress = re.findall(r"^replayed (\d+) of (\d+) clips, \d+ s$", shown, flags=re.MULTILINE)
+        assert progress == [("25", "60"), ("50", "60")]
+        assert re.search(r"^Took \d+ s for 60 clips decoded this run, [\d.]+ s a clip", shown, flags=re.MULTILINE)
+        assert "kettle" not in shown
 
 
 class TestSamplingClips:
