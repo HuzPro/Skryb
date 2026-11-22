@@ -3,7 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Download, FileDown, Play, RotateCcw, Search, SlidersHorizontal, Square, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Interlinear } from "../components/english";
-import { Card, Row } from "../components/parts";
+import { Card, PAGE_TITLE, Row, TEXT_INSET } from "../components/parts";
 import { ResizeEdge, saveWidth, savedWidth, useAppInfo } from "../components/shell";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -79,6 +79,12 @@ export function finalText(entry: HistoryEntry): string {
 /** Words as the Home numbers count them: split on whitespace. */
 export function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+/** "1 word", "15 words", "1,912 words". */
+export function words(text: string): string {
+  const count = wordCount(text);
+  return `${count.toLocaleString()} ${count === 1 ? "word" : "words"}`;
 }
 
 /** Mirrors `history.entries.preview`: one line, and a hint when there is no text. */
@@ -392,8 +398,8 @@ export function HistoryPage() {
   return (
     <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-3">
       {/* The title starts where the list's text does; the cards sit outside that line. */}
-      <div className="mb-1 flex min-h-10 items-center gap-2 px-3.5">
-        <h1 className="page-title min-w-0 flex-1 truncate">History</h1>
+      <div className={cn(TEXT_INSET, "mb-1 flex min-h-10 items-center gap-2")}>
+        <h1 className={cn(PAGE_TITLE, "flex-1")}>History</h1>
         {settings && !settings.saved.capture_content ? <Badge>Not saving</Badge> : null}
         {exportNote.text ? <span className={cn("text-[12.5px]", exportNote.error ? "text-destructive" : "text-muted-foreground")}>{exportNote.text}</span> : null}
         <div className="relative w-72 min-w-32 shrink">
@@ -434,7 +440,7 @@ export function HistoryPage() {
                   const style = { transform: `translateY(${row.start}px)`, height: row.size };
                   if (item.kind === "day") {
                     return (
-                      <div key={row.key} style={style} className="absolute inset-x-0 top-0 flex items-end px-3.5 pb-1 text-[11.5px] font-semibold text-muted-foreground">
+                      <div key={row.key} style={style} className="absolute inset-x-0 top-0 flex items-end px-4 pb-1 text-[11.5px] font-semibold text-muted-foreground">
                         {item.label}
                       </div>
                     );
@@ -451,14 +457,14 @@ export function HistoryPage() {
                       style={style}
                       onClick={() => select(entry.id)}
                       className={cn(
-                        "absolute inset-x-1 top-0 flex flex-col justify-center rounded-lg px-2.5 transition-colors hover:bg-accent/60",
+                        "absolute inset-x-1 top-0 flex flex-col justify-center rounded-lg px-3 transition-colors hover:bg-accent/60",
                         active && "bg-selected hover:bg-selected",
                       )}
                     >
                       <span dir="auto" className={cn("truncate text-[13px]", blank && "text-muted-foreground italic")}>{preview(entry)}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground tabular-nums">
                         {parts(entry.at).time} · {formatDuration(entry.audio_seconds)}
-                        {blank ? null : ` · ${wordCount(finalText(entry)).toLocaleString()} words`}
+                        {blank ? null : ` · ${words(finalText(entry))}`}
                         {entry.status ? <Badge variant={statusVariant(entry.status)}>{entry.status}</Badge> : null}
                       </span>
                     </div>
@@ -483,24 +489,24 @@ export function HistoryPage() {
         <Card className="flex min-w-0 flex-col">
           {selected && actions ? (
             <>
-              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 px-6 pt-5">
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 px-4 pt-4">
                 <span className="text-[15px] font-semibold">
                   {dayLabel(selected.at, new Date())}, {parts(selected.at).time}
                 </span>
                 <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground tabular-nums">
                   {formatDuration(selected.audio_seconds)}
-                  {shownText.trim() ? ` · ${wordCount(shownText).toLocaleString()} words` : null}
+                  {shownText.trim() ? ` · ${words(shownText)}` : null}
                   {selected.status ? <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge> : null}
                 </span>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3.5 text-[15px] leading-relaxed">
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[15px] leading-relaxed">
                 {settings?.saved.show_english && hasArabic(shownText) ? (
                   <EnglishText text={shownText} />
                 ) : (
                   <div dir="auto" className="selectable whitespace-pre-wrap">{shownText || <span className="text-muted-foreground italic">No text.</span>}</div>
                 )}
               </div>
-              {statusNote ? <p className={cn("px-6 pb-2 text-[12.5px]", noteIsError ? "selectable text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
+              {statusNote ? <p className={cn("px-4 pb-2 text-[12.5px]", noteIsError ? "selectable text-destructive" : "text-muted-foreground")}>{statusNote}</p> : null}
               <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
                 {buttons.map(({ name, label, icon: Icon, disabled, run }, at) => (
                   <Button key={name} variant={at === 0 ? "default" : "outline"} data-track={name} disabled={disabled} onClick={() => void run()}>

@@ -73,8 +73,8 @@ export function ModelCard({ model, selected, onSelect }: { model: Model; selecte
         >
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {model.tier ? <Badge variant="primary">{model.tier}</Badge> : null}
-            <span className="text-[13.5px] font-medium">{model.name}</span>
-            <span className="text-[12px] text-muted-foreground">{model.display_size}</span>
+            <span className="self-baseline text-[13.5px] font-medium">{model.name}</span>
+            <span className="self-baseline text-[12px] text-muted-foreground">{model.display_size}</span>
             {model.installed ? (
               <Badge variant="success">
                 <Check className="size-3" />

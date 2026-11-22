@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { ModelCard, useModels } from "../components/models";
-import { InlineError, Row, Rows, Section } from "../components/parts";
+import { InlineError, Row, Rows, Section, TEXT_INSET } from "../components/parts";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { runBeforeClose, windowControls } from "../lib/platform";
 import { useStore } from "../lib/store";
 import { USAGE_DATA_PROMISE } from "../lib/telemetry";
+import { cn } from "../lib/utils";
 import { MicrophonePicker } from "./microphone";
 import { setBindingKeys, ShortcutField, useCapture } from "./shortcuts";
 
@@ -48,13 +49,13 @@ export function SetupPage() {
 
   return (
     <div className="mx-auto w-full max-w-[640px] px-8 pt-6 pb-10">
-      <h1 className="page-title">Welcome to Skryb</h1>
-      <p className="mt-1 text-[13px] text-muted-foreground">
+      <h1 className={cn(TEXT_INSET, "page-title")}>Welcome to Skryb</h1>
+      <p className={cn(TEXT_INSET, "mt-1 text-[13px] text-muted-foreground")}>
         Three quick choices and you are ready to dictate. Everything runs on this computer; nothing is sent anywhere.
       </p>
 
       <Section title="1. Speech model" note="Download one to start. You can change it later.">
-        <div role="radiogroup" aria-label="Speech model" className="flex flex-col gap-2">
+        <div role="radiogroup" aria-label="Speech model" className="flex flex-col gap-3">
           {models.map((model) => (
             <ModelCard
               key={model.name}
@@ -85,7 +86,11 @@ export function SetupPage() {
           }
           onStop={capture.stop}
         />
-        {capture.error ? <InlineError>{capture.error.message}</InlineError> : null}
+        {capture.error ? (
+          <div className={TEXT_INSET}>
+            <InlineError>{capture.error.message}</InlineError>
+          </div>
+        ) : null}
       </Section>
 
       <Section title="Optional: usage data" note="Off unless you turn it on. It stays on this computer, and you can change it in Settings.">
@@ -96,7 +101,7 @@ export function SetupPage() {
         </Rows>
       </Section>
 
-      <div className="mt-8 flex items-center justify-end gap-3 border-t pt-4">
+      <div className={cn(TEXT_INSET, "mt-8 flex items-center justify-end gap-3 border-t pt-4")}>
         {error || saveError ? <span className="mr-auto text-[12.5px] text-destructive">{error || saveError}</span> : null}
         {!chosen?.installed ? <span className="text-[12.5px] text-muted-foreground">Download a model to continue.</span> : null}
         <Button disabled={!chosen?.installed || finishing} onClick={() => void finish()}>

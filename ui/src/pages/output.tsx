@@ -72,14 +72,15 @@ export function OutputPage() {
         title="Paste method per app"
         note="For apps that ignore Ctrl+V: add the app's .exe name and how to paste into it. mintty needs none."
       >
+        {/* Every row shares one set of columns, the last wide enough for Add, so the selects line up and the right-hand buttons share an edge. */}
         <Card className="divide-y">
-          <div className="grid grid-cols-[1fr_180px_28px] gap-3 px-4 py-2 text-[12px] font-medium text-muted-foreground">
+          <div className="grid grid-cols-[1fr_180px_76px] gap-3 px-4 py-2 text-[12px] font-medium text-muted-foreground">
             <span>App</span>
             <span>Paste method</span>
             <span />
           </div>
           {overrides.map(([process, method]) => (
-            <div key={process} className="grid grid-cols-[1fr_180px_28px] items-center gap-3 px-4 py-1.5">
+            <div key={process} className="grid grid-cols-[1fr_180px_76px] items-center gap-3 px-4 py-1.5">
               <span className="truncate text-[13px]">{process}</span>
               <Select
                 label={`Paste method for ${process}`}
@@ -87,13 +88,13 @@ export function OutputPage() {
                 options={PASTE_METHODS}
                 onChange={(value) => setOverrides(withOverride(overrides, process, value as PasteMethod))}
               />
-              <Button variant="ghost" size="icon" aria-label={`Remove ${process}`} onClick={() => setOverrides(overrides.filter(([name]) => name !== process))}>
+              <Button variant="ghost" size="icon" className="justify-self-end" aria-label={`Remove ${process}`} onClick={() => setOverrides(overrides.filter(([name]) => name !== process))}>
                 <X />
               </Button>
             </div>
           ))}
           <form
-            className="grid grid-cols-[1fr_180px_auto] items-center gap-3 px-4 py-2.5"
+            className="grid grid-cols-[1fr_180px_76px] items-center gap-3 px-4 py-2.5"
             onSubmit={(event) => {
               event.preventDefault();
               add();
@@ -101,7 +102,7 @@ export function OutputPage() {
           >
             <Input aria-label="App name" placeholder="App, e.g. notepad.exe" value={newProcess} onChange={(event) => setNewProcess(event.target.value)} />
             <Select label="New paste method" value={newMethod} options={PASTE_METHODS} onChange={(value) => setNewMethod(value as PasteMethod)} />
-            <Button type="submit" variant="outline" disabled={!newProcess.trim()}>
+            <Button type="submit" variant="outline" className="w-full" disabled={!newProcess.trim()}>
               <Plus />
               Add
             </Button>

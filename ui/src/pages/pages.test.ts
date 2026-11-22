@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { launchPath, restoredPath } from "../app";
 import type { HistoryEntry, Model, Settings, UpdateStatus } from "../lib/types";
 import { duplicateAlias, joinAliases, newestFirst, splitAliases, termFrom, termProblem } from "./dictionary";
-import { finalText, formatDuration, groupByDay, preview } from "./history";
+import { finalText, formatDuration, groupByDay, preview, words } from "./history";
 import { formatSaved, versusUsual } from "../lib/utils";
 import { count, dictationPace, reliability, streakNote, timeSaved } from "./home";
 import { nextCue } from "./microphone";
@@ -338,5 +338,21 @@ describe("updates page", () => {
     for (const state of ["checking", "up_to_date", "off", "failed", "idle"] as const) {
       expect(describeUpdate(status({ state }), "0.2.0").title).toBe("Skryb 0.2.0");
     }
+  });
+});
+
+describe("how many words a dictation has", () => {
+  it("says one word, not one words", () => {
+    expect(words("Yes.")).toBe("1 word");
+    expect(words("  Yes.  ")).toBe("1 word");
+    expect(words("日本語のテキストも表示できるか確認してください。")).toBe("1 word");
+  });
+
+  it("counts none, a few and thousands", () => {
+    expect(words("")).toBe("0 words");
+    expect(words(" \n\t ")).toBe("0 words");
+    expect(words("On it")).toBe("2 words");
+    expect(words("Duplicate line\nDuplicate line")).toBe("4 words");
+    expect(words(Array.from({ length: 1912 }, (_, at) => `word${at}`).join(" "))).toBe(`${(1912).toLocaleString()} words`);
   });
 });

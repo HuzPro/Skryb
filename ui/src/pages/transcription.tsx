@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { ModelCard, useModels } from "../components/models";
-import { ChoiceCards, Disclosure, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
+import { ChoiceCards, Disclosure, PageBody, PageTitle, Row, Rows, Section, TEXT_INSET } from "../components/parts";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { api } from "../lib/api";
+import { cn } from "../lib/utils";
 import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
 import type { Engines, Model, Settings, TranscriptionMode } from "../lib/types";
@@ -108,7 +109,7 @@ export function TranscriptionPage() {
         />
       </Section>
       <Section title="Models" note={draft.transcription_mode === "batch" ? "Small, Medium and Large: the larger the model, the fewer mistakes, and the more it needs." : undefined}>
-        <div role="radiogroup" aria-label="Model" className="flex flex-col gap-2">
+        <div role="radiogroup" aria-label="Model" className="flex flex-col gap-3">
           {shown.map((model) => (
             <ModelCard
               key={model.name}
@@ -117,7 +118,7 @@ export function TranscriptionPage() {
               onSelect={() => editSettings((current) => fitLanguageToModel({ ...current, model_size: model.name, engine: "auto" }))}
             />
           ))}
-          {models.length && !shown.length ? <p className="text-[12.5px] text-muted-foreground">No models for this mode.</p> : null}
+          {models.length && !shown.length ? <p className={cn(TEXT_INSET, "text-[12.5px] text-muted-foreground")}>No models for this mode.</p> : null}
         </div>
       </Section>
       <Section title="Speech">

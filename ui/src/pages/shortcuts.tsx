@@ -1,6 +1,6 @@
 import { Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { InlineError, KeyCaps, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
+import { InlineError, KeyCaps, PageBody, PageTitle, Row, Rows, Section, TEXT_INSET } from "../components/parts";
 import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
@@ -116,7 +116,9 @@ export function ShortcutField({
         onClick={recording ? onStop : onRecord}
         aria-label={recording ? "Recording a shortcut" : "Record a shortcut"}
         className={cn(
-          "flex h-9 w-[300px] min-w-0 items-center rounded-lg border bg-card px-2 text-left shadow-xs outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
+          "flex h-8 min-w-0 items-center rounded-md border bg-card px-2 text-left shadow-xs outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
+          // A row with a remove button fills its card, so that button meets the right edge the switches and buttons use.
+          onClear ? "flex-1" : "w-[300px]",
           recording && "border-primary ring-2 ring-primary/20",
         )}
       >
@@ -172,7 +174,7 @@ export function ShortcutsPage() {
             description="Toggle: press to start, again to stop. Hold: talk while held."
             error={problem && problem.index === -1 ? problem.message : ""}
           >
-            <div className="flex flex-col gap-2">
+            <div className="flex w-full flex-col gap-2">
               {dictation.map(({ binding, index }) => {
                 const row = `dictate:${index}`;
                 const error = errorFor(row, index);
@@ -221,7 +223,7 @@ export function ShortcutsPage() {
             const error = errorFor(row, index);
             return (
               <Row key={action} stacked title={title} description={description}>
-                <div>
+                <div className="w-full">
                   <ShortcutField
                     keys={binding?.keys ?? ""}
                     recording={capture.recordingRow === row}
@@ -240,7 +242,7 @@ export function ShortcutsPage() {
             );
           })}
         </Rows>
-        <p className="mt-2.5 text-[12.5px] text-muted-foreground">
+        <p className={cn(TEXT_INSET, "mt-2.5 text-[12.5px] text-muted-foreground")}>
           Click Record, then press keys or a mouse button (middle, 4 and 5 work). Clear a shortcut to turn it off.
         </p>
       </Section>

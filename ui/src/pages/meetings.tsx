@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { Link, useParams } from "react-router";
 import { EnglishStatus, Interlinear, useTranslationStatus } from "../components/english";
 import { formatGigabytes } from "../components/models";
-import { Bars, Card, ContextMenu, InlineError, PAGE_EDGE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat, type Bar } from "../components/parts";
+import { Bars, Card, ContextMenu, InlineError, PAGE_EDGE, PAGE_TITLE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat, TEXT_INSET, type Bar } from "../components/parts";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -164,7 +164,7 @@ export function MeetingHistoryPage() {
   const empty = !overview ? "Loading…" : search ? "No meetings match." : "Meetings you record or transcribe land here.";
 
   return (
-    <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-5")}>
+    <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-3")}>
       <PageTitle title="History">
         <div className="relative w-72">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -191,7 +191,7 @@ export function MeetingHistoryPage() {
                   )}
                 >
                   <MeetingCover meeting={meeting} />
-                  <div className="px-3.5 py-2.5">
+                  <div className="px-4 py-2.5">
                     <p className="truncate text-[13.5px] font-medium">{meetingName(meeting.id)}</p>
                     <p className="mt-0.5 truncate text-[12px] text-muted-foreground tabular-nums">
                       {dayLabel(meeting.started, today)}, {meeting.started.slice(11, 16)} · {meeting.speakers} {meeting.speakers === 1 ? "voice" : "voices"}
@@ -236,7 +236,8 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-primary bg-card shadow-card">
       <MeetingCover meeting={meeting} />
-      <div className="px-3.5 py-2.5">
+      {/* The box's own padding puts the name where it stood on the card. */}
+      <div className="px-3 py-2.5">
         <input
           autoFocus
           defaultValue={meetingName(meeting.id)}
@@ -332,18 +333,19 @@ function StartStopButton({ live, overview }: { live: LiveMeeting | null | undefi
   );
 }
 
+// Centred on the title, while the words beside it sit on the title's baseline.
 function StatusBadge({ live }: { live: LiveMeeting }) {
   if (live.status === "Recording") {
     return (
-      <Badge variant="destructive">
+      <Badge variant="destructive" className="self-center">
         <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" />
         Recording
       </Badge>
     );
   }
-  if (live.status === "Saved") return <Badge variant="success">Saved</Badge>;
+  if (live.status === "Saved") return <Badge variant="success" className="self-center">Saved</Badge>;
   return (
-    <Badge variant="primary">
+    <Badge variant="primary" className="self-center">
       <LoaderCircle className="size-3 animate-spin" />
       {live.status}
     </Badge>
@@ -404,7 +406,8 @@ function TranscriptPane({ transcript, meetingId, live, onNameClick, empty }: { t
   };
   return (
     <Card className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div ref={box} onScroll={onScroll} aria-live={live ? "polite" : undefined} className="min-h-0 flex-1 overflow-y-auto px-5 py-3 motion-safe:scroll-smooth">
+      {/* With each turn's own padding, the first line starts 16 px in, level with the side cards' headings. */}
+      <div ref={box} onScroll={onScroll} aria-live={live ? "polite" : undefined} className="min-h-0 flex-1 overflow-y-auto px-4 py-1.5 motion-safe:scroll-smooth">
         {turns.length ? (
           turns.map((turn) => (
             <div
@@ -478,7 +481,7 @@ function SpeakersCard({ transcript, meetingId, focusKey }: { transcript: Meeting
     }
   };
   return (
-    <Card className="px-4 py-3.5">
+    <Card className="px-4 py-4">
       <h2 className="mb-2.5 text-[13px] font-semibold text-muted-foreground">Speakers</h2>
       {shares.length ? (
         <div className="grid grid-cols-1 gap-x-5 gap-y-2.5 max-[1199px]:grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
@@ -499,7 +502,8 @@ function SpeakersCard({ transcript, meetingId, focusKey }: { transcript: Meeting
                 className="h-7 border-transparent bg-transparent px-1.5 shadow-none hover:border-input focus-visible:bg-card"
               />
               <span className="w-9 text-right text-[12px] text-muted-foreground tabular-nums">{Math.round(share * 100)}%</span>
-              <div className="col-start-2 col-end-4 h-1 overflow-hidden rounded-full bg-muted">
+              {/* Starts under the name's first letter, inside the box's border and padding. */}
+              <div className="col-start-2 col-end-4 ml-[7px] h-1 overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-[var(--speaker)] transition-[width] duration-300" style={{ width: `${share * 100}%` }} />
               </div>
             </div>
@@ -539,7 +543,7 @@ function OpenFolderButton({ path }: { path: string }) {
 /** Back to the list of meetings, beside the meeting's own title. */
 function BackToHistory() {
   return (
-    <Button asChild variant="ghost" size="icon" aria-label="Back to History" title="Back to History">
+    <Button asChild variant="ghost" size="icon" aria-label="Back to History" title="Back to History" className="-ml-[7px] size-6 text-muted-foreground hover:text-foreground">
       <Link to="/meetings" draggable={false}>
         <ArrowLeft />
       </Link>
@@ -550,10 +554,10 @@ function BackToHistory() {
 /** Header, transcript and side cards; `fill` pins it to the window so the transcript scrolls, else the page scrolls as a whole. */
 function MeetingLayout({ header, warning, transcript, aside, fill = true }: { header: ReactNode; warning?: string | null; transcript: ReactNode; aside: ReactNode; fill?: boolean }) {
   return (
-    <div className={cn(PAGE_EDGE, "flex w-full flex-col gap-3 pb-5", fill ? "h-full" : "min-h-full")}>
+    <div className={cn(PAGE_EDGE, "flex w-full flex-col gap-3 pb-3", fill ? "h-full" : "min-h-full")}>
       {header}
       {warning ? (
-        <div role="alert" className="selectable flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2 text-[12.5px] text-warning">
+        <div role="alert" className="selectable flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2 text-[12.5px] text-warning">
           <CircleAlert className="size-4 shrink-0" />
           {warning}
         </div>
@@ -591,7 +595,7 @@ export function MeetingModels({ overview, compact = false }: { overview: Meeting
     }
   };
   return (
-    <Card className={cn("px-4 py-3.5", compact && "border-primary/30 bg-selected")}>
+    <Card className={cn("px-4 py-4", compact && "border-primary/30 bg-selected")}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-[13.5px] font-medium">{overview.models_ready ? "Meeting models" : "Meetings need these models"}</h2>
@@ -606,9 +610,9 @@ export function MeetingModels({ overview, compact = false }: { overview: Meeting
           </Button>
         )}
       </div>
-      <div className="mt-3 grid gap-2.5 min-[900px]:grid-cols-2">
+      <div className="mt-3 grid gap-3 min-[900px]:grid-cols-2">
         {overview.models.map((model) => (
-          <div key={model.name} className="rounded-lg border bg-card px-3 py-2">
+          <div key={model.name} className="rounded-lg border bg-card px-4 py-2">
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-medium">{model.label}</span>
               <span className="text-[12px] text-muted-foreground">{model.display_size}</span>
@@ -658,7 +662,7 @@ function FileDropCard({ ready, meetingLanguage, className }: { ready: boolean; m
     [ready],
   );
   return (
-    <Card className={cn("border-dashed px-5 py-4 transition-colors", over && "border-primary bg-primary/5", className)}>
+    <Card className={cn("border-dashed px-4 py-4 transition-colors", over && "border-primary bg-primary/5", className)}>
       <div className="flex items-start gap-3.5">
         <FileAudio className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground", over && "text-primary")} aria-hidden />
         <div className="min-w-0 flex-1">
@@ -703,9 +707,9 @@ export function MeetingHomePage() {
   const language = LANGUAGES.find((choice) => choice.value === meetings?.language)?.label ?? "English";
 
   const header = (
-    <div className="flex min-h-10 items-center gap-4">
-      <div className="flex min-w-0 flex-1 items-center gap-x-3">
-        <h1 className="page-title shrink-0">{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Meetings"}</h1>
+    <div className={cn(TEXT_INSET, "mb-1 flex min-h-10 items-center gap-4")}>
+      <div className="flex min-w-0 flex-1 items-baseline gap-x-3">
+        <h1 className={cn(PAGE_TITLE, "shrink-0")}>{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Meetings"}</h1>
         {live ? <StatusBadge live={live} /> : null}
         {live && running && !file ? <span className="text-[13px] text-muted-foreground tabular-nums">{formatDuration(elapsed)}</span> : null}
         {live?.device && running ? <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">Listening to {live.device}</span> : null}
@@ -759,7 +763,7 @@ export function MeetingHomePage() {
         <>
           {live ? <SpeakersCard transcript={transcript} meetingId={live.id} focusKey={focusKey} /> : null}
           {/* Narrow windows leave the transcript the room: the header already says what is recording. */}
-          <Card className={cn("px-4 py-3.5", live && "max-[1199px]:hidden")}>
+          <Card className={cn("px-4 py-4", live && "max-[1199px]:hidden")}>
             <h2 className="mb-2.5 text-[13px] font-semibold text-muted-foreground">Session</h2>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[12.5px]">
               {live ? <Detail term="Started">{when(live.started)}</Detail> : null}
@@ -843,12 +847,15 @@ export function SavedMeetingPage() {
   const seconds = transcript ? Math.max(0, ...transcript.entries.map((entry) => entry.end)) : 0;
   const words = transcript ? transcript.entries.reduce((sum, entry) => sum + entry.text.split(/\s+/).filter(Boolean).length, 0) : 0;
   const header = (
-    <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
+    <div className="mb-1 flex min-h-10 items-center pr-[17px]">
       <BackToHistory />
-      <h1 className="page-title truncate" title={id}>
-        {meetingName(id)}
-      </h1>
-      {transcript ? <span className="text-[13px] text-muted-foreground">{when(transcript.started)}</span> : null}
+      {/* The date sits on the title's baseline rather than centred beside it. */}
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className={PAGE_TITLE} title={id}>
+          {meetingName(id)}
+        </h1>
+        {transcript ? <span className="text-[13px] text-muted-foreground">{when(transcript.started)}</span> : null}
+      </div>
     </div>
   );
   if (!transcript) {
@@ -867,7 +874,7 @@ export function SavedMeetingPage() {
       aside={
         <>
           <SpeakersCard transcript={transcript} meetingId={id} focusKey={focusKey} />
-          <Card className="px-4 py-3.5 max-[1199px]:hidden">
+          <Card className="px-4 py-4 max-[1199px]:hidden">
             <h2 className="mb-2.5 text-[13px] font-semibold text-muted-foreground">Meeting</h2>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[12.5px]">
               <Detail term="Started">{when(transcript.started)}</Detail>

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Bars, Card, dayBars, firstDayLabel, KeyCaps, PAGE_EDGE, PageTitle, Section, Stat, StatusDot } from "../components/parts";
+import { Bars, Card, dayBars, firstDayLabel, KeyCaps, PAGE_EDGE, PageTitle, Section, Stat, StatusDot, TEXT_INSET } from "../components/parts";
 import { useEngineStatus } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { queries } from "../lib/queries";
@@ -38,7 +38,7 @@ function EngineCard() {
   const saved = useQuery(queries.settings).data;
   const engine = status.app?.engine;
   return (
-    <Card className="px-5 py-4">
+    <Card className="px-4 py-4">
       <h2 className="mb-2.5 text-[13px] font-semibold text-muted-foreground">Status</h2>
       <p className="flex items-center gap-2 text-[15px] font-medium">
         <StatusDot tone={status.tone} />
@@ -63,7 +63,7 @@ function DictateCard() {
   const device = saved?.input_device ?? "";
   const microphone = device ? (microphones.find((candidate) => candidate.name === device)?.label ?? device) : "Windows default";
   return (
-    <Card className="px-5 py-4">
+    <Card className="px-4 py-4">
       <h2 className="mb-2.5 text-[13px] font-semibold text-muted-foreground">Dictate</h2>
       {shortcuts.length ? (
         <ul className="flex flex-col gap-2">
@@ -151,8 +151,9 @@ function UsageSection() {
         <Stat label={retention ? `Last ${retention} days` : "All time"} value={words(all.words)} detail={`≈${formatSaved(timeSaved(all))} saved vs typing`} />
         <Stat label="Streak" value={count(usage.streak, "day", "days")} detail={streakNote(usage.streak, usage.longest_streak)} />
       </div>
-      <div className="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
-        <Bars title="Words a day, last 30 days" bars={dayBars(usage.days)} format={words} axis={[firstDayLabel(usage.days.length), "Today"]} usual={usage.usual_day} />
+      {/* The same four columns as the row above, the chart across three: every card edge here meets one up there. */}
+      <div className="mt-3 grid gap-3 min-[1100px]:grid-cols-4">
+        <Bars className="min-[1100px]:col-span-3" title="Words a day, last 30 days" bars={dayBars(usage.days)} format={words} axis={[firstDayLabel(usage.days.length), "Today"]} usual={usage.usual_day} />
         <div className="grid gap-3 max-[1099px]:grid-cols-3">
           <Stat label="Dictation pace" value={pace === null ? "–" : `${pace} wpm`} detail={`Pauses included · typing ≈${TYPING_WPM}`} />
           <Stat
@@ -165,7 +166,7 @@ function UsageSection() {
           )}
         </div>
       </div>
-      <p className="mt-2.5 text-[12.5px] text-muted-foreground">
+      <p className={cn(TEXT_INSET, "mt-2.5 text-[12.5px] text-muted-foreground")}>
         Time saved is an estimate: the same words typed at {TYPING_WPM} a minute, less all time spent recording. From{" "}
         <Link to="/history" draggable={false} className="font-medium text-primary hover:underline">
           History

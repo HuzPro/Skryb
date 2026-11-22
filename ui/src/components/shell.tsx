@@ -313,7 +313,8 @@ export function ResizeEdge({
 function UpdateButton() {
   const app = useAppInfo();
   const [failed, setFailed] = useState(false);
-  const line = "flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground";
+  // Its icon sits on the page links' icon column and its words on their text column: a 14 px icon in their 16 px slot.
+  const line = "flex h-8 min-w-0 items-center gap-2.5 rounded-lg px-2.5 text-[12px] text-muted-foreground [&_svg]:mx-px";
   // Cut short sideways only: `truncate` hides overflow both ways, and would clip the descenders that centring on the capitals leaves outside the box.
   if (!app) return <span />;
   const update = app.update;
@@ -387,7 +388,7 @@ export function Sidebar({
         </span>
         <span className="pointer-events-none text-[13px] font-semibold">Skryb</span>
       </div>
-      <div className="px-3 pt-0.5">
+      <div className="px-2 pt-0.5">
         <ModeToggle mode={mode} onChange={onMode} recording={app?.meeting_recording ?? false} />
       </div>
       <nav aria-label="Pages" className="flex flex-col gap-0.5 px-2 pt-3">
@@ -412,7 +413,7 @@ export function Sidebar({
           );
         })}
       </nav>
-      <div className="mt-auto flex items-center justify-between gap-1.5 p-3">
+      <div className="mt-auto flex items-center justify-between gap-1.5 px-2 py-3">
         <UpdateButton />
         <Link
           to="/updates"

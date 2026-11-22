@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Card, InlineError, NumberField, PageBody, PageTitle, Row, Rows, Section } from "../components/parts";
+import { Card, InlineError, NumberField, PageBody, PageTitle, Row, Rows, Section, TEXT_INSET } from "../components/parts";
 import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
@@ -127,7 +127,7 @@ export function MicrophonePicker({ settings, onChoose }: { settings: Settings; o
   const [error, setError] = useState("");
   return (
     <>
-      <div role="radiogroup" aria-label="Microphone" className="flex flex-col gap-2">
+      <div role="radiogroup" aria-label="Microphone" className="flex flex-col gap-3">
         {microphoneChoices(microphones, settings.input_device).map((choice) => {
           const selected = choice.name === settings.input_device;
           return (
@@ -143,7 +143,7 @@ export function MicrophonePicker({ settings, onChoose }: { settings: Settings; o
             >
               <div className="text-[13.5px] font-medium">{choice.label}</div>
               {selected ? (
-                <div className="mt-1">
+                <div className="mt-0.5">
                   <LevelMeter device={choice.name} />
                 </div>
               ) : choice.note ? (
@@ -153,10 +153,10 @@ export function MicrophonePicker({ settings, onChoose }: { settings: Settings; o
           );
         })}
       </div>
-      <Button variant="link" className="mt-2" onClick={() => rescan().then(() => setError(""), (failure: unknown) => setError(errorText(failure)))}>
+      <Button variant="link" className={cn(TEXT_INSET, "mt-3")} onClick={() => rescan().then(() => setError(""), (failure: unknown) => setError(errorText(failure)))}>
         Look for new microphones
       </Button>
-      {error ? <InlineError>{error}</InlineError> : null}
+      {error ? <div className={TEXT_INSET}><InlineError>{error}</InlineError></div> : null}
     </>
   );
 }
@@ -253,7 +253,7 @@ export function MicrophonePage() {
             <p className="px-4 py-3 text-[12.5px] text-muted-foreground">None yet. The microphone chosen above is used.</p>
           )}
         </Card>
-        <Button variant="link" className="mt-2" disabled={!canAdd} onClick={() => editRecording({ preferred_devices: [...preferred, chosenFullName] })}>
+        <Button variant="link" className={cn(TEXT_INSET, "mt-3")} disabled={!canAdd} onClick={() => editRecording({ preferred_devices: [...preferred, chosenFullName] })}>
           Add the chosen microphone
         </Button>
       </Section>

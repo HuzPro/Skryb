@@ -3,7 +3,7 @@ import { ArrowLeft, FileDown, FileUp, FolderOpen, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { installDescription, installTitle, useInstall } from "../components/install";
-import { PageBody, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
+import { PAGE_TITLE, PageBody, ProgressBar, RadioDot, Row, Rows, Section } from "../components/parts";
 import { useAppInfo } from "../components/shell";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
@@ -90,7 +90,7 @@ const COLOURWAYS: { value: Colourway; label: string }[] = [
 /** One card per theme; the colour is picked once, below, for every theme. */
 function ThemeCards({ theme, onPick }: { theme: Theme; onPick: (theme: Theme) => void }) {
   return (
-    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-4 gap-2.5">
+    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-4 gap-3">
       {THEMES.map(({ value, title }) => {
         const selected = value === theme;
         return (
@@ -100,7 +100,7 @@ function ThemeCards({ theme, onPick }: { theme: Theme; onPick: (theme: Theme) =>
             aria-checked={selected}
             onClick={() => onPick(value)}
             className={cn(
-              "surface flex items-center gap-2 rounded-xl border border-edge bg-card px-3.5 py-3 text-[13.5px] font-medium shadow-card outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40",
+              "surface flex items-center gap-2 rounded-xl border border-edge bg-card px-4 py-3 text-[13.5px] font-medium shadow-card outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40",
               selected && "border-primary bg-selected hover:bg-selected",
             )}
           >
@@ -170,16 +170,19 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
   }
 }
 
-/** The page title with a way out: back to the page Settings was opened from, or Home when the window opened on it. */
+/**
+ * The page title with a way out: back to the page Settings was opened from, or Home when the window opened on it.
+ * The arrow fills the inset before the text line, starting at the cards' edge, so the title starts where every other page's does.
+ */
 function SettingsTitle() {
   const navigate = useNavigate();
   const opened = useLocation().key === "default";
   return (
-    <div className="mb-1 flex min-h-10 items-center gap-1.5">
-      <Button variant="ghost" size="icon" aria-label="Back" title="Back" className="-ml-2 text-muted-foreground hover:text-foreground" onClick={() => void (opened ? navigate("/home") : navigate(-1))}>
+    <div className="mb-1 flex min-h-10 items-center">
+      <Button variant="ghost" size="icon" aria-label="Back" title="Back" className="-ml-[7px] size-6 text-muted-foreground hover:text-foreground" onClick={() => void (opened ? navigate("/home") : navigate(-1))}>
         <ArrowLeft />
       </Button>
-      <h1 className="page-title min-w-0 truncate">Settings</h1>
+      <h1 className={PAGE_TITLE}>Settings</h1>
     </div>
   );
 }
@@ -294,7 +297,7 @@ export function SettingsPage() {
           theme={draft.theme}
           onPick={(theme) => editSettings((current) => ({ ...current, theme, colourways: everyTheme(current.colourways[current.theme]) }))}
         />
-        <Rows className="mt-2.5">
+        <Rows className="mt-3">
           <Row title="Colour" description={COLOURWAYS.find(({ value }) => value === colourway)?.label}>
             <ColourSwatches theme={draft.theme} colourway={colourway} onPick={(picked) => editSettings((current) => ({ ...current, colourways: everyTheme(picked) }))} />
           </Row>

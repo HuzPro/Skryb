@@ -326,7 +326,8 @@ export function DictionaryPage() {
         title="People and terms"
         note="Names and words to spell right in dictation and meetings. Heard-as spellings are swapped for the entry. Dictate over a selected name to switch spellings."
       >
-        <Card className="divide-y">
+        {/* Clipped, so a tinted first or last row keeps the card's round corners. */}
+        <Card className="divide-y overflow-hidden">
           {draft.suggestions.map((suggestion) => (
             <SuggestionRow key={suggestion.heard} suggestion={suggestion} onAccept={() => void accept(suggestion)} onDismiss={() => void dismiss(suggestion)} />
           ))}
@@ -372,7 +373,8 @@ export function DictionaryPage() {
                   <Button variant="ghost" size="icon" aria-label="Edit entry" onClick={() => setEditingTerm({ index, editor: termEditorFor(term) })}>
                     <Pencil />
                   </Button>
-                  <Button variant="ghost" size="icon" aria-label="Delete entry" onClick={() => editTerms((people) => people.filter((_, at) => at !== index))}>
+                  {/* 4 px from Edit, as in the word rules below, so both lists' buttons stand in one column. */}
+                  <Button variant="ghost" size="icon" className="-ml-1" aria-label="Delete entry" onClick={() => editTerms((people) => people.filter((_, at) => at !== index))}>
                     <Trash2 />
                   </Button>
                 </div>
@@ -389,7 +391,7 @@ export function DictionaryPage() {
         title="Words and replacements"
         note="Swap spoken words for typed text. Separate aliases with commas. A space at an alias's edge stays part of it."
       >
-        <Card className="divide-y">
+        <Card className="divide-y overflow-hidden">
           <form
             className="px-4 py-3"
             onSubmit={async (event) => {
@@ -433,7 +435,7 @@ export function DictionaryPage() {
                   <ArrowRight className="size-3.5 text-muted-foreground" />
                   <span className="truncate text-[13px]">{rule.replacement || <span className="text-muted-foreground">(nothing)</span>}</span>
                   <span className="flex items-center justify-end gap-1">
-                    <span className="text-[11.5px] text-muted-foreground" title="Times this rule has changed a dictation">
+                    <span className="text-[11.5px] text-muted-foreground tabular-nums" title="Times this rule has changed a dictation">
                       {rule.fired ? `${rule.fired}×` : "never"}
                     </span>
                     {rule.kind === "regex" ? <Badge>Regex</Badge> : null}

@@ -4,17 +4,25 @@ import { keyCaps } from "../lib/keys";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
 
-/** Every page starts at the same left edge and top; settings pages keep to a readable width. */
-export const PAGE_EDGE = "px-8 pt-3";
+/**
+ * One alignment rule for every page. Cards start PAGE_EDGE from the sidebar and the window; everything
+ * read (a page's title, a section's heading, a card's first word) starts on one line inside that, so text
+ * runs down one line and the cards sit just outside it. A card's own text is its 1 px border plus `px-4`
+ * in, so text outside a card is inset by TEXT_INSET, the same 17 px. Settings pages keep to a readable width.
+ */
+export const PAGE_EDGE = "px-3 pt-3";
+export const TEXT_INSET = "px-[17px]";
+/** A page's title: centred on its capitals, so it is level with the buttons and fields on its line; cut short sideways only, so its descenders show. */
+export const PAGE_TITLE = "page-title label-centred min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap";
 
 export function PageBody({ children }: { children: ReactNode }) {
-  return <div className={cn(PAGE_EDGE, "w-full max-w-[760px] pb-28")}>{children}</div>;
+  return <div className={cn(PAGE_EDGE, "w-full max-w-[720px] pb-28")}>{children}</div>;
 }
 
 export function PageTitle({ title, children }: { title: ReactNode; children?: ReactNode }) {
   return (
-    <div className="mb-1 flex min-h-10 items-center justify-between gap-4">
-      <h1 className="page-title min-w-0 truncate">{title}</h1>
+    <div className={cn(TEXT_INSET, "mb-1 flex min-h-10 items-center justify-between gap-4")}>
+      <h1 className={PAGE_TITLE}>{title}</h1>
       {children}
     </div>
   );
@@ -23,11 +31,11 @@ export function PageTitle({ title, children }: { title: ReactNode; children?: Re
 export function Section({ title, note, children, action }: { title: string; note?: ReactNode; children: ReactNode; action?: ReactNode }) {
   return (
     <section className="mt-7">
-      <div className="mb-2 flex items-end justify-between gap-4">
+      <div className={cn(TEXT_INSET, "mb-2 flex items-end justify-between gap-4")}>
         <h2 className="text-[13px] font-semibold text-muted-foreground">{title}</h2>
         {action}
       </div>
-      {note ? <p className="-mt-1 mb-2.5 text-[12.5px] text-muted-foreground">{note}</p> : null}
+      {note ? <p className={cn(TEXT_INSET, "-mt-1 mb-2.5 text-[12.5px] text-muted-foreground")}>{note}</p> : null}
       {children}
     </section>
   );
@@ -95,7 +103,7 @@ export function RadioDot({ selected }: { selected: boolean }) {
 /** Mutually exclusive options as cards with a radio dot: Mode, Output mode. */
 export function ChoiceCards<T extends string>({ value, choices, onChange, label }: { value: T; choices: Choice<T>[]; onChange: (value: T) => void; label: string }) {
   return (
-    <div role="radiogroup" aria-label={label} className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${choices.length}, minmax(0, 1fr))` }}>
+    <div role="radiogroup" aria-label={label} className="grid gap-3" style={{ gridTemplateColumns: `repeat(${choices.length}, minmax(0, 1fr))` }}>
       {choices.map((choice) => {
         const selected = choice.value === value;
         return (
@@ -106,7 +114,7 @@ export function ChoiceCards<T extends string>({ value, choices, onChange, label 
             disabled={choice.disabled}
             onClick={() => onChange(choice.value)}
             className={cn(
-              "flex flex-col items-start surface rounded-xl border border-edge bg-card px-3.5 py-3 text-left shadow-card outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-55",
+              "flex flex-col items-start surface rounded-xl border border-edge bg-card px-4 py-3 text-left shadow-card outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-55",
               selected && "border-primary bg-selected hover:bg-selected",
             )}
           >
@@ -196,7 +204,7 @@ export function NumberField({
 export function Disclosure({ label, children, defaultOpen = false }: { label: string; children: ReactNode; defaultOpen?: boolean }) {
   return (
     <details className="group mt-3" open={defaultOpen}>
-      <summary className="inline-flex cursor-default list-none items-center gap-1 text-[13px] font-medium text-primary [&::-webkit-details-marker]:hidden">
+      <summary className="ml-[17px] inline-flex cursor-default list-none items-center gap-1 text-[13px] font-medium text-primary [&::-webkit-details-marker]:hidden">
         {label}
         <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
       </summary>
@@ -314,7 +322,7 @@ export function ContextMenu({ x, y, label, items, onClose: closed }: { x: number
 /** One number on a card: what it counts, the number, and a line under it. */
 export function Stat({ label, value, detail, className, title }: { label: string; value: string; detail?: ReactNode; className?: string; title?: string }) {
   return (
-    <Card className={cn("px-5 py-4", className)} title={title}>
+    <Card className={cn("px-4 py-4", className)} title={title}>
       <p className="text-[12.5px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-[24px] leading-tight font-semibold tabular-nums">{value}</p>
       {detail ? <p className="mt-0.5 text-[12.5px] text-muted-foreground">{detail}</p> : null}
@@ -340,6 +348,7 @@ export function Bars({
   axis,
   usual,
   partial = true,
+  className,
 }: {
   title: string;
   bars: Bar[];
@@ -347,13 +356,14 @@ export function Bars({
   axis: [string, string];
   usual?: number | null;
   partial?: boolean;
+  className?: string;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const top = Math.max(...bars.map((bar) => bar.value), usual ?? 0, 0);
   const shown = bars[hovered ?? bars.length - 1];
   const usualAt = usual && top > 0 ? (usual / top) * 100 : null;
   return (
-    <Card className="flex flex-col px-5 py-4">
+    <Card className={cn("flex flex-col px-4 py-4", className)}>
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-[12.5px] text-muted-foreground">{title}</h3>
         {shown ? (
