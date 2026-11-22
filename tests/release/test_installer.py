@@ -203,3 +203,15 @@ class TestStageWheelSource:
 
         with pytest.raises(InstallerBuildError, match=r"build_ui\.ps1"):
             _stage_wheel_source(repo, tmp_path / "scratch")
+
+
+class TestTheSetupScript:
+    def test_the_skryb_it_reopens_after_an_update_can_follow_the_users_own_folder_links(self):
+        script = (Path(__file__).resolve().parents[2] / "installer" / "Skryb.iss").read_text(encoding="utf-8")
+        setup = script.split("[Setup]", 1)[1].split("\n[", 1)[0]
+        directives = [line.strip() for line in setup.splitlines() if line.strip() and not line.lstrip().startswith(";")]
+
+        # Left on (Inno Setup's default since 6.7.0), the reopened app inherits the guard and
+        # every model folder that is a junction to another drive fails to open with error 448.
+        assert "RedirectionGuard=no" in directives
+        assert "PrivilegesRequired=lowest" in directives

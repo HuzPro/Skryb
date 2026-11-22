@@ -52,6 +52,12 @@ DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
+; Setup turns on Windows' RedirectionGuard for itself, and the Skryb it starts after an update
+; inherits it. The guard refuses any folder link made without admin rights (error 448), so a
+; models folder the user moved to another drive by junction could not be read until Skryb was
+; started again by hand. Setup installs for one user and never elevates, so the guard has
+; nothing here to protect.
+RedirectionGuard=no
 RestartApplications=no
 ChangesEnvironment=yes
 OutputBaseFilename={#AppName}-Setup-{#AppVersion}

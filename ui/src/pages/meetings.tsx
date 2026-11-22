@@ -161,7 +161,9 @@ export function MeetingHistoryPage() {
     event.preventDefault();
   };
 
-  const empty = !overview ? "Loading…" : search ? "No meetings match." : "Meetings you record or transcribe land here.";
+  // A failed load says so: "Loading…" for ever reads as a window that has hung.
+  const failed = useQuery(queries.meetings).isError;
+  const empty = !overview ? (failed ? "Meetings could not be loaded. Quit Skryb from the tray and start it again." : "Loading…") : search ? "No meetings match." : "Meetings you record or transcribe land here.";
 
   return (
     <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-3")}>
