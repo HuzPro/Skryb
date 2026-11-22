@@ -189,6 +189,17 @@ function HistorySettings({ open, onClose }: { open: boolean; onClose: () => void
           <Row title="Save history" description="Keeps each dictation's text and recording on this computer.">
             <Switch aria-label="Save history" checked={draft.capture_content} onCheckedChange={(on) => editSettings((current) => ({ ...current, capture_content: on }))} />
           </Row>
+          <Row
+            title="Capture my edits"
+            description="After you dictate into a window, keeps the keys you type there until you send, to learn what you corrected. Saved with that window's title, beside your history. Needs Save history, and starts the next time Skryb starts."
+          >
+            <Switch
+              aria-label="Capture my edits"
+              disabled={!draft.capture_content}
+              checked={draft.capture_content && draft.capture_edits}
+              onCheckedChange={(on) => editSettings((current) => ({ ...current, capture_edits: on }))}
+            />
+          </Row>
           <Row title="Show English" description="Arabic dictations word by word, with the English under each word.">
             <Switch aria-label="Show English" checked={draft.show_english} onCheckedChange={(on) => editSettings((current) => ({ ...current, show_english: on }))} />
           </Row>

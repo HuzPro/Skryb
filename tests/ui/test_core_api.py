@@ -30,7 +30,7 @@ _SETTINGS_KEYS = {
     "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings", "theme",
-    "colourways", "show_english", "telemetry",
+    "colourways", "show_english", "telemetry", "capture_edits",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",
@@ -321,6 +321,41 @@ def test_show_english_starts_off_and_switched_on_is_saved_and_comes_back_on(rig:
 
     assert rig.config.get("translation.show_english") is True
     assert _settings(rig)["show_english"] is True
+
+
+def test_edit_capture_starts_off_and_switched_on_is_saved_and_comes_back_on(rig: Rig) -> None:
+    settings = _settings(rig)
+    assert settings["capture_edits"] is False
+    settings["capture_content"] = True
+    settings["capture_edits"] = True
+
+    assert rig.call("PUT", "/api/settings", settings)[0] == 200
+
+    assert rig.config.get("diagnostics.capture_edits") is True
+    assert _settings(rig)["capture_edits"] is True
+
+
+def test_edit_capture_switched_off_again_is_saved_off(rig: Rig) -> None:
+    rig.config.set("diagnostics.capture_content", True)
+    rig.config.set("diagnostics.capture_edits", True)
+    settings = _settings(rig)
+    assert settings["capture_edits"] is True
+    settings["capture_edits"] = False
+
+    assert rig.call("PUT", "/api/settings", settings)[0] == 200
+
+    assert rig.config.get("diagnostics.capture_edits") is False
+    assert rig.config.get("diagnostics.capture_content") is True
+
+
+def test_settings_without_the_edit_capture_switch_are_refused_and_nothing_changes(rig: Rig) -> None:
+    settings = _settings(rig)
+    for wrong in ("yes", 1, None):
+        status, body = rig.call("PUT", "/api/settings", {**settings, "capture_edits": wrong})
+        assert status == 400 and body["error"]
+    del settings["capture_edits"]
+    assert rig.call("PUT", "/api/settings", settings)[0] == 400
+    assert rig.config.get("diagnostics.capture_edits", False) is False
 
 
 def test_a_theme_this_version_does_not_know_reads_back_as_the_default(rig: Rig) -> None:

@@ -54,6 +54,8 @@ DEFAULT_CONFIG = {
     "diagnostics": {
         "enabled": True,
         "capture_content": False,
+        # What is typed into a window after a dictation lands in it, with that window's title; needs capture_content.
+        "capture_edits": False,
         "retain_sessions": 50,
         "directory": "",
     },

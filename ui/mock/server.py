@@ -209,6 +209,7 @@ def _default_settings():
         "meetings": {"folder": MEETINGS_FOLDER, "record_microphone": True, "language": "en"},
         "show_english": True,
         "telemetry": False,
+        "capture_edits": False,
         "theme": "default",
         "colourways": {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"},
     }

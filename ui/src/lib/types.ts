@@ -45,6 +45,8 @@ export interface Settings {
   transcription_mode: TranscriptionMode;
   question_marks: boolean;
   capture_content: boolean;
+  /** Also keeps what is typed after a dictation lands, with the window's title; needs capture_content, and starts with the next launch. */
+  capture_edits: boolean;
   input_device: string;
   boost_quiet_speech: boolean;
   hotkey_bindings: Binding[];

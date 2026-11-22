@@ -11,6 +11,7 @@ const settings: Settings = {
   transcription_mode: "batch",
   question_marks: true,
   capture_content: true,
+  capture_edits: false,
   input_device: "Microphone (Blue Yeti)",
   boost_quiet_speech: true,
   hotkey_bindings: [{ keys: "ctrl+alt+m", mode: "toggle", action: "dictate" }],

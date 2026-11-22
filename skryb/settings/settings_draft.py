@@ -29,6 +29,8 @@ class SettingsDraft:
     # Handed to the engine when it is built, like the speech style.
     question_marks: bool = True
     capture_content: bool = False
+    # Read when Skryb starts, so switching it on waits for the next start; switching it off stops the writing at once.
+    capture_edits: bool = False
     # "" is the Windows default microphone. Both are read at the start of
     # every recording, so neither needs a rebuild to take effect.
     input_device: str = ""

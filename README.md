@@ -90,9 +90,10 @@ keeps the last 50 marked sessions. Older, unmarked folders stay until you
 remove them.
 
 Edit capture is also off by default. It needs history turned on and the
-separate `diagnostics.capture_edits=true` setting in the config file before
-launch. It saves your edits to dictated text along with window titles, so only
-turn it on deliberately. Turning history off stops edit capture writing too.
+separate **Capture my edits** switch in History settings, and it starts the
+next time Skryb starts. It saves your edits to dictated text along with window
+titles, so only turn it on deliberately. Turning it or history off stops edit
+capture writing at once.
 
 ## License
 

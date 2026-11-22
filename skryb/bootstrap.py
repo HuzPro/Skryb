@@ -319,7 +319,8 @@ def _build_edit_capture(config: JsonConfigAdapter, paths: AppPaths) -> Win32Edit
     """The keystroke watcher, or nothing while edit capture is off.
 
     ``edits.jsonl`` records what the user types into the window a
-    transcription was pasted into, so it stays off by default and config-only.
+    transcription was pasted into, so it stays off until History settings
+    switches it on, and starts with the next launch.
     """
     if not _edit_capture_enabled(config):
         return None

@@ -312,6 +312,7 @@ class SettingsService:
             theme=self._theme(),
             colourways=load_colourways(self._config),
             show_english=self._config.get("translation.show_english", False) is True,
+            capture_edits=self._config.get("diagnostics.capture_edits", False) is True,
             telemetry=self._config.get("telemetry.enabled", False) is True,
             **self._meeting_fields(),
         )
@@ -332,6 +333,7 @@ class SettingsService:
         original = self.current_draft()
         colourway = active_colourway(self._config)
         self._config.set("diagnostics.capture_content", draft.capture_content)
+        self._config.set("diagnostics.capture_edits", draft.capture_edits)
         if draft.capture_content:
             self._config.set("diagnostics.enabled", True)
         self._config.set("transcription.model_size", draft.model_size)

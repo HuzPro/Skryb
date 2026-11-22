@@ -1216,6 +1216,16 @@ class TestEditCaptureSwitch:
 
         assert capture is None
 
+    def test_should_stay_off_when_history_is_off_even_with_its_own_switch_on(self, tmp_path: Path):
+        config = FakeConfig({
+            "diagnostics.capture_edits": True,
+            "diagnostics.capture_content": False,
+        })
+
+        capture = _build_edit_capture(config, self._paths(tmp_path))
+
+        assert capture is None
+
     def test_should_write_nothing_while_it_is_off(self, tmp_path: Path):
         paths = self._paths(tmp_path)
 
