@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { ModelCard, useModels } from "../components/models";
-import { InlineError, Section } from "../components/parts";
+import { InlineError, Row, Rows, Section } from "../components/parts";
 import { Button } from "../components/ui/button";
+import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { runBeforeClose, windowControls } from "../lib/platform";
 import { useStore } from "../lib/store";
+import { USAGE_DATA_PROMISE } from "../lib/telemetry";
 import { MicrophonePicker } from "./microphone";
 import { setBindingKeys, ShortcutField, useCapture } from "./shortcuts";
 
@@ -84,6 +86,14 @@ export function SetupPage() {
           onStop={capture.stop}
         />
         {capture.error ? <InlineError>{capture.error.message}</InlineError> : null}
+      </Section>
+
+      <Section title="Optional: usage data" note="Off unless you turn it on. It stays on this computer, and you can change it in Settings.">
+        <Rows>
+          <Row title="Keep usage data" description={USAGE_DATA_PROMISE}>
+            <Switch aria-label="Keep usage data" checked={draft.telemetry} onCheckedChange={(telemetry) => editSettings((current) => ({ ...current, telemetry }))} />
+          </Row>
+        </Rows>
       </Section>
 
       <div className="mt-8 flex items-center justify-end gap-3 border-t pt-4">

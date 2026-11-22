@@ -50,6 +50,8 @@ class SettingsDraft:
     meetings_language: str = "en"
     # Read where lines are shown or a meeting starts; switching it on downloads the model.
     show_english: bool = False
+    # Read as each event arrives, so switching it off stops recording at once.
+    telemetry: bool = False
     theme: str = "default"
     # Each theme's own colourway, by theme.
     colourways: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLOURWAYS))

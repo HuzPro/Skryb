@@ -7,6 +7,7 @@ import { validateBindings } from "./keys";
 import { onBeforeClose } from "./platform";
 import { queries } from "./queries";
 import { onServerEvent } from "./sse";
+import { settingEvents, track } from "./telemetry";
 import type { Dictionary, License, SaveResult, Settings } from "./types";
 
 export type UnsavedChoice = "save" | "discard" | "cancel";
@@ -146,6 +147,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setSavePhase("idle");
         return false;
       }
+      settingEvents(settings.saved, draft).forEach(track);
       dispatchSettings({ type: "committed", value: draft });
       client.setQueryData(["settings"], draft);
       if (result.engine_reload_started) {

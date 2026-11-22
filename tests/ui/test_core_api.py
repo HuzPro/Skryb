@@ -30,7 +30,7 @@ _SETTINGS_KEYS = {
     "question_marks", "capture_content", "input_device", "boost_quiet_speech",
     "hotkey_bindings", "double_tap_locks_hold", "recording",
     "history_retention_days", "paste_method_overrides", "check_for_updates", "meetings", "theme",
-    "colourways", "show_english",
+    "colourways", "show_english", "telemetry",
 }
 _RECORDING_KEYS = {
     "warn_when_silent", "preferred_devices", "cues_enabled", "cue_volume",

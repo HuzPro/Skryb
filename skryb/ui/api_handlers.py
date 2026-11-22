@@ -43,10 +43,12 @@ from skryb.settings.service import EngineEventListener, SettingsService
 from skryb.settings.settings_draft import ChangeSet
 from skryb.settings.signal import Signal
 from skryb.settings.transcription_mode import TranscriptionMode
+from skryb.telemetry.events import TelemetryStore
 from skryb.transcription.model_info import ALL_MODELS
 from skryb.ui.api_server import ApiError, ApiRequest, ApiResponse, ApiServer, Route
 from skryb.ui.event_hub import EventHub, Json
 from skryb.ui.meeting_handlers import MeetingApi
+from skryb.ui.telemetry_handlers import TelemetryApi
 from skryb.ui.translation_handlers import TranslationApi
 from skryb.ui.shapes import (
     Fields,
@@ -58,6 +60,7 @@ from skryb.ui.shapes import (
     history_entry_json,
     settings_json,
     shown_combination,
+    telemetry_settings_json,
     usage_report_json,
 )
 
@@ -270,8 +273,12 @@ class CoreApi:
         meetings: MeetingApi | None = None,
         engine_device: Callable[[], tuple[str | None, str | None]] = _no_device,
         translation: TranslationApi | None = None,
+        telemetry: TelemetryStore | None = None,
     ) -> None:
         self._translation = translation
+        self._telemetry = (
+            TelemetryApi(telemetry, context=self._telemetry_context) if telemetry is not None else None
+        )
         self._service = service
         self._hub = hub
         self._microphones = microphones
@@ -342,13 +349,14 @@ class CoreApi:
             ("POST", "/api/updates/install", self._install_update),
         ]
         # Meetings and translation keep their own order: stopping a meeting waits for its last lines, and a
-        # translation for the model, neither of which may hold up settings.
+        # translation for the model, neither of which may hold up settings. Telemetry arrives all the time
+        # and must never wait behind a save.
         return [
             (method, path, handler if method == "GET" else self._one_at_a_time(handler))
             for method, path, handler in table
         ] + (self._meetings.routes() if self._meetings is not None else []) + (
             self._translation.routes() if self._translation is not None else []
-        )
+        ) + (self._telemetry.routes() if self._telemetry is not None else [])
 
     def _one_at_a_time(
         self, handler: Callable[[ApiRequest], ApiResponse],
@@ -373,6 +381,22 @@ class CoreApi:
             # None: this copy runs from a git checkout and updates through git.
             "update": asdict(self._updates.status()) if self._updates is not None else None,
             "meeting_recording": self._meetings is not None and self._meetings.recording(),
+        }
+
+    def _telemetry_context(self) -> Json:
+        """What a telemetry export says about this install: nothing typed, said or named by its owner."""
+        hardware = self._hardware()
+        return {
+            "app": {"version": app_version()},
+            "hardware": {"kind": hardware["kind"], "device_name": hardware["device_name"]},
+            "engine": {
+                "model": self._hub.engine_status().get("model"),
+                **_device_json(*self._engine_device()),
+            },
+            "settings": telemetry_settings_json(self._service.current_draft()),
+            "dictation": (
+                usage_report_json(self._history.usage()) if self._history is not None else None
+            ),
         }
 
     def publish_app_info(self) -> None:

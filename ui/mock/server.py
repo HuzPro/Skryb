@@ -208,6 +208,7 @@ def _default_settings():
         "check_for_updates": True,
         "meetings": {"folder": MEETINGS_FOLDER, "record_microphone": True, "language": "en"},
         "show_english": True,
+        "telemetry": False,
         "theme": "default",
         "colourways": {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"},
     }
@@ -230,7 +231,6 @@ def _history():
             status, error = "Failed", "The model ran out of memory (CUDA error 2)."
         elif roll < 0.07:
             status, has_audio = "Not saved", False
-        text = f"#{HISTORY_SIZE - index} {text}" if text.strip() else text
         heard, typed = text, ""
         if text.strip() and not status and rng.random() < 0.75:
             heard, typed = "um " + text[:1].lower() + text[1:].rstrip("."), text
@@ -367,6 +367,7 @@ class Core:
         self.lock = threading.RLock()
         self.clients: list[queue.Queue] = []
         self.settings = _default_settings()
+        self.telemetry: dict[str, int] = {}
         self.accepted: set[str] = set()
         self.models = [dict(model, download=None) for model in MODELS]
         if first_run:
@@ -1000,6 +1001,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def _logs(self, method, rest, query) -> None:
         self._send(204)
+
+    def _telemetry(self, method, rest, query) -> None:
+        """Usage data: counted while the setting is on, exported or deleted on request."""
+        core = self.core
+        if method == "GET":
+            counts = dict(sorted(core.telemetry.items(), key=lambda item: -item[1]))
+            self._send(200, {"events": sum(counts.values()), "counts": counts})
+        elif rest == ["export"]:
+            self._send(200, {"events": sum(core.telemetry.values())})
+        elif method == "DELETE":
+            core.telemetry.clear()
+            self._send(204)
+        else:
+            if core.settings.get("telemetry"):
+                for event in (self._body() or {}).get("events", []):
+                    key = f"{event['kind']}:{event['name']}"
+                    core.telemetry[key] = core.telemetry.get(key, 0) + 1
+            self._send(204)
 
     def _pill(self, method, rest, query) -> None:
         self._send(204)

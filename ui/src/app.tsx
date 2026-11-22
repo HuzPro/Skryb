@@ -9,6 +9,7 @@ import { applyTheme, guardClose, onRelaunch, runBeforeClose, setWindowIcon, show
 import { prefetchPages, queryClient } from "./lib/queries";
 import { useServerEvents } from "./lib/sse";
 import { StoreProvider, useStore, useStoreRef } from "./lib/store";
+import { openedPage, setTelemetry, watchUsage } from "./lib/telemetry";
 import { DictionaryPage } from "./pages/dictionary";
 import { HistoryPage } from "./pages/history";
 import { DictationHomePage } from "./pages/home";
@@ -121,6 +122,16 @@ function ThemeSync() {
   return null;
 }
 
+/** While usage data is on, records each page opened and each control used; nothing while it is off. */
+function TelemetrySync() {
+  const on = useStore().settings?.saved.telemetry ?? false;
+  const { pathname } = useLocation();
+  useEffect(watchUsage, []);
+  useEffect(() => setTelemetry(on), [on]);
+  useEffect(() => openedPage(pathname), [pathname]);
+  return null;
+}
+
 /** The taskbar shows the window's icon: the mark in the colourway now applied. */
 function paintWindowIcon(): void {
   const style = getComputedStyle(document.documentElement);
@@ -183,6 +194,7 @@ function Shell() {
     <LostContext.Provider value={lost}>
       <InstallContext.Provider value={install}>
         <ThemeSync />
+        <TelemetrySync />
         <div className="relative flex h-full">
           {setup ? null : (
             <Sidebar

@@ -122,8 +122,51 @@ def settings_json(draft: SettingsDraft) -> Json:
             "language": draft.meetings_language,
         },
         "show_english": draft.show_english,
+        "telemetry": draft.telemetry,
         "theme": draft.theme,
         "colourways": dict(draft.colourways),
+    }
+
+
+def telemetry_settings_json(draft: SettingsDraft) -> Json:
+    """The settings a telemetry export may carry: switches, numbers and fixed choices.
+
+    Listed one by one, so a setting that holds a folder, a device's name or anything typed is
+    never included by default.
+    """
+    recording = draft.recording
+    return {
+        "model_size": draft.model_size,
+        "language": draft.language,
+        "device": draft.device,
+        "engine": draft.engine,
+        "output_mode": draft.output_mode.value,
+        "transcription_mode": draft.transcription_mode.value,
+        "question_marks": draft.question_marks,
+        "capture_content": draft.capture_content,
+        "boost_quiet_speech": draft.boost_quiet_speech,
+        "shortcuts": [binding_json(binding) for binding in draft.hotkey_bindings],
+        "double_tap_locks_hold": draft.double_tap_locks_hold,
+        "recording": {
+            "warn_when_silent": recording.warn_when_silent,
+            "preferred_devices": len(recording.preferred_devices),
+            "cues_enabled": recording.cues_enabled,
+            "cue_volume": recording.cue_volume,
+            "duck_other_audio": recording.duck_other_audio,
+            "duck_level": recording.duck_level,
+            "max_duration_seconds": recording.max_duration_seconds,
+            "warn_before_cap_seconds": recording.warn_before_cap_seconds,
+        },
+        "history_retention_days": draft.history_retention_days,
+        "paste_method_overrides": len(draft.paste_method_overrides),
+        "check_for_updates": draft.check_for_updates,
+        "meetings": {
+            "record_microphone": draft.meetings_record_microphone,
+            "language": draft.meetings_language,
+        },
+        "show_english": draft.show_english,
+        "theme": draft.theme,
+        "colourway": draft.colourways.get(draft.theme),
     }
 
 
@@ -179,6 +222,7 @@ def draft_from_json(document: object, saved: SettingsDraft) -> SettingsDraft:
         meetings_record_microphone=meetings.flag("record_microphone"),
         meetings_language=meetings.one_of("language", MEETING_LANGUAGES),
         show_english=settings.flag("show_english"),
+        telemetry=settings.flag("telemetry"),
         theme=settings.one_of("theme", UI_THEMES),
         colourways={theme: colourways.one_of(theme, COLOURWAYS) for theme in UI_THEMES},
     )

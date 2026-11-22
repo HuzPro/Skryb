@@ -1,5 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileDown, FileUp, FolderOpen } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, FileDown, FileUp, FolderOpen, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { installDescription, installTitle, useInstall } from "../components/install";
@@ -9,7 +9,9 @@ import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { api, errorText } from "../lib/api";
 import { chooseOpenPath, chooseSavePath } from "../lib/platform";
+import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
+import { USAGE_DATA_PROMISE } from "../lib/telemetry";
 import type { Colourway, Theme, UpdateStatus } from "../lib/types";
 import { cn } from "../lib/utils";
 
@@ -19,6 +21,63 @@ const THEMES: { value: Theme; title: string }[] = [
   { value: "material", title: "Material" },
   { value: "paper", title: "Paper" },
 ];
+
+/** Usage data: the switch that keeps it, how much is kept, and exporting or deleting all of it. */
+function UsageData() {
+  const { settings, editSettings, confirm } = useStore();
+  const client = useQueryClient();
+  // Asked again each time Settings opens: events arrive all the time and no server event announces them.
+  const kept = useQuery({ ...queries.telemetry, staleTime: 0 }).data?.events ?? 0;
+  const [note, setNote] = useState({ text: "", error: false });
+  const draft = settings?.draft;
+  if (!draft) return null;
+  const act = async (work: () => Promise<string>) => {
+    try {
+      setNote({ text: await work(), error: false });
+    } catch (error) {
+      setNote({ text: errorText(error), error: true });
+    }
+  };
+  const events = (count: number) => `${count.toLocaleString()} ${count === 1 ? "event" : "events"}`;
+  const exportData = () =>
+    act(async () => {
+      const path = await chooseSavePath("Export usage data", `skryb-usage-${new Date().toISOString().slice(0, 10)}.json`, "Usage data", "json");
+      if (!path) return "";
+      const exported = await api.post<{ events: number }>("/api/telemetry/export", { path });
+      return `Exported ${events(exported.events)}.`;
+    });
+  const deleteData = () =>
+    act(async () => {
+      if (!(await confirm("Delete usage data", "Everything Skryb has kept about how you use it goes. This can't be undone.", "Delete"))) return "";
+      await api.del("/api/telemetry");
+      await client.invalidateQueries({ queryKey: ["telemetry"] });
+      return "Deleted.";
+    });
+  return (
+    <Section title="Usage data" note="Off unless you turn it on. It stays on this computer.">
+      <Rows>
+        <Row title="Keep usage data" description={USAGE_DATA_PROMISE}>
+          <Switch aria-label="Keep usage data" checked={draft.telemetry} onCheckedChange={(telemetry) => editSettings((current) => ({ ...current, telemetry }))} />
+        </Row>
+        <Row
+          title={kept ? `${events(kept)} kept` : "Nothing kept yet"}
+          description="Export it as one file to send to Skryb's developers, or to read yourself."
+          error={note.error ? note.text : undefined}
+        >
+          {!note.error && note.text ? <span className="text-[12.5px] text-muted-foreground">{note.text}</span> : null}
+          <Button variant="outline" data-track="export-usage" disabled={!kept} onClick={() => void exportData()}>
+            <FileDown />
+            Export
+          </Button>
+          <Button variant="outline" data-track="delete-usage" disabled={!kept} onClick={() => void deleteData()}>
+            <Trash2 />
+            Delete
+          </Button>
+        </Row>
+      </Rows>
+    </Section>
+  );
+}
 
 const COLOURWAYS: { value: Colourway; label: string }[] = [
   { value: "green", label: "Skryb green" },
@@ -241,6 +300,8 @@ export function SettingsPage() {
           </Row>
         </Rows>
       </Section>
+
+      <UsageData />
 
       <Section title="Settings and logs">
         <Rows>

@@ -29,6 +29,8 @@ from skryb.settings.model_installation_cache import ModelInstallationCache
 from skryb.settings.service import SettingsService
 from skryb.settings.settings_draft import ChangeSet
 from skryb.settings.signal import Signal
+from skryb.telemetry.events import FILE_NAME as TELEMETRY_FILE
+from skryb.telemetry.events import TelemetryStore
 from skryb.transcription.engine_factory import build_engine_registry
 from skryb.transcription.license_policy import LicensePolicy
 from skryb.ui.api_handlers import CoreApi, ShortcutCapture
@@ -152,6 +154,7 @@ class Rig:
         self.setup_done = threading.Event()
         self.history_dir = tmp_path / "diagnostics"
         self.history_dir.mkdir(parents=True)
+        self.telemetry_path = self.history_dir / TELEMETRY_FILE
         self.played: list[Path] = []
         self.previewed: list[tuple[str, float]] = []
         self.stopped = 0
@@ -188,6 +191,10 @@ class Rig:
             updates=updates,
             engine_device=engine_device,
             preview_sound=lambda cue, volume: self.previewed.append((cue, volume)),
+            telemetry=TelemetryStore(
+                self.telemetry_path,
+                enabled=lambda: self.config.get("telemetry.enabled", False) is True,
+            ),
         ).serve_on(self.server)
 
     def _count_stop(self) -> None:

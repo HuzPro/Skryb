@@ -1,12 +1,13 @@
 import { QueryClient, queryOptions } from "@tanstack/react-query";
 import { api } from "./api";
-import type { AppInfo, Dictionary, Engines, HistoryEntry, HistoryUsage, LiveMeeting, MeetingOverview, Microphone, Model, Settings } from "./types";
+import type { AppInfo, Dictionary, Engines, HistoryEntry, HistoryUsage, LiveMeeting, MeetingOverview, Microphone, Model, Settings, TelemetryStatus } from "./types";
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: Infinity, retry: 1, refetchOnWindowFocus: false } },
 });
 
-export const HISTORY_PAGE = 100;
+/** History opens on this many of the newest dictations, so it is up at once; the rest load as the list is scrolled. */
+export const HISTORY_PAGE = 30;
 
 /** What the pages read from the core; the shell fetches each once, the events keep them current. */
 export const queries = {
@@ -22,6 +23,9 @@ export const queries = {
   }),
   // Under "history", so a new or deleted dictation fetches it again.
   usage: queryOptions({ queryKey: ["history", "usage"], queryFn: () => api.get<HistoryUsage>("/api/history/usage") }),
+  telemetry: queryOptions({ queryKey: ["telemetry"], queryFn: () => api.get<TelemetryStatus>("/api/telemetry") }),
+  // Its own copy of the counts, read once: what orders controls by use must not move them while the window is open.
+  usageOrder: queryOptions({ queryKey: ["telemetry", "order"], queryFn: () => api.get<TelemetryStatus>("/api/telemetry") }),
   engines: (model: string) => queryOptions({ queryKey: ["engines", model], queryFn: () => api.get<Engines>(`/api/engines?model=${encodeURIComponent(model)}`) }),
   history: (search: string, limit: number) =>
     queryOptions({

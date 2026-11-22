@@ -56,9 +56,17 @@ export interface Settings {
   meetings: MeetingSettings;
   /** Arabic lines in meetings and History show their English and a gloss under each word; on downloads the model. */
   show_english: boolean;
+  /** Off until asked for: which pages, controls and settings are used, kept on this computer. */
+  telemetry: boolean;
   theme: Theme;
   /** Each theme remembers its own colourway. */
   colourways: Record<Theme, Colourway>;
+}
+
+/** How much usage data is kept, and how often each kind:name has happened, most used first. */
+export interface TelemetryStatus {
+  events: number;
+  counts: Record<string, number>;
 }
 
 export interface ChangeSet {

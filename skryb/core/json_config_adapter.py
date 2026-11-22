@@ -73,6 +73,10 @@ DEFAULT_CONFIG = {
     "translation": {
         "show_english": False,
     },
+    # Off until asked for: which pages, controls and settings are used, kept on this computer.
+    "telemetry": {
+        "enabled": False,
+    },
     "ui": {
         "theme": "default",
         "colourways": {"default": "ink", "glass": "ink", "material": "ink", "paper": "green"},

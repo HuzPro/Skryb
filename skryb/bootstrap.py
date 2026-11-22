@@ -203,6 +203,8 @@ from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version, open_wi
 from skryb.ui.api_server import ApiServer
 from skryb.ui.launcher import ShellLauncher
 from skryb.ui.meeting_handlers import MeetingApi
+from skryb.telemetry.events import FILE_NAME as TELEMETRY_FILE
+from skryb.telemetry.events import TelemetryStore
 from skryb.ui.translation_handlers import TranslationApi
 
 _logger = logging.getLogger(__name__)
@@ -1510,6 +1512,10 @@ def build_app(
             english=functools.partial(english_for_meetings, config, translation),
         ),
         translation=TranslationApi(translation, api_server.hub, enabled=functools.partial(show_english, config)),
+        telemetry=TelemetryStore(
+            paths.diagnostics_dir / TELEMETRY_FILE,
+            enabled=lambda: config.get("telemetry.enabled", False) is True,
+        ),
     )
     launcher = ShellLauncher(
         api_server,

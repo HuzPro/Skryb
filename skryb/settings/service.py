@@ -312,6 +312,7 @@ class SettingsService:
             theme=self._theme(),
             colourways=load_colourways(self._config),
             show_english=self._config.get("translation.show_english", False) is True,
+            telemetry=self._config.get("telemetry.enabled", False) is True,
             **self._meeting_fields(),
         )
 
@@ -351,6 +352,7 @@ class SettingsService:
         self._config.set("meetings.record_microphone", draft.meetings_record_microphone)
         self._config.set("meetings.language", draft.meetings_language)
         self._config.set("translation.show_english", draft.show_english)
+        self._config.set("telemetry.enabled", draft.telemetry)
         self._config.set("ui.theme", draft.theme)
         self._config.set("ui.colourways", cast(ConfigValue, dict(draft.colourways)))
         # A process name holds a dot, so the map is stored whole rather
