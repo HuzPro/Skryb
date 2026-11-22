@@ -773,9 +773,21 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
-  /* Inside a rounded card the track stops short of both ends, so the corner's curve never cuts the thumb. */
-  .surface ::-webkit-scrollbar-track {
+  /*
+   * One rule for every scrollbar in a rounded box: the track stops short of both ends by a share of that
+   * box's corner radius, so the curve never cuts the thumb. Cards, dialogs and menus are `surface`; Paper's
+   * rounded content panel holds the page's own scrollbar.
+   */
+  .surface::-webkit-scrollbar-track:vertical,
+  .surface ::-webkit-scrollbar-track:vertical {
     margin-block: calc(var(--r-xl) * 0.6);
+  }
+  .surface::-webkit-scrollbar-track:horizontal,
+  .surface ::-webkit-scrollbar-track:horizontal {
+    margin-inline: calc(var(--r-xl) * 0.6);
+  }
+  .content-panel > main::-webkit-scrollbar-track:vertical {
+    margin-block: calc(var(--panel-radius) * 0.6);
   }
   input[type="range"] {
     accent-color: var(--primary);
