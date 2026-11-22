@@ -319,6 +319,114 @@ def test_without_a_gpu_or_a_working_npu_voices_are_not_told_apart_and_the_window
     assert warning == NO_GPU_WARNING
 
 
+class _OpenVinoWithoutAnNpu(_FakeNpuDiarizer):
+    """OpenVINO on a computer with no NPU: it can only offer the CPU."""
+
+    def __init__(self, snapshot: Path) -> None:
+        super().__init__(snapshot, device="CPU")
+
+
+class _FakeCpuDiarizer(LevelLabeller):
+    built: list["_FakeCpuDiarizer"] = []
+
+    def __init__(self, model: Path, fail: str | None = None) -> None:
+        if fail:
+            raise asr.TranscriptionError(fail)
+        super().__init__(0.01)
+        self.model, self.disposed = model, False
+        _FakeCpuDiarizer.built.append(self)
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+_GGUF = Path("C:/Users/Zoë/AppData/Roaming/Skryb/models/Nemotron-3-Diarization.q8_0.gguf")
+
+
+def test_without_a_gpu_or_an_npu_nvidias_cpu_diarizer_tells_the_speakers_apart_with_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(asr, "gpu_available", lambda: False)
+    monkeypatch.setattr(asr, "OpenVinoDiarizer", _OpenVinoWithoutAnNpu)
+    monkeypatch.setattr(asr, "CpuDiarizer", _FakeCpuDiarizer)
+    models, _built = _models(FakeQwen())
+    models._cpu_diarizer_model = lambda: _GGUF
+
+    labeller, warning = models.speaker_labeller()
+
+    assert isinstance(labeller, _FakeCpuDiarizer) and labeller.model == _GGUF
+    assert warning is None
+
+
+@pytest.mark.parametrize("reason", [
+    "The CPU diarizer isn't installed (nemo_speech_asr_c.dll is missing).",
+    "The CPU diarizer didn't load from nemo_speech_asr_c.dll: [WinError 193] %1 is not a valid Win32 application",
+    "The CPU diarizer failed to load (status 1): illegal instruction: this build needs AVX2",
+])
+def test_a_cpu_diarizer_that_cannot_load_leaves_everyone_as_speaker_1_and_the_window_says_so(
+    monkeypatch: pytest.MonkeyPatch, reason: str,
+) -> None:
+    monkeypatch.setattr(asr, "gpu_available", lambda: False)
+    monkeypatch.setattr(asr, "OpenVinoDiarizer", _OpenVinoWithoutAnNpu)
+    monkeypatch.setattr(asr, "CpuDiarizer", lambda model: _FakeCpuDiarizer(model, fail=reason))
+    models, _built = _models(FakeQwen())
+    models._cpu_diarizer_model = lambda: _GGUF
+
+    labeller, warning = models.speaker_labeller()
+
+    assert labeller.frame_seconds == 0.032
+    assert warning == NO_GPU_WARNING
+
+
+def test_a_computer_with_a_gpu_never_loads_the_cpu_diarizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(asr, "CpuDiarizer", lambda model: pytest.fail("loaded the CPU diarizer beside a GPU"))
+    models, _built = _models(FakeQwen())
+    models._cpu_diarizer_model = lambda: _GGUF
+
+    labeller, warning = models.speaker_labeller()
+
+    assert labeller.frame_seconds == 0.01 and warning is None
+
+
+def test_the_cpu_diarizer_is_let_go_of_when_the_meeting_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(asr, "gpu_available", lambda: False)
+    monkeypatch.setattr(asr, "OpenVinoDiarizer", _OpenVinoWithoutAnNpu)
+    monkeypatch.setattr(asr, "CpuDiarizer", _FakeCpuDiarizer)
+    models, _built = _models(FakeQwen())
+    models._cpu_diarizer_model = lambda: _GGUF
+    labeller, _ = models.speaker_labeller()
+
+    models.release()
+
+    assert isinstance(labeller, _FakeCpuDiarizer) and labeller.disposed
+
+
+@pytest.mark.parametrize(("kind", "npu", "model"), [
+    ("amd_rocm", None, "nemotron-3-diarization"),
+    ("nvidia_cuda", None, "nemotron-3-diarization"),
+    ("cpu", "FD3E", "nemotron-3-diarization"),  # a tuned Intel NPU runs the checkpoint through OpenVINO
+    ("cpu", None, "nemotron-3-diarization-cpu"),
+])
+def test_a_computer_downloads_the_checkpoint_with_a_gpu_or_npu_and_nvidias_cpu_build_with_neither(
+    kind: str, npu: str | None, model: str,
+) -> None:
+    from skryb.transcription.engine_types import HardwareProfile
+    from tests.fakes.hardware import FakeHardwareDetector
+
+    detector = FakeHardwareDetector(HardwareProfile(kind=kind, device_name="Some device", gfx_arch=None, npu=npu))
+
+    assert asr.diarizer_model_for(detector).name == model
+
+
+def test_the_cpu_diarizers_model_is_the_gguf_in_the_diarizers_pinned_snapshot(tmp_path: Path) -> None:
+    from skryb.meetings.models import DIARIZER
+
+    repo = tmp_path / "models--nvidia--Nemotron-3-Diarization"
+    (repo / "refs").mkdir(parents=True)
+    (repo / "refs" / "main").write_text(DIARIZER.revision)
+
+    assert asr.cpu_diarizer_model(tmp_path) == (
+        repo / "snapshots" / DIARIZER.revision / "Nemotron-3-Diarization.q8_0.gguf")
+
+
 def test_loading_the_speech_detector_leaves_torch_on_every_thread_it_had() -> None:
     import subprocess
     import sys

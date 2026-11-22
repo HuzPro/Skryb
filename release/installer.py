@@ -57,6 +57,12 @@ _NATIVE_DIARIZER_IN_WHEEL = "skryb/transcription/nd.dll"
 # The NPU engine's CPU decoder, from native/tdt/build.py. Plain C, so there is no NVIDIA build of it.
 _NATIVE_TDT_BUILD = Path("native") / "tdt" / "build" / "tdt_cpu.dll"
 _NATIVE_TDT_IN_WHEEL = "skryb/transcription/tdt_cpu.dll"
+# NVIDIA's NeMo-Speech.cpp CPU build (the meeting diarizer without a GPU) as native/nemo_speech/fetch.py leaves it:
+# its DLLs, and its licences under licenses/. Shipped as one folder beside the native engines.
+_NEMO_SPEECH_BUILD = Path("native") / "nemo_speech" / "build"
+_NEMO_SPEECH_IN_WHEEL = ("skryb/transcription/nemo-speech/nemo_speech_asr_c.dll",
+                         "skryb/transcription/nemo-speech/licenses/LICENSE",
+                         "skryb/transcription/nemo-speech/licenses/NOTICE")
 
 
 def iss_defines(version: str, payload_dir: Path, wheel_filename: str) -> dict[str, str]:
@@ -208,6 +214,7 @@ def _require_built_files_in_wheel(wheel: Path) -> None:
     native = (_NATIVE_ENGINE_IN_WHEEL, _NATIVE_PARAKEET_IN_WHEEL, _NATIVE_DIARIZER_IN_WHEEL)
     for member in (
         _UI_SHELL_IN_WHEEL, *native, *(dll.replace(".dll", "_cuda.dll") for dll in native), _NATIVE_TDT_IN_WHEEL,
+        *_NEMO_SPEECH_IN_WHEEL,
     ):
         if member not in names:
             raise InstallerBuildError(
@@ -266,6 +273,13 @@ def _copy_native_engine(repo_root: Path, destination: Path) -> None:
     if not decoder.exists():
         raise InstallerBuildError(f"the NPU engine's CPU decoder is not built ({decoder} is missing); run native/tdt/build.py first")
     shutil.copyfile(decoder, destination / decoder.name)
+    nemo_speech = repo_root / _NEMO_SPEECH_BUILD
+    if not (nemo_speech / "nemo_speech_asr_c.dll").is_file():
+        raise InstallerBuildError(
+            f"NVIDIA's CPU diarizer is not fetched ({nemo_speech} has no nemo_speech_asr_c.dll); "
+            f"run native/nemo_speech/fetch.py first"
+        )
+    shutil.copytree(nemo_speech, destination / "nemo-speech")
 
 
 

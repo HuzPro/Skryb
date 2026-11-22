@@ -154,6 +154,25 @@ class TestHfRepoResolverIgnorePatterns:
         names = [f.filename for f in files]
         assert names == ["config.json", "model.safetensors", "model.bin"]
 
+    def test_naming_the_files_keeps_exactly_those_even_ones_the_ignore_list_skips(self):
+        api = MagicMock()
+        api.repo_info.return_value = _fake_repo_info(
+            sha="sha",
+            files=[
+                _fake_sibling("config.json", 100),
+                _fake_sibling("model.safetensors", 400_000_000),
+                _fake_sibling("Nemotron-3-Diarization.nemo", 400_000_000),
+                _fake_sibling("Nemotron-3-Diarization.q8_0.gguf", 107_012_128),
+                _fake_sibling("Nemotron-3-Diarization.f16.gguf", 200_000_000),
+                _fake_sibling("README.md", 5_000),
+            ],
+        )
+
+        files = HfRepoResolver(api=api).resolve(
+            "nvidia/Nemotron-3-Diarization", "", ("Nemotron-3-Diarization.q8_0.gguf",)).files
+
+        assert [(f.filename, f.size) for f in files] == [("Nemotron-3-Diarization.q8_0.gguf", 107_012_128)]
+
     def test_should_exclude_readme_and_gitattributes(self):
         api = MagicMock()
         api.repo_info.return_value = _fake_repo_info(

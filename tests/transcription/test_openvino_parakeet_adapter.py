@@ -611,7 +611,9 @@ class TestWhenTheNpuWillNotRunIt:
         core = _FakeCore({"NPU": "ok", "CPU": "ok"})
         engine, _, _ = engine_on(core)
         engine.load_model()
-        _eventually(lambda: len(core.compiled) == len(BUCKET_FRAMES))
+        # The engine files each length a moment after the core compiles it: wait for the engine, or a length filed
+        # after the loop below stays unbroken and the dictation never leaves the NPU.
+        _eventually(lambda: engine._model._encoder.length_count == len(BUCKET_FRAMES))
         for compiled in engine._model._encoder._compiled_by_frames.values():
             compiled.broken = "ZE_RESULT_ERROR_DEVICE_LOST"
 

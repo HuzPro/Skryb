@@ -118,6 +118,10 @@ Streaming mode types text live as you speak, instead of recording first and tran
 - The CUDA wheel index defaults to `cu130`, which covers the RTX 20 series through the RTX 50 series and needs NVIDIA driver 580 or newer. On a GTX 10-series card or older, change it to `cu126` in `requirements-nvidia.txt` (those builds don't run on an RTX 50). PyTorch wheels bundle the CUDA runtime, so only the host driver version matters - no CUDA Toolkit install required.
 - The native engines (Parakeet, Qwen3-ASR and the meeting diarizer) have an experimental NVIDIA build for the RTX 30, 40 and 50 series, picked automatically. It checks its own kernels when it loads and falls back to the CPU if they disagree.
 
+### No supported GPU or NPU
+
+- Meetings still tell speakers apart, through an experimental CPU build of the same diarizer (NVIDIA's NeMo-Speech.cpp). It downloads a 107 MB model the first time and keeps up with live audio on a recent desktop CPU. If the CPU falls behind, the speaker labels finish after the meeting ends instead.
+
 ### "I already have a custom torch installed"
 
 Use matching PyTorch and torchaudio builds, then install `requirements-all.txt` with a constraints file pinning those versions. Although that file does not list torch directly, torchaudio depends on it and pip may otherwise replace your runtime.

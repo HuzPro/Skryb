@@ -1,6 +1,7 @@
 """A whole meeting through the real session, on fake devices and fake models."""
 
 import json
+import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -167,3 +168,31 @@ def test_quitting_mid_meeting_closes_the_audio_files_and_keeps_the_lines_so_far(
     assert capture.stopped.wait(_WAIT_SECONDS)
     audio, _rate = soundfile.read(session.folder / "them.flac", dtype="float32")
     assert len(audio) > 0
+
+
+class _SlowSpeakers(FakeModels):
+    """A speaker labeller slower than live audio, as NVIDIA's CPU diarizer can be on a weak CPU."""
+
+    def speaker_labeller(self):
+        labeller, warning = super().speaker_labeller()
+        push = labeller.push
+
+        def slow_push(audio, last=False):
+            time.sleep(0.15)  # audio arrives every 0.1 s and takes 0.15 s to label, so labels fall behind
+            return push(audio, last)
+
+        labeller.push = slow_push  # type: ignore[method-assign]
+        return labeller, warning
+
+
+def test_a_diarizer_slower_than_live_audio_catches_up_after_the_meeting_and_labels_every_line(tmp_path: Path) -> None:
+    them = np.concatenate([voice(0, 3), silence(1.5), voice(1, 2.5), silence(1), voice(0, 2), silence(1)])
+    models = _SlowSpeakers()
+
+    session, events = _run(tmp_path, FakeCapture(them), models, record_microphone=False)
+
+    lines = [(e.track, e.speaker) for e in session.transcript.entries]
+    assert lines == [("them", 0), ("them", 1), ("them", 0)]
+    assert [e["status"] for e in events if e["type"] == "status"][-2:] == ["Finishing", "Saved"]
+    audio, _rate = soundfile.read(session.folder / "them.flac", dtype="float32")
+    assert len(audio) == len(them)
