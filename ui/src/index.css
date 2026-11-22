@@ -773,6 +773,10 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* Inside a rounded card the track stops short of both ends, so the corner's curve never cuts the thumb. */
+  .surface ::-webkit-scrollbar-track {
+    margin-block: calc(var(--r-xl) * 0.6);
+  }
   input[type="range"] {
     accent-color: var(--primary);
   }

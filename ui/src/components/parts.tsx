@@ -10,13 +10,15 @@ import { Input } from "./ui/input";
  * runs down one line and the cards sit just outside it. A card's own text is its 1 px border plus `px-4`
  * in, so text outside a card is inset by TEXT_INSET, the same 17 px. Settings pages keep to a readable width.
  */
-export const PAGE_EDGE = "px-3 pt-3";
+// The page keeps a 10 px gutter for its scrollbar on the right whether or not it scrolls, so the right
+// padding is 2 px: 12 px from the cards to the window on that side too, with the scrollbar inside it.
+export const PAGE_EDGE = "pt-3 pr-0.5 pl-3";
 export const TEXT_INSET = "px-[17px]";
 /** A page's title: centred on its capitals, so it is level with the buttons and fields on its line; cut short sideways only, so its descenders show. */
 export const PAGE_TITLE = "page-title label-centred min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap";
 
 export function PageBody({ children }: { children: ReactNode }) {
-  return <div className={cn(PAGE_EDGE, "w-full max-w-[720px] pb-28")}>{children}</div>;
+  return <div className={cn(PAGE_EDGE, "w-full max-w-[710px] pb-28")}>{children}</div>;
 }
 
 export function PageTitle({ title, children }: { title: ReactNode; children?: ReactNode }) {

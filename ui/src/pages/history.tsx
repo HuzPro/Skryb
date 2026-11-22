@@ -3,7 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Download, FileDown, Play, RotateCcw, Search, SlidersHorizontal, Square, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Interlinear } from "../components/english";
-import { Card, PAGE_TITLE, Row, TEXT_INSET } from "../components/parts";
+import { Card, PAGE_EDGE, PAGE_TITLE, Row, TEXT_INSET } from "../components/parts";
 import { ResizeEdge, saveWidth, savedWidth, useAppInfo } from "../components/shell";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -407,7 +407,7 @@ export function HistoryPage() {
       : [];
 
   return (
-    <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-3">
+    <div className={cn(PAGE_EDGE, "flex h-full flex-col gap-3 pb-3")}>
       {/* The title starts where the list's text does; the cards sit outside that line. */}
       <div className={cn(TEXT_INSET, "mb-1 flex min-h-10 items-center gap-2")}>
         <h1 className={cn(PAGE_TITLE, "flex-1")}>History</h1>
