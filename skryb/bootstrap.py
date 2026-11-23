@@ -198,6 +198,7 @@ from skryb.transcription.streaming.streaming_engine import (
 from skryb.transcription_use_case import RecordAndTranscribeUseCase
 from skryb.translation.service import TranslationService
 from skryb.tray.app import SystemTrayApp
+from skryb.tray.shown_in_tray import keep_tray_icon_shown_in_background
 from skryb.tray.win32_tray_adapter import build_win32_tray_adapter
 from skryb.ui.api_handlers import CoreApi, ShortcutCapture, app_version, open_with_shell
 from skryb.ui.api_server import ApiServer
@@ -1621,8 +1622,9 @@ def build_app(
     # Keys observed before this only queue up; the observer catches up.
     if edit_capture is not None:
         _start_once_idle(event_bus, edit_capture.start)
-    # Every start, as an update's Setup puts the emerald icon back.
-    _start_once_idle(event_bus, _app_icon_painter(config))
+    # Every start, as an update's Setup puts the emerald icon back. And once Windows has seen
+    # this program's tray icon, it gets the place on the taskbar the user gave it as pythonw.exe.
+    _start_once_idle(event_bus, _app_icon_painter(config), keep_tray_icon_shown_in_background)
     _spawn_engine_load_thread(
         config, paths, registry, hardware_detector, license_policy, diagnostics,
         use_case=record_and_transcribe_use_case,
