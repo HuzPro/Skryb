@@ -6,7 +6,7 @@ that build is given: the version numbers, the resources, and the stack size read
 """
 
 import struct
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -71,7 +71,7 @@ class TestTheResourcesOfAnExe:
     def test_the_icon_and_the_manifest_are_compiled_in_from_any_folder(self):
         folder = r"C:\Users\Zoë O'Hara\Skryb builds (new)"
 
-        script = resource_script("0.18.1", WINDOWED_EXE, Path(folder, "skryb.ico"), Path(folder, "python.manifest"))
+        script = resource_script("0.18.1", WINDOWED_EXE, PureWindowsPath(folder, "skryb.ico"), PureWindowsPath(folder, "python.manifest"))
 
         # A backslash is doubled, or the resource compiler would read it as an escape.
         assert r'''1 ICON "C:\\Users\\Zoë O'Hara\\Skryb builds (new)\\skryb.ico"''' in script

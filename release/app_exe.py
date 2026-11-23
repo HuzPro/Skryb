@@ -15,7 +15,7 @@ import re
 import struct
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from release import APP_NAME
 from release.errors import InstallerBuildError
@@ -52,7 +52,7 @@ def file_version(version: str) -> tuple[int, int, int, int]:
     return tuple(parts + [0] * (4 - len(parts)))  # type: ignore[return-value]
 
 
-def resource_script(version: str, exe_name: str, icon: Path, manifest: Path) -> str:
+def resource_script(version: str, exe_name: str, icon: PurePath, manifest: PurePath) -> str:
     """The resources compiled into an exe: its icon, its manifest and the details Windows shows.
 
     Task Manager names a process by ``FileDescription``, so that is the app's name.
