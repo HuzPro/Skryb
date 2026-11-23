@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { byUse, controlName, pageName, settingEvents } from "./telemetry";
+import { QueryObserver } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { connectTo } from "./api";
+import { queries, queryClient } from "./queries";
+import { byUse, controlName, deleteUsageData, openedPage, pageName, setTelemetry, settingEvents, track } from "./telemetry";
 import type { Settings } from "./types";
 
 const settings: Settings = {
@@ -147,5 +150,98 @@ describe("putting what is used most first", () => {
     expect(ordered.slice(0, 3)).toEqual(["item-6", "item-13", "item-20"]);
     expect(ordered.at(-1)).toBe("item-4998");
     expect(byUse(items, counts, (item) => item)).toEqual(ordered);
+  });
+});
+
+/** A core that keeps the events it is sent while usage data is on, and counts how often it was asked for the count. */
+function fakeCore() {
+  const core = { keeping: true, kept: 0, asked: 0, batches: 0 };
+  vi.stubGlobal("fetch", async (url: string, init: { method: string; body?: string }) => {
+    const path = new URL(url).pathname;
+    if (path !== "/api/telemetry") return new Response(JSON.stringify({ error: "Not found." }), { status: 404 });
+    if (init.method === "GET") {
+      core.asked += 1;
+      return new Response(JSON.stringify({ events: core.kept, counts: {} }));
+    }
+    if (init.method === "DELETE") core.kept = 0;
+    else {
+      core.batches += 1;
+      if (core.keeping) core.kept += (JSON.parse(init.body ?? "{}") as { events: unknown[] }).events.length;
+    }
+    return new Response(null, { status: 204 });
+  });
+  connectTo(8765, "dev");
+  return core;
+}
+
+/** The number Settings shows while its usage data row is on screen. */
+function watchCount() {
+  const observer = new QueryObserver(queryClient, { ...queries.telemetry, staleTime: 0 });
+  const stop = observer.subscribe(() => undefined);
+  return { shown: () => observer.getCurrentResult().data?.events, stop };
+}
+
+/** Enough clicks that the batch goes to the core at once, as it does after five seconds. */
+function clicks(count: number): void {
+  for (let n = 0; n < count; n++) track({ kind: "click", name: `updates.button-${n % 7}` });
+}
+
+describe("the usage data count on screen", () => {
+  afterEach(() => {
+    setTelemetry(false);
+    queryClient.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("follows new events as they are kept and goes to 0 after Delete", async () => {
+    const core = fakeCore();
+    core.kept = 88;
+    setTelemetry(true);
+    openedPage("/updates");
+    const count = watchCount();
+    await vi.waitFor(() => expect(count.shown()).toBe(88));
+
+    clicks(50);
+    await vi.waitFor(() => expect(count.shown()).toBe(138));
+    for (let batch = 0; batch < 20; batch++) clicks(50);
+    await vi.waitFor(() => expect(count.shown()).toBe(1138));
+
+    await deleteUsageData();
+    expect(count.shown()).toBe(0);
+    count.stop();
+  });
+
+  it("stops changing once usage data is turned off", async () => {
+    const core = fakeCore();
+    setTelemetry(true);
+    openedPage("/updates");
+    const count = watchCount();
+    await vi.waitFor(() => expect(count.shown()).toBe(0));
+    clicks(50);
+    await vi.waitFor(() => expect(count.shown()).toBe(50));
+
+    setTelemetry(false);
+    clicks(500);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.batches).toBe(1);
+    expect(count.shown()).toBe(50);
+    count.stop();
+  });
+
+  it("isn't asked for while the row is off screen", async () => {
+    const core = fakeCore();
+    setTelemetry(true);
+    openedPage("/history");
+    const count = watchCount();
+    await vi.waitFor(() => expect(count.shown()).toBe(0));
+    count.stop();
+    const asked = core.asked;
+
+    for (let batch = 0; batch < 10; batch++) clicks(50);
+    await vi.waitFor(() => expect(core.kept).toBe(500));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.asked).toBe(asked);
   });
 });

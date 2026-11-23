@@ -1,5 +1,6 @@
 import { api } from "./api";
 import { onBeforeClose } from "./platform";
+import { queries, queryClient } from "./queries";
 import type { Settings } from "./types";
 
 /**
@@ -82,7 +83,17 @@ async function flush(): Promise<void> {
   if (!sending.length) return;
   const now = Date.now();
   // Usage data is never worth an error message: a batch the core doesn't take is dropped.
-  await api.post("/api/telemetry", { events: sending.map(({ at, ...event }) => ({ ...event, ago: now - at })) }).catch(() => undefined);
+  // Once it's kept, the count Settings shows is asked for again, if it's on screen.
+  await api.post("/api/telemetry", { events: sending.map(({ at, ...event }) => ({ ...event, ago: now - at })) }).then(
+    () => void queryClient.invalidateQueries({ queryKey: queries.telemetry.queryKey, exact: true }),
+    () => undefined,
+  );
+}
+
+/** Deletes everything kept; what Settings shows of it is asked for again. */
+export async function deleteUsageData(): Promise<void> {
+  await api.del("/api/telemetry");
+  await queryClient.invalidateQueries({ queryKey: queries.telemetry.queryKey });
 }
 
 export function track(event: UsageEvent): void {

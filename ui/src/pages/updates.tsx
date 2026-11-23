@@ -11,7 +11,7 @@ import { api, errorText } from "../lib/api";
 import { chooseOpenPath, chooseSavePath } from "../lib/platform";
 import { queries } from "../lib/queries";
 import { useStore } from "../lib/store";
-import { USAGE_DATA_PROMISE } from "../lib/telemetry";
+import { deleteUsageData, USAGE_DATA_PROMISE } from "../lib/telemetry";
 import type { Colourway, Theme, UpdateStatus } from "../lib/types";
 import { cn } from "../lib/utils";
 
@@ -22,11 +22,17 @@ const THEMES: { value: Theme; title: string }[] = [
   { value: "paper", title: "Paper" },
 ];
 
+const events = (count: number) => `${count.toLocaleString()} ${count === 1 ? "event" : "events"}`;
+
+/** The usage data row's title: "Nothing kept yet", "1 event kept", "1,234 events kept". */
+export function keptTitle(kept: number): string {
+  return kept ? `${events(kept)} kept` : "Nothing kept yet";
+}
+
 /** Usage data: the switch that keeps it, how much is kept, and exporting or deleting all of it. */
 function UsageData() {
   const { settings, editSettings, confirm } = useStore();
-  const client = useQueryClient();
-  // Asked again each time Settings opens: events arrive all the time and no server event announces them.
+  // Asked again each time Settings opens, and each time the window's own events are kept (telemetry.ts).
   const kept = useQuery({ ...queries.telemetry, staleTime: 0 }).data?.events ?? 0;
   const [note, setNote] = useState({ text: "", error: false });
   const draft = settings?.draft;
@@ -38,7 +44,6 @@ function UsageData() {
       setNote({ text: errorText(error), error: true });
     }
   };
-  const events = (count: number) => `${count.toLocaleString()} ${count === 1 ? "event" : "events"}`;
   const exportData = () =>
     act(async () => {
       const path = await chooseSavePath("Export usage data", `skryb-usage-${new Date().toISOString().slice(0, 10)}.json`, "Usage data", "json");
@@ -49,8 +54,7 @@ function UsageData() {
   const deleteData = () =>
     act(async () => {
       if (!(await confirm("Delete usage data", "Everything Skryb has kept about how you use it goes. This can't be undone.", "Delete"))) return "";
-      await api.del("/api/telemetry");
-      await client.invalidateQueries({ queryKey: ["telemetry"] });
+      await deleteUsageData();
       return "Deleted.";
     });
   return (
@@ -60,7 +64,7 @@ function UsageData() {
           <Switch aria-label="Keep usage data" checked={draft.telemetry} onCheckedChange={(telemetry) => editSettings((current) => ({ ...current, telemetry }))} />
         </Row>
         <Row
-          title={kept ? `${events(kept)} kept` : "Nothing kept yet"}
+          title={keptTitle(kept)}
           description="Export it as one file to send to Skryb's developers, or to read yourself."
           error={note.error ? note.text : undefined}
         >
@@ -154,9 +158,10 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
     case "up_to_date":
       return { title: `Skryb ${running}`, description: "You have the latest version." };
     case "downloading":
-      return { title: `Downloading Skryb ${update.version}`, description: `${percent}% downloaded. You choose when to install it.` };
+      // Said the same whether a check or "Restart and update" started it.
+      return { title: `Downloading Skryb ${update.version}`, description: `${percent}% downloaded.` };
     case "ready":
-      return { title: `Skryb ${update.version} is ready`, description: "Skryb restarts to install it, once any dictation finishes." };
+      return { title: `Skryb ${update.version} is ready`, description: "Skryb restarts to install it, or anything newer, once any dictation finishes." };
     case "installing":
       return { title: `Installing Skryb ${update.version}`, description: "Skryb will close and open again in a minute." };
     case "updated":
@@ -168,6 +173,13 @@ export function describeUpdate(update: UpdateStatus | null, running: string): { 
     default:
       return { title: `Skryb ${running}`, description: "Skryb checks shortly after it starts." };
   }
+}
+
+/** What the Updates row offers: a bar while downloading, else the check, and "Restart and update" beside it once a version is ready. */
+export function updateControls(update: UpdateStatus | null): ("progress" | "check" | "install")[] {
+  if (update === null) return [];
+  if (update.state === "downloading") return ["progress"];
+  return update.state === "ready" ? ["check", "install"] : ["check"];
 }
 
 /**
@@ -266,17 +278,19 @@ export function SettingsPage() {
           <Row
             title={title}
             description={description}
-            error={requestError || (update?.state === "failed" ? update.error : "")}
+            error={requestError || update?.error || ""}
             stacked={update?.state === "downloading"}
           >
-            {update === null ? null : update.state === "downloading" ? (
-              <ProgressBar value={update.bytes_total > 0 ? update.bytes_done / update.bytes_total : 0} className="w-full" />
-            ) : update.state === "ready" ? (
-              <Button onClick={() => void restartAndUpdate()}>Restart and update</Button>
-            ) : (
-              <Button variant="outline" disabled={busy} onClick={() => void send("/api/updates/check")}>
-                Check for updates
-              </Button>
+            {updateControls(update).map((control) =>
+              control === "progress" ? (
+                <ProgressBar key={control} value={update && update.bytes_total > 0 ? update.bytes_done / update.bytes_total : 0} className="w-full" />
+              ) : control === "check" ? (
+                <Button key={control} variant="outline" disabled={busy} onClick={() => void send("/api/updates/check")}>
+                  Check for updates
+                </Button>
+              ) : (
+                <Button key={control} onClick={() => void restartAndUpdate()}>Restart and update</Button>
+              ),
             )}
           </Row>
           <Row

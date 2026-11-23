@@ -2,9 +2,63 @@ import { describe, expect, it } from "vitest";
 import { restoredPath } from "../app";
 import { installDescription, installTitle } from "../components/install";
 import type { UpdateStatus } from "../lib/types";
-import { describeUpdate, everyTheme } from "./updates";
+import { describeUpdate, everyTheme, keptTitle, updateControls } from "./updates";
 
 const status = (overrides: Partial<UpdateStatus>): UpdateStatus => ({ state: "idle", version: "", bytes_done: 0, bytes_total: 0, error: "", ...overrides });
+
+describe("the Updates page with a version ready", () => {
+  it("offers to check for a newer one as well as to restart and update", () => {
+    expect(updateControls(status({ state: "ready", version: "0.18.1" }))).toEqual(["check", "install"]);
+  });
+
+  it("says it installs anything newer, and keeps both buttons when the last check failed", () => {
+    const failedCheck = status({ state: "ready", version: "0.18.1", error: "Couldn't check for updates. Timed out." });
+
+    expect(describeUpdate(failedCheck, "0.18.0")).toEqual({
+      title: "Skryb 0.18.1 is ready",
+      description: "Skryb restarts to install it, or anything newer, once any dictation finishes.",
+    });
+    expect(updateControls(failedCheck)).toEqual(["check", "install"]);
+  });
+
+  it("offers only the check when nothing is ready, and nothing in a git checkout", () => {
+    for (const state of ["idle", "off", "up_to_date", "updated", "failed", "checking", "installing"] as const) {
+      expect(updateControls(status({ state }))).toEqual(["check"]);
+    }
+    expect(updateControls(null)).toEqual([]);
+  });
+});
+
+describe("the Updates page while Restart and update fetches a newer version first", () => {
+  it("shows the check, then the download of the newer version with its bar, then the install", () => {
+    const checking = status({ state: "checking", version: "0.18.1" });
+    const downloading = status({ state: "downloading", version: "0.19.1", bytes_done: 13_938_000, bytes_total: 30_972_960 });
+    const installing = status({ state: "installing", version: "0.19.1" });
+
+    expect(describeUpdate(checking, "0.18.0")).toEqual({ title: "Skryb 0.18.0", description: "Checking GitHub for a newer version..." });
+    expect(describeUpdate(downloading, "0.18.0")).toEqual({ title: "Downloading Skryb 0.19.1", description: "45% downloaded." });
+    expect(describeUpdate(installing, "0.18.0").title).toBe("Installing Skryb 0.19.1");
+    expect(updateControls(checking)).toEqual(["check"]);
+    expect(updateControls(downloading)).toEqual(["progress"]);
+    expect(updateControls(installing)).toEqual(["check"]);
+  });
+
+  it("names the version it falls back to when the newer one couldn't be fetched", () => {
+    const fallback = status({ state: "installing", version: "0.18.1", error: "Couldn't check for updates. Timed out. Installing Skryb 0.18.1, downloaded earlier, instead." });
+
+    expect(describeUpdate(fallback, "0.18.0").title).toBe("Installing Skryb 0.18.1");
+  });
+});
+
+describe("how much usage data is kept", () => {
+  it("reads nothing, one event, or a count with its thousands separated", () => {
+    expect(keptTitle(0)).toBe("Nothing kept yet");
+    expect(keptTitle(1)).toBe("1 event kept");
+    expect(keptTitle(2)).toBe("2 events kept");
+    expect(keptTitle(1234)).toBe(`${(1234).toLocaleString()} events kept`);
+    expect(keptTitle(100_000)).toBe(`${(100_000).toLocaleString()} events kept`);
+  });
+});
 
 describe("the Updates page after an update", () => {
   it("says the new version was installed just now", () => {

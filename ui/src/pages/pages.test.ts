@@ -324,7 +324,7 @@ describe("updates page", () => {
   it("shows whole percents while downloading, never past 100", () => {
     expect(describeUpdate(status({ state: "downloading", version: "0.3.0", bytes_done: 15_486_480, bytes_total: 30_972_960 }), "0.2.0")).toEqual({
       title: "Downloading Skryb 0.3.0",
-      description: "50% downloaded. You choose when to install it.",
+      description: "50% downloaded.",
     });
     expect(describeUpdate(status({ state: "downloading", version: "0.3.0", bytes_done: 30_972_959, bytes_total: 30_972_960 }), "0.2.0").description).toMatch(/^99%/);
     expect(describeUpdate(status({ state: "downloading", version: "0.3.0" }), "0.2.0").description).toMatch(/^0%/);

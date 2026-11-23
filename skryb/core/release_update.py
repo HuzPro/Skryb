@@ -30,6 +30,8 @@ _logger = logging.getLogger(__name__)
 # Not the API: its 60 anonymous requests an hour are shared with everything on the
 # connection. Each release publishes this file (release/latest_manifest.py) instead.
 LATEST_RELEASE_URL = "https://github.com/HuzPro/Skryb/releases/latest/download/latest.json"
+# Seconds to connect, then for each read. The file is a kilobyte, and "Restart and update" waits on it.
+_FETCH_TIMEOUT = (5, 10)
 FIRST_CHECK_SECONDS = 15.0
 CHECK_EVERY_SECONDS = 3600.0
 # The installer is about 31 MB; anything far bigger is not one of ours.
@@ -137,7 +139,7 @@ def fetch_latest_release(running_version: str) -> object:
     response = requests.get(
         LATEST_RELEASE_URL,
         headers={"User-Agent": f"skryb/{running_version}"},
-        timeout=30,
+        timeout=_FETCH_TIMEOUT,
     )
     response.raise_for_status()
     return response.json()
@@ -164,12 +166,15 @@ def run_installer(installer: Path, log: Path, progress: Path) -> None:
 
 
 class ReleaseUpdater:
-    """Checks GitHub every hour, downloads a newer installer, and installs it when asked.
+    """Checks GitHub every hour, downloads a newer installer, and installs the newest when asked.
 
     ``on_change`` hears every status change; ``offer`` is told once per
     version that an update is ready. Checks and downloads run on the
-    updater's own thread; ``install`` may be called from any thread and
-    waits for a dictation to finish before ``quit_into`` closes the app.
+    updater's own thread; ``install`` may be called from any thread, looks
+    for a release newer than the one downloaded first, and waits for a
+    dictation to finish before ``quit_into`` closes the app. A downloaded
+    installer is replaced only by a newer one that has downloaded and
+    matched its SHA-256.
     """
 
     def __init__(
@@ -205,6 +210,9 @@ class ReleaseUpdater:
         self._status = UpdateStatus()
         self._ready: Release | None = None
         self._offered = ""
+        self._installing = False
+        # Held while checking, downloading or installing: one of them at a time.
+        self._working = threading.Lock()
         self._thread: threading.Thread | None = None
 
     @property
@@ -255,12 +263,18 @@ class ReleaseUpdater:
         self._wake.set()
 
     def install(self) -> None:
-        """Install the downloaded update once no dictation is under way."""
+        """Install the newest release once no dictation is under way.
+
+        A release newer than the one downloaded is fetched first; when that
+        fails, the one downloaded is installed. Ignored while an install is
+        under way or with nothing downloaded.
+        """
         with self._lock:
-            release = self._ready
-            if release is None or self._status.state == "installing":
+            ready = self._ready
+            if ready is None or self._installing:
                 return
-        threading.Thread(target=self._install_when_idle, args=(release,), daemon=True).start()
+            self._installing = True
+        threading.Thread(target=self._install_newest, args=(ready,), name="release-install", daemon=True).start()
 
     # -- checking --------------------------------------------------------------------------
 
@@ -278,47 +292,71 @@ class ReleaseUpdater:
             self._wake.wait(CHECK_EVERY_SECONDS)
 
     def check_once(self) -> None:
-        if self.status().state in ("downloading", "installing"):
+        """Look for a newer release; ignored while a check, a download or an install is under way."""
+        if self.status().state == "installing" or not self._working.acquire(blocking=False):
             return
-        ready = self.offered_version()
+        try:
+            self._show_outcome(self._fetch_newest())
+        finally:
+            self._working.release()
+
+    def _fetch_newest(self) -> str:
+        """Make the newest release the ready one; returns what went wrong, or "".
+
+        Only a release newer than this copy and than the ready one is
+        downloaded, so a failure leaves the ready one ready.
+        """
         self._set(replace(self.status(), state="checking", error=""))
         try:
             release = self._newer_release()
         except Exception as exc:  # noqa: BLE001 - any failure is reported, never raised
-            self._report_failure("Couldn't check for updates", exc, keep_ready=bool(ready))
-        else:
-            self._act_on(release)
+            return _failure("Couldn't check for updates", exc)
+        return "" if release is None else self._fetch(release)
 
     def _newer_release(self) -> Release | None:
         release = release_from_github(self._fetch_latest())
-        if release is None or not is_newer(release.version, self._running_version):
+        if release is None or not is_newer(release.version, self.offered_version() or self._running_version):
             return None
         return release
 
-    def _act_on(self, release: Release | None) -> None:
-        if release is None:
-            self._set(UpdateStatus(state="up_to_date"))
-            return
-        if self.offered_version() == release.version:
-            self._set(UpdateStatus(state="ready", version=release.version))
-            return
-        # An older ready installer is about to be deleted for this one.
-        with self._lock:
-            self._ready = None
+    def _fetch(self, release: Release) -> str:
         try:
             self._download(release)
         except Exception as exc:  # noqa: BLE001
-            self._report_failure(f"Couldn't download Skryb {release.version}", exc)
+            return _failure(f"Couldn't download Skryb {release.version}", exc)
         else:
-            self._make_ready(release)
+            with self._lock:
+                self._ready = release
+            return ""
+
+    def _show_outcome(self, error: str) -> None:
+        with self._lock:
+            ready = self._ready
+            first_offer = ready is not None and self._offered != ready.version
+            if ready is not None:
+                self._offered = ready.version
+        if ready is not None:
+            self._set(UpdateStatus(state="ready", version=ready.version, error=error))
+        elif error:
+            self._set(UpdateStatus(state="failed", error=error))
+        else:
+            self._set(UpdateStatus(state="up_to_date"))
+        if ready is not None and first_offer:
+            self._offer(ready.version)
 
     # -- downloading -----------------------------------------------------------------------
 
     def _download(self, release: Release) -> None:
+        """Fetch *release*'s installer and check it; the ready one is deleted only once it matches."""
         target = self._updates_dir / release.installer_name
-        self._remove_other_installers(keep=target)
-        if target.is_file() and sha256_of(target) == release.sha256:
-            return
+        with self._lock:
+            ready = self._ready
+        self._remove_other_installers(target, *([self._updates_dir / ready.installer_name] if ready else []))
+        if not (target.is_file() and sha256_of(target) == release.sha256):
+            self._download_afresh(release, target)
+        self._remove_other_installers(target)
+
+    def _download_afresh(self, release: Release, target: Path) -> None:
         target.unlink(missing_ok=True)
         self._set(UpdateStatus(state="downloading", version=release.version, bytes_total=release.size))
         progress = threading.Lock()
@@ -346,36 +384,40 @@ class ReleaseUpdater:
             target.unlink(missing_ok=True)
             raise ValueError("the download doesn't match the file GitHub published")
 
-    def _remove_other_installers(self, keep: Path) -> None:
+    def _remove_other_installers(self, *keep: Path) -> None:
+        """Deletes every installer but *keep* and their partial downloads."""
         self._updates_dir.mkdir(parents=True, exist_ok=True)
         for old in self._updates_dir.glob("Skryb-Setup-*.exe*"):
-            if old != keep and not old.name.startswith(keep.name):
+            if not any(old.name.startswith(kept.name) for kept in keep):
                 old.unlink(missing_ok=True)
-
-    def _make_ready(self, release: Release) -> None:
-        with self._lock:
-            self._ready = release
-            first_offer = self._offered != release.version
-            self._offered = release.version
-        self._set(UpdateStatus(state="ready", version=release.version))
-        if first_offer:
-            self._offer(release.version)
 
     # -- installing ------------------------------------------------------------------------
 
-    def _install_when_idle(self, release: Release) -> None:
-        self._set(UpdateStatus(state="installing", version=release.version))
+    def _install_newest(self, ready: Release) -> None:
+        with self._working:
+            error = self._fetch_newest()
+            with self._lock:
+                newest = self._ready or ready
+            if error:
+                error = f"{error} Installing Skryb {newest.version}, downloaded earlier, instead."
+                _logger.warning(error)
+            self._install_when_idle(newest, error)
+
+    def _install_when_idle(self, release: Release, error: str = "") -> None:
+        self._set(UpdateStatus(state="installing", version=release.version, error=error))
         while self._is_busy():
             self._sleep(_IDLE_POLL_SECONDS)
         installer = self._updates_dir / release.installer_name
         if not installer.is_file() or sha256_of(installer) != release.sha256:
             with self._lock:
                 self._ready = None
+                self._installing = False
             self._set(UpdateStatus(
                 state="failed", version=release.version,
                 error="The downloaded installer changed on disk, so it wasn't run. Check again to fetch it fresh.",
             ))
             return
+        _logger.info("Installing Skryb %s.", release.version)
         log = self._updates_dir / f"install-{release.version}.log"
         self._remember_pending(release.version, log)
         self._quit_into(lambda: self._launch_installer(installer, log))
@@ -395,7 +437,9 @@ class ReleaseUpdater:
         except OSError as exc:
             for marker in (_PENDING_FILE, PROGRESS_FILE):
                 (self._updates_dir / marker).unlink(missing_ok=True)
-            self._report_failure("Couldn't start the installer", exc)
+            with self._lock:
+                self._installing = False
+            self._set(UpdateStatus(state="failed", error=_failure("Couldn't start the installer", exc)))
             raise
 
     def _report_unfinished_update(self) -> None:
@@ -419,19 +463,18 @@ class ReleaseUpdater:
 
     # -- status ----------------------------------------------------------------------------
 
-    def _report_failure(self, what: str, exc: Exception, *, keep_ready: bool = False) -> None:
-        _logger.warning("%s: %s", what, exc, exc_info=not isinstance(exc, OSError))
-        if keep_ready:
-            self._set(UpdateStatus(state="ready", version=self.offered_version()))
-            return
-        self._set(UpdateStatus(state="failed", error=f"{what}. {_plain_reason(exc)}"))
-
     def _set(self, status: UpdateStatus) -> None:
         with self._lock:
             if status == self._status:
                 return
             self._status = status
         self._on_change(status)
+
+
+def _failure(what: str, exc: Exception) -> str:
+    """Logs *what* went wrong and returns it in plain words, with why."""
+    _logger.warning("%s: %s", what, exc, exc_info=not isinstance(exc, OSError))
+    return f"{what}. {_plain_reason(exc)}"
 
 
 def _plain_reason(exc: Exception) -> str:

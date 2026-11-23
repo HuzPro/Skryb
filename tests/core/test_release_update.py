@@ -48,14 +48,22 @@ def _github(version: str, *assets: dict[str, object]) -> dict[str, object]:
 
 
 class _Downloader:
-    """Writes the installer in 1,200 pieces from eight threads, like the chunked downloader."""
+    """Writes the installer in 1,200 pieces from eight threads, like the chunked downloader.
+
+    With ``gate`` set, each download waits for it once it has started, which ``started`` says.
+    """
 
     def __init__(self, payload: bytes = _INSTALLER) -> None:
         self.payload = payload
         self.plans: list[FileDownloadPlan] = []
+        self.gate: threading.Event | None = None
+        self.started = threading.Event()
 
     def download(self, plan, on_progress, cancel_event, pause_event) -> None:
         self.plans.append(plan)
+        self.started.set()
+        if self.gate is not None:
+            assert self.gate.wait(5), "the download was never let through"
         plan.target.write_bytes(self.payload)
         pieces = [256] * (len(self.payload) // 256)
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -101,6 +109,36 @@ class _Rig:
         assert self.busy_for_sleeps <= 0, "quit in the middle of a dictation"
         start()
         self.quits += 1
+
+    def installers_run(self) -> list[str]:
+        return [installer.name for installer, _log, _progress in self.started]
+
+    def installers_on_disk(self) -> list[str]:
+        return sorted(path.name for path in self.updates_dir.glob("Skryb-Setup-*"))
+
+    def install_and_wait(self) -> None:
+        self.updater.install()
+        _wait_for(lambda: not any(thread.name == "release-install" for thread in threading.enumerate()))
+
+
+def _wait_for(condition) -> None:
+    for _ in range(500):
+        if condition():
+            return
+        threading.Event().wait(0.01)
+    raise AssertionError("timed out")
+
+
+def _ready_on(tmp_path: Path, version: str, *, running: str = "0.18.0") -> _Rig:
+    """A copy running *running* with *version* downloaded and waiting to be installed."""
+    rig = _Rig(tmp_path, running=running, latest=_github(version))
+    rig.updater.check_once()
+    assert rig.updater.status() == UpdateStatus(state="ready", version=version)
+    return rig
+
+
+def _fail_download(plan, *_args) -> None:
+    raise ConnectionError("connection reset by GitHub")
 
 
 class TestReadingGitHubsLatestRelease:
@@ -243,14 +281,27 @@ class TestCheckingForAnUpdate:
             state="failed", error="Couldn't check for updates. Connection reset by GitHub.",
         )
 
-    def test_keeps_a_ready_update_ready_when_a_later_check_fails(self, tmp_path):
+    def test_keeps_a_ready_update_ready_when_a_later_check_fails_and_says_why(self, tmp_path):
         rig = _Rig(tmp_path)
         rig.updater.check_once()
         rig.latest = OSError("offline")
 
         rig.updater.check_once()
 
-        assert rig.updater.status() == UpdateStatus(state="ready", version="0.2.0")
+        assert rig.updater.status() == UpdateStatus(
+            state="ready", version="0.2.0", error="Couldn't check for updates. Offline.",
+        )
+        assert rig.updater.offered_version() == "0.2.0"
+
+    def test_a_good_check_after_a_failed_one_clears_the_error(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = TimeoutError("timed out")
+        rig.updater.check_once()
+        rig.latest = _github("0.18.1")
+
+        rig.updater.check_once()
+
+        assert rig.updater.status() == UpdateStatus(state="ready", version="0.18.1")
 
     def test_a_thousand_checks_download_once_and_offer_once(self, tmp_path):
         rig = _Rig(tmp_path)
@@ -293,6 +344,133 @@ class TestCheckingForAnUpdate:
         assert rig.updater.offered_version() == "0.3.0"
         assert rig.offers == ["0.2.0", "0.3.0"]
         assert sorted(path.name for path in rig.updates_dir.iterdir()) == ["Skryb-Setup-0.3.0.exe"]
+
+
+class TestCheckingWhileAnUpdateIsReady:
+    def test_a_check_with_one_version_ready_downloads_the_newer_one_in_its_place(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+
+        rig.updater.check_once()
+
+        assert rig.updater.status() == UpdateStatus(state="ready", version="0.19.0")
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.19.0.exe"]
+        assert rig.offers == ["0.18.1", "0.19.0"]
+
+    def test_the_ready_version_stays_installable_while_the_newer_one_downloads(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        rig.downloader.gate = threading.Event()
+        rig.downloader.started.clear()
+        checking = threading.Thread(target=rig.updater.check_once)
+        checking.start()
+        assert rig.downloader.started.wait(5)
+
+        during = (rig.updater.offered_version(), rig.updater.status().state, rig.installers_on_disk())
+        rig.downloader.gate.set()
+        checking.join(5)
+
+        assert during == ("0.18.1", "downloading", ["Skryb-Setup-0.18.1.exe"])
+        assert rig.updater.offered_version() == "0.19.0"
+
+    def test_skips_every_version_between_the_ready_one_and_the_latest(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.2")
+
+        rig.updater.check_once()
+
+        assert [plan.target.name for plan in rig.downloader.plans] == ["Skryb-Setup-0.18.1.exe", "Skryb-Setup-0.19.2.exe"]
+        assert rig.updater.status() == UpdateStatus(state="ready", version="0.19.2")
+        assert rig.offers == ["0.18.1", "0.19.2"]
+
+    @pytest.mark.parametrize("latest", ["0.19.0", "0.18.5", "0.18.0", "0.17.9"])
+    def test_keeps_the_ready_version_when_the_latest_is_no_newer_than_it(self, tmp_path, latest):
+        rig = _ready_on(tmp_path, "0.19.0")
+        rig.latest = _github(latest)
+
+        rig.updater.check_once()
+
+        assert rig.updater.status() == UpdateStatus(state="ready", version="0.19.0")
+        assert len(rig.downloader.plans) == 1
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.19.0.exe"]
+        assert rig.offers == ["0.19.0"]
+
+    @pytest.mark.parametrize("latest", [
+        None,
+        "",
+        [],
+        {"message": "Not Found"},
+        _github("0.19.0", _asset("0.19.0", digest=None)),
+        _github("0.19.0", _asset("0.19.0", browser_download_url="https://example.com/Skryb-Setup-0.19.0.exe")),
+        _github("0.19.0", _asset("0.18.9")),
+        _github("0.19.0", _asset("0.19.0", size=500 * 1024 * 1024 + 1)),
+        {"tag_name": "v٠.١٩.٠", "assets": [_asset("٠.١٩.٠")]},
+    ])
+    def test_keeps_the_ready_version_when_the_latest_is_malformed_or_untrusted(self, tmp_path, latest):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = latest
+
+        rig.updater.check_once()
+
+        assert rig.updater.status() == UpdateStatus(state="ready", version="0.18.1")
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.18.1.exe"]
+        assert len(rig.downloader.plans) == 1
+
+    @pytest.mark.parametrize("why", ["wrong bytes", "connection reset"])
+    def test_a_newer_download_that_fails_or_does_not_match_leaves_the_ready_one_in_place(self, tmp_path, why):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        if why == "wrong bytes":
+            rig.downloader.payload = _INSTALLER[:-1] + b"\x00"
+        else:
+            rig.downloader.download = _fail_download
+
+        rig.updater.check_once()
+
+        status = rig.updater.status()
+        assert (status.state, status.version) == ("ready", "0.18.1")
+        assert status.error.startswith("Couldn't download Skryb 0.19.0. ")
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.18.1.exe"]
+        assert hashlib.sha256((rig.updates_dir / "Skryb-Setup-0.18.1.exe").read_bytes()).hexdigest() == _SHA
+        assert rig.offers == ["0.18.1"]
+
+    def test_a_check_that_fails_with_a_version_ready_keeps_its_installer(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = ConnectionError("Max retries exceeded with url: /HuzPro/Skryb/releases/latest/download/latest.json")
+
+        rig.updater.check_once()
+
+        assert rig.updater.status().state == "ready"
+        assert rig.updater.offered_version() == "0.18.1"
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.18.1.exe"]
+
+    def test_a_thousand_checks_with_a_newer_release_out_download_and_offer_each_version_once(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+
+        for _ in range(1000):
+            rig.updater.check_once()
+
+        assert len(rig.downloader.plans) == 2
+        assert rig.offers == ["0.18.1", "0.19.0"]
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.19.0.exe"]
+
+    def test_a_check_is_ignored_while_another_is_downloading(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        rig.downloader.gate = threading.Event()
+        rig.downloader.started.clear()
+        first = threading.Thread(target=rig.updater.check_once)
+        first.start()
+        assert rig.downloader.started.wait(5)
+        fetches = rig.fetches
+
+        rig.updater.check_once()
+        rig.downloader.gate.set()
+        first.join(5)
+
+        assert rig.fetches == fetches
+        assert len(rig.downloader.plans) == 2
 
 
 class TestInstalling:
@@ -382,6 +560,203 @@ class TestInstalling:
         assert not (rig.updates_dir / "install-progress.json").exists()
         assert rig.updater.status().error == "Couldn't start the installer. Access is denied."
 
+    def test_can_be_asked_again_after_the_installer_would_not_start(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        tries: list[str] = []
+
+        def blocked_once(installer: Path, _log: Path, _progress: Path) -> None:
+            tries.append(installer.name)
+            if len(tries) == 1:
+                raise PermissionError("Access is denied")
+
+        def quit_into(start) -> None:
+            try:
+                start()
+            except OSError:
+                return
+            rig.quits += 1
+
+        rig.updater._start_installer = blocked_once
+        rig.updater._quit_into = quit_into
+
+        rig.install_and_wait()
+        rig.install_and_wait()
+
+        assert tries == ["Skryb-Setup-0.18.1.exe", "Skryb-Setup-0.18.1.exe"]
+        assert rig.quits == 1
+
+
+class TestInstallingTheNewest:
+    def test_installs_a_release_published_after_the_ready_one_without_a_second_click(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        before = len(rig.statuses)
+
+        rig.install_and_wait()
+
+        assert rig.installers_run() == ["Skryb-Setup-0.19.0.exe"]
+        assert rig.quits == 1
+        shown = [(status.state, status.version) for status in rig.statuses[before:]]
+        assert shown[0] == ("checking", "0.18.1")
+        assert ("downloading", "0.19.0") in shown
+        assert shown[-1] == ("installing", "0.19.0")
+        assert "ready" not in {state for state, _version in shown}
+        assert json.loads((rig.updates_dir / "pending.json").read_text(encoding="utf-8"))["version"] == "0.19.0"
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.19.0.exe"]
+        assert rig.offers == ["0.18.1"], "no notice offers what is already being installed"
+
+    @pytest.mark.parametrize("latest", ["0.18.2", "0.19.2", "1.0.0"])
+    def test_jumps_straight_to_the_latest_over_versions_never_downloaded(self, tmp_path, latest):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github(latest)
+
+        rig.install_and_wait()
+
+        assert rig.installers_run() == [f"Skryb-Setup-{latest}.exe"]
+        assert [plan.target.name for plan in rig.downloader.plans] == ["Skryb-Setup-0.18.1.exe", f"Skryb-Setup-{latest}.exe"]
+
+    def test_installs_the_ready_one_as_it_is_when_nothing_newer_is_out(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        before = len(rig.statuses)
+
+        rig.install_and_wait()
+
+        assert rig.installers_run() == ["Skryb-Setup-0.18.1.exe"]
+        assert len(rig.downloader.plans) == 1
+        assert rig.statuses[before:] == [
+            UpdateStatus(state="checking", version="0.18.1"),
+            UpdateStatus(state="installing", version="0.18.1"),
+        ]
+
+    @pytest.mark.parametrize("failure", [
+        ConnectionError("connection reset by GitHub"),
+        TimeoutError("timed out"),
+        OSError("[WinError 10051] A socket operation was attempted to an unreachable network"),
+    ])
+    def test_installs_the_ready_one_when_the_check_fails_and_says_so(self, tmp_path, failure):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = failure
+
+        rig.install_and_wait()
+
+        assert rig.installers_run() == ["Skryb-Setup-0.18.1.exe"]
+        status = rig.updater.status()
+        assert (status.state, status.version) == ("installing", "0.18.1")
+        assert status.error.startswith("Couldn't check for updates. ")
+        assert status.error.endswith(" Installing Skryb 0.18.1, downloaded earlier, instead.")
+
+    @pytest.mark.parametrize("why", ["wrong bytes", "connection reset"])
+    def test_installs_the_ready_one_when_the_newer_download_fails_or_does_not_match(self, tmp_path, why):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        if why == "wrong bytes":
+            rig.downloader.payload = b"MZ" + _INSTALLER[2:-1]
+        else:
+            rig.downloader.download = _fail_download
+
+        rig.install_and_wait()
+
+        assert rig.installers_run() == ["Skryb-Setup-0.18.1.exe"]
+        assert rig.installers_on_disk() == ["Skryb-Setup-0.18.1.exe"]
+        assert hashlib.sha256((rig.updates_dir / "Skryb-Setup-0.18.1.exe").read_bytes()).hexdigest() == _SHA
+        assert rig.updater.status().error.startswith("Couldn't download Skryb 0.19.0. ")
+
+    def test_checks_before_installing_with_automatic_checks_off(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.enabled = False
+        rig.latest = _github("0.19.0")
+
+        rig.install_and_wait()
+
+        assert rig.installers_run() == ["Skryb-Setup-0.19.0.exe"]
+
+    def test_waits_for_the_dictation_after_fetching_the_newer_release(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        rig.busy_for_sleeps = 40
+
+        rig.install_and_wait()
+
+        assert rig.busy_for_sleeps <= 0
+        assert rig.installers_run() == ["Skryb-Setup-0.19.0.exe"]
+
+    def test_many_install_requests_at_once_run_one_installer(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        rig.downloader.gate = threading.Event()
+        rig.downloader.started.clear()
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            list(pool.map(lambda _n: rig.updater.install(), range(200)))
+        assert rig.downloader.started.wait(5)
+        rig.updater.install()
+        rig.downloader.gate.set()
+        _wait_for(lambda: not any(thread.name == "release-install" for thread in threading.enumerate()))
+
+        assert rig.installers_run() == ["Skryb-Setup-0.19.0.exe"]
+        assert rig.quits == 1
+        assert len(rig.downloader.plans) == 2
+
+    def test_does_nothing_more_once_installing(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.install_and_wait()
+
+        rig.install_and_wait()
+        rig.updater.check_once()
+
+        assert rig.installers_run() == ["Skryb-Setup-0.18.1.exe"]
+        assert rig.updater.status().state == "installing"
+
+    def test_a_check_during_the_install_time_download_is_ignored(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        rig.downloader.gate = threading.Event()
+        rig.downloader.started.clear()
+        rig.updater.install()
+        assert rig.downloader.started.wait(5)
+        fetches = rig.fetches
+
+        rig.updater.check_once()
+        rig.downloader.gate.set()
+        _wait_for(lambda: rig.quits == 1)
+
+        assert rig.fetches == fetches
+        assert rig.installers_run() == ["Skryb-Setup-0.19.0.exe"]
+
+    def test_a_check_while_the_install_waits_for_a_dictation_is_ignored(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        dictation_over = threading.Event()
+        rig.updater._is_busy = lambda: not dictation_over.is_set()
+        rig.updater._sleep = lambda _seconds: dictation_over.wait(0.01)
+        rig.updater.install()
+        _wait_for(lambda: rig.updater.status().state == "installing")
+        fetches = rig.fetches
+
+        rig.updater.check_once()
+        dictation_over.set()
+        _wait_for(lambda: rig.quits == 1)
+
+        assert rig.fetches == fetches
+        assert rig.installers_run() == ["Skryb-Setup-0.18.1.exe"]
+
+    def test_an_install_asked_for_mid_download_waits_for_it_and_installs_what_it_brought(self, tmp_path):
+        rig = _ready_on(tmp_path, "0.18.1")
+        rig.latest = _github("0.19.0")
+        rig.downloader.gate = threading.Event()
+        rig.downloader.started.clear()
+        checking = threading.Thread(target=rig.updater.check_once)
+        checking.start()
+        assert rig.downloader.started.wait(5)
+
+        rig.updater.install()
+        assert rig.quits == 0
+        rig.downloader.gate.set()
+        checking.join(5)
+        _wait_for(lambda: rig.quits == 1)
+
+        assert rig.installers_run() == ["Skryb-Setup-0.19.0.exe"]
+        assert len(rig.downloader.plans) == 2
+
 
 class TestAfterAnUpdate:
     def _pending(self, rig: _Rig, text: str) -> None:
@@ -461,18 +836,11 @@ class TestReopeningTheWindowAfterAnUpdate:
 
 
 class TestTheHourlyLoop:
-    def _wait_for(self, condition) -> None:
-        for _ in range(500):
-            if condition():
-                return
-            threading.Event().wait(0.01)
-        raise AssertionError("timed out")
-
     def test_checks_soon_after_start_when_automatic_checks_are_on(self, tmp_path):
         rig = _Rig(tmp_path)
         rig.updater.start(first_check_after=0)
         try:
-            self._wait_for(lambda: rig.updater.status().state == "ready")
+            _wait_for(lambda: rig.updater.status().state == "ready")
         finally:
             rig.updater.dispose()
         assert rig.fetches == 1
@@ -482,11 +850,11 @@ class TestTheHourlyLoop:
         rig.enabled = False
         rig.updater.start(first_check_after=0)
         try:
-            self._wait_for(lambda: rig.updater.status().state == "off")
+            _wait_for(lambda: rig.updater.status().state == "off")
             assert rig.fetches == 0
 
             rig.updater.check_now()
-            self._wait_for(lambda: rig.updater.status().state == "ready")
+            _wait_for(lambda: rig.updater.status().state == "ready")
         finally:
             rig.updater.dispose()
         assert rig.fetches == 1
@@ -559,3 +927,18 @@ class TestAskingGitHub:
 
         assert asked == ["https://github.com/HuzPro/Skryb/releases/latest/download/latest.json"]
         assert release_from_github(answer).version == "0.7.0"
+
+    def test_gives_up_on_a_github_that_does_not_answer_within_seconds(self, monkeypatch):
+        timeouts: list[object] = []
+
+        def get(_url: str, **kwargs: object) -> object:
+            timeouts.append(kwargs["timeout"])
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr("requests.get", get)
+
+        with pytest.raises(TimeoutError):
+            release_update.fetch_latest_release("0.18.0")
+
+        (connect, read), = timeouts
+        assert 0 < connect <= 5 and 0 < read <= 10, "Restart and update waits on this check"
