@@ -5,7 +5,7 @@ from skryb.output.text_pipeline import PipelineMode, build_pipeline, drop_search
 
 
 class TestDroppingTheFullStopOfAShortEntry:
-    @pytest.mark.parametrize("process", ["zen.exe", "chrome.exe", "msedge.exe", "Firefox.EXE", "skryb-ui.exe"])
+    @pytest.mark.parametrize("process", ["zen.exe", "chrome.exe", "msedge.exe", "Firefox.EXE", "skryb-ui.exe", "Skryb.exe"])
     def test_a_few_words_in_a_browser_or_skryb_lose_the_full_stop_and_space(self, process):
         assert drop_search_entry_stop("Open data. ", process) == "Open data"
 

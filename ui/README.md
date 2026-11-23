@@ -7,6 +7,14 @@ spawns on demand:
 skryb-ui.exe --port 12345 --token <token> --page settings|history|setup
 ```
 
+An installed copy has no `skryb-ui.exe`. The crate also builds as
+`skryb_ui.dll`, and the core starts the window as
+`Skryb.exe --settings-window --port ...`: the program the app itself runs as
+(`native/host/skryb_host.c`) loads the DLL and calls `skryb_ui_run`. Task
+Manager merges processes of one program file, so core and window show as one
+"Skryb" row. `scripts\build_ui.ps1` builds both; `pnpm tauri build` alone
+builds only the exe.
+
 It talks to the core only over a loopback API (fetch + one EventSource). The
 code is the contract: `skryb/ui/shapes.py` and
 `skryb/ui/api_handlers.py` in the core, `src/lib/types.ts` and

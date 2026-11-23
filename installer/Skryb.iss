@@ -118,6 +118,7 @@ var
   ShownPercent: Integer;
   InstallFinished: Boolean;
   InstallFailed: Boolean;
+  AppExeSetAside: String;    { Skryb.exe's path once it was renamed for the copy }
 
 { --- progress for the Settings window ----------------------------------- }
 
@@ -468,10 +469,51 @@ begin
   CloseHandle(Process);
 end;
 
+{ The Settings window is a second process of Skryb.exe ("--settings-window"),
+  and through an in-app update it stays open to show the progress. Windows
+  won't replace the file of a running program, but it will rename it: the
+  window carries on from the renamed file while the new Skryb.exe is copied
+  in. This runs before Setup looks for programs to close, so it finds
+  nothing using Skryb.exe and leaves the window open. A Skryb that is still
+  running is closed all the same, for the Python DLLs it has loaded; the
+  window loads none of them. }
+procedure SetRunningAppExeAside();
+var
+  Exe: String;
+begin
+  Exe := ExpandConstant('{app}\python\{#AppName}.exe');
+  { Left by an install whose window was still open; gone unless it still is. }
+  DeleteFile(Exe + '.old');
+  if FileExists(Exe) and not FileExists(Exe + '.old') and RenameFile(Exe, Exe + '.old') then
+    AppExeSetAside := Exe;
+end;
+
+{ Skryb.exe is back in place however Setup ends: an install that stopped
+  before copying the new one gets the old one back, and after a finished
+  one the old file goes, unless a window is still running from it. }
+procedure SettleAppExeSetAside();
+begin
+  if AppExeSetAside = '' then
+    Exit;
+  if FileExists(AppExeSetAside) then
+    DeleteFile(AppExeSetAside + '.old')
+  else
+    RenameFile(AppExeSetAside + '.old', AppExeSetAside);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  SetRunningAppExeAside();
+  Result := '';
+end;
+
 { The old version's Settings window saves where it was and closes itself
   once it reads the "starting" step; the new version reopens it there. A
   window that doesn't (one from before this handover existed) would keep
-  showing the old version, so after three seconds it is closed. }
+  showing the old version, so after three seconds it is closed. Up to 0.18
+  the window was its own skryb-ui.exe; since then it is a Skryb.exe started
+  with "--settings-window". Windows goes on reporting that process under the
+  name it was started by after its file is renamed. }
 procedure CloseOldSettingsWindows();
 var
   AppDir, Command: String;
@@ -481,8 +523,10 @@ begin
   { PowerShell's single-quoted string doubles a quote inside it. }
   StringChangeEx(AppDir, #39, #39#39, True);
   Command := '-NoProfile -ExecutionPolicy Bypass -Command "$app = ' + #39 + AppDir + #39 + ';'
-    + ' $old = @(Get-Process skryb-ui -ErrorAction SilentlyContinue | Where-Object'
-    + ' { $_.Path -and $_.Path.StartsWith($app, [StringComparison]::OrdinalIgnoreCase) });'
+    + ' $old = @(Get-CimInstance Win32_Process | Where-Object { $line = [string]$_.CommandLine;'
+    + ' $line.IndexOf($app, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and ($_.Name -eq ''skryb-ui.exe'''
+    + ' -or ($_.Name -eq ''{#AppName}.exe'' -and $line.Contains('' --settings-window''))) }'
+    + ' | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue });'
     + ' $old | Wait-Process -Timeout 3 -ErrorAction SilentlyContinue;'
     + ' $old | Where-Object { -not $_.HasExited } | Stop-Process -Force -ErrorAction SilentlyContinue"';
   Exec('powershell.exe', Command, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -501,6 +545,7 @@ end;
   still tells the Settings window, which would otherwise wait forever. }
 procedure DeinitializeSetup();
 begin
+  SettleAppExeSetAside();
   if not InstallFinished and not InstallFailed then
     WriteFailure();
 end;

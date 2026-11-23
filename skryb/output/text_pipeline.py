@@ -197,6 +197,8 @@ def _no_target_app() -> str:
 _SEARCH_FIELD_APPS = frozenset({
     "zen.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe",
     "vivaldi.exe", "arc.exe", "librewolf.exe", "floorp.exe", "waterfox.exe", "skryb-ui.exe",
+    # An installed copy's own window: a second process of the program the app runs as.
+    "skryb.exe",
 })
 _SEARCH_ENTRY_MAX_WORDS = 4
 

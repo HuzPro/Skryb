@@ -38,9 +38,10 @@ _ISCC_DEFAULT_LOCATIONS = (
 )
 
 # The settings window (Tauri) as scripts\build_ui.ps1 leaves it, and where it
-# sits in the wheel: skryb.ui.launcher looks in ui-bin/ when installed.
-_UI_SHELL_BUILD = Path("ui") / "src-tauri" / "target" / "release" / "skryb-ui.exe"
-_UI_SHELL_IN_WHEEL = "skryb/ui-bin/skryb-ui.exe"
+# sits in the wheel: an installed Skryb.exe loads it from ui-bin/ to be the
+# window (native/host/skryb_host.c), and skryb.ui.launcher looks for it there.
+_UI_SHELL_BUILD = Path("ui") / "src-tauri" / "target" / "release" / "skryb_ui.dll"
+_UI_SHELL_IN_WHEEL = "skryb/ui-bin/skryb_ui.dll"
 
 # The native engines (Qwen3-ASR, Parakeet) as their build.sh leaves them, and
 # where skryb.transcription.native_engine_dll looks for them when installed.

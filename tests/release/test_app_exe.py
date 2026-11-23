@@ -10,7 +10,7 @@ from pathlib import Path, PureWindowsPath
 
 import pytest
 
-from release.app_exe import CONSOLE_EXE, WINDOWED_EXE, file_version, resource_script, stack_size
+from release.app_exe import CONSOLE_EXE, WINDOWED_EXE, dlls_needed_to_start, file_version, resource_script, stack_size
 from release.errors import InstallerBuildError
 
 
@@ -103,3 +103,60 @@ class TestTheStackAnExeReserves:
         exe.write_bytes(_exe_reserving(2_000_000, header_at=0x108) + bytes(50_000))
 
         assert stack_size(exe) == 2_000_000
+
+
+_SKRYB_EXE_DEPENDENTS = """
+Dump of file C:/payload/python/Skryb.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    api-ms-win-crt-heap-l1-1-0.dll
+    api-ms-win-crt-runtime-l1-1-0.dll
+    KERNEL32.dll
+    api-ms-win-crt-string-l1-1-0.dll
+
+  Image has the following delay load dependencies:
+
+    python312.dll
+
+  Summary
+
+       11000 .data
+        3000 .text
+"""
+
+_PYTHONW_EXE_DEPENDENTS = """
+Dump of file C:/payload/python/pythonw.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    python312.dll
+    VCRUNTIME140.dll
+    api-ms-win-crt-runtime-l1-1-0.dll
+    KERNEL32.dll
+
+  Summary
+
+        1000 .data
+"""
+
+
+class TestTheDllsAnExeNeedsToStart:
+    def test_a_dll_loaded_only_on_first_use_is_not_one_of_them(self):
+        # The settings window never runs Python, so it never loads python312.dll and
+        # an update can replace that file while the window stays open.
+        assert dlls_needed_to_start(_SKRYB_EXE_DEPENDENTS) == [
+            "api-ms-win-crt-heap-l1-1-0.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "KERNEL32.dll",
+            "api-ms-win-crt-string-l1-1-0.dll",
+        ]
+
+    def test_an_exe_linked_like_pythons_own_needs_the_install_folders_dlls(self):
+        assert dlls_needed_to_start(_PYTHONW_EXE_DEPENDENTS)[:2] == ["python312.dll", "VCRUNTIME140.dll"]
+
+    @pytest.mark.parametrize("listing", ["", "dumpbin : fatal error LNK1181: cannot open input file", "\n\n  Summary\n"])
+    def test_a_listing_that_names_no_dll_gives_none(self, listing):
+        assert dlls_needed_to_start(listing) == []

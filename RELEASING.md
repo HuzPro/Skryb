@@ -59,7 +59,7 @@ a manual run only builds and tests.
 Requires [Inno Setup 6](https://jrsoftware.org/isdl.php), a relocatable
 CPython 3.12 (a [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
 `install_only` build), and the settings window and the native Qwen3-ASR
-engine built first. The build stops if `ui\src-tauri\target\release\skryb-ui.exe`
+engine built first. The build stops if `ui\src-tauri\target\release\skryb_ui.dll`
 or `native\engine\build\qasr.dll` is missing, because both ship inside the
 app wheel. The engine needs AMD's `rocm-sdk-core` 7.2.1 wheel in the Python
 that runs `build.sh` (see `native/README.md`); CI installs it on the runner.
@@ -89,7 +89,12 @@ auto-detected from the default install location when omitted.
    starts `python\skryb-cli.exe`: two small programs of Skryb's own
    (`native/host/skryb_host.c`, built by `release/app_exe.py`) that run the
    bundled Python in their own process, so Task Manager lists the app as
-   "Skryb" and not "Python". Shortcuts an earlier version left pointing at
+   "Skryb" and not "Python". The settings window is the same `Skryb.exe`
+   started with `--settings-window` (it loads `skryb_ui.dll` from the app's
+   wheel), so both show as one row. On an update Setup renames the running
+   `Skryb.exe` to `Skryb.exe.old` before copying the new one, which lets the
+   open window stay up to show progress, and removes the old file once the
+   window has closed. Shortcuts an earlier version left pointing at
    `pythonw.exe -m skryb` (a taskbar pin, a copy on the desktop or in
    Startup) are pointed at `Skryb.exe` on install.
 4. Writes `THIRD-PARTY-NOTICES.txt` for the installed packages; uninstall

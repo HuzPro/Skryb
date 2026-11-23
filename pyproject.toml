@@ -108,7 +108,7 @@ include = ["skryb*"]
 # The gated-model licence texts are runtime resources: the app displays
 # them and hashes them to record consent. Undeclared, they would be
 # absent from the installed wheel and the gate would have no terms to
-# show. ui-bin/ holds the settings window exe, which only the installer
-# build puts there.
+# show. ui-bin/ holds the settings window as the DLL Skryb.exe loads, which
+# only the installer build puts there.
 [tool.setuptools.package-data]
-skryb = ["licenses/*.md", "ui-bin/*.exe", "transcription/qasr.dll", "transcription/npk.dll", "transcription/nd.dll", "transcription/*_cuda.dll", "transcription/tdt_cpu.dll"]
+skryb = ["licenses/*.md", "ui-bin/*.dll", "transcription/qasr.dll", "transcription/npk.dll", "transcription/nd.dll", "transcription/*_cuda.dll", "transcription/tdt_cpu.dll"]
