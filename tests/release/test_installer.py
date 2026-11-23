@@ -253,6 +253,11 @@ class TestTheSetupScript:
         after_copying = code.split("if CurStep = ssPostInstall then", 1)[1].split("if CurStep = ssDone then", 1)[0]
 
         assert "PointOldShortcutsAtSkryb();" in after_copying
+        # WScript.Shell reads a shortcut as empty when its path has a character outside the system
+        # code page, so one named "Skryb ✓.lnk" would be skipped. Explorer's own object reads it.
+        assert "CreateOleObject('Shell.Application')" in code
+        assert "WScript.Shell')" not in code
+        assert code.isascii(), "Setup reads the script as ANSI: a character outside ASCII in it is a gamble"
         # The desktop, the Start menu with its Startup folder, and where taskbar pins are kept.
         for folder in ("{userdesktop}", "{userprograms}", r"{userappdata}\Microsoft\Internet Explorer\Quick Launch"):
             assert f"ExpandConstant('{folder}')" in code

@@ -365,37 +365,45 @@ end;
 { Up to 0.18 every shortcut started "pythonw.exe -m skryb". Setup rewrites the
   ones it made; a copy it doesn't own (pinned to the taskbar, dragged to the
   desktop, put in Startup) would go on starting Skryb as "Python". One that
-  can't be read or changed is left alone: it still starts Skryb. }
-procedure PointShortcutAtSkryb(Shell: Variant; const Shortcut: String);
+  can't be read or changed is left alone: it still starts Skryb.
+
+  Read through Explorer's own Shell.Application: WScript.Shell's
+  CreateShortcut comes back empty for a path with a character outside the
+  system code page (a check mark in the name, a user folder in another
+  script). }
+procedure PointShortcutAtSkryb(ShellFolder: Variant; const Folder, Name: String);
 var
-  Link: Variant;
+  Item, Link: Variant;
   Target, Arguments: String;
 begin
   try
-    Link := Shell.CreateShortcut(Shortcut);
-    Target := Link.TargetPath;
+    Item := ShellFolder.ParseName(Name);
+    Link := Item.GetLink;
+    Target := Link.Path;
     Arguments := Link.Arguments;
     Arguments := Trim(Arguments);
     if (CompareText(Target, ExpandConstant('{app}\python\pythonw.exe')) = 0)
        and (Pos('-m skryb ', Arguments + ' ') = 1) then
     begin
-      Link.TargetPath := ExpandConstant('{app}\python\{#AppName}.exe');
+      Link.Path := ExpandConstant('{app}\python\{#AppName}.exe');
       Link.Arguments := Trim(Copy(Arguments, Length('-m skryb') + 1, Length(Arguments)));
       Link.Save;
-      Log('Pointed an older shortcut at {#AppName}.exe: ' + Shortcut);
+      Log('Pointed an older shortcut at {#AppName}.exe: ' + AddBackslash(Folder) + Name);
     end;
   except
-    Log('Left a shortcut as it was: ' + Shortcut + ' (' + GetExceptionMessage + ')');
+    Log('Left a shortcut as it was: ' + AddBackslash(Folder) + Name + ' (' + GetExceptionMessage + ')');
   end;
 end;
 
 procedure PointShortcutsIn(Shell: Variant; const Folder: String; Deep: Boolean);
 var
   Found: TFindRec;
+  ShellFolder: Variant;
 begin
   if not FindFirst(AddBackslash(Folder) + '*', Found) then
     Exit;
   try
+    ShellFolder := Shell.NameSpace(Folder);
     repeat
       if Found.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
       begin
@@ -405,7 +413,7 @@ begin
           PointShortcutsIn(Shell, AddBackslash(Folder) + Found.Name, True);
       end
       else if CompareText(ExtractFileExt(Found.Name), '.lnk') = 0 then
-        PointShortcutAtSkryb(Shell, AddBackslash(Folder) + Found.Name);
+        PointShortcutAtSkryb(ShellFolder, Folder, Found.Name);
     until not FindNext(Found);
   finally
     FindClose(Found);
@@ -419,7 +427,7 @@ var
   Shell: Variant;
 begin
   try
-    Shell := CreateOleObject('WScript.Shell');
+    Shell := CreateOleObject('Shell.Application');
   except
     Log('Older shortcuts were not checked: ' + GetExceptionMessage);
     Exit;
