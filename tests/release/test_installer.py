@@ -62,12 +62,12 @@ class TestBuildIsccArgs:
 
 
 class TestLauncherShim:
-    def test_invokes_the_console_entry_point_with_forwarded_args(self):
+    def test_the_skryb_command_runs_skrybs_own_console_program_with_what_was_typed(self):
         shim = cmd_shim_text()
 
-        assert "@echo off" in shim
-        assert "skryb.exe" in shim
-        assert "%*" in shim
+        assert shim.splitlines() == ["@echo off", r'"%~dp0..\python\skryb-cli.exe" %*']
+        # cmd.exe needs CRLF line ends.
+        assert shim.endswith("\r\n") and "\n" not in shim.replace("\r\n", "")
 
 
 class TestValidatingThePythonRuntime:
@@ -205,11 +205,60 @@ class TestStageWheelSource:
             _stage_wheel_source(repo, tmp_path / "scratch")
 
 
+_SETUP_SCRIPT = Path(__file__).resolve().parents[2] / "installer" / "Skryb.iss"
+
+
+def _setup_script_section(name: str) -> list[str]:
+    """The entries of one section of the Setup script, comments left out."""
+    section = _SETUP_SCRIPT.read_text(encoding="utf-8").split(f"[{name}]", 1)[1].split("\n[", 1)[0]
+    return [line.strip() for line in section.splitlines() if line.strip() and not line.lstrip().startswith(";")]
+
+
+def _entry(line: str) -> dict[str, str]:
+    """``Name: "a"; Filename: "b"`` as a dict."""
+    return {key.strip(): value.strip().strip('"') for key, value in (part.split(":", 1) for part in line.split(";"))}
+
+
 class TestTheSetupScript:
+    def test_every_shortcut_that_opens_the_app_starts_skrybs_own_exe(self):
+        shortcuts = [_entry(line) for line in _setup_script_section("Icons")]
+        opens_the_app = [shortcut for shortcut in shortcuts if "Uninstall" not in shortcut["Name"]]
+
+        assert [shortcut["Name"] for shortcut in opens_the_app] == [r"{group}\{#AppName}", r"{autodesktop}\{#AppName}"]
+        for shortcut in opens_the_app:
+            # Through pythonw.exe, Windows lists the running app as "Python".
+            assert shortcut["Filename"] == r"{app}\python\{#AppName}.exe"
+            assert "Parameters" not in shortcut
+            assert shortcut["WorkingDir"] == "{app}"
+            # The file Skryb repaints in the colour chosen in Settings.
+            assert shortcut["IconFilename"] == r"{app}\skryb.ico"
+
+    def test_the_app_reopened_after_an_update_is_skrybs_own_exe(self):
+        reopened = [_entry(line) for line in _setup_script_section("Run")]
+
+        assert len(reopened) == 1
+        assert reopened[0]["Filename"] == r"{app}\python\{#AppName}.exe"
+        assert "Parameters" not in reopened[0]
+        assert reopened[0]["WorkingDir"] == "{app}"
+        # A silent in-app update must reopen Skryb, so this never gets skipifsilent.
+        assert reopened[0]["Flags"].split() == ["nowait", "postinstall"]
+
+    def test_nothing_setup_links_or_starts_runs_the_app_through_python(self):
+        entries = _setup_script_section("Icons") + _setup_script_section("Run")
+
+        assert not [line for line in entries if "python.exe" in line.lower() or "pythonw.exe" in line.lower()]
+
+    def test_shortcuts_left_by_earlier_versions_are_pointed_at_skrybs_own_exe_on_every_install(self):
+        code = _SETUP_SCRIPT.read_text(encoding="utf-8").split("[Code]", 1)[1]
+        after_copying = code.split("if CurStep = ssPostInstall then", 1)[1].split("if CurStep = ssDone then", 1)[0]
+
+        assert "PointOldShortcutsAtSkryb();" in after_copying
+        # The desktop, the Start menu with its Startup folder, and where taskbar pins are kept.
+        for folder in ("{userdesktop}", "{userprograms}", r"{userappdata}\Microsoft\Internet Explorer\Quick Launch"):
+            assert f"ExpandConstant('{folder}')" in code
+
     def test_the_skryb_it_reopens_after_an_update_can_follow_the_users_own_folder_links(self):
-        script = (Path(__file__).resolve().parents[2] / "installer" / "Skryb.iss").read_text(encoding="utf-8")
-        setup = script.split("[Setup]", 1)[1].split("\n[", 1)[0]
-        directives = [line.strip() for line in setup.splitlines() if line.strip() and not line.lstrip().startswith(";")]
+        directives = _setup_script_section("Setup")
 
         # Left on (Inno Setup's default since 6.7.0), the reopened app inherits the guard and
         # every model folder that is a junction to another drive fails to open with error 448.

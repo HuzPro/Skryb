@@ -604,7 +604,7 @@ def _show_instance_conflict() -> None:
 
 
 def _stderr_is_console() -> bool:
-    # pythonw (GUI launches, the Start Menu shortcut) runs with no stdio.
+    # A GUI launch (Skryb.exe from the Start Menu shortcut, pythonw) runs with no stdio.
     return sys.stderr is not None and sys.stderr.isatty()
 
 

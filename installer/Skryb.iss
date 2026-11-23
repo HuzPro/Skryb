@@ -88,14 +88,16 @@ Source: "{#PayloadDir}\NOTICE.txt"; DestDir: "{app}"
 Source: "..\brand\skryb.ico"; DestDir: "{app}"
 
 [Icons]
-; The shortcuts launch pythonw.exe, so without IconFilename they show Python's icon.
-Name: "{group}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; IconFilename: "{app}\skryb.ico"
+; Skryb.exe is Skryb's own program beside the bundled Python (release/app_exe.py), so Windows
+; lists the app as "Skryb"; started through pythonw.exe it was listed as "Python". IconFilename
+; stays on {app}\skryb.ico, the file Skryb repaints in the colour chosen in Settings.
+Name: "{group}\{#AppName}"; Filename: "{app}\python\{#AppName}.exe"; WorkingDir: "{app}"; IconFilename: "{app}\skryb.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; IconFilename: "{app}\skryb.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\python\{#AppName}.exe"; WorkingDir: "{app}"; IconFilename: "{app}\skryb.ico"; Tasks: desktopicon
 
 [Run]
 ; No skipifsilent: after a silent in-app update this is what reopens Skryb.
-Filename: "{app}\python\pythonw.exe"; Parameters: "-m skryb"; WorkingDir: "{app}"; Description: "Start {#AppName}"; Flags: nowait postinstall
+Filename: "{app}\python\{#AppName}.exe"; WorkingDir: "{app}"; Description: "Start {#AppName}"; Flags: nowait postinstall
 
 [UninstallDelete]
 ; pip writes into {app}\python at setup time; those files are not in the
@@ -358,6 +360,75 @@ begin
   RegWriteExpandStringValue(HKCU, EnvironmentKey, 'Path', Marker);
 end;
 
+{ --- shortcuts from earlier versions ------------------------------------- }
+
+{ Up to 0.18 every shortcut started "pythonw.exe -m skryb". Setup rewrites the
+  ones it made; a copy it doesn't own (pinned to the taskbar, dragged to the
+  desktop, put in Startup) would go on starting Skryb as "Python". One that
+  can't be read or changed is left alone: it still starts Skryb. }
+procedure PointShortcutAtSkryb(Shell: Variant; const Shortcut: String);
+var
+  Link: Variant;
+  Target, Arguments: String;
+begin
+  try
+    Link := Shell.CreateShortcut(Shortcut);
+    Target := Link.TargetPath;
+    Arguments := Link.Arguments;
+    Arguments := Trim(Arguments);
+    if (CompareText(Target, ExpandConstant('{app}\python\pythonw.exe')) = 0)
+       and (Pos('-m skryb ', Arguments + ' ') = 1) then
+    begin
+      Link.TargetPath := ExpandConstant('{app}\python\{#AppName}.exe');
+      Link.Arguments := Trim(Copy(Arguments, Length('-m skryb') + 1, Length(Arguments)));
+      Link.Save;
+      Log('Pointed an older shortcut at {#AppName}.exe: ' + Shortcut);
+    end;
+  except
+    Log('Left a shortcut as it was: ' + Shortcut + ' (' + GetExceptionMessage + ')');
+  end;
+end;
+
+procedure PointShortcutsIn(Shell: Variant; const Folder: String; Deep: Boolean);
+var
+  Found: TFindRec;
+begin
+  if not FindFirst(AddBackslash(Folder) + '*', Found) then
+    Exit;
+  try
+    repeat
+      if Found.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
+      begin
+        { Not through a link to another folder, which could lead anywhere. }
+        if Deep and (Found.Name <> '.') and (Found.Name <> '..')
+           and (Found.Attributes and FILE_ATTRIBUTE_REPARSE_POINT = 0) then
+          PointShortcutsIn(Shell, AddBackslash(Folder) + Found.Name, True);
+      end
+      else if CompareText(ExtractFileExt(Found.Name), '.lnk') = 0 then
+        PointShortcutAtSkryb(Shell, AddBackslash(Folder) + Found.Name);
+    until not FindNext(Found);
+  finally
+    FindClose(Found);
+  end;
+end;
+
+{ The desktop itself, the Start menu (Startup is inside it) and where Windows
+  keeps taskbar pins. }
+procedure PointOldShortcutsAtSkryb();
+var
+  Shell: Variant;
+begin
+  try
+    Shell := CreateOleObject('WScript.Shell');
+  except
+    Log('Older shortcuts were not checked: ' + GetExceptionMessage);
+    Exit;
+  end;
+  PointShortcutsIn(Shell, ExpandConstant('{userdesktop}'), False);
+  PointShortcutsIn(Shell, ExpandConstant('{userprograms}'), True);
+  PointShortcutsIn(Shell, ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch'), True);
+end;
+
 { --- in-app update ------------------------------------------------------ }
 
 function OpenProcess(DesiredAccess: DWORD; InheritHandle: BOOL; ProcessId: DWORD): THandle;
@@ -433,6 +504,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     AddBinToPath();
+    PointOldShortcutsAtSkryb();
     if not InstallDependencies() then
     begin
       WriteFailure();
