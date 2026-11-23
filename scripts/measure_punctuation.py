@@ -3,6 +3,8 @@
     python -m scripts.measure_punctuation checks --logs D:/VoiceToText_logs --out D:/Skryb-punctuation-eval
     "%LOCALAPPDATA%/Programs/Skryb/python/python.exe" -B scripts/measure_punctuation.py replay \
         --logs D:/VoiceToText_logs --out D:/Skryb-punctuation-eval --min-seconds 15 --control
+    "%LOCALAPPDATA%/Programs/Skryb/python/python.exe" -B scripts/measure_punctuation.py judge \
+        --logs D:/VoiceToText_logs --out D:/Skryb-punctuation-eval --variant 500
 
 ``checks`` decodes nothing. It counts, over every logged dictation of one
 model, the signs of a misplaced mark that need no labels: sentences ending on
@@ -20,9 +22,14 @@ trim that changes them has damaged recognition, whatever it did to the marks.
 The engine also moves on its own: taking 40 ms off one clip changed a word.
 So ``--control`` decodes each clip twice more with its pauses untouched, once
 exactly as it is and once without its first 20 ms, and a cap only means
-something where it moves the output more than those do. Every spot where the two disagree on a mark is written out for a later blind
-listening pass, which is the only fair judge: the user's own edits were made
-from the raw output and so favour it.
+something where it moves the output more than those do.
+
+``judge`` is the fair test of which version is right: the user's own edits
+were made from the raw output and so favour it. It takes a random hundred of
+the places where raw and one variant disagree on a mark, cuts a few seconds of
+the original recording around each, and writes a page that plays the clip and
+shows the two versions side by side in a random order, without saying which is
+which until every place has been judged.
 
 The replay needs the engine DLLs, which only the installed app ships, so it
 runs in the app's own Python and imports ``skryb`` from there. Nothing here
@@ -40,7 +47,9 @@ import json
 import math
 import random
 import re
+import shutil
 import time
+import wave
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -123,6 +132,8 @@ class _Options:
     min_seconds: float | None
     max_seconds: float | None
     control: bool
+    variant: str
+    count: int
 
 
 def main(argv: Sequence[str] | None = None, build_decoder: DecoderFactory | None = None) -> None:
@@ -132,6 +143,8 @@ def main(argv: Sequence[str] | None = None, build_decoder: DecoderFactory | None
     out = _checked_output_dir(options.out, options.logs)
     if options.command == "checks":
         _checks_command(options, out)
+    elif options.command == "judge":
+        _judge_command(options, out, build_decoder or _app_decoder)
     else:
         _replay_command(options, out, build_decoder or _app_decoder)
 
@@ -141,7 +154,10 @@ def _parse_options(argv: Sequence[str] | None) -> _Options:
     commands = parser.add_subparsers(dest="command", required=True)
     checks = commands.add_parser("checks", help="label-free counts over the logged text, no decoding")
     replay = commands.add_parser("replay", help="decode saved clips raw and with long pauses shortened")
-    for command in (checks, replay):
+    judge = commands.add_parser("judge", help="write a blind listening page for places a variant differs from raw")
+    judge.add_argument("--variant", default="500", help="the replayed variant to judge against raw: a cap in ms, or shift")
+    judge.add_argument("--count", type=int, default=100, help="how many places to judge")
+    for command in (checks, replay, judge):
         command.add_argument("--logs", type=Path, required=True, help="folder with one subfolder per session")
         command.add_argument("--out", type=Path, required=True, help="folder for the results, outside the repo")
         command.add_argument("--model", default=DEFAULT_MODEL, help="the model field to keep")
@@ -178,6 +194,8 @@ def _parse_options(argv: Sequence[str] | None) -> _Options:
         min_seconds=shortest,
         max_seconds=longest,
         control=getattr(arguments, "control", False),
+        variant=getattr(arguments, "variant", ""),
+        count=getattr(arguments, "count", 0),
     )
 
 
@@ -833,6 +851,7 @@ def punctuation_spots(raw: str, trimmed: str) -> list[_Event]:
             if raw_tokens[at_raw][1] != trimmed_tokens[at_trimmed][1]:
                 spots.append({
                     "word": at_raw,
+                    "trimmed_word": at_trimmed,
                     "raw_mark": raw_tokens[at_raw][1],
                     "trimmed_mark": trimmed_tokens[at_trimmed][1],
                     "raw": _around(raw_tokens, at_raw),
@@ -849,8 +868,7 @@ def _tokens(text: str) -> list[tuple[str, str]]:
 
 
 def _around(tokens: list[tuple[str, str]], at: int) -> str:
-    window = tokens[max(at - _CONTEXT_WORDS, 0): at + _CONTEXT_WORDS + 1]
-    return " ".join(word + mark for word, mark in window)
+    return _joined_words(tokens[max(at - _CONTEXT_WORDS, 0): at + _CONTEXT_WORDS + 1])
 
 
 def _differences(records: list[_Event], keys: Sequence[str]) -> list[_Event]:
@@ -938,6 +956,244 @@ def _print_replay(summary: _Event, keys: Sequence[str], failures: list[str]) -> 
         rows.append((label, ["-", *(f"{variants[_variant_name(key)][field]:,}" for key in keys)]))
     print()
     _print_table(names, rows)
+
+
+# --- judge --------------------------------------------------------------------
+
+_JUDGE_PAGE = Path(__file__).with_name("punctuation_judge.html")
+_WORDS_SHOWN = 14
+# A clip runs from this many words before the place to this many after it,
+# with a little room either end so neither edge lands inside a word.
+_WORDS_HEARD_BEFORE = 5
+_WORDS_HEARD_AFTER = 3
+_CLIP_LEAD_SECONDS = 1.0
+_CLIP_TAIL_SECONDS = 0.8
+# A pause at the place is played whole, because how long it was is part of the
+# evidence, but a minute spent thinking is not listened to in full.
+_CLIP_LONGEST_SECONDS = 20.0
+# Spread over many dictations: one long ramble must not be a tenth of the verdict.
+_PLACES_PER_DICTATION = 2
+_LOCATE_FIRST_STEP_SECONDS = 4.0
+_LOCATE_WITHIN_SECONDS = 0.4
+# Only the half minute before a guess is decoded: decoding six minutes to find
+# one word took 25 s a try, and half a minute holds some seventy words to match.
+_LOCATE_WINDOW_SECONDS = 30.0
+# Past the longest run of words the two texts share, a later match counts only
+# this close to the one before it: a lone "the" further on is a coincidence.
+_LOCATE_LONGEST_GAP_WORDS = 2
+# Given a second of audio the engine can write a word or two that was never
+# said; a run this long (or all it wrote, if shorter) is what places a stretch.
+_LOCATE_SURE_WORDS = 3
+_CLIP_FADE_SECONDS = 0.01
+_CLIP_PEAK = 0.9
+
+
+def _judge_command(options: _Options, out: Path, build_decoder: DecoderFactory) -> None:
+    slug = _slug(options.model)
+    summary_path = out / f"replay-{slug}-summary.json"
+    if not summary_path.is_file():
+        raise SystemExit(f"No replay of {options.model} in {out}. Run replay first.")
+    places = judged_places(list(replayed_records(out / f"replay-{slug}.jsonl").values()), options.variant, options.seed)
+    if not places:
+        raise SystemExit(f"The replay in {out} has no place where {_variant_name(options.variant)} differs from raw.")
+    folder = out / "judge"
+    shutil.rmtree(folder / "clips", ignore_errors=True)
+    (folder / "clips").mkdir(parents=True)
+    decode, close = build_decoder(options.model, str(json.loads(summary_path.read_text(encoding="utf-8"))["engine"]))
+    try:
+        items, lost = _judged_items(places, options, decode, folder)
+    finally:
+        close()
+    shown_as = f"pauses shortened to {options.variant} ms" if options.variant.isdigit() else options.variant
+    page = {"run": f"{slug}-{options.variant}-{options.seed}-{len(items)}", "variant": shown_as, "items": items}
+    (folder / "items.js").write_text(f"window.JUDGE = {json.dumps(page, ensure_ascii=False)};\n", encoding="utf-8")
+    shutil.copyfile(_JUDGE_PAGE, folder / "index.html")
+    print(f"{len(items)} places to judge, {lost} skipped because the engine could not hear them in a clip cut for them")
+    print(f"Open {folder / 'index.html'}")
+
+
+def judged_places(records: Sequence[_Event], variant: str, seed: int) -> list[tuple[_Event, _Event]]:
+    """Every (clip, spot) where *variant* differs from raw, shuffled, at most two from one dictation."""
+    places: list[tuple[_Event, _Event]] = []
+    for record in records:
+        trimmed = record["trimmed"]
+        assert isinstance(trimmed, dict)
+        if _is_variant(trimmed.get(variant)):
+            places += [(record, spot) for spot in punctuation_spots(str(record["raw"]), str(trimmed[variant]["text"]))]
+    random.Random(seed).shuffle(places)
+    taken: Counter[str] = Counter()
+    kept: list[tuple[_Event, _Event]] = []
+    for record, spot in places:
+        if taken[str(record["id"])] < _PLACES_PER_DICTATION:
+            taken[str(record["id"])] += 1
+            kept.append((record, spot))
+    return kept
+
+
+def _judged_items(
+    places: list[tuple[_Event, _Event]], options: _Options, decode: Decode, folder: Path,
+) -> tuple[list[_Event], int]:
+    sides = random.Random(options.seed)
+    items: list[_Event] = []
+    lost = 0
+    for record, spot in places:
+        if len(items) == options.count:
+            break
+        raw_tokens = _tokens(str(record["raw"]))
+        audio = load_wav(Path(str(record["audio_path"])))
+        words = [word for word, _ in raw_tokens]
+        cut = place_in_clip(words, int(spot["word"]), audio.data, audio.sample_rate, decode)
+        if cut is None:
+            lost += 1
+            continue
+        clip = f"clips/{len(items) + 1:03d}.wav"
+        _write_clip(folder / clip, _for_listening(audio.data[cut[0]: cut[1]], audio.sample_rate), audio.sample_rate)
+        trimmed_tokens = _tokens(str(record["trimmed"][options.variant]["text"]))
+        raw_first = sides.random() < 0.5
+        versions = (_shown(raw_tokens, int(spot["word"])), _shown(trimmed_tokens, int(spot["trimmed_word"])))
+        items.append({
+            "id": record["id"],
+            "clip": clip,
+            "a": versions[0 if raw_first else 1],
+            "b": versions[1 if raw_first else 0],
+            "raw": "a" if raw_first else "b",
+            "raw_mark": spot["raw_mark"],
+            "trimmed_mark": spot["trimmed_mark"],
+        })
+        if len(items) % _PROGRESS_EVERY == 0:
+            print(f"cut {len(items)} of {options.count} clips", flush=True)
+    return items, lost
+
+
+def place_in_clip(
+    words: Sequence[str], at: int, samples: np.ndarray, sample_rate: int, decode: Decode,
+) -> tuple[int, int] | None:
+    """The stretch of the clip, as (first sample, one past the last), that holds ``words[at]`` and the words round it.
+
+    One located moment is not enough to cut at. The engine can write a word
+    before it has been said in full, and can hold a word back until the next
+    ones confirm it, which after a pause is seconds later: a quarter of the
+    clips cut round a single moment missed their place. So the stretch runs
+    from a word well before the place to a word well after it, and it is kept
+    only if the engine, given that stretch alone, hears the place in it.
+    """
+    length = samples.size / sample_rate
+    first_word, last_word = at - _WORDS_HEARD_BEFORE, at + _WORDS_HEARD_AFTER
+    start = locate(words, first_word, samples, sample_rate, decode) if first_word >= 0 else 0.0
+    end = locate(words, last_word, samples, sample_rate, decode) if last_word < len(words) else length
+    if start is None or end is None or end <= start:
+        return None
+    finish = min(end + _CLIP_TAIL_SECONDS, length)
+    begin = max(start - _CLIP_LEAD_SECONDS, finish - _CLIP_LONGEST_SECONDS, 0.0)
+    cut = round(begin * sample_rate), round(finish * sample_rate)
+    return cut if _hears_place(words, at, decode(samples[cut[0]: cut[1]], sample_rate)) else None
+
+
+def _hears_place(words: Sequence[str], at: int, heard: str) -> bool:
+    """Whether *heard* holds ``words[at]`` and the word after it, in step with the words round them."""
+    first = max(at - _WORDS_HEARD_BEFORE, 0)
+    around = [word.casefold() for word in words[first: at + _WORDS_HEARD_AFTER + 1]]
+    matcher = SequenceMatcher(None, around, [word.casefold() for word, _ in _tokens(heard)], autojunk=False)
+    matched = {index for block in matcher.get_matching_blocks() for index in range(block.a, block.a + block.size)}
+    return {at - first, min(at + 1, len(words) - 1) - first} <= matched
+
+
+def locate(words: Sequence[str], at: int, samples: np.ndarray, sample_rate: int, decode: Decode) -> float | None:
+    """About how many seconds into the clip ``words[at]`` is said, or None if the engine never hears it.
+
+    The engine gives no word times, and guessing from the word's share of the
+    text is out by as much as fifteen seconds in a long dictation. So the half
+    minute up to a guess is decoded to see whether the word has been heard by
+    then, and the guess is halved in on the first moment it has. That moment
+    is usually within half a second of the word, but see ``place_in_clip``.
+    """
+    length = samples.size / sample_rate
+
+    def heard_by(seconds: float) -> bool:
+        first = max(round((seconds - _LOCATE_WINDOW_SECONDS) * sample_rate), 0)
+        return _last_word_heard(words, decode(samples[first: round(seconds * sample_rate)], sample_rate)) >= at
+
+    step = _LOCATE_FIRST_STEP_SECONDS
+    late = min(length * (at + 1) / len(words), length)
+    if heard_by(late):
+        early = late - step
+        while early > 0 and heard_by(early):
+            late, step = early, step * 2
+            early = late - step
+        early = max(early, 0.0)
+    else:
+        early, late = late, min(late + step, length)
+        while not heard_by(late):
+            if late >= length:
+                return None
+            early, step = late, step * 2
+            late = min(early + step, length)
+    while late - early > _LOCATE_WITHIN_SECONDS:
+        middle = (early + late) / 2
+        if heard_by(middle):
+            late = middle
+        else:
+            early = middle
+    return late
+
+
+def _last_word_heard(words: Sequence[str], heard: str) -> int:
+    """Which of *words* the text *heard*, a stretch from somewhere inside them, ends on; -1 when it shares none."""
+    matcher = SequenceMatcher(
+        None, [word.casefold() for word in words], [word.casefold() for word, _ in _tokens(heard)], autojunk=False,
+    )
+    blocks = [block for block in matcher.get_matching_blocks() if block.size]
+    if not blocks:
+        return -1
+    longest = max(range(len(blocks)), key=lambda index: blocks[index].size)
+    last = blocks[longest]
+    if last.size < min(_LOCATE_SURE_WORDS, len(matcher.b)):
+        return -1
+    for block in blocks[longest + 1:]:
+        gaps = (block.a - last.a - last.size, block.b - last.b - last.size)
+        if max(gaps) > _LOCATE_LONGEST_GAP_WORDS:
+            break
+        last = block
+    return last.a + last.size - 1
+
+
+def _for_listening(samples: np.ndarray, sample_rate: int) -> np.ndarray:
+    """*samples* faded in and out and brought up to a comfortable level; the engine never hears this copy."""
+    clip = samples.astype(np.float64)
+    fade = min(round(sample_rate * _CLIP_FADE_SECONDS), clip.size // 2)
+    if fade:
+        ramp = np.linspace(0.0, 1.0, fade)
+        clip[:fade] *= ramp
+        clip[-fade:] *= ramp[::-1]
+    peak = float(np.max(np.abs(clip), initial=0.0))
+    return clip * (_CLIP_PEAK / peak) if peak > 0 else clip
+
+
+def _write_clip(path: Path, clip: np.ndarray, sample_rate: int) -> None:
+    with wave.open(str(path), "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(sample_rate)
+        stream.writeframes((np.clip(clip, -1.0, 1.0) * 32767).astype("<i2").tobytes())
+
+
+def _shown(tokens: list[tuple[str, str]], at: int) -> _Event:
+    """The words around ``tokens[at]`` in three parts, so the page can mark the middle one.
+
+    The marked part is the word, its mark and the word after: a full stop
+    changes the next word's capital too, and both belong to the choice.
+    """
+    following = tokens[at + 1: at + 2]
+    after = _joined_words(tokens[at + 2: at + 1 + _WORDS_SHOWN])
+    return {
+        "before": _joined_words(tokens[max(at - _WORDS_SHOWN, 0): at]),
+        "spot": _joined_words(tokens[at: at + 1]) + "".join(f" {word}" for word, _ in following),
+        "after": "".join(mark for _, mark in following) + (f" {after}" if after else ""),
+    }
+
+
+def _joined_words(tokens: Sequence[tuple[str, str]]) -> str:
+    return " ".join(word + mark for word, mark in tokens)
 
 
 # --- The installed app's engine -----------------------------------------------

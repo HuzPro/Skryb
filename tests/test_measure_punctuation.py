@@ -10,6 +10,7 @@ which is the habit being measured.
 import json
 import re
 import wave
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,10 @@ import pytest
 from scripts.measure_punctuation import (
     DEFAULT_MODEL,
     _Dictation,
+    judged_places,
+    locate,
     main,
+    place_in_clip,
     punctuation_spots,
     sample_clips,
     sentences,
@@ -1001,3 +1005,297 @@ class TestPunctuationSpots:
         spots = punctuation_spots("هل وصل الطرد؟ نعم", "هل وصل الطرد. نعم")
 
         assert [(spot["raw_mark"], spot["trimmed_mark"]) for spot in spots] == [("؟", ".")]
+
+
+# --- Judging -------------------------------------------------------------------
+
+_JUDGE_RATE = 100
+
+
+def _clock(seconds: float) -> np.ndarray:
+    """Stand-in audio in which every sample holds its own time, so a slice of it knows where it came from."""
+    return (np.arange(round(seconds * _JUDGE_RATE)) / _JUDGE_RATE).astype(np.float32)
+
+
+class _TimedSpeech:
+    """Hears each word that was finished inside the stretch of audio it is given."""
+
+    def __init__(self, words: list[str], ends: list[float], mishears_every: int = 0) -> None:
+        self._words, self._ends, self._mishears_every = words, ends, mishears_every
+        self.decodes = 0
+        self.longest = 0.0
+
+    def decode(self, samples: np.ndarray, sample_rate: int) -> str:
+        self.decodes += 1
+        self.longest = max(self.longest, samples.size / sample_rate)
+        first, last = float(samples[0]), float(samples[-1]) + 1 / sample_rate
+        heard = [word for word, end in zip(self._words, self._ends) if first < end <= last + 1e-4]
+        if self._mishears_every:
+            heard = [word if index % self._mishears_every else "hmm" for index, word in enumerate(heard, start=1)]
+        return " ".join(heard)
+
+
+def _rambling_dictation(count: int, seed: int) -> tuple[list[str], list[float]]:
+    """Words said at an uneven pace, with a long think every forty or so, and the same phrases over and over."""
+    rng = np.random.default_rng(seed)
+    stock = ["lantern", "orchard", "kettle", "the", "and", "then", "naïve", "الطرد", "walk", "to", "it's", "re-check"]
+    words = [stock[int(rng.integers(len(stock)))] for _ in range(count)]
+    gaps = rng.uniform(0.2, 0.5, count)
+    gaps[rng.integers(count, size=count // 40)] += rng.uniform(2.0, 9.0, count // 40)
+    return words, np.cumsum(gaps).tolist()
+
+
+class TestFindingAPlaceInItsClip:
+    @pytest.mark.parametrize("at", [0, 1, 37, 412, 1000, 1998, 1999])
+    def test_a_word_is_found_just_after_it_was_said_in_a_dictation_of_two_thousand_words(self, at: int) -> None:
+        words, ends = _rambling_dictation(2000, seed=31)
+        engine = _TimedSpeech(words, ends)
+
+        found = locate(words, at, _clock(ends[-1] + 1.0), _JUDGE_RATE, engine.decode)
+
+        assert found is not None
+        assert -0.011 <= found - ends[at] <= 0.4
+        assert engine.decodes <= 16
+        # Never the whole lead-up: decoding minutes of audio per try is what made long dictations slow.
+        assert engine.longest <= 30.0
+
+    def test_a_word_before_a_long_pause_is_placed_at_the_start_of_the_pause_not_inside_it(self) -> None:
+        words = ["pack", "the", "kettle", "and", "walk"]
+        ends = [0.4, 0.7, 1.2, 9.5, 9.9]
+
+        found = locate(words, 2, _clock(11.0), _JUDGE_RATE, _TimedSpeech(words, ends).decode)
+
+        assert found is not None
+        assert 1.2 <= found <= 1.6
+
+    def test_a_place_is_still_found_when_the_engine_mishears_one_word_in_seven(self) -> None:
+        words, ends = _rambling_dictation(600, seed=32)
+        engine = _TimedSpeech(words, ends, mishears_every=7)
+        samples = _clock(ends[-1] + 1.0)
+
+        found = [locate(words, at, samples, _JUDGE_RATE, engine.decode) for at in (50, 201, 333, 590)]
+
+        # A misheard word is only known to have gone by once the next one is heard.
+        assert all(spot is not None and -0.011 <= spot - ends[at] <= 1.0 for spot, at in zip(found, (50, 201, 333, 590)))
+
+    def test_a_word_the_engine_never_hears_is_reported_as_not_found(self) -> None:
+        words = ["pack", "the", "kettle"]
+        silent = _TimedSpeech(["hmm", "hmm"], [0.5, 1.0])
+
+        assert locate(words, 1, _clock(3.0), _JUDGE_RATE, silent.decode) is None
+
+    def test_a_stray_match_far_past_the_words_really_heard_does_not_count_as_hearing_them(self) -> None:
+        # The stretch ends on a cut-off word the engine wrote as "the", which is also said much later.
+        words = ["pack", "the", "kettle", "and", "walk", "down", "to", "orchard", "gate", "before", "dusk", "on", "the", "mill"]
+        engine = _TimedSpeech(["pack", "the", "kettle", "and", "the"], [0.4, 0.7, 1.2, 1.5, 1.8])
+
+        found = locate(words, 6, _clock(8.0), _JUDGE_RATE, engine.decode)
+
+        assert found is None
+
+
+_ERRAND = ("pack", "the", "lantern", "and", "the", "kettle", "then", "walk", "down", "to", "the", "orchard", "gate")
+
+
+class TestCuttingAClipRoundAPlace:
+    @pytest.mark.parametrize("at", [0, 3, 37, 412, 1000, 1996, 1999])
+    def test_the_clip_holds_the_place_with_the_words_before_and_after_it(self, at: int) -> None:
+        words, ends = _rambling_dictation(2000, seed=33)
+        engine = _TimedSpeech(words, ends)
+
+        cut = place_in_clip(words, at, _clock(ends[-1] + 1.0), _JUDGE_RATE, engine.decode)
+
+        assert cut is not None
+        begin, finish = cut[0] / _JUDGE_RATE, cut[1] / _JUDGE_RATE
+        assert begin <= (ends[at - 4] if at >= 5 else 0.0)
+        assert finish >= ends[min(at + 3, 1999)]
+        assert finish - begin <= 20.0
+
+    def test_a_long_pause_right_after_the_place_is_played_through_to_the_words_that_follow(self) -> None:
+        words = list(_ERRAND)
+        ends = [0.4, 0.7, 1.2, 1.5, 1.8, 2.3, 9.6, 10.0, 10.4, 10.7, 11.0, 11.5, 12.0]
+
+        cut = place_in_clip(words, 5, _clock(13.0), _JUDGE_RATE, _TimedSpeech(words, ends).decode)
+
+        assert cut is not None
+        assert cut[0] / _JUDGE_RATE <= 0.4
+        assert cut[1] / _JUDGE_RATE >= 10.4
+
+    def test_a_place_the_engine_cannot_hear_in_the_clip_cut_for_it_is_dropped(self) -> None:
+        words = list(_ERRAND)
+        ends = [0.4, 0.7, 1.2, 1.5, 1.8, 2.3, 2.7, 3.0, 3.4, 3.7, 4.0, 4.5, 5.0]
+        # In a long stretch the engine gets every word; in a short one it loses "kettle".
+        whole = _TimedSpeech(words, ends)
+
+        def decode(samples: np.ndarray, sample_rate: int) -> str:
+            heard = whole.decode(samples, sample_rate)
+            return heard if samples.size / sample_rate > 12 else heard.replace("kettle", "cattle")
+
+        assert place_in_clip(words, 5, _clock(40.0), _JUDGE_RATE, whole.decode) is not None
+        assert place_in_clip(words, 5, _clock(40.0), _JUDGE_RATE, decode) is None
+
+    def test_a_think_of_over_twenty_seconds_at_the_place_is_not_cut_into_a_clip(self) -> None:
+        words = list(_ERRAND)
+        ends = [0.4, 0.7, 1.2, 1.5, 1.8, 2.3, 31.6, 32.0, 32.4, 32.7, 33.0, 33.5, 34.0]
+
+        assert place_in_clip(words, 5, _clock(35.0), _JUDGE_RATE, _TimedSpeech(words, ends).decode) is None
+
+
+_RAMBLE = (
+    "Pack the lantern and the kettle. And walk down to the orchard before the gate is shut. "
+    "Then light the stove, pour the tea. So we can sit by the naïve old mill and wait for الطرد to come."
+)
+_RAMBLE_JOINED = (
+    "Pack the lantern and the kettle, and walk down to the orchard before the gate is shut. "
+    "Then light the stove. Pour the tea so we can sit by the naïve old mill and wait for الطرد to come."
+)
+_WORDS_A_SECOND = 2
+
+
+class _SteadyReader:
+    """Hears the ramble at two words a second in whatever stretch of a saved clip it is given, marks and all."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.built_for: list[tuple[str, str]] = []
+        self.closed = 0
+        self._clips = [load_wav(path).data for path in sorted((tmp_path / "logs" / _SESSION / "audio").glob("*.wav"))]
+
+    def build(self, model: str, engine: str) -> tuple:
+        self.built_for.append((model, engine))
+        return self.decode, self.close
+
+    def decode(self, samples: np.ndarray, sample_rate: int) -> str:
+        first = next(at for at in (_position_of(clip, samples) for clip in self._clips) if at is not None)
+        heard = range(-(-first * _WORDS_A_SECOND // sample_rate), (first + samples.size) * _WORDS_A_SECOND // sample_rate)
+        return " ".join(_RAMBLE.split()[index] for index in heard)
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def _replayed(tmp_path: Path, dictations: int) -> Path:
+    """An eval folder as a finished replay leaves it: *dictations* clips of the same ramble."""
+    rng = np.random.default_rng(40)
+    out = tmp_path / "eval"
+    out.mkdir()
+    seconds = len(_RAMBLE.split()) / _WORDS_A_SECOND
+    records = []
+    for index in range(1, dictations + 1):
+        clip = tmp_path / "logs" / _SESSION / "audio" / f"{index:04d}.wav"
+        _write_wav(clip, _speech(seconds, rng))
+        records.append({
+            "id": f"{_SESSION}/{index:04d}",
+            "audio_path": str(clip),
+            "audio_seconds": seconds,
+            "logged_text": _RAMBLE,
+            "raw": _RAMBLE,
+            "trimmed": {
+                "500": {"text": _RAMBLE_JOINED, "removed_seconds": 1.2},
+                "800": {"text": _RAMBLE, "removed_seconds": 0.4},
+            },
+        })
+    (out / f"replay-{DEFAULT_MODEL}.jsonl").write_text(
+        "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8",
+    )
+    (out / f"replay-{DEFAULT_MODEL}-summary.json").write_text(json.dumps({"engine": _ENGINE}), encoding="utf-8")
+    return out
+
+
+def _run_judge(tmp_path: Path, reader: _SteadyReader, *extra: str) -> dict:
+    out = tmp_path / "eval"
+    main(["judge", "--logs", str(tmp_path / "logs"), "--out", str(out), *extra], build_decoder=reader.build)
+    script = (out / "judge" / "items.js").read_text(encoding="utf-8")
+    assert script.startswith("window.JUDGE = ") and script.endswith(";\n")
+    return json.loads(script[len("window.JUDGE = "):-2])
+
+
+class TestJudging:
+    def test_at_most_two_places_are_taken_from_one_dictation_and_the_same_seed_takes_the_same_ones(
+        self, tmp_path: Path,
+    ) -> None:
+        records = _jsonl(_replayed(tmp_path, 40) / f"replay-{DEFAULT_MODEL}.jsonl")
+
+        places = judged_places(records, "500", seed=3)
+
+        # The ramble differs from its joined version at three places, in each of forty dictations.
+        assert len(places) == 80
+        assert max(Counter(record["id"] for record, _ in places).values()) == 2
+        assert len({spot["word"] for _, spot in places}) == 3
+        assert [(r["id"], s["word"]) for r, s in places] == [(r["id"], s["word"]) for r, s in judged_places(records, "500", 3)]
+        assert [(r["id"], s["word"]) for r, s in places] != [(r["id"], s["word"]) for r, s in judged_places(records, "500", 4)]
+
+    def test_a_variant_that_matches_raw_or_was_never_replayed_has_no_places(self, tmp_path: Path) -> None:
+        records = _jsonl(_replayed(tmp_path, 3) / f"replay-{DEFAULT_MODEL}.jsonl")
+
+        assert judged_places(records, "800", seed=0) == []
+        assert judged_places(records, "300", seed=0) == []
+
+    def test_the_page_gets_one_short_clip_and_both_versions_for_each_place(self, tmp_path: Path) -> None:
+        _replayed(tmp_path, 30)
+        reader = _SteadyReader(tmp_path)
+
+        page = _run_judge(tmp_path, reader, "--count", "40")
+
+        folder = tmp_path / "eval" / "judge"
+        assert (folder / "index.html").read_text(encoding="utf-8") == (
+            Path(__file__).parents[1] / "scripts" / "punctuation_judge.html"
+        ).read_text(encoding="utf-8")
+        assert page["variant"] == "pauses shortened to 500 ms"
+        assert len(page["items"]) == 40
+        assert sorted(path.name for path in (folder / "clips").iterdir()) == [f"{n:03d}.wav" for n in range(1, 41)]
+        assert (reader.built_for, reader.closed) == ([(DEFAULT_MODEL, _ENGINE)], 1)
+        for item in page["items"]:
+            with wave.open(str(folder / item["clip"])) as clip:
+                assert (clip.getnchannels(), clip.getsampwidth(), clip.getframerate()) == (1, 2, _RATE)
+                assert 3.0 < clip.getnframes() / _RATE <= 7.0
+                loudest = np.abs(np.frombuffer(clip.readframes(clip.getnframes()), dtype="<i2")).max()
+            assert 0.85 * 32767 < loudest <= 0.9 * 32767 + 1
+
+    def test_each_version_is_shown_with_the_differing_mark_inside_the_highlighted_part(self, tmp_path: Path) -> None:
+        _replayed(tmp_path, 30)
+
+        page = _run_judge(tmp_path, _SteadyReader(tmp_path), "--count", "40")
+
+        for item in page["items"]:
+            raw, other = item[item["raw"]], item["b" if item["raw"] == "a" else "a"]
+            assert " ".join(part for part in (raw["before"], raw["spot"] + raw["after"]) if part) in _RAMBLE
+            assert " ".join(part for part in (other["before"], other["spot"] + other["after"]) if part) in _RAMBLE_JOINED
+            assert raw["spot"].casefold().replace(item["raw_mark"], "") == other["spot"].casefold().replace(
+                item["trimmed_mark"], "",
+            )
+            assert item["raw_mark"] != item["trimmed_mark"]
+            assert (item["raw_mark"] or " ") in raw["spot"] and (item["trimmed_mark"] or " ") in other["spot"]
+
+    def test_which_side_holds_the_version_as_recorded_is_mixed_and_repeats_with_the_seed(self, tmp_path: Path) -> None:
+        _replayed(tmp_path, 30)
+
+        sides = [item["raw"] for item in _run_judge(tmp_path, _SteadyReader(tmp_path), "--count", "40")["items"]]
+        again = [item["raw"] for item in _run_judge(tmp_path, _SteadyReader(tmp_path), "--count", "40")["items"]]
+
+        assert 10 <= sides.count("a") <= 30
+        assert sides == again
+
+    def test_the_console_shows_counts_and_never_a_dictated_word(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _replayed(tmp_path, 5)
+
+        _run_judge(tmp_path, _SteadyReader(tmp_path), "--count", "6")
+
+        printed = capsys.readouterr().out
+        assert "6 places to judge, 0 skipped" in printed
+        assert not any(word in printed for word in ("lantern", "kettle", "orchard", "الطرد"))
+
+    def test_judging_before_any_replay_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / "logs").mkdir()
+
+        with pytest.raises(SystemExit, match="Run replay first"):
+            main(["judge", "--logs", str(tmp_path / "logs"), "--out", str(tmp_path / "eval")])
+
+    def test_a_variant_with_nothing_to_judge_is_refused_without_loading_the_engine(self, tmp_path: Path) -> None:
+        _replayed(tmp_path, 3)
+        reader = _SteadyReader(tmp_path)
+
+        with pytest.raises(SystemExit, match="no place where 800 ms differs"):
+            _run_judge(tmp_path, reader, "--variant", "800")
+        assert reader.built_for == []
