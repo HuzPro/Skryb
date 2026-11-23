@@ -20,13 +20,10 @@ import zipfile
 from pathlib import Path
 
 from release import APP_NAME
+from release.app_exe import CONSOLE_EXE, build_app_exes
 from release.build_target import BuildTarget
 from release.errors import InstallerBuildError
 
-
-# The console entry point pip installs from ``[project.scripts]`` (lower
-# case, the name users type), distinct from the display name APP_NAME.
-_CLI_NAME = "skryb"
 
 # Only these modules of the build-time ``release`` package are shipped, so
 # the bundled Python can regenerate THIRD-PARTY-NOTICES.txt post-install.
@@ -86,11 +83,15 @@ def build_iscc_args(
 
 
 def cmd_shim_text() -> str:
-    """Return the ``skryb.cmd`` launcher placed on the system PATH."""
+    """Return the ``skryb.cmd`` launcher placed on the user's PATH.
+
+    It runs Skryb's own console program, so a Skryb started from a terminal is listed as "Skryb"
+    too. pip's ``Scripts/skryb.exe`` would run it in a child ``python.exe``.
+    """
     return "\r\n".join(
         [
             "@echo off",
-            rf'"%~dp0..\python\Scripts\{_CLI_NAME}.exe" %*',
+            rf'"%~dp0..\python\{CONSOLE_EXE}" %*',
             "",
         ]
     )
@@ -135,6 +136,7 @@ def stage_payload(repo_root: Path, payload_dir: Path, python_dir: Path, version:
     _reset_dir(payload_dir)
     wheel_filename = _build_app_wheel(python_dir, repo_root, payload_dir / "wheels")
     _copy_python_runtime(python_dir, payload_dir / "python")
+    build_app_exes(repo_root, payload_dir / "python", version)
     _copy_requirements(repo_root, payload_dir / "requirements")
     _copy_notices_tool(repo_root, payload_dir / "tools" / "release")
     _copy_license(repo_root, payload_dir / "LICENSE.txt")

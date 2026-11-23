@@ -62,7 +62,9 @@ CPython 3.12 (a [python-build-standalone](https://github.com/astral-sh/python-bu
 engine built first. The build stops if `ui\src-tauri\target\release\skryb-ui.exe`
 or `native\engine\build\qasr.dll` is missing, because both ship inside the
 app wheel. The engine needs AMD's `rocm-sdk-core` 7.2.1 wheel in the Python
-that runs `build.sh` (see `native/README.md`); CI installs it on the runner:
+that runs `build.sh` (see `native/README.md`); CI installs it on the runner.
+The build also compiles `Skryb.exe` and `skryb-cli.exe` (below), which needs
+Visual Studio's C++ tools:
 
 ```powershell
 .\scripts\build_ui.ps1
@@ -83,7 +85,13 @@ auto-detected from the default install location when omitted.
 3. Adds `skryb` to the user's PATH (runnable from any terminal) and
    creates Start-Menu / optional desktop shortcuts (windowless). It
    installs per user, in `%LOCALAPPDATA%\Programs\Skryb`, with no admin
-   prompt.
+   prompt. The shortcuts start `python\Skryb.exe` and the `skryb` command
+   starts `python\skryb-cli.exe`: two small programs of Skryb's own
+   (`native/host/skryb_host.c`, built by `release/app_exe.py`) that run the
+   bundled Python in their own process, so Task Manager lists the app as
+   "Skryb" and not "Python". Shortcuts an earlier version left pointing at
+   `pythonw.exe -m skryb` (a taskbar pin, a copy on the desktop or in
+   Startup) are pointed at `Skryb.exe` on install.
 4. Writes `THIRD-PARTY-NOTICES.txt` for the installed packages; uninstall
    removes everything, including the pip-installed files.
 

@@ -586,7 +586,7 @@ class TestShowError:
         assert "something broke" in captured.getvalue()
 
     def test_should_still_show_dialog_when_stderr_is_missing(self):
-        # pythonw (GUI launches, the Start Menu shortcut) has no stdio.
+        # A GUI launch (Skryb.exe from the Start Menu shortcut, pythonw) has no stdio.
         with (
             patch("sys.stderr", None),
             patch("skryb.__main__._try_show_error_dialog") as dialog,
