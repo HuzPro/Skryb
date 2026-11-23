@@ -50,6 +50,7 @@ class _TextRange(Protocol):
     def CompareEndpoints(  # noqa: N802 (COM name)
         self, endpoint: int, target: "_TextRange", target_endpoint: int,
     ) -> int: ...
+    def ExpandToEnclosingUnit(self, unit: int) -> None: ...
     def GetText(self, max_length: int) -> str: ...  # noqa: N802 (COM name)
     def MoveEndpointByRange(  # noqa: N802 (COM name)
         self, endpoint: int, target: "_TextRange", target_endpoint: int,
@@ -250,7 +251,10 @@ def _context_of(element: _Element) -> CaretContext:
         return NO_CONTEXT
     selection = ranges.GetElement(0)
     document = pattern.DocumentRange
-    if not _lies_within(selection, document):
+    if _rests_at_the_end_of(selection, document):
+        _logger.debug("The caret reads as just past the field's end; reading it as the end of the field.")
+        selection = _end_of(document)
+    elif not _lies_within(selection, document):
         if not _overlaps(selection, document):
             _logger.debug(
                 "No caret context: the selection lies outside the field (%s).",
@@ -260,9 +264,7 @@ def _context_of(element: _Element) -> CaretContext:
         _logger.debug("The selection runs past the field's edge; reading the part inside it.")
         selection = _clamped_to(selection, document)
     context = CaretContext(
-        before=_adjacent_text(
-            selection, document, uia.TextPatternRangeEndpoint_Start,
-        ),
+        before=_text_before(selection, document),
         selected=selection.GetText(_ALL_TEXT),
         after=_adjacent_text(
             selection, document, uia.TextPatternRangeEndpoint_End,
@@ -285,6 +287,34 @@ def _lies_within(selection: _TextRange, document: _TextRange) -> bool:
         selection.CompareEndpoints(start, document, start) >= 0
         and selection.CompareEndpoints(end, document, end) <= 0
     )
+
+
+def _rests_at_the_end_of(selection: _TextRange, document: _TextRange) -> bool:
+    """Whether a bare caret past the field has no text between the field and itself.
+
+    With the caret at the end of the last line of a ProseMirror composer,
+    Chromium reports it one position after the document range, yet not one
+    character lies between the two. That is the end of the field, the
+    commonest place to dictate from, and not a caret elsewhere on the page.
+    """
+    uia = _uia()
+    start = uia.TextPatternRangeEndpoint_Start
+    end = uia.TextPatternRangeEndpoint_End
+    if selection.CompareEndpoints(start, document, end) <= 0 or selection.GetText(_ALL_TEXT):
+        return False
+    gap = _end_of(document)
+    gap.MoveEndpointByRange(end, selection, start)
+    return not gap.GetText(_ALL_TEXT)
+
+
+def _end_of(document: _TextRange) -> _TextRange:
+    """A bare caret at the end of the field's own range."""
+    uia = _uia()
+    caret = document.Clone()
+    caret.MoveEndpointByRange(
+        uia.TextPatternRangeEndpoint_Start, document, uia.TextPatternRangeEndpoint_End,
+    )
+    return caret
 
 
 def _overlaps(selection: _TextRange, document: _TextRange) -> bool:
@@ -323,6 +353,47 @@ def _clamped_to(selection: _TextRange, document: _TextRange) -> _TextRange:
     _clamp_to_document(clamped, uia.TextPatternRangeEndpoint_Start, document)
     _clamp_to_document(clamped, uia.TextPatternRangeEndpoint_End, document)
     return clamped
+
+
+def _text_before(selection: _TextRange, document: _TextRange) -> str:
+    """The text before the selection, ending with a line break when it starts an empty line.
+
+    Chromium puts no character between two paragraphs, so on the empty
+    paragraph Enter makes in ProseMirror, Lexical, Quill or CodeMirror the
+    previous paragraph reads as if the caret followed it on the same line.
+    """
+    before = _adjacent_text(selection, document, _uia().TextPatternRangeEndpoint_Start)
+    if before and before[-1] not in "\r\n" and _starts_an_empty_line(selection):
+        return (before + "\n")[-CONTEXT_CHARS:]
+    return before
+
+
+def _starts_an_empty_line(selection: _TextRange) -> bool:
+    """Whether the selection starts a line holding nothing but its line break.
+
+    Chromium's paragraph unit folds an empty paragraph into the one before
+    it, so only the line unit tells. Asking for the line break rules out the
+    start of a soft-wrapped line, which holds words, and a caret at the end
+    of the text that the provider cannot expand, which holds nothing. A
+    provider that cannot tell lines at all keeps the reading it gave.
+    """
+    try:
+        return _line_at_the_caret_is_empty(selection)
+    except Exception:
+        _logger.debug("The provider could not say which line the caret is on.", exc_info=True)
+        return False
+
+
+def _line_at_the_caret_is_empty(selection: _TextRange) -> bool:
+    uia = _uia()
+    start = uia.TextPatternRangeEndpoint_Start
+    line = selection.Clone()
+    line.MoveEndpointByRange(uia.TextPatternRangeEndpoint_End, selection, start)
+    line.ExpandToEnclosingUnit(uia.TextUnit_Line)
+    return (
+        line.CompareEndpoints(start, selection, start) == 0
+        and line.GetText(_ALL_TEXT) in ("\n", "\r", "\r\n")
+    )
 
 
 def _adjacent_text(selection: _TextRange, document: _TextRange, edge: int) -> str:

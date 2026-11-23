@@ -22,6 +22,7 @@ from skryb.output.caret_context import (
     NO_CONTEXT,
     SELECTION_OUTSIDE_FIELD,
     CaretContext,
+    fit_to_context,
     log_caret_text_when,
 )
 from skryb.output.win32_caret_context import (
@@ -38,6 +39,7 @@ _DESCENDANTS = 4
 _ENDPOINT_START = 0
 _ENDPOINT_END = 1
 _UNIT_CHARACTER = 0
+_UNIT_LINE = 3
 
 _DOCUMENT = "Hello, I'm here for water. "
 _SELECTION_START = 11
@@ -62,6 +64,7 @@ def stub_uia(monkeypatch) -> None:
             TextPatternRangeEndpoint_Start=_ENDPOINT_START,
             TextPatternRangeEndpoint_End=_ENDPOINT_END,
             TextUnit_Character=_UNIT_CHARACTER,
+            TextUnit_Line=_UNIT_LINE,
         ),
     )
 
@@ -80,13 +83,34 @@ class NullPointer:
 
 
 class FakeTextRange:
-    def __init__(self, document: str, start: int, end: int) -> None:
+    """A range over a flat text. ``past_the_text`` makes it compare as that
+    many positions later than its place in the text, the way Chromium orders
+    a caret at the end of a composer after the composer's own range.
+    Lines start after each line break and at ``line_starts``, where Chromium
+    starts a paragraph or wraps a line with no character in between."""
+
+    def __init__(
+        self, document: str, start: int, end: int, past_the_text: int = 0,
+        line_starts: frozenset[int] = frozenset(),
+    ) -> None:
         self.document = document
         self.start = start
         self.end = end
+        self.past_the_text = past_the_text
+        self.line_starts = line_starts
 
     def Clone(self) -> "FakeTextRange":  # noqa: N802 (COM name)
-        return FakeTextRange(self.document, self.start, self.end)
+        return FakeTextRange(
+            self.document, self.start, self.end, self.past_the_text, self.line_starts,
+        )
+
+    def ExpandToEnclosingUnit(self, unit: int) -> None:
+        assert unit == _UNIT_LINE
+        starts = self.line_starts | {0} | {
+            index + 1 for index, character in enumerate(self.document) if character in "\r\n"
+        }
+        self.start = max(position for position in starts if position <= self.start)
+        self.end = min((position for position in starts if position > self.start), default=len(self.document))
 
     def GetText(self, max_length: int) -> str:  # noqa: N802 (COM name)
         return self.document[self.start:self.end]
@@ -99,7 +123,10 @@ class FakeTextRange:
     def CompareEndpoints(  # noqa: N802 (COM name)
         self, endpoint: int, target: "FakeTextRange", target_endpoint: int,
     ) -> int:
-        return self.position_of(endpoint) - target.position_of(target_endpoint)
+        return (
+            self.position_of(endpoint) + self.past_the_text
+            - target.position_of(target_endpoint) - target.past_the_text
+        )
 
     def position_of(self, endpoint: int) -> int:
         return self.start if endpoint == _ENDPOINT_START else self.end
@@ -312,6 +339,44 @@ class TestFieldsInsideALargerDocument:
 
         assert _context_from(automation) is SELECTION_OUTSIDE_FIELD
 
+    def test_a_bare_caret_after_the_field_with_text_in_between_is_still_outside_it(self):
+        text = "Hello there. "
+        page = _CHROME_BEFORE + text + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, start + len(text))
+        automation = _automation_within(field, start + len(text) + 1, start + len(text) + 1)
+
+        assert _context_from(automation) is SELECTION_OUTSIDE_FIELD
+
+    @pytest.mark.parametrize(
+        "text",
+        ["Pack the lantern, and ", "No space at the end", "x", "naïve الطرد. " * 40],
+        ids=["trailing space", "no trailing space", "one character", "long, with unicode"],
+    )
+    def test_a_caret_reported_just_past_the_end_of_the_text_is_read_as_the_end_of_the_field(self, text):
+        page = _CHROME_BEFORE + text + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, start + len(text))
+        caret = FakeTextRange(page, start + len(text), start + len(text), past_the_text=1)
+        automation = FakeAutomation(FakeElement(FakeTextPattern([caret], field)))
+
+        context = _context_from(automation)
+
+        assert context == CaretContext(text[-CONTEXT_CHARS:], "", "")
+        assert context is not SELECTION_OUTSIDE_FIELD
+
+    def test_a_second_dictation_carries_on_the_sentence_the_first_left_unfinished(self):
+        text = "Pack the lantern, and "
+        page = _CHROME_BEFORE + text + _CHROME_AFTER
+        start = len(_CHROME_BEFORE)
+        field = FakeTextRange(page, start, start + len(text))
+        caret = FakeTextRange(page, start + len(text), start + len(text), past_the_text=1)
+        automation = FakeAutomation(FakeElement(FakeTextPattern([caret], field)))
+
+        fitted = fit_to_context("Walk down to the orchard. ", _context_from(automation))
+
+        assert fitted == "walk down to the orchard. "
+
     def test_a_selection_ending_exactly_where_the_field_starts_is_outside_it(self):
         page = _CHROME_BEFORE + "Hello there. " + _CHROME_AFTER
         start = len(_CHROME_BEFORE)
@@ -328,6 +393,80 @@ class TestFieldsInsideALargerDocument:
 
         assert context.before == "a" * CONTEXT_CHARS
         assert context.after == "b" * CONTEXT_CHARS
+
+
+def _automation_with_a_line_starting_at_the_caret(before: str, line: str) -> FakeAutomation:
+    """``before``, then a line starting at the caret with no character in between."""
+    document = before + line
+    field = FakeTextRange(document, 0, len(document))
+    caret = FakeTextRange(document, len(before), len(before), line_starts=frozenset({len(before)}))
+    return FakeAutomation(FakeElement(FakeTextPattern([caret], field)))
+
+
+def _automation_on_a_new_paragraph(text: str) -> FakeAutomation:
+    """``text``, then the empty paragraph Enter made, the way Chromium reads
+    ProseMirror, Lexical, Quill or CodeMirror: nothing between the two, and
+    the new paragraph's own trailing break after the caret."""
+    return _automation_with_a_line_starting_at_the_caret(text, "\n")
+
+
+class RangeThatCannotTellLines(FakeTextRange):
+    def Clone(self) -> "RangeThatCannotTellLines":
+        return RangeThatCannotTellLines(self.document, self.start, self.end)
+
+    def ExpandToEnclosingUnit(self, unit: int) -> None:
+        raise OSError("this provider has no line unit")
+
+
+class TestACaretOnANewLine:
+    def test_a_box_that_cannot_tell_lines_is_still_read(self):
+        text = "Pack the lantern, and "
+        caret = RangeThatCannotTellLines(text, len(text), len(text))
+        automation = FakeAutomation(FakeElement(FakeTextPattern([caret], _whole_of(text))))
+
+        assert _context_from(automation) == CaretContext(text, "", "")
+
+    @pytest.mark.parametrize(
+        "text",
+        ["Pack the lantern.", "Things to pack", "x", "Ça va — naïve 東京 café", "y" * (CONTEXT_CHARS - 1), "z" * 300],
+        ids=["finished sentence", "unfinished line", "one character", "unicode", "one short of the width", "long"],
+    )
+    def test_the_text_before_a_caret_on_a_new_paragraph_ends_with_a_line_break(self, text):
+        context = _context_from(_automation_on_a_new_paragraph(text))
+
+        assert context.before == (text + "\n")[-CONTEXT_CHARS:]
+        assert context.after == "\n"
+
+    @pytest.mark.parametrize("text", ["Pack the lantern.", "Things to pack", "Ça va, naïve"])
+    def test_a_dictation_on_a_new_paragraph_starts_with_a_capital_and_nothing_in_front(self, text):
+        fitted = fit_to_context("walk down. ", _context_from(_automation_on_a_new_paragraph(text)))
+
+        assert fitted == "Walk down. "
+
+    @pytest.mark.parametrize("text", ["Pack the lantern, and ", "Things to pack", "naïve 東京"])
+    def test_a_caret_at_the_end_of_a_line_reads_no_line_break(self, text):
+        context = _context_from(_automation_over(text, len(text), len(text)))
+
+        assert context.before == text
+
+    def test_a_caret_at_the_start_of_a_soft_wrapped_line_reads_no_line_break(self):
+        automation = _automation_with_a_line_starting_at_the_caret(
+            "Pack the lantern and ", "walk down to the orchard.",
+        )
+
+        assert _context_from(automation).before == "Pack the lantern and "
+
+    def test_a_caret_at_the_end_whose_line_reads_as_nothing_reads_no_line_break(self):
+        automation = _automation_with_a_line_starting_at_the_caret("Pack the lantern, and ", "")
+
+        assert _context_from(automation).before == "Pack the lantern, and "
+
+    @pytest.mark.parametrize("line_break", ["\n", "\r", "\r\n"])
+    def test_a_line_break_already_read_before_the_caret_is_not_doubled(self, line_break):
+        automation = _automation_with_a_line_starting_at_the_caret("Pack the lantern." + line_break, "\n")
+
+        assert _context_from(automation).before == "Pack the lantern." + line_break
+
 
 class TestWebViewsThatReportOnlyTheirHost:
     """WhatsApp's composer often reads as the blank pane around its WebView2."""

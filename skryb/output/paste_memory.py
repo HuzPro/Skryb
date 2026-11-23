@@ -21,6 +21,8 @@ _MODIFIER_KEYS = frozenset({
     _VK_CAPITAL,
 })
 _LLKHF_INJECTED = 0x10
+# How much of the last paste a reading has to end with to be believed.
+_AGREEING_LETTERS = 12
 
 KeyCharacter = Callable[[int, bool], str]
 """The character a key types (vk, shift held), or "" when it types none."""
@@ -160,7 +162,13 @@ def read_or_remember(
     memory: PasteMemory,
     wait: Callable[[], None],
 ) -> Callable[[], CaretContext]:
-    """Read the text box, try once more, then fall back to the last paste.
+    """Read the text box, try once more, and check the reading against the last paste.
+
+    While nothing has moved the caret since this app put text there, that
+    text is what stands before it. A box that cannot be read goes by it, and
+    so does a reading that does not end with it: Monaco (VS Code) reads as
+    an empty box whatever it holds, and a reading like that would start
+    every dictation as a new sentence.
 
     A selection outside the field gets no second try: in 328 dictations it
     never read differently 100 ms later.
@@ -171,10 +179,29 @@ def read_or_remember(
         if found == NO_CONTEXT and found is not SELECTION_OUTSIDE_FIELD:
             wait()
             found = read()
+        remembered = memory.context()
+        if remembered == NO_CONTEXT:
+            return found
         if found == NO_CONTEXT:
-            found = memory.context()
-            if found != NO_CONTEXT:
-                _logger.debug("Caret context unreadable; using the last paste.")
-        return found
+            _logger.debug("Caret context unreadable; using the last paste.")
+            return remembered
+        if found.selected or _ends_like(found.before, remembered.before):
+            return found
+        _logger.debug("The text read before the caret does not end with the last paste; using the paste.")
+        return remembered
 
     return context
+
+
+def _ends_like(read_before: str, pasted: str) -> bool:
+    """Whether the text read before the caret ends with the letters just put there.
+
+    Only letters and digits are compared: an editor may hand back other
+    spaces, other quotes or none of its invisible markers, and none of that
+    makes the reading wrong.
+    """
+    return _letters(read_before).endswith(_letters(pasted)[-_AGREEING_LETTERS:])
+
+
+def _letters(text: str) -> str:
+    return "".join(character for character in text.casefold() if character.isalnum())

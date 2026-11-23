@@ -375,6 +375,68 @@ class TestReadOrRemember:
         assert context() == NO_CONTEXT
 
 
+class TestReadingsThatDisagreeWithTheLastPaste:
+    def read_after_pasting(self, memory: PasteMemory, pasted: str, read: CaretContext) -> CaretContext:
+        memory.remember(pasted)
+        return read_or_remember(lambda: read, memory, lambda: None)()
+
+    @pytest.mark.parametrize(
+        "read",
+        [
+            CaretContext("", "", "Editor content"),
+            CaretContext("Some page text above the box.", "", ""),
+            CaretContext("\ufeff", "", "\n"),
+        ],
+        ids=["an empty box with a label after it", "other text from the page", "an invisible marker only"],
+    )
+    def test_goes_by_the_last_paste_when_the_reading_does_not_end_with_it(self, memory, read):
+        context = self.read_after_pasting(memory, "Pack the lantern, and ", read)
+
+        assert context == CaretContext("Pack the lantern, and ", "", "")
+
+    @pytest.mark.parametrize(
+        ("pasted", "read_before"),
+        [
+            ("Pack the lantern, and ", "Pack the lantern, and "),
+            ("Pack the lantern, and ", "Earlier line.\nPack the lantern, and"),
+            ("Pack the lantern, and ", "Pack the lantern,\u00a0and\u00a0"),
+            ("Don't wait for الطرد. ", "Don\u2019t wait for الطرد. "),
+            ("naïve old mill ", "\ufeffnaïve old mill "),
+            ("... ", "anything at all"),
+        ],
+        ids=[
+            "the same text", "the trailing space dropped", "no-break spaces", "a curly apostrophe and Arabic",
+            "an invisible marker in front", "a paste with no letters",
+        ],
+    )
+    def test_keeps_a_reading_that_ends_with_the_letters_of_the_last_paste(self, memory, pasted, read_before):
+        read = CaretContext(read_before, "", " and the rest.")
+
+        assert self.read_after_pasting(memory, pasted, read) is read
+
+    def test_keeps_a_reading_that_holds_a_selection(self, memory):
+        read = CaretContext("", "old words", "")
+
+        assert self.read_after_pasting(memory, "Pack the lantern, and ", read) is read
+
+    def test_keeps_the_reading_once_a_click_may_have_moved_the_caret(self, memory, desktop):
+        memory.remember("Pack the lantern, and ")
+        desktop.clicks += 1
+        read = CaretContext("Somewhere else entirely. ", "", "")
+
+        assert read_or_remember(lambda: read, memory, lambda: None)() is read
+
+    def test_a_long_run_of_dictations_into_a_box_that_reads_empty_stays_one_sentence(self, memory):
+        context = read_or_remember(lambda: CaretContext("", "", "E"), memory, lambda: None)
+        typed = ""
+        for _ in range(2000):
+            fitted = fit_to_context("And then the kettle ", context())
+            memory.remember(fitted)
+            typed += fitted
+
+        assert typed == "And then the kettle " + "and then the kettle " * 1999
+
+
 class TestDictatingIntoAnUnreadableBox:
     def dictate(self, memory: PasteMemory, text: str) -> str:
         read = read_or_remember(lambda: NO_CONTEXT, memory, lambda: None)
