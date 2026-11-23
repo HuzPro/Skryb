@@ -26,10 +26,17 @@ CONSOLE_EXE = "skryb-cli.exe"
 _SOURCE = Path("native") / "host" / "skryb_host.c"
 _ICON = Path("brand") / "skryb.ico"
 _MSVC_FINDER = Path("native") / "tdt" / "build.py"
-# (the exe, the Python program it stands in for, extra compiler flags, the linker's subsystem)
+# Skryb.exe is also the settings window (--settings-window), and that process stays open while an
+# update copies files over the install to show its progress. Setup can move a running exe aside,
+# but any DLL of the install folder the process had loaded would be locked and Setup would close
+# the window to replace it. So this exe needs none of them to start: its C runtime is the part of
+# Windows (the "hybrid" link: vcruntime compiled in, the universal CRT shared with Python), and
+# python312.dll is loaded only on the way into Python.
+_NO_INSTALLED_DLLS = ("/NODEFAULTLIB:libucrt.lib", "ucrt.lib", "/DELAYLOAD:python312.dll", "delayimp.lib")
+# (the exe, the Python program it stands in for, compiler flags, linker flags)
 _BUILDS = (
-    (WINDOWED_EXE, "pythonw.exe", (), "WINDOWS"),
-    (CONSOLE_EXE, "python.exe", ("/DSKRYB_CONSOLE",), "CONSOLE"),
+    (WINDOWED_EXE, "pythonw.exe", ("/MT",), ("/SUBSYSTEM:WINDOWS", *_NO_INSTALLED_DLLS)),
+    (CONSOLE_EXE, "python.exe", ("/MD", "/DSKRYB_CONSOLE"), ("/SUBSYSTEM:CONSOLE",)),
 )
 _LARGEST_VERSION_PART = 65535
 _STARTS_IN_SECONDS = 60
@@ -125,7 +132,7 @@ def build_app_exes(repo_root: Path, python_dir: Path, version: str) -> None:
     """Build both exes into ``python_dir``, beside the bundled Python they run, and check they start it."""
     environment, compiler = _load_msvc_finder(repo_root)()
     with tempfile.TemporaryDirectory() as scratch:
-        for exe_name, interpreter, flags, subsystem in _BUILDS:
+        for exe_name, interpreter, compiler_flags, linker_flags in _BUILDS:
             work = Path(scratch) / Path(exe_name).stem
             work.mkdir()
             manifest = work / "python.manifest"
@@ -136,14 +143,38 @@ def build_app_exes(repo_root: Path, python_dir: Path, version: str) -> None:
             _run(["rc.exe", "/nologo", "/fo", "app.res", "app.rc"], environment, work)
             _run(
                 [
-                    str(compiler), "/nologo", "/O2", "/MD", "/W3", *flags, f"/I{python_dir / 'include'}",
+                    str(compiler), "/nologo", "/O2", "/W3", *compiler_flags, f"/I{python_dir / 'include'}",
                     str(repo_root / _SOURCE), "app.res", f"/Fe:{python_dir / exe_name}",
-                    "/link", f"/LIBPATH:{python_dir / 'libs'}", f"/SUBSYSTEM:{subsystem}", "/MANIFEST:NO",
+                    "/link", f"/LIBPATH:{python_dir / 'libs'}", *linker_flags, "/MANIFEST:NO",
                     f"/STACK:{stack_size(python_dir / interpreter)}",
                 ],
                 environment, work,
             )
+            if _NO_INSTALLED_DLLS[0] in linker_flags:
+                _require_no_installed_dlls(python_dir / exe_name, compiler.with_name("dumpbin.exe"), environment)
             _check_it_starts_python(python_dir / exe_name, python_dir / interpreter, work)
+
+
+def dlls_needed_to_start(dependents_listing: str) -> list[str]:
+    """The DLLs Windows loads before a program runs, from ``dumpbin /dependents``.
+
+    The ones it lists after them as delay-loaded are only loaded when first called.
+    """
+    at_start = dependents_listing.split("following dependencies:", 1)[-1].split("delay load dependencies:", 1)[0]
+    return [line.strip() for line in at_start.splitlines() if line.strip().lower().endswith(".dll")]
+
+
+def _require_no_installed_dlls(exe: Path, dumpbin: Path, environment: dict[str, str]) -> None:
+    listing = subprocess.run(
+        [str(dumpbin), "/nologo", "/dependents", str(exe)], check=True, env=environment, capture_output=True, text=True,
+    ).stdout
+    needed = dlls_needed_to_start(listing)
+    installed = [name for name in needed if (exe.parent / name).exists()]
+    if installed or not needed:
+        raise InstallerBuildError(
+            f"{exe.name} needs {', '.join(installed) or 'an unreadable list of DLLs'} from the install folder to start; "
+            f"its settings window would lock them during an update"
+        )
 
 
 def _check_it_starts_python(exe: Path, interpreter: Path, work: Path) -> None:

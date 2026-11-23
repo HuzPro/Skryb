@@ -147,7 +147,8 @@ jobs:
         run: xvfb-run -a python -m pytest -q -n auto --dist worksteal
 
   # The settings window (Tauri), rebuilt only when its sources or the Rust compiler
-  # changed; otherwise the exe from the last build of the same sources.
+  # changed; otherwise the DLL from the last build of the same sources. (An installed
+  # Skryb.exe loads the window as skryb_ui.dll; skryb-ui.exe is for a source checkout.)
   ui:
     name: Settings window
     runs-on: windows-2022
@@ -157,11 +158,11 @@ jobs:
       - uses: actions/checkout@v5
       - id: key
         shell: bash
-        run: echo "exe=ui-exe-rust$(rustc -V | cut -d' ' -f2)-node$NODE_VERSION-${{ hashFiles('ui/**', '!ui/mock/**', '!ui/README.md', 'scripts/build_ui.ps1') }}" >> "$GITHUB_OUTPUT"
+        run: echo "exe=ui-dll-rust$(rustc -V | cut -d' ' -f2)-node$NODE_VERSION-${{ hashFiles('ui/**', '!ui/mock/**', '!ui/README.md', 'scripts/build_ui.ps1') }}" >> "$GITHUB_OUTPUT"
       - id: exe
         uses: actions/cache/restore@v4
         with:
-          path: ui/src-tauri/target/release/skryb-ui.exe
+          path: ui/src-tauri/target/release/skryb_ui.dll
           key: ${{ steps.key.outputs.exe }}
 
       - if: steps.exe.outputs.cache-hit != 'true'
@@ -208,13 +209,13 @@ jobs:
       - if: steps.exe.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ui/src-tauri/target/release/skryb-ui.exe
+          path: ui/src-tauri/target/release/skryb_ui.dll
           key: ${{ steps.key.outputs.exe }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ui
-          path: ui/src-tauri/target/release/skryb-ui.exe
+          path: ui/src-tauri/target/release/skryb_ui.dll
           if-no-files-found: error
           retention-days: 1
 

@@ -8,12 +8,14 @@ thin I/O steps exercised in CI. The launcher shim and the runtime NOTICE
 text are also pinned down, since both ship verbatim to users.
 """
 
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from release.errors import InstallerBuildError
 from release.installer import (
+    _UI_SHELL_IN_WHEEL,
     _require_standalone_runtime,
     _stage_wheel_source,
     build_iscc_args,
@@ -21,6 +23,7 @@ from release.installer import (
     iss_defines,
     notice_text,
 )
+from skryb.ui.launcher import SETTINGS_WINDOW_FLAG
 
 
 class TestIssDefines:
@@ -109,9 +112,9 @@ def _fake_repo(root: Path, *, ui_built: bool = True, engine_built: bool = True) 
     for name in ("pyproject.toml", "LICENSE.txt", "NOTICE"):
         (repo / name).write_text(name, encoding="utf-8")
     if ui_built:
-        exe = repo / "ui" / "src-tauri" / "target" / "release" / "skryb-ui.exe"
-        exe.parent.mkdir(parents=True)
-        exe.write_bytes(b"MZ settings window")
+        window = repo / "ui" / "src-tauri" / "target" / "release" / "skryb_ui.dll"
+        window.parent.mkdir(parents=True)
+        window.write_bytes(b"MZ settings window")
     if engine_built:
         dll = repo / "native" / "engine" / "build" / "qasr.dll"
         dll.parent.mkdir(parents=True)
@@ -150,7 +153,7 @@ class TestStageWheelSource:
 
         source = _stage_wheel_source(repo, tmp_path / "scratch")
 
-        shipped = source / "skryb" / "ui-bin" / "skryb-ui.exe"
+        shipped = source / "skryb" / "ui-bin" / "skryb_ui.dll"
         assert shipped.read_bytes() == b"MZ settings window"
 
     def test_puts_the_native_engine_where_the_installed_app_looks(self, tmp_path):
@@ -208,6 +211,13 @@ class TestStageWheelSource:
 _SETUP_SCRIPT = Path(__file__).resolve().parents[2] / "installer" / "Skryb.iss"
 
 
+def _packaged_patterns() -> set[str]:
+    """The files pyproject.toml puts in the wheel beside the code, with the globs it uses filled in."""
+    with (_SETUP_SCRIPT.parents[1] / "pyproject.toml").open("rb") as handle:
+        patterns = tomllib.load(handle)["tool"]["setuptools"]["package-data"]["skryb"]
+    return {"skryb/" + pattern.replace("ui-bin/*.dll", "ui-bin/skryb_ui.dll") for pattern in patterns}
+
+
 def _setup_script_section(name: str) -> list[str]:
     """The entries of one section of the Setup script, comments left out."""
     section = _SETUP_SCRIPT.read_text(encoding="utf-8").split(f"[{name}]", 1)[1].split("\n[", 1)[0]
@@ -261,6 +271,33 @@ class TestTheSetupScript:
         # The desktop, the Start menu with its Startup folder, and where taskbar pins are kept.
         for folder in ("{userdesktop}", "{userprograms}", r"{userappdata}\Microsoft\Internet Explorer\Quick Launch"):
             assert f"ExpandConstant('{folder}')" in code
+
+    def test_the_running_skryb_exe_is_moved_aside_before_setup_looks_for_programs_to_close(self):
+        code = _SETUP_SCRIPT.read_text(encoding="utf-8").split("[Code]", 1)[1]
+        # Setup calls PrepareToInstall first, then asks Windows what is using the files it will copy.
+        before_the_copy = code.split("function PrepareToInstall(", 1)[1].split("end;", 1)[0]
+        when_setup_ends = code.split("procedure DeinitializeSetup();", 1)[1].split("end;", 1)[0]
+
+        assert "SetRunningAppExeAside();" in before_the_copy
+        # An install that stopped before the copy must not leave the shortcuts without their exe.
+        assert "SettleAppExeSetAside();" in when_setup_ends
+
+    def test_an_old_settings_window_is_found_whichever_program_it_runs_as(self):
+        code = _SETUP_SCRIPT.read_text(encoding="utf-8").split("[Code]", 1)[1]
+        closing = code.split("procedure CloseOldSettingsWindows();", 1)[1].split("end;", 1)[0]
+
+        # Up to 0.18 the window was skryb-ui.exe; now it is Skryb.exe started with this flag.
+        assert "''skryb-ui.exe''" in closing
+        assert "''{#AppName}.exe''" in closing
+        assert f"'' {SETTINGS_WINDOW_FLAG}''" in closing
+
+    def test_skryb_exe_looks_for_the_settings_window_where_the_wheel_puts_it(self):
+        host = (_SETUP_SCRIPT.parents[1] / "native" / "host" / "skryb_host.c").read_text(encoding="utf-8")
+        beside_the_exe = "Lib/site-packages/" + _UI_SHELL_IN_WHEEL
+
+        assert 'L"' + beside_the_exe.replace("/", r"\\") + '"' in host
+        assert f'L"{SETTINGS_WINDOW_FLAG}"' in host
+        assert _UI_SHELL_IN_WHEEL in _packaged_patterns()
 
     def test_the_skryb_it_reopens_after_an_update_can_follow_the_users_own_folder_links(self):
         directives = _setup_script_section("Setup")

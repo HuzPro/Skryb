@@ -1,8 +1,11 @@
 """Opening the UI shell: which exe, what it is told, and what the user hears when there is none."""
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from skryb.core.event_bus import SimpleEventBus
 from skryb.core.state_machine import AppStateMachine
@@ -13,6 +16,7 @@ from skryb.ui.launcher import (
     UI_EXE_ENV,
     ShellLauncher,
     shell_candidates,
+    shell_command,
 )
 
 _PACKAGE = Path(__file__).resolve().parents[2] / "skryb"
@@ -52,7 +56,7 @@ def _exe(folder: Path) -> Path:
 
 def test_the_shell_is_looked_for_in_the_configured_path_then_the_repo_build_then_the_package() -> None:
     repo_build = _PACKAGE.parent / "ui" / "src-tauri" / "target" / "release" / "skryb-ui.exe"
-    packaged = _PACKAGE / "ui-bin" / "skryb-ui.exe"
+    packaged = _PACKAGE / "ui-bin" / "skryb_ui.dll"
 
     assert shell_candidates({UI_EXE_ENV: r"D:\Builds\UI ✓\skryb-ui.exe"}) == [
         Path(r"D:\Builds\UI ✓\skryb-ui.exe"), repo_build, packaged,
@@ -79,6 +83,51 @@ def test_the_first_shell_found_opens_on_the_page_with_the_servers_port_and_token
     assert launcher.is_running() is True
     spawn.shells[0].exit_code = 0
     assert launcher.is_running() is False
+
+
+@pytest.mark.parametrize(
+    ("install", "interpreter", "dll"),
+    [
+        ("Zoë O'Hara/AppData/Local/Programs/Skryb", "pythonw.exe", "skryb_ui.dll"),
+        # The skryb command runs Python's console program; the window is still Skryb.exe.
+        ("Zoë O'Hara/AppData/Local/Programs/Skryb", "python.exe", "skryb_ui.dll"),
+        ("Apps (portable) ✓/Skryb", "PYTHONW.EXE", "SKRYB_UI.DLL"),
+    ],
+)
+def test_an_installed_copys_window_is_skryb_exe_started_as_the_settings_window(
+    tmp_path: Path, install: str, interpreter: str, dll: str,
+) -> None:
+    python = tmp_path / install / "python"
+    packaged = python / "Lib" / "site-packages" / "skryb" / "ui-bin" / dll
+
+    command = shell_command(packaged, str(python / interpreter))
+
+    assert command == [str(python / "Skryb.exe"), "--settings-window"]
+
+
+@pytest.mark.parametrize("shell", ["Builds/UI ✓/skryb-ui.exe", "repo/ui/src-tauri/target/release/SKRYB-UI.EXE"])
+def test_a_source_checkouts_window_is_the_shells_own_exe(tmp_path: Path, shell: str) -> None:
+    assert shell_command(tmp_path / shell, str(tmp_path / "repo" / "venv" / "Scripts" / "python.exe")) == [str(tmp_path / shell)]
+
+
+def test_the_installed_window_opens_through_skryb_exe_with_the_same_page_and_handover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawn = _Spawner()
+    interpreter = tmp_path / "python" / "pythonw.exe"
+    packaged = interpreter.parent / "Lib" / "site-packages" / "skryb" / "ui-bin" / "skryb_ui.dll"
+    packaged.parent.mkdir(parents=True)
+    packaged.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "executable", str(interpreter))
+    updates = tmp_path / "updates"
+    launcher = ShellLauncher(_Address(), MagicMock(), spawn=spawn, candidates=lambda: [packaged], updates_dir=updates)
+
+    assert launcher.open("updates", restore=True) is True
+
+    assert spawn.commands == [[
+        str(interpreter.with_name("Skryb.exe")), "--settings-window",
+        "--port", "51234", "--token", "tok-_3n", "--page", "updates", "--updates-dir", str(updates), "--restore",
+    ]]
 
 
 def test_asking_again_while_the_shell_runs_hands_it_the_new_page(tmp_path: Path) -> None:

@@ -3,6 +3,11 @@
 Nothing is spawned until the user asks for a window. A second ``open``
 while the shell runs spawns again: the shell's single-instance plugin hands
 the new page to the window already open and the new process exits.
+
+A source checkout runs the shell's own exe. An installed copy has the shell
+as a DLL that Skryb.exe loads when started with ``--settings-window``
+(``native/host/skryb_host.c``): the window is then a second process of the
+program the app itself runs as, and Windows lists the two as one "Skryb".
 """
 
 import logging
@@ -19,7 +24,10 @@ _logger = logging.getLogger(__name__)
 UI_EXE_ENV = "SKRYB_UI_EXE"
 SHELL_NOT_BUILT = "The settings window is not built. Run scripts\\build_ui.ps1."
 SHELL_WOULD_NOT_START = "The settings window could not be opened. See the log for details."
+SETTINGS_WINDOW_FLAG = "--settings-window"
 _EXE_NAME = "skryb-ui.exe"
+_DLL_NAME = "skryb_ui.dll"
+_APP_EXE_NAME = "Skryb.exe"
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent
 _ASFW_ANY = -1
 _SETUP_POLL_MS = 100
@@ -46,8 +54,15 @@ def shell_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
     return [
         *([Path(configured)] if configured else []),
         _PACKAGE_DIR.parent / "ui" / "src-tauri" / "target" / "release" / _EXE_NAME,
-        _PACKAGE_DIR / "ui-bin" / _EXE_NAME,
+        _PACKAGE_DIR / "ui-bin" / _DLL_NAME,
     ]
+
+
+def shell_command(shell: Path, interpreter: str | None = None) -> list[str]:
+    """What starts *shell*: an exe runs itself, the DLL is run by the Skryb.exe beside the interpreter."""
+    if shell.suffix.lower() != ".dll":
+        return [str(shell)]
+    return [str(Path(interpreter or sys.executable).with_name(_APP_EXE_NAME)), SETTINGS_WINDOW_FLAG]
 
 
 def spawn_shell(args: list[str]) -> ShellProcess:
@@ -107,7 +122,7 @@ class ShellLauncher:
             self._notify(SHELL_NOT_BUILT)
             return False
         command = [
-            str(exe),
+            *shell_command(exe),
             "--port", str(self._address.port),
             "--token", self._address.token,
             "--page", page,
