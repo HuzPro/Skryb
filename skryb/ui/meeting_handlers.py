@@ -6,12 +6,16 @@ server events; a saved meeting is read from its folder on request.
 
 import json
 import logging
+import math
 from collections.abc import Callable
 from pathlib import Path
+
+import numpy as np
 
 from skryb.core.action_dispatcher import ThreadedActionDispatcher
 from skryb.core.recycle_bin import move_to_recycle_bin
 from skryb.meetings.model_files import MeetingModelFiles
+from skryb.meetings.playback import read_mixed, wav
 from skryb.meetings.recorder import MeetingError, MeetingRecorder
 from skryb.meetings.storage import list_meetings, meeting_folder, rename_meeting
 from skryb.meetings.thumbnail import THUMBNAIL_JPG
@@ -23,6 +27,8 @@ from skryb.ui.shapes import Fields
 _logger = logging.getLogger(__name__)
 
 _NAME_CHARS = 60
+# A line's times come from the speech detector, which can clip the first and last sound; play a little either side.
+_PLAY_MARGIN_SECONDS = 0.2
 _NO_CONTENT = ApiResponse(204)
 _ACCEPTED = ApiResponse(202)
 _IN_BACKGROUND = ThreadedActionDispatcher()
@@ -65,6 +71,7 @@ class MeetingApi:
             ("POST", "/api/meetings/folder/open", self._open_meetings_folder),
             ("GET", "/api/meetings/{id}", self._read),
             ("GET", "/api/meetings/{id}/thumbnail", self._thumbnail),
+            ("GET", "/api/meetings/{id}/audio", self._audio),
             ("POST", "/api/meetings/{id}/english", self._request_english),
             ("POST", "/api/meetings/{id}/rename", self._rename),
             ("POST", "/api/meetings/{id}/name", self._rename_meeting),
@@ -145,6 +152,22 @@ class MeetingApi:
             raise ApiError(404, "This meeting has no thumbnail.") from exc
         return ApiResponse(200, jpeg, "image/jpeg")
 
+    def _audio(self, request: ApiRequest) -> ApiResponse:
+        """``?start=&end=`` seconds of the meeting, every track mixed, as WAV; works while it still records."""
+        start, end = _stretch_request(request.query)
+        try:
+            audio = self._audio_between(request, start - _PLAY_MARGIN_SECONDS, end + _PLAY_MARGIN_SECONDS)
+        except (OSError, RuntimeError) as exc:  # soundfile's errors are RuntimeErrors
+            raise ApiError(404, "This meeting's recording can't be played.", str(exc)) from exc
+        return ApiResponse(200, wav(audio), "audio/wav")
+
+    def _audio_between(self, request: ApiRequest, start: float, end: float) -> np.ndarray:
+        start = max(0.0, start)
+        live = self._recorder.live_session(request.params["id"])
+        if live is not None:
+            return live.audio_between(start, end)
+        return read_mixed(self._meeting_folder(request), start, end)
+
     def _rename(self, request: ApiRequest) -> ApiResponse:
         key, name = _rename_request(request.body)
         if not is_speaker_key(key):
@@ -170,6 +193,8 @@ class MeetingApi:
 
     def _rename_meeting(self, request: ApiRequest) -> ApiResponse:
         name = _name_request(request.body)
+        if self._recorder.name_later(request.params["id"], name):
+            return ApiResponse(200, {"id": request.params["id"], "later": True})
         folder = self._released_folder(request)
         try:
             renamed = rename_meeting(folder, name)
@@ -224,6 +249,16 @@ def _file_request(body: object) -> tuple[Path, str]:
     if not path.is_absolute() or not path.is_file():
         raise ApiError(400, f"{path.name or 'That file'} isn't there any more.")
     return path, language
+
+
+def _stretch_request(query: dict[str, str]) -> tuple[float, float]:
+    try:
+        start, end = float(query["start"]), float(query["end"])
+    except (KeyError, ValueError) as exc:
+        raise ApiError(400, "Say which part of the meeting to play.", str(exc)) from exc
+    if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+        raise ApiError(400, "Say which part of the meeting to play.", f"start={start}, end={end}")
+    return start, end
 
 
 def _name_request(body: object) -> str:

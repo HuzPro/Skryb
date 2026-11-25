@@ -136,6 +136,15 @@ describe("the live meeting's events", () => {
     meeting = applyMeetingEvent(meeting, { type: "saved", id: "2026-10-29 14-05" });
     expect([meeting?.recording, meeting?.status]).toEqual([false, "Saved"]);
   });
+
+  it("moves to the new folder when the meeting takes a name given while it recorded", () => {
+    const named = { ...live([line(0, "them:0", 0, 1, "Hi.")]), name: "Retro – ٹیم" };
+    const saved = applyMeetingEvent(named, {
+      type: "saved", id: "2026-10-29 14-05", saved_as: "2026-10-29 14-05 Retro – ٹیم", folder: "D:\\Meetings\\2026-10-29 14-05 Retro – ٹیم",
+    });
+    expect([saved?.id, saved?.folder, saved?.name, saved?.status]).toEqual(["2026-10-29 14-05 Retro – ٹیم", "D:\\Meetings\\2026-10-29 14-05 Retro – ٹیم", null, "Saved"]);
+    expect(saved?.entries).toHaveLength(1);
+  });
 });
 
 describe("a dropped file", () => {

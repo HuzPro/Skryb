@@ -311,6 +311,8 @@ export interface LiveMeeting extends MeetingTranscript {
   source?: string | null;
   /** That file's progress through its current step, 0 to 1. */
   progress?: number | null;
+  /** A name given while it records; its folder takes it once the meeting is saved. */
+  name?: string | null;
 }
 
 export interface MeetingSummary {
@@ -351,7 +353,8 @@ export type MeetingEvent =
   | { type: "remove"; id: string; entry_id: number }
   | { type: "names"; id: string; names: Record<string, string> }
   | ({ type: "started" } & Omit<LiveMeeting, "recording">)
-  | { type: "saved"; id: string };
+  /** `saved_as` and `folder` when the meeting took a name given while it was recording. */
+  | { type: "saved"; id: string; saved_as?: string; folder?: string };
 
 export interface SaveResult {
   changes: ChangeSet;

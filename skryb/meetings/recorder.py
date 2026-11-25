@@ -10,7 +10,7 @@ from pathlib import Path
 from skryb.meetings.file_session import Decode, FileSession
 from skryb.meetings.media_file import MediaFileError, check, decode_audio
 from skryb.meetings.session import MeetingCapture, Models, Session
-from skryb.meetings.storage import MeetingSettings, new_meeting_folder
+from skryb.meetings.storage import MeetingSettings, new_meeting_folder, rename_meeting
 from skryb.meetings.thumbnail import Grab, grab_shell_thumbnail
 from skryb.meetings.transcript import English, Event
 
@@ -64,6 +64,7 @@ class MeetingRecorder:
         self._grab_thumbnail = grab_thumbnail
         self._current: Session | FileSession | None = None
         self._last: Session | FileSession | None = None
+        self._later_name: str | None = None  # given while the meeting still records; its folder takes it once saved
 
     def is_recording(self) -> bool:
         return self._current is not None
@@ -77,7 +78,7 @@ class MeetingRecorder:
         session = self._current or self._last
         if session is None or (session is self._last and session.status == "Saved"):
             return None
-        return {"recording": session is self._current, **session.state()}
+        return {"recording": session is self._current, **session.state(), "name": self._later_name}
 
     def transcribing_file(self) -> bool:
         return isinstance(self._current, FileSession)
@@ -85,6 +86,15 @@ class MeetingRecorder:
     def live_session(self, meeting_id: str) -> Session | FileSession | None:
         session = self._current or self._last
         return session if session is not None and session.folder.name == meeting_id else None
+
+    def name_later(self, meeting_id: str, name: str) -> bool:
+        """Keep *name* for the meeting still recording or finishing, for its folder once saved; False for any other."""
+        with self._handover:
+            session = self._current or self._last
+            if session is None or session.folder.name != meeting_id or session.status == "Saved":
+                return False
+            self._later_name = name
+            return True
 
     def let_go(self, meeting_id: str) -> None:
         """Forget a saved meeting about to be renamed or deleted; one still being recorded or transcribed is refused."""
@@ -168,7 +178,7 @@ class MeetingRecorder:
                 return
             self._current, self._last = None, session
         _logger.info("Transcribed %s into %s", session.source, session.folder)
-        self._publish({"type": "saved", "id": session.folder.name})
+        self._publish(self._saved(session))
 
     def stop(self) -> None:
         with self._turn:
@@ -181,7 +191,25 @@ class MeetingRecorder:
                 self._on_change(False)
             session.stop()
             _logger.info("Meeting saved in %s", session.folder)
-        self._publish({"type": "saved", "id": session.folder.name})
+            saved = self._saved(session)
+        self._publish(saved)
+
+    def _saved(self, session: Session | FileSession) -> Event:
+        """The ``saved`` event, once the folder has the name given while recording; ``saved_as`` is its new id."""
+        with self._handover:
+            name, self._later_name = self._later_name, None
+        event: Event = {"type": "saved", "id": session.folder.name}
+        if name is None:
+            return event
+        try:
+            renamed = rename_meeting(session.folder, name)
+        except OSError:
+            _logger.exception("Could not give %s the name %r", session.folder, name)
+            return event
+        with self._handover:
+            if self._last is session:
+                self._last = None  # it holds the old folder; the saved meeting is read from the new one
+        return {**event, "saved_as": renamed.name, "folder": str(renamed)}
 
     def dispose(self) -> None:
         """On quit: the audio files close and the lines so far stay saved; the rest is not transcribed."""

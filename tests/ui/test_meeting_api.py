@@ -91,9 +91,10 @@ class MeetingRig:
                 return error.code, json.loads(raw) if raw else None
 
     def fetch(self, path: str) -> tuple[int, str, bytes]:
-        """A GET whose answer may not be JSON: its status, Content-Type and raw body."""
+        """A GET whose answer may not be JSON: its status, Content-Type and raw body; a query after ? goes as is."""
+        route, mark, query = path.partition("?")
         request = urllib.request.Request(
-            f"http://127.0.0.1:{self.server.port}{urllib.request.quote(path)}",
+            f"http://127.0.0.1:{self.server.port}{urllib.request.quote(route)}{mark}{query}",
             headers={"Authorization": f"Bearer {self.server.token}"},
         )
         try:
@@ -365,19 +366,57 @@ def test_a_rename_without_a_name_is_refused(rig: MeetingRig, body: object) -> No
     assert _ids(rig) == ["2026-10-16 20-20 Ops Onboarding"]
 
 
-def test_a_meeting_being_recorded_cant_be_renamed_or_deleted(rig: MeetingRig) -> None:
+def test_a_meeting_being_recorded_cant_be_deleted(rig: MeetingRig) -> None:
     stream = rig.events()
     rig.call("POST", "/api/meetings/start")
     while stream.until("meeting")["type"] != "entry":
         pass
 
-    renamed = rig.call("POST", "/api/meetings/2026-10-29 14-05/name", {"name": "Retro"})
     deleted = rig.call("DELETE", "/api/meetings/2026-10-29 14-05")
 
-    assert renamed[0] == 400 and renamed[1]["error"] == "This meeting is still being recorded or transcribed. Stop it first."
-    assert deleted[0] == 400
+    assert deleted[0] == 400 and deleted[1]["error"] == "This meeting is still being recorded or transcribed. Stop it first."
     assert (rig.root / "2026-10-29 14-05").is_dir()
     stream.close()
+
+
+def test_a_name_given_while_recording_shows_at_once_and_the_folder_takes_it_when_the_meeting_is_saved(rig: MeetingRig) -> None:
+    stream = rig.events()
+    rig.call("POST", "/api/meetings/start")
+    while stream.until("meeting")["type"] != "entry":
+        pass
+
+    renamed = rig.call("POST", "/api/meetings/2026-10-29 14-05/name", {"name": "Retro – ٹیم"})
+    live = rig.call("GET", "/api/meetings/live")[1]["meeting"]
+
+    assert renamed == (200, {"id": "2026-10-29 14-05", "later": True})
+    assert live["name"] == "Retro – ٹیم" and live["recording"] is True
+    assert (rig.root / "2026-10-29 14-05").is_dir()  # the folder is still being written
+
+    rig.call("POST", "/api/meetings/stop")
+    saved = stream.until("meeting")
+    while saved["type"] != "saved":
+        saved = stream.until("meeting")
+    stream.close()
+
+    assert saved == {"type": "saved", "id": "2026-10-29 14-05", "saved_as": "2026-10-29 14-05 Retro – ٹیم",
+                     "folder": str(rig.root / "2026-10-29 14-05 Retro – ٹیم")}
+    assert _ids(rig) == ["2026-10-29 14-05 Retro – ٹیم"]
+    assert rig.call("GET", "/api/meetings/2026-10-29 14-05 Retro – ٹیم")[1]["entries"]
+    assert rig.call("GET", "/api/meetings/live")[1]["meeting"] is None
+
+
+def test_the_last_name_given_while_recording_wins_and_a_blank_one_keeps_just_the_date(rig: MeetingRig) -> None:
+    stream = rig.events()
+    rig.call("POST", "/api/meetings/start")
+    while stream.until("meeting")["type"] != "entry":
+        pass
+    stream.close()
+
+    rig.call("POST", "/api/meetings/2026-10-29 14-05/name", {"name": "Retro"})
+    rig.call("POST", "/api/meetings/2026-10-29 14-05/name", {"name": "   "})
+    rig.call("POST", "/api/meetings/stop")
+
+    assert _ids(rig) == ["2026-10-29 14-05"]
 
 
 def test_the_meeting_just_recorded_can_be_renamed_and_its_speakers_named_in_the_new_folder(rig: MeetingRig) -> None:
@@ -451,3 +490,102 @@ def test_only_a_meeting_s_own_thumbnail_can_be_fetched(rig: MeetingRig, tmp_path
     status, content_type, _body = rig.fetch(f"/api/meetings/{meeting_id}/thumbnail")
 
     assert status == 404 and content_type != "image/jpeg"
+
+
+# -- playing a stretch of a meeting --------------------------------------------------------
+
+_RATE = 16000
+
+
+def _write_track(folder: Path, track: str, audio: np.ndarray) -> None:
+    import soundfile
+
+    soundfile.write(folder / f"{track}.flac", audio, _RATE, format="FLAC")
+
+
+def _wav(body: bytes) -> np.ndarray:
+    import soundfile
+
+    audio, rate = soundfile.read(io.BytesIO(body), dtype="float32")
+    assert rate == _RATE
+    return audio
+
+
+def test_a_line_plays_both_sides_mixed_with_a_fifth_of_a_second_either_side(rig: MeetingRig) -> None:
+    folder = rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 1.0, "Welcome aboard."), ("me", 0, 3.0, "Thanks.")])
+    # Each track changes level every second, so a wrong offset or a missing track shows.
+    _write_track(folder, "them", np.repeat(np.array([0.1, 0.2, 0.3, 0.4, 0.5], np.float32), _RATE))
+    _write_track(folder, "me", np.repeat(np.array([0.0, 0.01, 0.02, 0.03, 0.04], np.float32), _RATE))
+
+    status, kind, body = rig.fetch("/api/meetings/2026-10-16 20-20 Ops Onboarding/audio?start=1.5&end=2.5")
+    audio = _wav(body)
+
+    assert status == 200 and kind == "audio/wav"
+    assert len(audio) == round(1.4 * _RATE)
+    assert audio[0] == pytest.approx(0.21, abs=2e-3) and audio[-1] == pytest.approx(0.32, abs=2e-3)
+
+
+def test_a_stretch_at_the_very_start_or_past_the_end_plays_only_what_was_recorded(rig: MeetingRig) -> None:
+    folder = rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Hi.")])
+    _write_track(folder, "them", np.full(2 * _RATE, 0.5, np.float32))
+
+    first = _wav(rig.fetch("/api/meetings/2026-10-16 20-20 Ops Onboarding/audio?start=0&end=1")[2])
+    last = _wav(rig.fetch("/api/meetings/2026-10-16 20-20 Ops Onboarding/audio?start=1.5&end=9000")[2])
+    after = rig.fetch("/api/meetings/2026-10-16 20-20 Ops Onboarding/audio?start=10&end=11")
+
+    assert len(first) == round(1.2 * _RATE)  # nothing before 0:00 to add
+    assert len(last) == round(0.7 * _RATE)
+    assert after[0] == 200 and len(_wav(after[2])) == 0
+
+
+def test_two_loud_sides_together_are_held_at_full_scale_instead_of_wrapping_round(rig: MeetingRig) -> None:
+    folder = rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Hi.")])
+    _write_track(folder, "them", np.full(_RATE, 0.8, np.float32))
+    _write_track(folder, "me", np.full(_RATE, 0.9, np.float32))
+
+    audio = _wav(rig.fetch("/api/meetings/2026-10-16 20-20 Ops Onboarding/audio?start=0.3&end=0.6")[2])
+
+    assert audio.max() == pytest.approx(1.0, abs=1e-3) and audio.min() > 0.99
+
+
+@pytest.mark.parametrize(
+    "query", ["", "?start=1", "?start=a&end=2", "?start=nan&end=2", "?start=1&end=inf", "?start=2&end=2", "?start=3&end=2", "?start=-1&end=2"],
+)
+def test_a_stretch_that_isnt_a_real_span_of_seconds_is_refused(rig: MeetingRig, query: str) -> None:
+    folder = rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Hi.")])
+    _write_track(folder, "them", np.full(_RATE, 0.5, np.float32))
+
+    status, _kind, body = rig.fetch(f"/api/meetings/2026-10-16 20-20 Ops Onboarding/audio{query}")
+
+    assert status == 400 and json.loads(body)["error"] == "Say which part of the meeting to play."
+
+
+def test_a_meeting_whose_recording_is_gone_says_it_cant_be_played(rig: MeetingRig) -> None:
+    rig.saved_meeting("2026-10-16 20-20 Ops Onboarding", [("them", 0, 0.0, "Hi.")])
+
+    status, _kind, body = rig.fetch("/api/meetings/2026-10-16 20-20 Ops Onboarding/audio?start=0&end=1")
+
+    assert status == 404 and json.loads(body)["error"] == "This meeting's recording can't be played."
+
+
+@pytest.mark.parametrize("meeting_id", ["..", "missing"])
+def test_only_meetings_in_the_meetings_folder_can_be_played(rig: MeetingRig, meeting_id: str) -> None:
+    rig.root.mkdir(parents=True)
+
+    assert rig.fetch(f"/api/meetings/{meeting_id}/audio?start=0&end=1")[0] in (400, 404)
+
+
+def test_a_line_of_the_meeting_being_recorded_plays_from_what_was_heard_so_far(rig: MeetingRig) -> None:
+    stream = rig.events()
+    rig.call("POST", "/api/meetings/start")
+    event = stream.until("meeting")
+    while event["type"] != "entry":
+        event = stream.until("meeting")
+    stream.close()
+    entry = event["entry"]
+
+    status, _kind, body = rig.fetch(f"/api/meetings/2026-10-29 14-05/audio?start={entry['start']}&end={entry['end']}")
+    audio = _wav(body)
+
+    assert status == 200 and len(audio) > 0
+    assert np.abs(audio).max() > 0.05  # the fake speaker's voice, not silence

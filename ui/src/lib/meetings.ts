@@ -102,7 +102,7 @@ export function applyMeetingEvent(live: LiveMeeting | null, event: MeetingEvent)
     case "names":
       return { ...live, names: event.names };
     case "saved":
-      return { ...live, recording: false, status: "Saved" };
+      return { ...live, id: event.saved_as ?? live.id, folder: event.folder ?? live.folder, name: null, recording: false, status: "Saved" };
   }
 }
 

@@ -11,6 +11,7 @@ import numpy as np
 
 from skryb.meetings.capture import RATE
 from skryb.meetings.models import Labeller
+from skryb.meetings.playback import mixed
 from skryb.meetings.segmenter import Segment, Segmenter
 from skryb.meetings.transcript import Publish, Transcript, asr_context
 
@@ -132,6 +133,10 @@ class Session:
             "id": self.folder.name, "status": self.status, "device": self.device, "warning": self.warning,
             **self.transcript.view(),
         }
+
+    def audio_between(self, start: float, end: float) -> np.ndarray:
+        """Every track from *start* to *end* seconds, mixed; read from memory, so it works mid-recording."""
+        return mixed([self._audio[track].between(start, end) for track in self._tracks])
 
     def _open_files(self) -> None:
         import soundfile

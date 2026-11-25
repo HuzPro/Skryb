@@ -11,6 +11,7 @@ pass `--shell-exe` so the mock can reopen it).
 """
 
 import argparse
+import io
 import json
 import math
 import queue
@@ -20,6 +21,7 @@ import struct
 import subprocess
 import threading
 import time
+import wave
 import zlib
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -353,6 +355,32 @@ def _saved_meetings():
     return meetings
 
 
+def _tone_wav(start: float, end: float, rate: int = 16000) -> bytes:
+    """A stand-in for a stretch of a meeting: *end* - *start* seconds of a soft tone, its pitch set by *start*."""
+    seconds = max(0.0, end - start) + 0.4
+    pitch = 220.0 * 2 ** ((int(start) % 12) / 12)
+    count = int(seconds * rate)
+    samples = (int(6000 * math.sin(2 * math.pi * pitch * i / rate) * min(1.0, i / 800, (count - i) / 800)) for i in range(count))
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(b"".join(struct.pack("<h", sample) for sample in samples))
+    return buffer.getvalue()
+
+
+def _new_meeting_id(meetings: dict, meeting_id: str, raw: str) -> str:
+    """The id *meeting_id* takes when called *raw*, as the core names folders."""
+    name = " ".join(re.sub(r'[<>:"/\\|?*]', " ", raw).split())[:80].rstrip(" .")
+    stamp = re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(?: [0-9]{2}-[0-9]{2})?", meeting_id)
+    renamed = " ".join(part for part in (stamp and stamp.group(0), name) if part) or "Meeting"
+    base, n = renamed, 2
+    while renamed != meeting_id and renamed in meetings:
+        renamed, n = f"{base} ({n})", n + 1
+    return renamed
+
+
 def _thumbnail_png(colour: tuple[int, int, int], width: int = 480, height: int = 270) -> bytes:
     """A stand-in for a video's thumbnail: *colour* fading darker towards the bottom, as a PNG."""
     def chunk(kind: bytes, data: bytes) -> bytes:
@@ -675,6 +703,17 @@ class Core:
             self.meetings[live["id"]]["thumbnail"] = (60, 128, 96) if live["source"].lower().endswith(VIDEO_EXTENSIONS) else None
             self.emit("meeting", {"type": "saved", "id": live["id"]})
 
+    def saved_event(self, live: dict) -> dict:
+        """The ``saved`` event; a name given while recording moves the meeting to its new id first."""
+        name = live.pop("name", None)
+        if name is None:
+            return {"type": "saved", "id": live["id"]}
+        renamed = _new_meeting_id(self.meetings, live["id"], name)
+        meeting = self.meetings.pop(live["id"])
+        meeting["folder"] = meeting["folder"][: -len(live["id"])] + renamed
+        self.meetings[renamed] = meeting
+        return {"type": "saved", "id": live["id"], "saved_as": renamed, "folder": meeting["folder"]}
+
     def stop_meeting(self) -> None:
         live = self.live_meeting
         if live.get("source"):
@@ -694,7 +733,7 @@ class Core:
             with self.lock:
                 self.meeting_status("Saved")
                 self.meetings[live["id"]] = {key: live[key] for key in ("folder", "started", "names", "entries")}
-                self.emit("meeting", {"type": "saved", "id": live["id"]})
+                self.emit("meeting", self.saved_event(live))
 
         self.later(1.5, saved)
 
@@ -1108,17 +1147,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(204)
         elif len(rest) == 2 and rest[1] == "name":
-            name = " ".join(re.sub(r'[<>:"/\\|?*]', " ", str((self._body() or {}).get("name", ""))).split())[:80].rstrip(" .")
-            stamp = re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(?: [0-9]{2}-[0-9]{2})?", rest[0])
+            raw = str((self._body() or {}).get("name", ""))
+            if live and live["id"] == rest[0] and live["status"] != "Saved":
+                live["name"] = raw
+                self._send(200, {"id": rest[0], "later": True})
+                return
             if rest[0] not in core.meetings:
                 self._error(404, "That meeting is no longer in the meetings folder.")
                 return
-            renamed = " ".join(part for part in (stamp and stamp.group(0), name) if part) or "Meeting"
-            base, n = renamed, 2
-            while renamed != rest[0] and renamed in core.meetings:
-                renamed, n = f"{base} ({n})", n + 1
+            renamed = _new_meeting_id(core.meetings, rest[0], raw)
             core.meetings[renamed] = core.meetings.pop(rest[0])
             self._send(200, {"id": renamed})
+        elif len(rest) == 2 and rest[1] == "audio" and method == "GET":
+            try:
+                start, end = float(query["start"][0]), float(query["end"][0])
+            except (KeyError, ValueError):
+                self._error(400, "Say which part of the meeting to play.")
+                return
+            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+                self._error(400, "Say which part of the meeting to play.")
+                return
+            if rest[0] not in core.meetings and not (live and live["id"] == rest[0]):
+                self._error(404, "That meeting is no longer in the meetings folder.")
+                return
+            self._send(200, _tone_wav(start, end), "audio/wav")
         elif len(rest) == 2 and rest[1] == "open":
             self._send(204)
         elif len(rest) == 2 and rest[1] == "english":

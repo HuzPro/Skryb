@@ -1,7 +1,7 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Search, Square, Trash2, X } from "lucide-react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { ArrowDown, ArrowLeft, Circle, CircleAlert, Download, FileAudio, FolderOpen, LoaderCircle, PencilLine, Play, Search, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { EnglishStatus, Interlinear, useTranslationStatus } from "../components/english";
 import { formatGigabytes } from "../components/models";
 import { Bars, Card, ContextMenu, InlineError, PAGE_EDGE, PAGE_TITLE, PageBody, PageTitle, ProgressBar, Row, Rows, Section, Stat, TEXT_INSET, type Bar } from "../components/parts";
@@ -121,12 +121,7 @@ export function MeetingHistoryPage() {
     if (name === null || name.trim() === meetingName(id)) return;
     setProblem("");
     try {
-      const renamed = await api.post<{ id: string }>(`/api/meetings/${encodeURIComponent(id)}/name`, { name });
-      // Shown at once, so the old name doesn't flash back while the list reloads.
-      client.setQueryData<MeetingOverview>(["meetings"], (current) =>
-        current && { ...current, meetings: current.meetings.map((meeting) => (meeting.id === id ? { ...meeting, id: renamed.id } : meeting)) },
-      );
-      await client.invalidateQueries({ queryKey: ["meetings"] });
+      await renameMeeting(client, id, name);
     } catch (error) {
       setProblem(errorText(error));
     }
@@ -227,6 +222,125 @@ export function MeetingHistoryPage() {
   );
 }
 
+/** Renames a meeting everywhere the window shows it and returns its id afterwards; one still recording takes the name when it is saved. */
+async function renameMeeting(client: QueryClient, id: string, name: string): Promise<string> {
+  const renamed = await api.post<{ id: string; later?: boolean }>(`/api/meetings/${encodeURIComponent(id)}/name`, { name });
+  client.setQueryData<LiveMeeting | null>(["meeting-live"], (live) => {
+    if (!live || live.id !== id) return live;
+    if (renamed.later) return { ...live, name };
+    return { ...live, id: renamed.id, name: null, folder: live.folder.slice(0, live.folder.length - id.length) + renamed.id };
+  });
+  // Shown at once, so the old name doesn't flash back while the list reloads.
+  client.setQueryData<MeetingOverview>(["meetings"], (current) =>
+    current && { ...current, meetings: current.meetings.map((meeting) => (meeting.id === id ? { ...meeting, id: renamed.id } : meeting)) },
+  );
+  await client.invalidateQueries({ queryKey: ["meetings"] });
+  return renamed.id;
+}
+
+/** A meeting page's title; clicking it makes it a text box where Enter or clicking away saves and Escape keeps the old name. */
+function MeetingTitle({ shown, name, onRename }: { shown: string; name: string; onRename: (name: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [problem, setProblem] = useState("");
+  const done = useRef(false);
+  const finish = (value: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    setEditing(false);
+    if (value === null || value.trim() === name.trim()) return;
+    setProblem("");
+    onRename(value).catch((error: unknown) => setProblem(errorText(error)));
+  };
+  return (
+    <>
+      {editing ? (
+        <input
+          autoFocus
+          defaultValue={name}
+          maxLength={80}
+          aria-label="Meeting name"
+          onFocus={(event) => event.currentTarget.select()}
+          onBlur={(event) => finish(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") finish(event.currentTarget.value);
+            else if (event.key === "Escape") finish(null);
+            else return;
+            event.preventDefault();
+          }}
+          // As wide as its text and no taller than the title it replaces, so nothing beside it moves.
+          className="page-title -mx-1 -mt-[3px] -mb-[9px] max-w-full min-w-[6ch] rounded-sm bg-transparent px-1 text-foreground outline-none ring-1 ring-primary [field-sizing:content]"
+        />
+      ) : (
+        // A flex box, so the button keeps its full width and only truncates when the row runs out of room.
+        <h1 className={cn(PAGE_TITLE, "flex")}>
+          <button
+            title="Rename this meeting"
+            onClick={() => {
+              done.current = false;
+              setEditing(true);
+            }}
+            className="-mx-1 min-w-0 cursor-text truncate rounded-sm px-1 text-left hover:bg-accent"
+          >
+            {shown}
+          </button>
+        </h1>
+      )}
+      {problem ? <InlineError>{problem}</InlineError> : null}
+    </>
+  );
+}
+
+/** Plays one stretch of the meeting at a time, both sides mixed; playing what is already playing stops it. */
+function usePlayback(meetingId: string | undefined) {
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [problem, setProblem] = useState("");
+  const current = useRef<{ key: string; audio?: HTMLAudioElement; url?: string } | null>(null);
+  const stop = useCallback(() => {
+    const was = current.current;
+    current.current = null;
+    was?.audio?.pause();
+    if (was?.url) URL.revokeObjectURL(was.url);
+    setPlaying(null);
+  }, []);
+  useEffect(() => stop, [stop, meetingId]);
+  const loadAndPlay = async (clip: { key: string; audio?: HTMLAudioElement; url?: string }, path: string) => {
+    const url = await api.fileUrl(path);
+    if (current.current !== clip) return URL.revokeObjectURL(url);
+    clip.url = url;
+    clip.audio = new Audio(url);
+    clip.audio.onended = () => current.current === clip && stop();
+    await clip.audio.play();
+  };
+  const toggle = (key: string, start: number, end: number) => {
+    const again = current.current?.key === key;
+    stop();
+    if (again || !meetingId) return;
+    const clip = { key };
+    current.current = clip;
+    setPlaying(key);
+    setProblem("");
+    loadAndPlay(clip, `/api/meetings/${encodeURIComponent(meetingId)}/audio?start=${start}&end=${end}`).catch((error: unknown) => {
+      if (current.current !== clip) return;
+      stop();
+      setProblem(errorText(error));
+    });
+  };
+  return { playing, toggle, problem };
+}
+
+function PlayButton({ playing, label, onClick }: { playing: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={playing ? "Stop" : label}
+      title={playing ? "Stop" : label}
+      className={cn("grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground", playing && "text-[var(--speaker)]")}
+    >
+      {playing ? <Square className="size-2.5 fill-current" /> : <Play className="size-3 fill-current" />}
+    </button>
+  );
+}
+
 /** The meeting's name as a text box in its row: Enter or clicking away saves it, Escape keeps the old one. */
 function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (name: string | null) => void }) {
   const done = useRef(false);
@@ -265,7 +379,7 @@ function RenameField({ meeting, onDone }: { meeting: MeetingSummary; onDone: (na
 function MeetingCover({ meeting }: { meeting: MeetingSummary }) {
   const thumbnail = useQuery({
     queryKey: ["meeting-thumbnail", meeting.id],
-    queryFn: () => api.image(`/api/meetings/${encodeURIComponent(meeting.id)}/thumbnail`),
+    queryFn: () => api.fileUrl(`/api/meetings/${encodeURIComponent(meeting.id)}/thumbnail`),
     enabled: meeting.has_thumbnail,
     staleTime: Infinity,
     retry: false,
@@ -373,6 +487,7 @@ function TranscriptPane({ transcript, meetingId, live, onNameClick, empty }: { t
   const translation = useTranslationStatus();
   const translating = showEnglish && Boolean(translation?.installed) && !translation?.error;
   useEnglishFor(meetingId, transcript.entries, translating);
+  const playback = usePlayback(meetingId);
   const box = useRef<HTMLDivElement>(null);
   const [atEnd, setAtEnd] = useState(true);
   const stick = useRef(true);
@@ -424,21 +539,56 @@ function TranscriptPane({ transcript, meetingId, live, onNameClick, empty }: { t
                 <button onClick={() => onNameClick(turn.key)} className="max-w-full truncate text-[13px] font-semibold text-[var(--speaker)] hover:underline">
                   {labelOf(turn.key, transcript.names)}
                 </button>
-                <time className="text-[11.5px] text-muted-foreground tabular-nums">{formatDuration(turn.start)}</time>
+                <div className="flex items-center gap-1">
+                  {meetingId ? (
+                    <PlayButton
+                      playing={playback.playing === `turn-${turn.lines[0]?.id}`}
+                      label={`Play ${labelOf(turn.key, transcript.names)} from ${formatDuration(turn.start)}`}
+                      onClick={() => playback.toggle(`turn-${turn.lines[0]?.id}`, turn.start, Math.max(...turn.lines.map((line) => line.end)))}
+                    />
+                  ) : null}
+                  <time className="text-[11.5px] text-muted-foreground tabular-nums">{formatDuration(turn.start)}</time>
+                </div>
               </div>
               <div className="selectable text-[13.5px] leading-relaxed">
                 {turn.lines.map((line) => {
                   const english = showEnglish ? englishOf(line) : null;
-                  if (english) return <Interlinear key={line.id} line={english} className="mb-2.5 last:mb-0" />;
+                  const key = `line-${line.id}`;
+                  const play = () => playback.toggle(key, line.start, line.end);
                   return (
-                    <p key={line.id} dir="auto" className="mb-1 last:mb-0">
-                      {line.text}
-                      {translating && hasArabic(line.text) ? (
-                        <span dir="ltr" className="block text-[12px] text-muted-foreground">
-                          Translating…
-                        </span>
-                      ) : null}
-                    </p>
+                    <div
+                      key={line.id}
+                      role={meetingId ? "button" : undefined}
+                      tabIndex={meetingId ? 0 : undefined}
+                      aria-pressed={meetingId ? playback.playing === key : undefined}
+                      title={meetingId ? "Click to play this line" : undefined}
+                      // A click that ends a text selection, or a double-click to select a word, doesn't play.
+                      onClick={(event) => meetingId && event.detail <= 1 && window.getSelection()?.isCollapsed !== false && play()}
+                      onKeyDown={(event) => {
+                        if (!meetingId || (event.key !== "Enter" && event.key !== " ")) return;
+                        event.preventDefault();
+                        play();
+                      }}
+                      className={cn(
+                        "-mx-1.5 rounded-md px-1.5 transition-colors",
+                        english ? "mb-2.5 last:mb-0" : "mb-1 last:mb-0",
+                        meetingId && "cursor-pointer hover:bg-accent",
+                        playback.playing === key && "bg-[color-mix(in_oklab,var(--speaker)_16%,transparent)] hover:bg-[color-mix(in_oklab,var(--speaker)_22%,transparent)]",
+                      )}
+                    >
+                      {english ? (
+                        <Interlinear line={english} />
+                      ) : (
+                        <p dir="auto">
+                          {line.text}
+                          {translating && hasArabic(line.text) ? (
+                            <span dir="ltr" className="block text-[12px] text-muted-foreground">
+                              Translating…
+                            </span>
+                          ) : null}
+                        </p>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -448,6 +598,11 @@ function TranscriptPane({ transcript, meetingId, live, onNameClick, empty }: { t
           <div className="grid h-full place-items-center py-16 text-center text-[13px] text-muted-foreground">{empty}</div>
         )}
       </div>
+      {playback.problem ? (
+        <div className="border-t px-4 py-2">
+          <InlineError>{playback.problem}</InlineError>
+        </div>
+      ) : null}
       {!atEnd && live ? (
         <Button size="sm" onClick={jump} className="enter-pop absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-lg">
           <ArrowDown />
@@ -711,7 +866,15 @@ export function MeetingHomePage() {
   const header = (
     <div className={cn(TEXT_INSET, "mb-1 flex min-h-10 items-center gap-4")}>
       <div className="flex min-w-0 flex-1 items-baseline gap-x-3">
-        <h1 className={cn(PAGE_TITLE, "shrink-0")}>{live ? (running ? (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)) : "Meetings"}</h1>
+        {live ? (
+          <MeetingTitle
+            shown={running ? live.name || (file ? "Transcribing a file" : "Live meeting") : meetingName(live.id)}
+            name={running && live.name != null ? live.name : meetingName(live.id)}
+            onRename={async (name) => void (await renameMeeting(client, live.id, name))}
+          />
+        ) : (
+          <h1 className={cn(PAGE_TITLE, "shrink-0")}>Meetings</h1>
+        )}
         {live ? <StatusBadge live={live} /> : null}
         {live && running && !file ? <span className="text-[13px] text-muted-foreground tabular-nums">{formatDuration(elapsed)}</span> : null}
         {live?.device && running ? <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">Listening to {live.device}</span> : null}
@@ -843,6 +1006,8 @@ function weekBars(weeks: number[], now: Date = new Date()): Bar[] {
 
 export function SavedMeetingPage() {
   const id = useParams().id ?? "";
+  const client = useQueryClient();
+  const navigate = useNavigate();
   const [focusKey, setFocusKey] = useState<{ key: string; at: number } | null>(null);
   const meeting = useQuery({ queryKey: ["meeting", id], queryFn: () => api.get<MeetingTranscript>(`/api/meetings/${encodeURIComponent(id)}`) });
   const transcript = meeting.data;
@@ -853,9 +1018,11 @@ export function SavedMeetingPage() {
       <BackToHistory />
       {/* The date sits on the title's baseline rather than centred beside it. */}
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className={PAGE_TITLE} title={id}>
-          {meetingName(id)}
-        </h1>
+        <MeetingTitle
+          shown={meetingName(id)}
+          name={meetingName(id)}
+          onRename={async (name) => navigate(`/meetings/${encodeURIComponent(await renameMeeting(client, id, name))}`, { replace: true })}
+        />
         {transcript ? <span className="text-[13px] text-muted-foreground">{when(transcript.started)}</span> : null}
       </div>
     </div>

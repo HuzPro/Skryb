@@ -14,6 +14,7 @@ import numpy as np
 
 from skryb.meetings.capture import RATE
 from skryb.meetings.media_file import MediaFileError, decode_audio
+from skryb.meetings.playback import read_mixed
 from skryb.meetings.segmenter import Segment, Segmenter
 from skryb.meetings.session import Models
 from skryb.meetings.thumbnail import Grab, grab_shell_thumbnail, save_thumbnail
@@ -92,6 +93,10 @@ class FileSession:
             "id": self.folder.name, "status": self.status, "device": self.device, "warning": self.warning,
             "source": self.source.name, "progress": self.progress, **self.transcript.view(),
         }
+
+    def audio_between(self, start: float, end: float) -> np.ndarray:
+        """The file's sound from *start* to *end* seconds; saved before any line is transcribed."""
+        return read_mixed(self.folder, start, end)
 
     def _set_status(self, status: str, warning: str | None = None, progress: float | None = None) -> None:
         self.status = status
